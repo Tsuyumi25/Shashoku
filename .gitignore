@@ -3,3 +3,8 @@ out/
 dist/
 .tsbuild/
 *.log
+
+# Python sidecar（venv 由 uv 自帶 .gitignore 自我忽略，這裡防其餘產物）
+ocr-sidecar/__pycache__/
+ocr-sidecar/crops/
+ocr-sidecar/*.out.png

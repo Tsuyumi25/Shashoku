@@ -10,6 +10,7 @@ import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { screenToContentPx } from "@/lib/coords";
 import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
+import type { OcrBlock } from "../shared/ipc";
 
 type Tool = "hand" | "brush" | "erase" | "tone" | "text";
 
@@ -39,6 +40,23 @@ const textStyle = reactive({
 const layerList = ref<RasterLayer[]>([]);
 const selectedTextId = ref<string | null>(null);
 const redrawKey = ref(0); // bump 觸發 template 重新映射(圖層可見性等)
+
+// ---- 專案 + OCR 狀態 ----
+const project = reactive<{ folder: string; images: string[] }>({ folder: "", images: [] });
+const currentPage = ref<string | null>(null); // 專案模式下的當前頁檔名
+const ocrData = reactive<Record<string, OcrBlock[]>>({});
+const ocrState = reactive<Record<string, "running" | "done" | "error">>({});
+const sidecarStatus = ref("");
+const batchRunning = ref(false);
+const hoveredBlock = ref<number | null>(null);
+
+const currentBlocks = computed<OcrBlock[]>(() =>
+  currentPage.value ? (ocrData[currentPage.value] ?? []) : []
+);
+
+function blockColor(label: OcrBlock["label"]): string {
+  return label === "bubble" ? "#2e9e44" : label === "text_bubble" ? "#e05252" : "#b06fe0";
+}
 
 const containerSize = reactive({ w: 1, h: 1 });
 const contentSize = computed(() => ({ w: doc.value?.width ?? 1, h: doc.value?.height ?? 1 }));
@@ -84,11 +102,7 @@ function measureContainer(): void {
 }
 
 // ---- 載圖 ----
-async function onPickFile(e: Event): Promise<void> {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  const bitmap = await createImageBitmap(file);
+async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   const d = new ShashokuDoc(bitmap.width, bitmap.height);
   const base = d.addLayerFromBitmap("底圖", bitmap);
   baseLayerId = base.id;
@@ -108,7 +122,84 @@ async function onPickFile(e: Event): Promise<void> {
   measureContainer();
   fitToView();
   redraw();
+}
+
+async function onPickFile(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  currentPage.value = null; // 單檔模式:無專案路徑,OCR 不可用
+  await buildDoc(await createImageBitmap(file));
   input.value = "";
+}
+
+// ---- 專案(資料夾)----
+async function openProject(): Promise<void> {
+  const res = await window.api.openProjectFolder();
+  if (!res) return;
+  project.folder = res.folder;
+  project.images = res.images;
+  if (res.images.length > 0) await loadPage(res.images[0]);
+}
+
+/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點/文字編輯。 */
+async function loadPage(name: string): Promise<void> {
+  const bytes = await window.api.readImage(project.folder, name);
+  const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+  currentPage.value = name;
+  await buildDoc(bitmap);
+}
+
+// ---- OCR(sidecar)----
+async function ocrOne(name: string): Promise<void> {
+  ocrState[name] = "running";
+  try {
+    const res = await window.api.ocrPage(project.folder, name);
+    ocrData[name] = res.blocks;
+    ocrState[name] = "done";
+  } catch (err) {
+    ocrState[name] = "error";
+    console.error("OCR failed:", name, err);
+  }
+}
+
+async function ocrCurrent(): Promise<void> {
+  if (currentPage.value) await ocrOne(currentPage.value);
+}
+
+/** 批次:整個專案逐頁跑(sidecar 端序列處理)。再按一次 = 停止。 */
+async function ocrProject(): Promise<void> {
+  if (batchRunning.value) {
+    batchRunning.value = false;
+    return;
+  }
+  batchRunning.value = true;
+  for (const name of project.images) {
+    if (!batchRunning.value) break;
+    if (ocrState[name] === "done" || ocrState[name] === "running") continue;
+    await ocrOne(name);
+  }
+  batchRunning.value = false;
+}
+
+/** OCR 框 → 文字物件:落在框中心、預設直排,原文留在面板對照,譯文由人打。 */
+function blockToText(b: OcrBlock): void {
+  const d = doc.value;
+  if (!d) return;
+  const t: TextObject = {
+    id: `text-${Date.now()}-${d.texts.length}`,
+    x: b.x + b.w / 2,
+    y: b.y + b.h / 2,
+    text: "",
+    fontSizePx: textStyle.fontSizePx,
+    fontFamily: textStyle.fontFamily,
+    color: textStyle.color,
+    direction: "vertical",
+  };
+  d.texts.push(t);
+  selectedTextId.value = t.id;
+  tool.value = "text";
+  redraw();
 }
 
 // 等 canvas 尺寸套用後再拿 context
@@ -373,6 +464,18 @@ let ro: ResizeObserver | null = null;
 onMounted(() => {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
+  window.api?.onOcrStatus((e) => {
+    sidecarStatus.value =
+      e.state === "starting"
+        ? "OCR sidecar 啟動中…"
+        : e.state === "loading"
+          ? `載入中:${e.detail ?? ""}`
+          : e.state === "ready"
+            ? "OCR 就緒"
+            : e.state === "stopped"
+              ? "OCR sidecar 已停止"
+              : `OCR 錯誤:${e.detail ?? ""}`;
+  });
   ro = new ResizeObserver(() => {
     measureContainer();
     if (doc.value && !ready.value) fitToView();
@@ -417,7 +520,7 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
 <template>
   <div class="flex h-full w-full text-sm">
     <!-- 左:工具列 -->
-    <aside class="flex w-40 flex-col gap-1 border-r p-2" style="border-color: var(--border); background: var(--panel)">
+    <aside class="flex w-44 flex-col gap-1 border-r p-2" style="border-color: var(--border); background: var(--panel)">
       <div class="mb-1 px-1 text-xs font-semibold" style="color: var(--muted)">写植 Shashoku · POC</div>
       <button
         v-for="t in TOOLS"
@@ -446,6 +549,57 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
           匯出 PNG
         </button>
       </div>
+
+      <!-- 專案 + OCR -->
+      <div class="mt-3 border-t pt-2" style="border-color: var(--border)">
+        <button class="w-full rounded px-2 py-1.5" style="background: var(--panel-2)" @click="openProject">
+          開啟資料夾（專案）
+        </button>
+        <template v-if="project.images.length">
+          <button
+            class="mt-1 w-full rounded px-2 py-1.5"
+            style="background: var(--panel-2)"
+            :disabled="!currentPage"
+            @click="ocrCurrent"
+          >
+            偵測+OCR 本頁
+          </button>
+          <button
+            class="mt-1 w-full rounded px-2 py-1.5"
+            :style="batchRunning ? 'background: var(--accent); color: #fff' : 'background: var(--panel-2)'"
+            @click="ocrProject"
+          >
+            {{ batchRunning ? "停止批次" : "偵測整個專案" }}
+          </button>
+          <p v-if="sidecarStatus" class="mt-1 px-1 text-[10px]" style="color: var(--muted)">
+            {{ sidecarStatus }}
+          </p>
+        </template>
+      </div>
+
+      <!-- 頁列表 -->
+      <ul v-if="project.images.length" class="mt-1 min-h-0 flex-1 overflow-y-auto">
+        <li v-for="name in project.images" :key="name">
+          <button
+            class="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs"
+            :style="name === currentPage ? 'background: var(--accent); color: #fff' : ''"
+            @click="loadPage(name)"
+          >
+            <span class="truncate">{{ name }}</span>
+            <span class="ml-1 shrink-0 text-[10px] opacity-80">
+              {{
+                ocrState[name] === "running"
+                  ? "⏳"
+                  : ocrState[name] === "error"
+                    ? "✕"
+                    : ocrData[name]
+                      ? ocrData[name].length
+                      : ""
+              }}
+            </span>
+          </button>
+        </li>
+      </ul>
     </aside>
 
     <!-- 中:畫布 -->
@@ -461,13 +615,40 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
       >
-        <canvas
+        <!-- 文件空間:canvas 與 OCR 框同住一個被 transform 的容器,框直接用原圖 px -->
+        <div
           v-show="doc"
-          ref="canvasEl"
           class="absolute left-0 top-0 origin-top-left"
-          style="image-rendering: pixelated; box-shadow: 0 0 0 1px var(--border)"
           :style="{ transform: canvasTransform }"
-        />
+        >
+          <canvas
+            ref="canvasEl"
+            class="block"
+            style="image-rendering: pixelated; box-shadow: 0 0 0 1px var(--border)"
+          />
+          <div
+            v-for="(b, i) in currentBlocks"
+            :key="i"
+            class="pointer-events-none absolute"
+            :style="{
+              left: b.x + 'px',
+              top: b.y + 'px',
+              width: b.w + 'px',
+              height: b.h + 'px',
+              border: `${2 / view.scale}px solid ${blockColor(b.label)}`,
+              background: hoveredBlock === i ? blockColor(b.label) + '33' : 'transparent',
+            }"
+          >
+            <span
+              class="absolute left-0 top-0 px-0.5 font-mono leading-none"
+              :style="{
+                background: blockColor(b.label),
+                color: '#fff',
+                fontSize: `${Math.max(10, 14 / view.scale)}px`,
+              }"
+            >{{ i }}</span>
+          </div>
+        </div>
         <!-- 網點拖曳預覽框 -->
         <div
           class="pointer-events-none absolute border border-dashed"
@@ -547,6 +728,42 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
           <p class="mt-1 text-[11px]" style="color: var(--muted)">Delete 刪除選取文字</p>
         </template>
         <p v-else class="text-[11px]" style="color: var(--muted)">點畫布空白處新增文字物件。</p>
+      </section>
+
+      <!-- OCR 原文 -->
+      <section v-if="currentBlocks.length">
+        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">
+          OCR 原文（{{ currentBlocks.length }} 框）
+        </h3>
+        <ul class="max-h-72 overflow-y-auto text-xs">
+          <li
+            v-for="(b, i) in currentBlocks"
+            :key="i"
+            class="mb-1 rounded p-1.5"
+            style="background: var(--panel-2)"
+            @mouseenter="hoveredBlock = i"
+            @mouseleave="hoveredBlock = null"
+          >
+            <div class="flex items-center gap-1">
+              <span
+                class="rounded px-1 font-mono text-[10px]"
+                :style="{ background: blockColor(b.label), color: '#fff' }"
+              >{{ i }}</span>
+              <span class="text-[10px]" style="color: var(--muted)">
+                {{ b.label }} {{ (b.score * 100).toFixed(0) }}%
+              </span>
+              <button
+                v-if="b.text !== undefined"
+                class="ml-auto rounded px-1 py-0.5 text-[10px]"
+                style="background: var(--panel)"
+                @click="blockToText(b)"
+              >
+                +文字
+              </button>
+            </div>
+            <p v-if="b.text" class="mt-0.5 select-text" style="color: var(--fg)">{{ b.text }}</p>
+          </li>
+        </ul>
       </section>
 
       <!-- 濾鏡壓力測試 -->

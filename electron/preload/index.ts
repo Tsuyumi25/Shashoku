@@ -1,3 +1,13 @@
-// POC 階段 renderer 只用瀏覽器 API(file input / canvas / blob),不需要跨行程橋接。
-// 之後要接原生檔案對話框、字型枚舉時,再在這裡 contextBridge.exposeInMainWorld。
-export {};
+import { contextBridge, ipcRenderer } from "electron";
+import { CHANNELS, type OcrStatusEvent, type ShashokuApi } from "../../shared/ipc";
+
+const api: ShashokuApi = {
+  openProjectFolder: () => ipcRenderer.invoke(CHANNELS.openProjectFolder),
+  readImage: (folder, name) => ipcRenderer.invoke(CHANNELS.readImage, folder, name),
+  ocrPage: (folder, name) => ipcRenderer.invoke(CHANNELS.ocrPage, folder, name),
+  onOcrStatus: (cb) => {
+    ipcRenderer.on(CHANNELS.ocrStatus, (_e, ev: OcrStatusEvent) => cb(ev));
+  },
+};
+
+contextBridge.exposeInMainWorld("api", api);
