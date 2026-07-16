@@ -13,6 +13,9 @@ export interface RGB {
  * 在 (cx,cy) 蓋一個圓形筆刷戳印到 layer,直接改 layer.data(直通 alpha)。
  * hardness ∈ [0,1]:1 = 硬邊,越小邊緣越軟。回傳被弄髒的矩形(已 clamp),
  * 呼叫端把整筆劃的戳印 union 起來當成 dirty-rect 交給合成。
+ *
+ * alphaLock = 鎖定透明像素(PS 語意):paint 只重新著色已有像素(alpha 不變、
+ * 全透明處不落筆),erase 直接無效。
  */
 export function stampBrush(
   layer: RasterLayer,
@@ -24,7 +27,9 @@ export function stampBrush(
   hardness: number,
   color: RGB,
   mode: BrushMode,
+  alphaLock = false,
 ): Rect {
+  if (alphaLock && mode === "erase") return EMPTY_RECT;
   const bounds = clampRect(circleBounds(cx, cy, radius), w, h);
   if (bounds.w === 0 || bounds.h === 0) return EMPTY_RECT;
 
@@ -43,6 +48,14 @@ export function stampBrush(
       if (mode === "erase") {
         // dst-out:把該像素的 alpha 依戳印強度削掉。
         data[idx + 3] = data[idx + 3] * (1 - sa);
+        continue;
+      }
+      if (alphaLock) {
+        // 只重新著色:alpha 原封不動,全透明像素不落筆。
+        if (data[idx + 3] === 0) continue;
+        data[idx] = color.r * sa + data[idx] * (1 - sa);
+        data[idx + 1] = color.g * sa + data[idx + 1] * (1 - sa);
+        data[idx + 2] = color.b * sa + data[idx + 2] * (1 - sa);
         continue;
       }
       // paint:把 color 以 sa 做 source-over 疊進去。

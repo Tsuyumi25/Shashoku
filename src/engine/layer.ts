@@ -12,6 +12,9 @@ export function createRasterLayer(name: string, w: number, h: number): RasterLay
     name,
     visible: true,
     opacity: 1,
+    blendMode: "normal",
+    locked: false,
+    alphaLocked: false,
     data: new Uint8ClampedArray(w * h * 4), // 全 0 = 全透明
   };
 }
@@ -32,6 +35,9 @@ export function rasterLayerFromBitmap(
     name,
     visible: true,
     opacity: 1,
+    blendMode: "normal",
+    locked: false,
+    alphaLocked: false,
     data: img.data,
   };
 }

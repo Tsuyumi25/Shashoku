@@ -1,4 +1,5 @@
 import type { RasterLayer, Rect, TextObject } from "./types";
+import { toCompositeOp } from "./blend";
 import { createRasterLayer, rasterLayerFromBitmap } from "./layer";
 import { renderTexts } from "./text";
 
@@ -44,16 +45,79 @@ export class ShashokuDoc {
 
   addLayerFromBitmap(name: string, bitmap: ImageBitmap): RasterLayer {
     const layer = rasterLayerFromBitmap(name, bitmap, this.width, this.height);
-    this.layers.push(layer);
-    this.initCache(layer);
+    this.insertLayer(layer, this.layers.length);
     return layer;
   }
 
   addBlankLayer(name: string): RasterLayer {
     const layer = createRasterLayer(name, this.width, this.height);
-    this.layers.push(layer);
-    this.initCache(layer);
+    this.insertLayer(layer, this.layers.length);
     return layer;
+  }
+
+  // ---- 結構操作(供 editor actions 呼叫;各自是可逆的最小步) ----
+
+  /** 在 index 插入既有 layer 物件(bottom→top 序)。undo 重插同一物件即可。 */
+  insertLayer(layer: RasterLayer, index: number): void {
+    const i = Math.max(0, Math.min(index, this.layers.length));
+    this.layers.splice(i, 0, layer);
+    if (!this.cache.has(layer.id)) this.initCache(layer);
+  }
+
+  /** 移除並回傳 {layer, index};找不到回 null。cache 一併釋放(重插會重建)。 */
+  removeLayer(layerId: string): { layer: RasterLayer; index: number } | null {
+    const index = this.layers.findIndex((l) => l.id === layerId);
+    if (index < 0) return null;
+    const [layer] = this.layers.splice(index, 1);
+    this.cache.delete(layer.id);
+    return { layer, index };
+  }
+
+  moveLayer(from: number, to: number): void {
+    if (from === to || from < 0 || from >= this.layers.length) return;
+    const [layer] = this.layers.splice(from, 1);
+    this.layers.splice(Math.max(0, Math.min(to, this.layers.length)), 0, layer);
+  }
+
+  layerIndex(layerId: string): number {
+    return this.layers.findIndex((l) => l.id === layerId);
+  }
+
+  /**
+   * Merge down(PS 語意):把該層以自己的 opacity/blendMode 合成進正下方那層,
+   * 然後移除自己。下方層的 buffer 被覆寫——呼叫端(action)負責先備份以供 undo。
+   */
+  mergeDown(layerId: string): boolean {
+    const index = this.layerIndex(layerId);
+    if (index <= 0) return false; // 最底層沒有「下方」
+    const top = this.layers[index];
+    const below = this.layers[index - 1];
+
+    const c = new OffscreenCanvas(this.width, this.height);
+    const ctx = c.getContext("2d")!;
+    const belowCanvas = this.cache.get(below.id)?.canvas;
+    const topCanvas = this.cache.get(top.id)?.canvas;
+    if (belowCanvas) ctx.drawImage(belowCanvas, 0, 0);
+    if (topCanvas) {
+      ctx.globalAlpha = top.opacity;
+      ctx.globalCompositeOperation = toCompositeOp(top.blendMode);
+      ctx.drawImage(topCanvas, 0, 0);
+    }
+    const merged = ctx.getImageData(0, 0, this.width, this.height);
+    below.data.set(merged.data);
+    this.syncLayer(below.id, { x: 0, y: 0, w: this.width, h: this.height });
+    this.removeLayer(top.id);
+    return true;
+  }
+
+  /** 抽出某層的 alpha channel(w*h bytes)——Ctrl+click 縮圖載入選區的原語。 */
+  extractAlpha(layerId: string): Uint8ClampedArray | null {
+    const layer = this.layers.find((l) => l.id === layerId);
+    if (!layer) return null;
+    const n = this.width * this.height;
+    const out = new Uint8ClampedArray(n);
+    for (let i = 0; i < n; i++) out[i] = layer.data[i * 4 + 3];
+    return out;
   }
 
   /** 把某層 buffer 的 dirty-rect 推進它的 canvas 快取(只搬那一塊)。 */
@@ -69,8 +133,9 @@ export class ShashokuDoc {
   }
 
   /**
-   * 顯示合成:清空 target,由下往上 drawImage 每個可見圖層,最後畫文字。
-   * globalAlpha 帶圖層不透明度。之後要 PS 混合模式就在這裡設 globalCompositeOperation。
+   * 顯示合成:清空 target,由下往上 drawImage 每個可見圖層(帶 opacity 與
+   * blend mode),最後畫文字。Tier 2 邊界:blend 全走 canvas 原生運算子,
+   * 無巢狀群組 → 不需要離屏遞迴。
    */
   compositeInto(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
     ctx.clearRect(0, 0, this.width, this.height);
@@ -79,9 +144,11 @@ export class ShashokuDoc {
       const canvas = this.cache.get(layer.id)?.canvas;
       if (!canvas) continue;
       ctx.globalAlpha = layer.opacity;
+      ctx.globalCompositeOperation = toCompositeOp(layer.blendMode);
       ctx.drawImage(canvas, 0, 0);
     }
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
     renderTexts(ctx as CanvasRenderingContext2D, this.texts);
   }
 

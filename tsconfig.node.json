@@ -17,5 +17,11 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["electron/**/*", "shared/**/*", "electron.vite.config.ts"]
+  "include": [
+    "electron/**/*",
+    "shared/**/*",
+    "electron.vite.config.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts"
+  ]
 }
