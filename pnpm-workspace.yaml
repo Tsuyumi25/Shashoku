@@ -1,0 +1,5 @@
+# pnpm 10 起 onlyBuiltDependencies 從 package.json 搬到這裡。
+# 只允許這兩個套件跑 postinstall（electron 下載二進位、esbuild 編原生 binding）。
+onlyBuiltDependencies:
+  - electron
+  - esbuild

@@ -1,0 +1,30 @@
+{
+  "name": "shashoku",
+  "version": "0.0.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "main": "out/main/index.js",
+  "description": "写植 — 漫畫翻譯植字工具（POC:CPU 像素引擎垂直切片）",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "vue-tsc -b"
+  },
+  "dependencies": {
+    "vue": "^3.5.28"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^22.19.11",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "electron": "~41.5",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.8",
+    "vite": "^7",
+    "vue-tsc": "^3.2.4"
+  }
+}
