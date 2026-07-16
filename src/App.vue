@@ -12,6 +12,10 @@ import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
 import { addLayer, duplicateLayer } from "@/editor/actions";
+import { addText, editText, moveText, removeText } from "@/editor/actions/text";
+import { pushPixelPatch, pushPixelPatches, type PixelPatch } from "@/editor/pixel-history";
+import { copyRect } from "@/engine/pixelPatch";
+import { clampRect } from "@/engine/geom";
 import LayerPanel from "@/components/LayerPanel.vue";
 import type { OcrBlock } from "../shared/ipc";
 
@@ -203,9 +207,18 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   inpaintBusy.value = true;
   try {
     const res = await window.api.inpaintBlocks(project.folder, name, targets);
+    const layer = d.layers.find((l) => l.id === inpaintLayerId);
+    const patches: PixelPatch[] = [];
     for (const p of res.patches) {
+      const rect = clampRect({ x: p.x, y: p.y, w: p.w, h: p.h }, d.width, d.height);
+      const before = layer ? copyRect(layer.data, d.width, rect) : null;
       await d.blitPngPatch(inpaintLayerId, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
+      if (layer && before) {
+        patches.push({ rect, before, after: copyRect(layer.data, d.width, rect) });
+      }
     }
+    // 整批去字 = 一步 undo
+    if (layer && patches.length) pushPixelPatches(editor.ctx(), inpaintLayerId, patches, "去字");
     editor.changed();
   } catch (err) {
     console.error("inpaint failed:", err);
@@ -228,10 +241,9 @@ function blockToText(b: OcrBlock): void {
     color: textStyle.color,
     direction: "vertical",
   };
-  d.texts.push(t);
+  addText(editor.ctx(), t);
   selectedTextId.value = t.id;
   tool.value = "text";
-  redraw();
 }
 
 // 等 canvas 尺寸套用後再拿 context
@@ -253,7 +265,11 @@ let lastPt = { x: 0, y: 0 };
 let panLast = { x: 0, y: 0 };
 let panning = false;
 let strokeDirty: Rect = EMPTY_RECT;
+// 筆劃級 undo:動筆前抄整層(暫時性,pointerup 只留包圍盒兩份就丟)
+let strokeBefore: Uint8ClampedArray | null = null;
+let strokeUnion: Rect = EMPTY_RECT;
 let draggingTextId: string | null = null;
+let dragTextFrom = { x: 0, y: 0 };
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
@@ -272,6 +288,7 @@ function stampAt(x: number, y: number): void {
     layer.alphaLocked,
   );
   strokeDirty = unionRect(strokeDirty, r);
+  strokeUnion = unionRect(strokeUnion, r);
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -289,8 +306,12 @@ function onPointerDown(e: PointerEvent): void {
   const p = toDoc(e);
 
   if (tool.value === "brush" || tool.value === "erase") {
+    const layer = doc.value.layers.find((l) => l.id === activeLayerId.value);
+    if (!layer || layer.locked) return; // 鎖定層不起筆
     painting.value = true;
     strokeDirty = EMPTY_RECT;
+    strokeUnion = EMPTY_RECT;
+    strokeBefore = layer.data.slice(); // 動筆前抄整層(pointerup 縮成包圍盒)
     stampAt(p.x, p.y);
     lastPt = p;
     doc.value.syncLayer(activeLayerId.value, strokeDirty);
@@ -304,6 +325,7 @@ function onPointerDown(e: PointerEvent): void {
     if (hit) {
       selectedTextId.value = hit.id;
       draggingTextId = hit.id;
+      dragTextFrom = { x: hit.x, y: hit.y };
     } else {
       const t: TextObject = {
         id: `text-${Date.now()}`,
@@ -315,10 +337,10 @@ function onPointerDown(e: PointerEvent): void {
         color: textStyle.color,
         direction: textStyle.direction,
       };
-      doc.value.texts.push(t);
+      addText(editor.ctx(), t);
       selectedTextId.value = t.id;
       draggingTextId = t.id;
-      redraw();
+      dragTextFrom = { x: t.x, y: t.y };
     }
   }
 }
@@ -375,13 +397,27 @@ function onPointerUp(e: PointerEvent): void {
     return;
   }
   if (painting.value && (tool.value === "brush" || tool.value === "erase")) {
+    // 整筆劃 = 一步 undo:全層快照縮成包圍盒 before/after
+    if (strokeBefore && strokeUnion.w > 0 && doc.value) {
+      const beforePatch = copyRect(strokeBefore, doc.value.width, strokeUnion);
+      pushPixelPatch(
+        editor.ctx(),
+        activeLayerId.value,
+        strokeUnion,
+        beforePatch,
+        tool.value === "erase" ? "擦除" : "筆刷",
+      );
+    }
+    strokeBefore = null;
+    strokeUnion = EMPTY_RECT;
     editor.changed(); // 筆劃結束:刷新面板縮圖
   }
   if (painting.value && tool.value === "tone" && toneRect.value) {
     const d = doc.value!;
     const layer = d.layers.find((l) => l.id === toneLayerId);
-    const r = toneRect.value;
-    if (layer && !layer.locked) {
+    const r = clampRect(toneRect.value, d.width, d.height);
+    if (layer && !layer.locked && r.w > 0 && r.h > 0) {
+      const before = copyRect(layer.data, d.width, r);
       perf.lastStamp = timeMs(() => {
         fillScreentoneRect(layer, d.width, d.height, r, {
           pitch: tone.pitch,
@@ -391,9 +427,13 @@ function onPointerUp(e: PointerEvent): void {
         });
       });
       d.syncLayer(toneLayerId, r);
+      pushPixelPatch(editor.ctx(), toneLayerId, r, before, "網點填充");
     }
     toneRect.value = null;
     editor.changed();
+  }
+  if (draggingTextId) {
+    moveText(editor.ctx(), draggingTextId, dragTextFrom); // 拖曳結束 = 一步
   }
   painting.value = false;
   draggingTextId = null;
@@ -451,10 +491,8 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
   }
   if ((e.key === "Delete" || e.key === "Backspace") && selectedTextId.value && !isTyping(e)) {
-    const d = doc.value!;
-    d.texts = d.texts.filter((t) => t.id !== selectedTextId.value);
+    removeText(editor.ctx(), selectedTextId.value);
     selectedTextId.value = null;
-    redraw();
   }
 }
 function onKeyUp(e: KeyboardEvent): void {
@@ -465,9 +503,30 @@ function isTyping(e: KeyboardEvent): boolean {
   return t.tagName === "TEXTAREA" || t.tagName === "INPUT";
 }
 
-// ---- 文字面板編輯 ----
-function onTextEdited(): void {
+// ---- 文字面板編輯(全部走 editText 入史;同欄位連續輸入自動合併) ----
+function editSelected<K extends "text" | "fontSizePx" | "fontFamily" | "color" | "direction">(
+  key: K,
+  value: TextObject[K],
+): void {
+  const t = selectedText.value;
+  if (!t || t[key] === value) return;
+  const prev = { [key]: t[key] } as Partial<Pick<TextObject, K>>;
+  t[key] = value;
+  editText(editor.ctx(), t.id, { [key]: value } as Partial<Pick<TextObject, K>>, prev);
   redraw();
+}
+
+function onTextInput(e: Event): void {
+  editSelected("text", (e.target as HTMLTextAreaElement).value);
+}
+function onFontSizeInput(e: Event): void {
+  editSelected("fontSizePx", Number((e.target as HTMLInputElement).value));
+}
+function onColorInput(e: Event): void {
+  editSelected("color", (e.target as HTMLInputElement).value);
+}
+function setDirection(d: "horizontal" | "vertical"): void {
+  editSelected("direction", d);
 }
 
 // ---- 濾鏡（CPU/WASM 壓力測試,套用在底圖）----
@@ -762,29 +821,36 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
         <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">文字（點畫布新增／選取）</h3>
         <template v-if="selectedText">
           <textarea
-            v-model="selectedText.text"
+            :value="selectedText.text"
             rows="3"
             class="w-full rounded p-1"
             style="background: var(--panel-2); color: var(--fg)"
-            @input="onTextEdited"
+            @input="onTextInput"
           />
           <label class="block mt-1">字級 {{ selectedText.fontSizePx }}px
-            <input type="range" min="8" max="120" v-model.number="selectedText.fontSizePx" class="w-full" @input="onTextEdited" />
+            <input
+              type="range"
+              min="8"
+              max="120"
+              :value="selectedText.fontSizePx"
+              class="w-full"
+              @input="onFontSizeInput"
+            />
           </label>
           <div class="mt-1 flex gap-1">
             <button
               class="flex-1 rounded px-1 py-1"
               :style="selectedText.direction === 'horizontal' ? 'background: var(--accent); color:#fff' : 'background: var(--panel-2)'"
-              @click="selectedText.direction = 'horizontal'; onTextEdited()"
+              @click="setDirection('horizontal')"
             >橫排</button>
             <button
               class="flex-1 rounded px-1 py-1"
               :style="selectedText.direction === 'vertical' ? 'background: var(--accent); color:#fff' : 'background: var(--panel-2)'"
-              @click="selectedText.direction = 'vertical'; onTextEdited()"
+              @click="setDirection('vertical')"
             >直排</button>
           </div>
           <label class="mt-1 flex items-center gap-2">顏色
-            <input type="color" v-model="selectedText.color" @input="onTextEdited" />
+            <input type="color" :value="selectedText.color" @input="onColorInput" />
           </label>
           <p class="mt-1 text-[11px]" style="color: var(--muted)">Delete 刪除選取文字</p>
         </template>
