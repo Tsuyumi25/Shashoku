@@ -7,9 +7,12 @@
 協議:stdin/stdout 各一行一個 JSON;所有 log 走 stderr,stdout 只吐協議。
   → {"id":1,"cmd":"detect_ocr","image":"/abs/path.jpg"}
   ← {"id":1,"ok":true,"width":W,"height":H,"blocks":[{x,y,w,h,label,score,text}]}
+  → {"id":2,"cmd":"inpaint","image":"/abs/path.jpg","blocks":[{x,y,w,h},...]}
+  ← {"id":2,"ok":true,"patches":[{x,y,w,h,method,png(base64 RGBA)}]}
   無 id 的事件行:{"event":"loading","detail":...} / {"event":"ready"}
 
 單獨測試:python sidecar.py --once /path/img.jpg [--annotate out.png]
+          python sidecar.py --inpaint-once /path/img.jpg --annotate out.png
 """
 
 import os
@@ -128,8 +131,23 @@ def load_models():
     return detector, mocr
 
 
+_lama = None
+
+
+def get_lama():
+    """LaMa 惰性載入:只有第一次用到去字才下載/載入(不拖慢 OCR-only 啟動)。"""
+    global _lama
+    if _lama is None:
+        emit({"event": "loading", "detail": "去字模型（LaMa-manga）"})
+        from inpaint import LamaInpainter
+        _lama = LamaInpainter()
+        emit({"event": "ready"})
+    return _lama
+
+
 def serve():
     detector, mocr = load_models()
+    from inpaint import inpaint_blocks
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -142,6 +160,9 @@ def serve():
         try:
             if req.get("cmd") == "detect_ocr":
                 res = detect_ocr(detector, mocr, req["image"])
+                emit({"id": req.get("id"), "ok": True, **res})
+            elif req.get("cmd") == "inpaint":
+                res = inpaint_blocks(req["image"], req["blocks"], get_lama, log)
                 emit({"id": req.get("id"), "ok": True, **res})
             elif req.get("cmd") == "ping":
                 emit({"id": req.get("id"), "ok": True})
@@ -165,8 +186,9 @@ def annotate(image_path: str, result: dict, out_path: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--once", metavar="IMAGE", help="單張測試後退出")
-    ap.add_argument("--annotate", metavar="OUT_PNG", help="搭配 --once,輸出畫框圖")
+    ap.add_argument("--once", metavar="IMAGE", help="單張偵測+OCR 測試後退出")
+    ap.add_argument("--inpaint-once", metavar="IMAGE", help="單張偵測+去字測試後退出")
+    ap.add_argument("--annotate", metavar="OUT_PNG", help="搭配 --once/--inpaint-once,輸出結果圖")
     args = ap.parse_args()
 
     if args.once:
@@ -176,6 +198,27 @@ def main():
         if args.annotate:
             annotate(args.once, res, args.annotate)
         return
+
+    if args.inpaint_once:
+        # 只需要偵測器(不 OCR),直接串去字,輸出補丁合成圖供目視驗收。
+        import base64 as b64
+        from inpaint import inpaint_blocks
+
+        emit({"event": "loading", "detail": "偵測模型（RT-DETR-v2）"})
+        detector = Detector()
+        img = Image.open(args.inpaint_once).convert("RGB")
+        blocks = [b for b in detector.detect(img) if b["label"] in TEXT_LABELS]
+        log(f"{len(blocks)} text blocks to inpaint")
+        res = inpaint_blocks(args.inpaint_once, blocks, get_lama, log)
+        emit({"patches": [{k: v for k, v in p.items() if k != "png"} for p in res["patches"]]})
+        if args.annotate:
+            for p in res["patches"]:
+                patch = Image.open(__import__("io").BytesIO(b64.b64decode(p["png"])))
+                img.paste(patch, (p["x"], p["y"]), patch)  # RGBA alpha 合成
+            img.save(args.annotate)
+            log(f"inpainted → {args.annotate}")
+        return
+
     serve()
 
 

@@ -5,6 +5,7 @@ export const CHANNELS = {
   readImage: "project:readImage",
   ocrPage: "ocr:page",
   ocrStatus: "ocr:status",
+  inpaintBlocks: "ocr:inpaint",
 } as const;
 
 export interface ProjectInfo {
@@ -34,9 +35,24 @@ export interface OcrStatusEvent {
   detail?: string;
 }
 
+/** 去字補丁:RGBA PNG(mask 外 alpha=0),座標為原圖 px。 */
+export interface InpaintPatch {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  method: "fill" | "lama";
+  png: string; // base64
+}
+
+export interface InpaintResult {
+  patches: InpaintPatch[];
+}
+
 export interface ShashokuApi {
   openProjectFolder(): Promise<ProjectInfo | null>;
   readImage(folder: string, name: string): Promise<Uint8Array>;
   ocrPage(folder: string, name: string): Promise<OcrPageResult>;
+  inpaintBlocks(folder: string, name: string, blocks: OcrBlock[]): Promise<InpaintResult>;
   onOcrStatus(cb: (e: OcrStatusEvent) => void): void;
 }

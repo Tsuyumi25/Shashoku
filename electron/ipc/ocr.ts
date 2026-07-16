@@ -2,7 +2,13 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { CHANNELS, type OcrPageResult, type OcrStatusEvent } from "../../shared/ipc";
+import {
+  CHANNELS,
+  type InpaintResult,
+  type OcrBlock,
+  type OcrPageResult,
+  type OcrStatusEvent,
+} from "../../shared/ipc";
 
 interface Pending {
   resolve: (v: never) => void;
@@ -126,6 +132,17 @@ export function registerOcrHandlers() {
         image: join(folder, name),
       });
       return { width: res.width, height: res.height, blocks: res.blocks };
+    }
+  );
+
+  ipcMain.handle(
+    CHANNELS.inpaintBlocks,
+    async (_e, folder: string, name: string, blocks: OcrBlock[]): Promise<InpaintResult> => {
+      const res = await sidecar.request<InpaintResult>("inpaint", {
+        image: join(folder, name),
+        blocks: blocks.map(({ x, y, w, h }) => ({ x, y, w, h })),
+      });
+      return { patches: res.patches };
     }
   );
 

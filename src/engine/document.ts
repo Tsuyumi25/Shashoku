@@ -85,6 +85,36 @@ export class ShashokuDoc {
     renderTexts(ctx as CanvasRenderingContext2D, this.texts);
   }
 
+  /**
+   * 把 sidecar 回來的 RGBA 補丁(base64 PNG,mask 外 alpha=0)貼進圖層。
+   * alpha 是 0/255 二值:有值處直接覆蓋(最新去字結果為準),其餘不動。
+   */
+  async blitPngPatch(layerId: string, r: Rect, pngBase64: string): Promise<void> {
+    const layer = this.layers.find((l) => l.id === layerId);
+    if (!layer || r.w <= 0 || r.h <= 0) return;
+
+    const bytes = Uint8Array.from(atob(pngBase64), (c) => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes]));
+    const c = new OffscreenCanvas(r.w, r.h);
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const src = ctx.getImageData(0, 0, r.w, r.h).data;
+
+    for (let y = 0; y < r.h; y++) {
+      let si = y * r.w * 4;
+      let di = ((r.y + y) * this.width + r.x) * 4;
+      for (let x = 0; x < r.w; x++, si += 4, di += 4) {
+        if (src[si + 3] === 0) continue;
+        layer.data[di] = src[si];
+        layer.data[di + 1] = src[si + 1];
+        layer.data[di + 2] = src[si + 2];
+        layer.data[di + 3] = 255;
+      }
+    }
+    this.syncLayer(layerId, r);
+  }
+
   /** 匯出壓平成 PNG blob(白底,漫畫頁通常不要透明)。 */
   async exportPng(background = "#ffffff"): Promise<Blob> {
     const canvas = new OffscreenCanvas(this.width, this.height);

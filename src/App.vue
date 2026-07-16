@@ -22,7 +22,10 @@ let displayCtx: CanvasRenderingContext2D | null = null;
 
 let paintLayerId = "";
 let toneLayerId = "";
-let baseLayerId = "";
+let inpaintLayerId = "";
+const baseLayerId = ref(""); // template 要用(作用層 radio 對底圖隱藏),故為 ref
+// 筆刷/擦除的作用圖層——去字結果進獨立圖層,把作用層切過去就能「擦回原圖」。
+const activeLayerId = ref("");
 // 底圖的原始像素副本:濾鏡每次從乾淨底圖套用(非累積),量測才穩定、半徑可反覆調。
 let baseOriginal: Uint8ClampedArray | null = null;
 
@@ -105,10 +108,12 @@ function measureContainer(): void {
 async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   const d = new ShashokuDoc(bitmap.width, bitmap.height);
   const base = d.addLayerFromBitmap("底圖", bitmap);
-  baseLayerId = base.id;
+  baseLayerId.value = base.id;
   baseOriginal = base.data.slice();
+  inpaintLayerId = d.addBlankLayer("去字").id;
   paintLayerId = d.addBlankLayer("筆刷").id;
   toneLayerId = d.addBlankLayer("網點").id;
+  activeLayerId.value = paintLayerId;
   bitmap.close();
 
   doc.value = d;
@@ -182,6 +187,31 @@ async function ocrProject(): Promise<void> {
   batchRunning.value = false;
 }
 
+// ---- 去字(inpaint)----
+const inpaintBusy = ref(false);
+
+/** 對指定框去字:sidecar 回 RGBA 補丁,貼進「去字」圖層(可切作用層擦回)。 */
+async function runInpaint(blocks: OcrBlock[]): Promise<void> {
+  const name = currentPage.value;
+  const d = doc.value;
+  if (!name || !d || inpaintBusy.value) return;
+  // 拆成 plain object:blocks 來自 reactive state,是 Proxy,IPC structured clone 不吃
+  const targets = blocks.filter((b) => b.label !== "bubble").map((b) => ({ ...b }));
+  if (targets.length === 0) return;
+  inpaintBusy.value = true;
+  try {
+    const res = await window.api.inpaintBlocks(project.folder, name, targets);
+    for (const p of res.patches) {
+      await d.blitPngPatch(inpaintLayerId, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
+    }
+    redraw();
+  } catch (err) {
+    console.error("inpaint failed:", err);
+  } finally {
+    inpaintBusy.value = false;
+  }
+}
+
 /** OCR 框 → 文字物件:落在框中心、預設直排,原文留在面板對照,譯文由人打。 */
 function blockToText(b: OcrBlock): void {
   const d = doc.value;
@@ -225,7 +255,7 @@ let draggingTextId: string | null = null;
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
-  const layer = d.layers.find((l) => l.id === paintLayerId)!;
+  const layer = d.layers.find((l) => l.id === activeLayerId.value)!;
   const r = stampBrush(
     layer,
     d.width,
@@ -259,7 +289,7 @@ function onPointerDown(e: PointerEvent): void {
     strokeDirty = EMPTY_RECT;
     stampAt(p.x, p.y);
     lastPt = p;
-    doc.value.syncLayer(paintLayerId, strokeDirty);
+    doc.value.syncLayer(activeLayerId.value, strokeDirty);
     redraw();
   } else if (tool.value === "tone") {
     painting.value = true;
@@ -314,7 +344,7 @@ function onPointerMove(e: PointerEvent): void {
     });
     perf.lastStamp = ms;
     lastPt = p;
-    doc.value.syncLayer(paintLayerId, strokeDirty);
+    doc.value.syncLayer(activeLayerId.value, strokeDirty);
     strokeDirty = EMPTY_RECT;
     redraw();
   } else if (painting.value && tool.value === "tone") {
@@ -412,7 +442,7 @@ function onTextEdited(): void {
 
 // ---- 濾鏡（CPU/WASM 壓力測試,套用在底圖）----
 function baseLayer(): RasterLayer | undefined {
-  return doc.value?.layers.find((l) => l.id === baseLayerId);
+  return doc.value?.layers.find((l) => l.id === baseLayerId.value);
 }
 function fullRect(): Rect {
   return { x: 0, y: 0, w: doc.value!.width, h: doc.value!.height };
@@ -424,7 +454,7 @@ function applyBlur(): void {
   perf.blurMs = timeMs(() =>
     gaussianBlur(baseOriginal!, layer.data, d.width, d.height, filter.blurRadius),
   );
-  d.syncLayer(baseLayerId, fullRect());
+  d.syncLayer(baseLayerId.value, fullRect());
   redraw();
 }
 function applyAdjust(): void {
@@ -434,7 +464,7 @@ function applyAdjust(): void {
   perf.adjustMs = timeMs(() =>
     brightnessContrast(baseOriginal!, layer.data, filter.brightness, filter.contrast),
   );
-  d.syncLayer(baseLayerId, fullRect());
+  d.syncLayer(baseLayerId.value, fullRect());
   redraw();
 }
 function restoreBase(): void {
@@ -442,7 +472,7 @@ function restoreBase(): void {
   const layer = baseLayer();
   if (!d || !layer || !baseOriginal) return;
   layer.data.set(baseOriginal);
-  d.syncLayer(baseLayerId, fullRect());
+  d.syncLayer(baseLayerId.value, fullRect());
   redraw();
 }
 
@@ -732,9 +762,19 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
 
       <!-- OCR 原文 -->
       <section v-if="currentBlocks.length">
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">
-          OCR 原文（{{ currentBlocks.length }} 框）
-        </h3>
+        <div class="mb-1 flex items-center justify-between">
+          <h3 class="text-xs font-semibold" style="color: var(--muted)">
+            OCR 原文（{{ currentBlocks.length }} 框）
+          </h3>
+          <button
+            class="rounded px-1.5 py-0.5 text-[10px]"
+            :style="inpaintBusy ? 'background: var(--accent); color: #fff' : 'background: var(--panel-2)'"
+            :disabled="inpaintBusy"
+            @click="runInpaint(currentBlocks)"
+          >
+            {{ inpaintBusy ? "去字中…" : "去字全部" }}
+          </button>
+        </div>
         <ul class="max-h-72 overflow-y-auto text-xs">
           <li
             v-for="(b, i) in currentBlocks"
@@ -755,6 +795,15 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
               <button
                 v-if="b.text !== undefined"
                 class="ml-auto rounded px-1 py-0.5 text-[10px]"
+                style="background: var(--panel)"
+                :disabled="inpaintBusy"
+                @click="runInpaint([b])"
+              >
+                去字
+              </button>
+              <button
+                v-if="b.text !== undefined"
+                class="rounded px-1 py-0.5 text-[10px]"
                 style="background: var(--panel)"
                 @click="blockToText(b)"
               >
@@ -793,16 +842,26 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
 
       <!-- 圖層 -->
       <section>
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">圖層</h3>
+        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">
+          圖層（◉ = 筆刷/擦除作用層）
+        </h3>
         <ul :key="redrawKey">
           <li
             v-for="l in [...layerList].reverse()"
             :key="l.id"
-            class="flex items-center gap-2 rounded px-2 py-1"
+            class="mb-0.5 flex items-center gap-2 rounded px-2 py-1"
             style="background: var(--panel-2)"
           >
             <input type="checkbox" :checked="l.visible" @change="toggleLayer(l)" />
-            <span>{{ l.name }}</span>
+            <span class="flex-1">{{ l.name }}</span>
+            <input
+              v-if="l.id !== baseLayerId"
+              type="radio"
+              name="activeLayer"
+              :checked="l.id === activeLayerId"
+              title="筆刷/擦除作用層"
+              @change="activeLayerId = l.id"
+            />
           </li>
         </ul>
       </section>
