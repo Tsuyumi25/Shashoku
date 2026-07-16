@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, shallowRef, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { computed, reactive, ref, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { ShashokuDoc } from "@/engine/document";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
@@ -10,12 +10,17 @@ import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { screenToContentPx } from "@/lib/coords";
 import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
+import { useEditor } from "@/editor/useEditor";
+import { addLayer, duplicateLayer } from "@/editor/actions";
+import LayerPanel from "@/components/LayerPanel.vue";
 import type { OcrBlock } from "../shared/ipc";
 
 type Tool = "hand" | "brush" | "erase" | "tone" | "text";
 
 // ---- 狀態 ----
-const doc = shallowRef<ShashokuDoc | null>(null);
+// doc / activeLayerId / undo 歷史活在 useEditor 單例,LayerPanel 共用同一份。
+const editor = useEditor();
+const { doc, activeLayerId } = editor;
 const containerEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let displayCtx: CanvasRenderingContext2D | null = null;
@@ -23,9 +28,7 @@ let displayCtx: CanvasRenderingContext2D | null = null;
 let paintLayerId = "";
 let toneLayerId = "";
 let inpaintLayerId = "";
-const baseLayerId = ref(""); // template 要用(作用層 radio 對底圖隱藏),故為 ref
-// 筆刷/擦除的作用圖層——去字結果進獨立圖層,把作用層切過去就能「擦回原圖」。
-const activeLayerId = ref("");
+const baseLayerId = ref(""); // 濾鏡壓力測試作用對象
 // 底圖的原始像素副本:濾鏡每次從乾淨底圖套用(非累積),量測才穩定、半徑可反覆調。
 let baseOriginal: Uint8ClampedArray | null = null;
 
@@ -40,9 +43,7 @@ const textStyle = reactive({
   direction: "horizontal" as "horizontal" | "vertical",
 });
 
-const layerList = ref<RasterLayer[]>([]);
 const selectedTextId = ref<string | null>(null);
-const redrawKey = ref(0); // bump 觸發 template 重新映射(圖層可見性等)
 
 // ---- 專案 + OCR 狀態 ----
 const project = reactive<{ folder: string; images: string[] }>({ folder: "", images: [] });
@@ -108,6 +109,7 @@ function measureContainer(): void {
 async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   const d = new ShashokuDoc(bitmap.width, bitmap.height);
   const base = d.addLayerFromBitmap("底圖", bitmap);
+  base.locked = true; // PS 慣例:背景層預設鎖定,防誤畫(面板可解鎖)
   baseLayerId.value = base.id;
   baseOriginal = base.data.slice();
   inpaintLayerId = d.addBlankLayer("去字").id;
@@ -117,7 +119,7 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   bitmap.close();
 
   doc.value = d;
-  layerList.value = d.layers;
+  editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   selectedTextId.value = null;
   perf.imageSize = `${d.width}×${d.height}`;
 
@@ -126,7 +128,7 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   perf.cpuComposite = benchmarkCpuComposite(d.layers, d.width, d.height);
   measureContainer();
   fitToView();
-  redraw();
+  editor.changed(); // 面板列表/縮圖刷新 + 重繪
 }
 
 async function onPickFile(e: Event): Promise<void> {
@@ -204,7 +206,7 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
     for (const p of res.patches) {
       await d.blitPngPatch(inpaintLayerId, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
     }
-    redraw();
+    editor.changed();
   } catch (err) {
     console.error("inpaint failed:", err);
   } finally {
@@ -255,7 +257,8 @@ let draggingTextId: string | null = null;
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
-  const layer = d.layers.find((l) => l.id === activeLayerId.value)!;
+  const layer = d.layers.find((l) => l.id === activeLayerId.value);
+  if (!layer || layer.locked) return; // 鎖定守門在工具層,引擎保持純粹
   const r = stampBrush(
     layer,
     d.width,
@@ -266,6 +269,7 @@ function stampAt(x: number, y: number): void {
     brush.hardness,
     hexToRgb(brush.color),
     tool.value === "erase" ? "erase" : "paint",
+    layer.alphaLocked,
   );
   strokeDirty = unionRect(strokeDirty, r);
 }
@@ -370,21 +374,26 @@ function onPointerUp(e: PointerEvent): void {
     panning = false;
     return;
   }
+  if (painting.value && (tool.value === "brush" || tool.value === "erase")) {
+    editor.changed(); // 筆劃結束:刷新面板縮圖
+  }
   if (painting.value && tool.value === "tone" && toneRect.value) {
     const d = doc.value!;
-    const layer = d.layers.find((l) => l.id === toneLayerId)!;
+    const layer = d.layers.find((l) => l.id === toneLayerId);
     const r = toneRect.value;
-    perf.lastStamp = timeMs(() => {
-      fillScreentoneRect(layer, d.width, d.height, r, {
-        pitch: tone.pitch,
-        angle: tone.angle,
-        density: tone.density,
-        color: hexToRgb(tone.color),
+    if (layer && !layer.locked) {
+      perf.lastStamp = timeMs(() => {
+        fillScreentoneRect(layer, d.width, d.height, r, {
+          pitch: tone.pitch,
+          angle: tone.angle,
+          density: tone.density,
+          color: hexToRgb(tone.color),
+        });
       });
-    });
-    d.syncLayer(toneLayerId, r);
+      d.syncLayer(toneLayerId, r);
+    }
     toneRect.value = null;
-    redraw();
+    editor.changed();
   }
   painting.value = false;
   draggingTextId = null;
@@ -409,6 +418,34 @@ function maxLineLen(lines: string[]): number {
 
 // ---- 鍵盤 ----
 function onKeyDown(e: KeyboardEvent): void {
+  // PS 肌肉記憶快捷鍵(輸入框內不攔)
+  if (!isTyping(e) && (e.ctrlKey || e.metaKey) && doc.value) {
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) {
+      editor.undo();
+      e.preventDefault();
+      return;
+    }
+    if ((k === "z" && e.shiftKey) || k === "y") {
+      editor.redo();
+      e.preventDefault();
+      return;
+    }
+    if (k === "j") {
+      const act = editor.activeLayer.value;
+      if (act) {
+        const copy = duplicateLayer(editor.ctx(), act.id);
+        if (copy) activeLayerId.value = copy.id;
+      }
+      e.preventDefault();
+      return;
+    }
+    if (k === "n" && e.shiftKey) {
+      activeLayerId.value = addLayer(editor.ctx()).id;
+      e.preventDefault();
+      return;
+    }
+  }
   if (e.code === "Space" && !isTyping(e)) {
     spaceDown.value = true;
     e.preventDefault();
@@ -426,13 +463,6 @@ function onKeyUp(e: KeyboardEvent): void {
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement;
   return t.tagName === "TEXTAREA" || t.tagName === "INPUT";
-}
-
-// ---- 圖層可見性 ----
-function toggleLayer(l: RasterLayer): void {
-  l.visible = !l.visible;
-  redrawKey.value++;
-  redraw();
 }
 
 // ---- 文字面板編輯 ----
@@ -455,7 +485,7 @@ function applyBlur(): void {
     gaussianBlur(baseOriginal!, layer.data, d.width, d.height, filter.blurRadius),
   );
   d.syncLayer(baseLayerId.value, fullRect());
-  redraw();
+  editor.changed();
 }
 function applyAdjust(): void {
   const d = doc.value;
@@ -465,7 +495,7 @@ function applyAdjust(): void {
     brightnessContrast(baseOriginal!, layer.data, filter.brightness, filter.contrast),
   );
   d.syncLayer(baseLayerId.value, fullRect());
-  redraw();
+  editor.changed();
 }
 function restoreBase(): void {
   const d = doc.value;
@@ -473,7 +503,7 @@ function restoreBase(): void {
   if (!d || !layer || !baseOriginal) return;
   layer.data.set(baseOriginal);
   d.syncLayer(baseLayerId.value, fullRect());
-  redraw();
+  editor.changed();
 }
 
 // ---- 匯出 ----
@@ -492,6 +522,7 @@ async function onExport(): Promise<void> {
 // ---- 生命週期 ----
 let ro: ResizeObserver | null = null;
 onMounted(() => {
+  editor.setRedraw(redraw);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   window.api?.onOcrStatus((e) => {
@@ -840,30 +871,10 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
         </button>
       </section>
 
-      <!-- 圖層 -->
-      <section>
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">
-          圖層（◉ = 筆刷/擦除作用層）
-        </h3>
-        <ul :key="redrawKey">
-          <li
-            v-for="l in [...layerList].reverse()"
-            :key="l.id"
-            class="mb-0.5 flex items-center gap-2 rounded px-2 py-1"
-            style="background: var(--panel-2)"
-          >
-            <input type="checkbox" :checked="l.visible" @change="toggleLayer(l)" />
-            <span class="flex-1">{{ l.name }}</span>
-            <input
-              v-if="l.id !== baseLayerId"
-              type="radio"
-              name="activeLayer"
-              :checked="l.id === activeLayerId"
-              title="筆刷/擦除作用層"
-              @change="activeLayerId = l.id"
-            />
-          </li>
-        </ul>
+      <!-- 圖層面板(點列 = 作用層;拖曳排序;雙擊改名;Ctrl+click 縮圖 = 選區) -->
+      <section v-if="doc">
+        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">圖層</h3>
+        <LayerPanel />
       </section>
 
       <!-- 效能 HUD -->
