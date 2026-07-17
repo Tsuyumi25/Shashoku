@@ -4,14 +4,13 @@ import { ShashokuDoc } from "@/engine/document";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
 import { benchmarkCpuComposite, timeMs } from "@/engine/perf";
-import type { Rect, TextObject } from "@/engine/types";
+import type { Rect } from "@/engine/types";
 import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { clamp, screenToContentPx } from "@/lib/coords";
 import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
 import { addLayer, duplicateLayer } from "@/editor/actions";
-import { addText, editText, moveText, removeText } from "@/editor/actions/text";
 import { pushPixelPatch, pushPixelPatches, type PixelPatch } from "@/editor/pixel-history";
 import { copyRect } from "@/engine/pixelPatch";
 import { clampRect } from "@/engine/geom";
@@ -24,6 +23,11 @@ import {
 } from "@/engine/selection";
 import LayerPanel from "@/components/LayerPanel.vue";
 import { appMode } from "@/lib/appMode";
+import { canvasTextPreviewStyleFromExportConfig, drawCanvasTextPreview } from "@/lib/canvasTextPreview";
+import { CATEGORY_COLORS } from "@shared/ssk/constants";
+import type { LabelItem } from "@/types/project";
+import { useEditorStore } from "@/stores/editorStore";
+import { useProjectStore } from "@/stores/projectStore";
 import type { OcrBlock } from "../../shared/ipc";
 
 type Tool = "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
@@ -44,18 +48,27 @@ let inpaintLayerId = "";
 const tool = ref<Tool>("brush");
 const brush = reactive({ size: 22, hardness: 0.85, color: "#e23b3b" });
 const tone = reactive({ pitch: 6, angle: 45, density: 0.5, color: "#000000" });
-const textStyle = reactive({
-  fontSizePx: 32,
-  fontFamily: "sans-serif",
-  color: "#111111",
-  direction: "horizontal" as "horizontal" | "vertical",
-});
 
-const selectedTextId = ref<string | null>(null);
+// ---- SSOT 投影:專案/頁/標籤全部以 projectStore(.ssk.json)為準 ----
+// 嵌字 mode 不再有自己的文字實體:畫布上的「文字」= 當前頁 labels 的投影,
+// 拖曳/編輯直接寫回 projectStore(pinia 響應式 → 翻譯視圖即時跟動),
+// undo 進嵌字自己的 History(D3:每 mode 一條棧)。
+const projectStore = useProjectStore();
+const editorStore = useEditorStore();
+const currentPage = computed(() => editorStore.currentFilename); // 頁游標與翻譯共享
+const loadedPage = ref<string | null>(null); // 已建成 doc 的頁(惰性重載判斷)
+const currentLabels = computed<LabelItem[]>(() =>
+  currentPage.value ? (projectStore.fileByName(currentPage.value)?.labels ?? []) : [],
+);
+const selectedLabel = computed<LabelItem | null>(
+  () => currentLabels.value.find((l) => l.id === editorStore.selectedLabelId) ?? null,
+);
+// 文字渲染樣式:exportConfig(全域)→ canvasTextPreview,與翻譯 mode 同一份渲染
+const textPreviewStyle = computed(() =>
+  canvasTextPreviewStyleFromExportConfig(projectStore.exportConfig),
+);
 
-// ---- 專案 + OCR 狀態 ----
-const project = reactive<{ folder: string; images: string[] }>({ folder: "", images: [] });
-const currentPage = ref<string | null>(null); // 專案模式下的當前頁檔名
+// ---- OCR 狀態 ----
 const ocrData = reactive<Record<string, OcrBlock[]>>({});
 const ocrState = reactive<Record<string, "running" | "done" | "error">>({});
 const sidecarStatus = ref("");
@@ -113,10 +126,6 @@ function bracketStep(size: number): number {
   return 25;
 }
 
-const selectedText = computed<TextObject | null>(
-  () => doc.value?.texts.find((t) => t.id === selectedTextId.value) ?? null,
-);
-
 // ---- 座標 ----
 function toDoc(e: PointerEvent | MouseEvent): { x: number; y: number } {
   const rect = containerEl.value!.getBoundingClientRect();
@@ -151,7 +160,6 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
-  selectedTextId.value = null;
   perf.imageSize = `${d.width}×${d.height}`;
 
   // canvas 尺寸 = 文件尺寸;縮放/平移由 CSS transform 負責。
@@ -166,33 +174,44 @@ async function onPickFile(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  currentPage.value = null; // 單檔模式:無專案路徑,OCR 不可用
+  loadedPage.value = null; // 單檔模式:無專案頁,OCR/標籤投影不可用
   await buildDoc(await createImageBitmap(file));
   input.value = "";
 }
 
-// ---- 專案(資料夾)----
-async function openProject(): Promise<void> {
-  const res = await window.api.openImageFolder();
-  if (!res) return;
-  project.folder = res.folder;
-  project.images = res.images;
-  if (res.images.length > 0) await loadPage(res.images[0]);
-}
+// ---- 專案頁載入(專案本身由翻譯 mode 開啟,這裡只消費)----
 
-/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點/文字編輯。 */
+/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點像素編輯。 */
 async function loadPage(name: string): Promise<void> {
-  const bytes = await window.api.readImage(project.folder, name);
+  if (!projectStore.folderPath) return;
+  const bytes = await window.api.readImage(projectStore.folderPath, name);
   const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
-  currentPage.value = name;
+  loadedPage.value = name;
   await buildDoc(bitmap);
 }
 
+/** 點頁列表 = 移動全域頁游標;載入由下面的 watch 統一處理(翻譯側換頁同路)。 */
+function selectPage(name: string): void {
+  editorStore.selectFile(name);
+}
+
+// 惰性重載:只在嵌字 mode 顯示中且頁游標指向未載入的頁時才建 doc,
+// 翻譯側連續換頁不會拖著嵌字重建文件。
+watch(
+  [appMode, currentPage],
+  async ([m, page]) => {
+    if (m !== "letter" || !page || page === loadedPage.value) return;
+    await loadPage(page);
+  },
+  { immediate: true },
+);
+
 // ---- OCR(sidecar)----
 async function ocrOne(name: string): Promise<void> {
+  if (!projectStore.folderPath) return;
   ocrState[name] = "running";
   try {
-    const res = await window.api.ocrPage(project.folder, name);
+    const res = await window.api.ocrPage(projectStore.folderPath, name);
     ocrData[name] = res.blocks;
     ocrState[name] = "done";
   } catch (err) {
@@ -212,10 +231,10 @@ async function ocrProject(): Promise<void> {
     return;
   }
   batchRunning.value = true;
-  for (const name of project.images) {
+  for (const f of projectStore.files) {
     if (!batchRunning.value) break;
-    if (ocrState[name] === "done" || ocrState[name] === "running") continue;
-    await ocrOne(name);
+    if (ocrState[f.filename] === "done" || ocrState[f.filename] === "running") continue;
+    await ocrOne(f.filename);
   }
   batchRunning.value = false;
 }
@@ -233,7 +252,7 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   if (targets.length === 0) return;
   inpaintBusy.value = true;
   try {
-    const res = await window.api.inpaintBlocks(project.folder, name, targets);
+    const res = await window.api.inpaintBlocks(projectStore.folderPath!, name, targets);
     const layer = d.layers.find((l) => l.id === inpaintLayerId);
     const patches: PixelPatch[] = [];
     for (const p of res.patches) {
@@ -254,22 +273,66 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   }
 }
 
-/** OCR 框 → 文字物件:落在框中心、預設直排,原文留在面板對照,譯文由人打。 */
-function blockToText(b: OcrBlock): void {
-  const d = doc.value;
-  if (!d) return;
-  const t: TextObject = {
-    id: `text-${Date.now()}-${d.texts.length}`,
-    x: b.x + b.w / 2,
-    y: b.y + b.h / 2,
-    text: "",
-    fontSizePx: textStyle.fontSizePx,
-    fontFamily: textStyle.fontFamily,
-    color: textStyle.color,
-    direction: "vertical",
+// ---- 標籤寫回通道(SSOT = projectStore;undo 進嵌字 History)----
+
+function makeLabel(xPercent: number, yPercent: number, text = ""): LabelItem {
+  return {
+    id: crypto.randomUUID(),
+    x: clamp(xPercent, 0, 1),
+    y: clamp(yPercent, 0, 1),
+    category: editorStore.activeCategory,
+    text,
   };
-  addText(editor.ctx(), t);
-  selectedTextId.value = t.id;
+}
+
+function pushLabelAdd(page: string, label: LabelItem): void {
+  let index: number | undefined;
+  projectStore.addLabel(page, label);
+  editor.history.push({
+    label: "新增標籤",
+    undo: () => {
+      index = projectStore.deleteLabel(page, label.id);
+    },
+    redo: () => projectStore.addLabel(page, label, index),
+  });
+  editorStore.selectedLabelId = label.id;
+}
+
+function pushLabelDelete(page: string, labelId: string): void {
+  const label = projectStore.fileByName(page)?.labels.find((l) => l.id === labelId);
+  if (!label) return;
+  let index = projectStore.deleteLabel(page, labelId);
+  editor.history.push({
+    label: "刪除標籤",
+    undo: () => projectStore.addLabel(page, label, index),
+    redo: () => {
+      index = projectStore.deleteLabel(page, labelId);
+    },
+  });
+  if (editorStore.selectedLabelId === labelId) editorStore.selectedLabelId = null;
+}
+
+/** 拖曳結束提交:位置已在拖曳中即時套用(lazy-do,同翻譯側 cmdMoveLabel)。 */
+function pushLabelMove(
+  page: string,
+  labelId: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): void {
+  if (from.x === to.x && from.y === to.y) return;
+  editor.history.push({
+    label: "移動文字",
+    undo: () => projectStore.moveLabel(page, labelId, from.x, from.y),
+    redo: () => projectStore.moveLabel(page, labelId, to.x, to.y),
+  });
+}
+
+/** OCR 框 → 翻譯標籤:落在框中心,譯文由人打(原文留在面板對照)。 */
+function blockToLabel(b: OcrBlock): void {
+  const d = doc.value;
+  const page = currentPage.value;
+  if (!d || !page) return;
+  pushLabelAdd(page, makeLabel((b.x + b.w / 2) / d.width, (b.y + b.h / 2) / d.height));
   tool.value = "text";
 }
 
@@ -358,8 +421,8 @@ let strokeDirty: Rect = EMPTY_RECT;
 // 筆劃級 undo:動筆前抄整層(暫時性,pointerup 只留包圍盒兩份就丟)
 let strokeBefore: Uint8ClampedArray | null = null;
 let strokeUnion: Rect = EMPTY_RECT;
-let draggingTextId: string | null = null;
-let dragTextFrom = { x: 0, y: 0 };
+let draggingLabelId: string | null = null;
+let dragLabelFrom: { x: number; y: number } | null = null; // percent(SSOT 座標)
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
@@ -437,26 +500,18 @@ function onPointerDown(e: PointerEvent): void {
     lastPt = p;
     toneRect.value = { x: p.x, y: p.y, w: 0, h: 0 };
   } else if (tool.value === "text") {
-    const hit = hitText(p.x, p.y);
+    const page = currentPage.value;
+    if (!page) return; // 標籤活在工程檔:單檔模式沒有可寫的 SSOT
+    const hit = hitLabel(e);
     if (hit) {
-      selectedTextId.value = hit.id;
-      draggingTextId = hit.id;
-      dragTextFrom = { x: hit.x, y: hit.y };
+      editorStore.selectedLabelId = hit.id;
+      draggingLabelId = hit.id;
+      dragLabelFrom = { x: hit.x, y: hit.y };
     } else {
-      const t: TextObject = {
-        id: `text-${Date.now()}`,
-        x: p.x,
-        y: p.y,
-        text: "翻譯文字",
-        fontSizePx: textStyle.fontSizePx,
-        fontFamily: textStyle.fontFamily,
-        color: textStyle.color,
-        direction: textStyle.direction,
-      };
-      addText(editor.ctx(), t);
-      selectedTextId.value = t.id;
-      draggingTextId = t.id;
-      dragTextFrom = { x: t.x, y: t.y };
+      const label = makeLabel(p.x / doc.value.width, p.y / doc.value.height);
+      pushLabelAdd(page, label);
+      draggingLabelId = label.id;
+      dragLabelFrom = { x: label.x, y: label.y };
     }
   }
 }
@@ -529,13 +584,14 @@ function onPointerMove(e: PointerEvent): void {
       w: Math.abs(p.x - lastPt.x),
       h: Math.abs(p.y - lastPt.y),
     };
-  } else if (draggingTextId) {
-    const t = doc.value.texts.find((tt) => tt.id === draggingTextId);
-    if (t) {
-      t.x = p.x;
-      t.y = p.y;
-      redraw();
-    }
+  } else if (draggingLabelId && currentPage.value) {
+    // 拖曳中即時寫回 SSOT(percent);overlay 由 watch 自動重畫,翻譯視圖同步跟動
+    projectStore.moveLabel(
+      currentPage.value,
+      draggingLabelId,
+      clamp(p.x / doc.value.width, 0, 1),
+      clamp(p.y / doc.value.height, 0, 1),
+    );
   }
 }
 
@@ -604,28 +660,70 @@ function onPointerUp(e: PointerEvent): void {
     toneRect.value = null;
     editor.changed();
   }
-  if (draggingTextId) {
-    moveText(editor.ctx(), draggingTextId, dragTextFrom); // 拖曳結束 = 一步
+  if (draggingLabelId && currentPage.value && dragLabelFrom) {
+    const l = currentLabels.value.find((ll) => ll.id === draggingLabelId);
+    if (l) pushLabelMove(currentPage.value, draggingLabelId, dragLabelFrom, { x: l.x, y: l.y });
   }
   painting.value = false;
-  draggingTextId = null;
+  draggingLabelId = null;
+  dragLabelFrom = null;
 }
 
-function hitText(x: number, y: number): TextObject | null {
-  const d = doc.value;
-  if (!d) return null;
-  for (let i = d.texts.length - 1; i >= 0; i--) {
-    const t = d.texts[i];
-    const lines = t.text.split("\n");
-    const half = t.fontSizePx;
-    const wSpan = t.direction === "horizontal" ? maxLineLen(lines) * t.fontSizePx * 0.6 : lines.length * t.fontSizePx;
-    const hSpan = t.direction === "horizontal" ? lines.length * t.fontSizePx : maxLineLen(lines) * t.fontSizePx;
-    if (Math.abs(x - t.x) <= wSpan / 2 + half && Math.abs(y - t.y) <= hSpan / 2 + half) return t;
+// ---- 標籤投影(DOM):排版外包 Chromium,命中測試量 DOM 實際包圍盒 ----
+
+const labelEls = new Map<string, HTMLElement>();
+function setLabelEl(id: string, el: unknown): void {
+  if (el instanceof HTMLElement) labelEls.set(id, el);
+  else labelEls.delete(id);
+}
+
+/** 命中測試走 DOM 包圍盒(排版是 Chromium 排的,量它最準)。旋轉視角下是 AABB,偏寬可接受。 */
+function hitLabel(e: PointerEvent): LabelItem | null {
+  const labels = currentLabels.value;
+  const pad = 6; // 螢幕 px 容差
+  for (let i = labels.length - 1; i >= 0; i--) {
+    const el = labelEls.get(labels[i].id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (
+      e.clientX >= r.left - pad &&
+      e.clientX <= r.right + pad &&
+      e.clientY >= r.top - pad &&
+      e.clientY <= r.bottom + pad
+    ) {
+      return labels[i];
+    }
   }
   return null;
 }
-function maxLineLen(lines: string[]): number {
-  return lines.reduce((m, l) => Math.max(m, Array.from(l).length), 1);
+
+/** 標籤節點樣式:中心錨點 + 顯式斷行(pre)+ 直排交給 writing-mode。 */
+function labelStyle(l: LabelItem): Record<string, string> {
+  const d = doc.value!;
+  const s = textPreviewStyle.value;
+  const selected = l.id === editorStore.selectedLabelId;
+  return {
+    left: `${l.x * d.width}px`,
+    top: `${l.y * d.height}px`,
+    transform: "translate(-50%, -50%)",
+    fontFamily: s.fontFamily,
+    fontSize: `${s.fontSizePx}px`,
+    lineHeight: "1.2",
+    color: s.color,
+    whiteSpace: "pre",
+    writingMode: s.direction === "vertical" ? "vertical-rl" : "horizontal-tb",
+    textAlign: "center",
+    outline: selected ? `${2 / view.scale}px dashed rgba(80,160,255,0.9)` : "none",
+    outlineOffset: `${4 / view.scale}px`,
+  };
+}
+
+function dotStyle(l: LabelItem): Record<string, string> {
+  return {
+    width: "18px",
+    height: "18px",
+    background: CATEGORY_COLORS[(l.category - 1) % CATEGORY_COLORS.length],
+  };
 }
 
 // ---- 鍵盤 ----
@@ -734,9 +832,8 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
   }
   if ((e.key === "Delete" || e.key === "Backspace") && !isTyping(e)) {
-    if (selectedTextId.value) {
-      removeText(editor.ctx(), selectedTextId.value);
-      selectedTextId.value = null;
+    if (editorStore.selectedLabelId && currentPage.value && tool.value === "text") {
+      pushLabelDelete(currentPage.value, editorStore.selectedLabelId);
       return;
     }
     // PS 的 Delete:清除作用層上選區內的像素(入史)
@@ -765,37 +862,66 @@ function isTyping(e: KeyboardEvent): boolean {
   return t.tagName === "TEXTAREA" || t.tagName === "INPUT";
 }
 
-// ---- 文字面板編輯(全部走 editText 入史;同欄位連續輸入自動合併) ----
-function editSelected<K extends "text" | "fontSizePx" | "fontFamily" | "color" | "direction">(
+// ---- 文字面板編輯 ----
+// 譯文寫回選中標籤(入嵌字 History,同欄位連續輸入 mergeKey 合併);
+// 樣式(字級/字體/顏色/方向)是 exportConfig 全域設定——per-label 樣式屬於
+// 之後的「樣式群組」,這裡不入 undo(設定不進歷史,兩 mode 一致)。
+function onLabelTextInput(e: Event): void {
+  const page = currentPage.value;
+  const l = selectedLabel.value;
+  const v = (e.target as HTMLTextAreaElement).value;
+  if (!page || !l || l.text === v) return;
+  const prev = l.text;
+  const id = l.id;
+  projectStore.updateLabelText(page, id, v);
+  editor.history.push({
+    label: "編輯譯文",
+    mergeKey: `label-text:${id}`,
+    undo: () => projectStore.updateLabelText(page, id, prev),
+    redo: () => projectStore.updateLabelText(page, id, v),
+  });
+}
+
+function onLabelCategoryChange(e: Event): void {
+  const page = currentPage.value;
+  const l = selectedLabel.value;
+  const v = Number((e.target as HTMLSelectElement).value);
+  if (!page || !l || l.category === v) return;
+  const prev = l.category;
+  const id = l.id;
+  projectStore.updateLabelCategory(page, id, v);
+  editor.history.push({
+    label: "變更分組",
+    undo: () => projectStore.updateLabelCategory(page, id, prev),
+    redo: () => projectStore.updateLabelCategory(page, id, v),
+  });
+}
+
+function setExportStyle<K extends "font" | "fontSizePx" | "textColor" | "textDirection">(
   key: K,
-  value: TextObject[K],
+  value: (typeof projectStore.exportConfig)[K],
 ): void {
-  const t = selectedText.value;
-  if (!t || t[key] === value) return;
-  const prev = { [key]: t[key] } as Partial<Pick<TextObject, K>>;
-  t[key] = value;
-  editText(editor.ctx(), t.id, { [key]: value } as Partial<Pick<TextObject, K>>, prev);
-  redraw();
+  if (projectStore.exportConfig[key] === value) return;
+  projectStore.exportConfig[key] = value;
+  projectStore.dirty = true;
 }
 
-function onTextInput(e: Event): void {
-  editSelected("text", (e.target as HTMLTextAreaElement).value);
-}
-function onFontSizeInput(e: Event): void {
-  editSelected("fontSizePx", Number((e.target as HTMLInputElement).value));
-}
-function onColorInput(e: Event): void {
-  editSelected("color", (e.target as HTMLInputElement).value);
-}
-function setDirection(d: "horizontal" | "vertical"): void {
-  editSelected("direction", d);
-}
-
-// ---- 匯出 ----
+// ---- 匯出:像素合成 + 標籤文字投影(與畫面同一渲染 = WYSIWYG)----
 async function onExport(): Promise<void> {
   const d = doc.value;
   if (!d) return;
-  const blob = await d.exportPng();
+  const canvas = new OffscreenCanvas(d.width, d.height);
+  const c = canvas.getContext("2d")!;
+  d.compositeInto(c);
+  c.globalCompositeOperation = "destination-over"; // 白底墊在最下
+  c.fillStyle = "#ffffff";
+  c.fillRect(0, 0, d.width, d.height);
+  c.globalCompositeOperation = "source-over";
+  const style = textPreviewStyle.value;
+  for (const l of currentLabels.value) {
+    if (l.text !== "") drawCanvasTextPreview(c as unknown as CanvasRenderingContext2D, l, d.width, d.height, style);
+  }
+  const blob = await canvas.convertToBlob({ type: "image/png" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -945,14 +1071,14 @@ const TOOL_KEYS: Record<string, Tool> = {
         </button>
       </div>
 
-      <!-- 專案 + OCR -->
+      <!-- 專案 + OCR(專案由翻譯 mode 開啟,這裡消費同一份) -->
       <div class="mt-3 border-t pt-2" style="border-color: var(--border)">
-        <button class="w-full rounded px-2 py-1.5" style="background: var(--accent)" @click="openProject">
-          開啟資料夾（專案）
-        </button>
-        <template v-if="project.images.length">
+        <p v-if="!projectStore.isOpen" class="px-1 text-[11px]" style="color: var(--muted-foreground)">
+          到「翻譯」頁開啟或建立工程,頁列表與標籤會同步到這裡。
+        </p>
+        <template v-else>
           <button
-            class="mt-1 w-full rounded px-2 py-1.5"
+            class="w-full rounded px-2 py-1.5"
             style="background: var(--accent)"
             :disabled="!currentPage"
             @click="ocrCurrent"
@@ -972,23 +1098,23 @@ const TOOL_KEYS: Record<string, Tool> = {
         </template>
       </div>
 
-      <!-- 頁列表 -->
-      <ul v-if="project.images.length" class="mt-1 min-h-0 flex-1 overflow-y-auto">
-        <li v-for="name in project.images" :key="name">
+      <!-- 頁列表(全域頁游標,與翻譯 mode 同步) -->
+      <ul v-if="projectStore.files.length" class="mt-1 min-h-0 flex-1 overflow-y-auto">
+        <li v-for="f in projectStore.files" :key="f.filename">
           <button
             class="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs"
-            :style="name === currentPage ? 'background: var(--primary); color: var(--primary-foreground)' : ''"
-            @click="loadPage(name)"
+            :style="f.filename === currentPage ? 'background: var(--primary); color: var(--primary-foreground)' : ''"
+            @click="selectPage(f.filename)"
           >
-            <span class="truncate">{{ name }}</span>
+            <span class="truncate">{{ f.filename }}</span>
             <span class="ml-1 shrink-0 text-[10px] opacity-80">
               {{
-                ocrState[name] === "running"
+                ocrState[f.filename] === "running"
                   ? "⏳"
-                  : ocrState[name] === "error"
+                  : ocrState[f.filename] === "error"
                     ? "✕"
-                    : ocrData[name]
-                      ? ocrData[name].length
+                    : ocrData[f.filename]
+                      ? ocrData[f.filename].length
                       : ""
               }}
             </span>
@@ -1059,6 +1185,18 @@ const TOOL_KEYS: Record<string, Tool> = {
               background: 'rgba(201,100,66,0.12)',
             }"
           />
+          <!-- 標籤文字投影(DOM,doc 空間):排版外包 Chromium(直排/斷行),
+               transform 縮放下向量銳利;拖曳只 patch 單節點 style -->
+          <div
+            v-for="l in currentLabels"
+            :key="l.id"
+            :ref="(el) => setLabelEl(l.id, el)"
+            class="pointer-events-none absolute"
+            :style="labelStyle(l)"
+          >
+            <span v-if="l.text === ''" class="block rounded-full" :style="dotStyle(l)" />
+            <template v-else>{{ l.text }}</template>
+          </div>
           <!-- 選區蟻線(doc 空間,最上層) -->
           <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
         </div>
@@ -1112,43 +1250,65 @@ const TOOL_KEYS: Record<string, Tool> = {
       </section>
 
       <section v-if="tool === 'text'">
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted-foreground)">文字（點畫布新增／選取）</h3>
-        <template v-if="selectedText">
+        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted-foreground)">文字（標籤投影,與翻譯同步）</h3>
+        <template v-if="selectedLabel">
           <textarea
-            :value="selectedText.text"
+            :value="selectedLabel.text"
             rows="3"
             class="w-full rounded p-1"
             style="background: var(--accent); color: var(--foreground)"
-            @input="onTextInput"
+            @input="onLabelTextInput"
           />
-          <label class="block mt-1">字級 {{ selectedText.fontSizePx }}px
-            <input
-              type="range"
-              min="8"
-              max="120"
-              :value="selectedText.fontSizePx"
-              class="w-full"
-              @input="onFontSizeInput"
-            />
+          <label class="mt-1 block">分組
+            <select
+              class="w-full rounded px-1 py-0.5"
+              style="background: var(--accent); color: var(--foreground)"
+              :value="selectedLabel.category"
+              @change="onLabelCategoryChange"
+            >
+              <option v-for="(g, i) in projectStore.header.groups" :key="i" :value="i + 1">
+                {{ i + 1 }} · {{ g }}
+              </option>
+            </select>
           </label>
-          <div class="mt-1 flex gap-1">
-            <button
-              class="flex-1 rounded px-1 py-1"
-              :style="selectedText.direction === 'horizontal' ? 'background: var(--primary); color:#fff' : 'background: var(--accent)'"
-              @click="setDirection('horizontal')"
-            >橫排</button>
-            <button
-              class="flex-1 rounded px-1 py-1"
-              :style="selectedText.direction === 'vertical' ? 'background: var(--primary); color:#fff' : 'background: var(--accent)'"
-              @click="setDirection('vertical')"
-            >直排</button>
-          </div>
-          <label class="mt-1 flex items-center gap-2">顏色
-            <input type="color" :value="selectedText.color" @input="onColorInput" />
-          </label>
-          <p class="mt-1 text-[11px]" style="color: var(--muted-foreground)">Delete 刪除選取文字</p>
+          <p class="mt-1 text-[11px]" style="color: var(--muted-foreground)">Delete 刪除選取標籤</p>
         </template>
-        <p v-else class="text-[11px]" style="color: var(--muted-foreground)">點畫布空白處新增文字物件。</p>
+        <p v-else-if="!currentPage" class="text-[11px]" style="color: var(--muted-foreground)">
+          文字即翻譯標籤,需先在「翻譯」頁開啟工程。
+        </p>
+        <p v-else class="text-[11px]" style="color: var(--muted-foreground)">點畫布空白處新增標籤;點文字選取/拖曳。</p>
+
+        <!-- 全域文字樣式(exportConfig,兩個 mode 共用同一份渲染) -->
+        <h3 class="mb-1 mt-3 text-xs font-semibold" style="color: var(--muted-foreground)">全域文字樣式</h3>
+        <label class="block">字級 {{ projectStore.exportConfig.fontSizePx ?? 24 }}px
+          <input
+            type="range"
+            min="8"
+            max="120"
+            :value="projectStore.exportConfig.fontSizePx ?? 24"
+            class="w-full"
+            @input="setExportStyle('fontSizePx', Number(($event.target as HTMLInputElement).value))"
+          />
+        </label>
+        <div class="mt-1 flex gap-1">
+          <button
+            class="flex-1 rounded px-1 py-1"
+            :style="projectStore.exportConfig.textDirection !== 'vertical' ? 'background: var(--primary); color: var(--primary-foreground)' : 'background: var(--accent)'"
+            @click="setExportStyle('textDirection', 'horizontal')"
+          >橫排</button>
+          <button
+            class="flex-1 rounded px-1 py-1"
+            :style="projectStore.exportConfig.textDirection === 'vertical' ? 'background: var(--primary); color: var(--primary-foreground)' : 'background: var(--accent)'"
+            @click="setExportStyle('textDirection', 'vertical')"
+          >直排</button>
+        </div>
+        <label class="mt-1 flex items-center gap-2">顏色
+          <input
+            type="color"
+            :value="projectStore.exportConfig.textColor"
+            @input="setExportStyle('textColor', ($event.target as HTMLInputElement).value)"
+          />
+        </label>
       </section>
 
       <!-- OCR 原文 -->
@@ -1193,12 +1353,12 @@ const TOOL_KEYS: Record<string, Tool> = {
                 去字
               </button>
               <button
-                v-if="b.text !== undefined"
+                v-if="b.text !== undefined && currentPage"
                 class="rounded px-1 py-0.5 text-[10px]"
                 style="background: var(--card)"
-                @click="blockToText(b)"
+                @click="blockToLabel(b)"
               >
-                +文字
+                +標籤
               </button>
             </div>
             <p v-if="b.text" class="mt-0.5 select-text" style="color: var(--foreground)">{{ b.text }}</p>

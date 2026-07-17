@@ -1,7 +1,6 @@
 import type { RasterLayer, Rect, TextObject } from "./types";
 import { toCompositeOp } from "./blend";
 import { createRasterLayer, rasterLayerFromBitmap } from "./layer";
-import { renderTexts } from "./text";
 
 interface LayerCache {
   canvas: OffscreenCanvas;
@@ -149,7 +148,8 @@ export class ShashokuDoc {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    renderTexts(ctx as CanvasRenderingContext2D, this.texts);
+    // 文字不在這裡:文字是標籤(SSOT)的投影,由 mode 層以 canvasTextPreview
+    // 畫在 overlay / 匯出時疊加。engine 回歸純像素。
   }
 
   /**
