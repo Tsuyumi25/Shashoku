@@ -133,10 +133,36 @@ function toDoc(e: PointerEvent | MouseEvent): { x: number; y: number } {
 }
 
 // ---- 重繪 ----
+/** interleave hook:畫第 index 層之前,把錨定在該層之下的標籤 drawElementImage 進去。 */
+function drawAnchoredBefore(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  beforeLayerIndex: number,
+): void {
+  const d = doc.value;
+  if (!d) return;
+  const layerId = d.layers[beforeLayerIndex]?.id;
+  if (!layerId) return;
+  for (const l of anchoredLabels.value) {
+    if (labelAnchors.value.get(l.id) !== layerId || l.text === "") continue;
+    const el = anchorEls.get(l.id);
+    if (!el) continue;
+    try {
+      (ctx as CanvasRenderingContext2D).drawElementImage(
+        el,
+        l.x * d.width - el.offsetWidth / 2,
+        l.y * d.height - el.offsetHeight / 2,
+      );
+    } catch {
+      // 節點剛掛上、paint record 未就緒(等下一次 redraw 自然補上)
+      requestAnimationFrame(() => redraw());
+    }
+  }
+}
+
 function redraw(): void {
   const d = doc.value;
   if (!d || !displayCtx) return;
-  perf.lastDraw = timeMs(() => d.compositeInto(displayCtx!));
+  perf.lastDraw = timeMs(() => d.compositeInto(displayCtx!, drawAnchoredBefore));
 }
 
 function measureContainer(): void {
@@ -160,6 +186,7 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
+  labelAnchors.value = new Map(); // 錨定跟著圖層生命週期走(圖層已全部重建)
   perf.imageSize = `${d.width}×${d.height}`;
 
   // canvas 尺寸 = 文件尺寸;縮放/平移由 CSS transform 負責。
@@ -677,35 +704,69 @@ function setLabelEl(id: string, el: unknown): void {
   else labelEls.delete(id);
 }
 
-/** 命中測試走 DOM 包圍盒(排版是 Chromium 排的,量它最準)。旋轉視角下是 AABB,偏寬可接受。 */
+// ---- 圖層錨定(夾層):labelId → 「畫在該圖層之下」的 layerId ----
+// runtime 暫態:圖層本身尚未落地(D7),layerId 換頁即重生,現在寫進
+// .ssk.json 只會存斷裂引用——落地跟 D7 一起。錨定的標籤節點改掛在顯示
+// canvas 的 fallback content(layoutsubtree,有 paint record 不顯示),
+// 合成時經 interleave hook drawElementImage 進正確 z 位置;未錨定的照舊
+// 是浮在最上的 DOM overlay(向量銳利)。
+const labelAnchors = ref(new Map<string, string>());
+const anchorEls = new Map<string, HTMLElement>();
+function setAnchorEl(id: string, el: unknown): void {
+  if (el instanceof HTMLElement) anchorEls.set(id, el);
+  else anchorEls.delete(id);
+}
+/** 錨定且錨定圖層仍存在的標籤(圖層被刪自動回浮動)。 */
+const anchoredLabels = computed<LabelItem[]>(() => {
+  const d = doc.value;
+  if (!d) return [];
+  return currentLabels.value.filter((l) => {
+    const layerId = labelAnchors.value.get(l.id);
+    return layerId !== undefined && d.layers.some((ly) => ly.id === layerId);
+  });
+});
+const floatingLabels = computed<LabelItem[]>(() =>
+  currentLabels.value.filter((l) => !anchoredLabels.value.includes(l)),
+);
+
+/** 命中測試:浮動走 DOM 包圍盒(量 Chromium 排的最準);錨定的節點躺在
+ * canvas fallback 裡、rect 不在畫布位置,改用幾何(中心 ± 排版尺寸)。 */
 function hitLabel(e: PointerEvent): LabelItem | null {
-  const labels = currentLabels.value;
+  const d = doc.value;
+  if (!d) return null;
   const pad = 6; // 螢幕 px 容差
+  const labels = currentLabels.value;
+  const p = toDoc(e);
   for (let i = labels.length - 1; i >= 0; i--) {
-    const el = labelEls.get(labels[i].id);
+    const l = labels[i];
+    const anchored = anchoredLabels.value.includes(l);
+    const el = anchored ? anchorEls.get(l.id) : labelEls.get(l.id);
     if (!el) continue;
-    const r = el.getBoundingClientRect();
-    if (
-      e.clientX >= r.left - pad &&
-      e.clientX <= r.right + pad &&
-      e.clientY >= r.top - pad &&
-      e.clientY <= r.bottom + pad
-    ) {
-      return labels[i];
+    if (anchored) {
+      const hw = el.offsetWidth / 2 + pad / view.scale;
+      const hh = el.offsetHeight / 2 + pad / view.scale;
+      const cx = l.x * d.width;
+      const cy = l.y * d.height;
+      if (Math.abs(p.x - cx) <= hw && Math.abs(p.y - cy) <= hh) return l;
+    } else {
+      const r = el.getBoundingClientRect();
+      if (
+        e.clientX >= r.left - pad &&
+        e.clientX <= r.right + pad &&
+        e.clientY >= r.top - pad &&
+        e.clientY <= r.bottom + pad
+      ) {
+        return l;
+      }
     }
   }
   return null;
 }
 
-/** 標籤節點樣式:中心錨點 + 顯式斷行(pre)+ 直排交給 writing-mode。 */
-function labelStyle(l: LabelItem): Record<string, string> {
-  const d = doc.value!;
+/** 文字本體樣式(浮動 overlay 與錨定節點共用):顯式斷行 + 直排交給 writing-mode。 */
+function baseTextStyle(): Record<string, string> {
   const s = textPreviewStyle.value;
-  const selected = l.id === editorStore.selectedLabelId;
   return {
-    left: `${l.x * d.width}px`,
-    top: `${l.y * d.height}px`,
-    transform: "translate(-50%, -50%)",
     fontFamily: s.fontFamily,
     fontSize: `${s.fontSizePx}px`,
     lineHeight: "1.2",
@@ -713,7 +774,62 @@ function labelStyle(l: LabelItem): Record<string, string> {
     whiteSpace: "pre",
     writingMode: s.direction === "vertical" ? "vertical-rl" : "horizontal-tb",
     textAlign: "center",
+    width: "max-content",
+  };
+}
+
+/** 浮動 overlay 節點:文字樣式 + 中心錨點定位 + 選中框。 */
+function labelStyle(l: LabelItem): Record<string, string> {
+  const d = doc.value!;
+  const selected = l.id === editorStore.selectedLabelId;
+  return {
+    ...baseTextStyle(),
+    left: `${l.x * d.width}px`,
+    top: `${l.y * d.height}px`,
+    transform: "translate(-50%, -50%)",
     outline: selected ? `${2 / view.scale}px dashed rgba(80,160,255,0.9)` : "none",
+    outlineOffset: `${4 / view.scale}px`,
+  };
+}
+
+/** 設定/解除標籤的圖層錨定(null = 回浮動),入嵌字 History。 */
+function setLabelAnchor(labelId: string, layerId: string | null): void {
+  const prev = labelAnchors.value.get(labelId) ?? null;
+  if (prev === layerId) return;
+  const apply = (v: string | null) => {
+    const next = new Map(labelAnchors.value);
+    if (v === null) next.delete(labelId);
+    else next.set(labelId, v);
+    labelAnchors.value = next; // 換新 Map:讓 computed/watch 確定看見變更
+  };
+  apply(layerId);
+  editor.history.push({
+    label: layerId === null ? "文字回到最上層" : "文字錨入圖層",
+    undo: () => apply(prev),
+    redo: () => apply(layerId),
+  });
+}
+
+// 錨定標籤的內容/樣式/位置變更 → 重合成(等一幀讓 paint record 跟上;
+// 浮動標籤是 Vue 響應式 DOM,不需要這條)
+watch(
+  [anchoredLabels, labelAnchors, textPreviewStyle],
+  () => requestAnimationFrame(() => requestAnimationFrame(() => redraw())),
+  { deep: true, flush: "post" },
+);
+
+/** 錨定標籤的選中指示框(節點本體藏在 canvas fallback,框畫在 overlay)。 */
+function anchorSelectionStyle(l: LabelItem): Record<string, string> {
+  const d = doc.value!;
+  const el = anchorEls.get(l.id);
+  const w = el?.offsetWidth ?? 24;
+  const h = el?.offsetHeight ?? 24;
+  return {
+    left: `${l.x * d.width - w / 2}px`,
+    top: `${l.y * d.height - h / 2}px`,
+    width: `${w}px`,
+    height: `${h}px`,
+    outline: `${2 / view.scale}px dashed rgba(80,160,255,0.9)`,
     outlineOffset: `${4 / view.scale}px`,
   };
 }
@@ -882,6 +998,13 @@ function onLabelTextInput(e: Event): void {
   });
 }
 
+function onAnchorChange(e: Event): void {
+  const l = selectedLabel.value;
+  if (!l) return;
+  const v = (e.target as HTMLSelectElement).value;
+  setLabelAnchor(l.id, v === "" ? null : v);
+}
+
 function onLabelCategoryChange(e: Event): void {
   const page = currentPage.value;
   const l = selectedLabel.value;
@@ -919,9 +1042,10 @@ async function onExport(): Promise<void> {
   if (!d || !cv || !displayCtx) return;
   const clones: { el: HTMLElement; l: LabelItem }[] = [];
   try {
-    // 畫面上的文字節點 clone 進顯示畫布子樹:inline style 全帶走,
-    // 拿掉定位(位置改由 drawElementImage 座標給)與選中框
-    for (const l of currentLabels.value) {
+    // 浮動標籤的節點 clone 進顯示畫布子樹:inline style 全帶走,
+    // 拿掉定位(位置改由 drawElementImage 座標給)與選中框。
+    // 錨定標籤不 clone——常駐節點已在 fallback,由 interleave hook 畫進堆疊
+    for (const l of floatingLabels.value) {
       if (l.text === "") continue;
       const src = labelEls.get(l.id);
       if (!src) continue;
@@ -939,7 +1063,7 @@ async function onExport(): Promise<void> {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
     const c = displayCtx;
-    d.compositeInto(c); // 乾淨合成(顯示畫布短暫成為匯出畫面,結尾 redraw 恢復)
+    d.compositeInto(c, drawAnchoredBefore); // 含錨定文字的合成(顯示畫布短暫成為匯出畫面,結尾 redraw 恢復)
     c.globalCompositeOperation = "destination-over"; // 白底墊在最下
     c.fillStyle = "#ffffff";
     c.fillRect(0, 0, d.width, d.height);
@@ -1177,14 +1301,22 @@ const TOOL_KEYS: Record<string, Tool> = {
           class="absolute left-0 top-0 origin-top-left"
           :style="{ transform: canvasTransform }"
         >
-          <!-- layoutsubtree:匯出時文字節點 clone 進 fallback content(不顯示)
-               取 paint record——宿主必須在視口內且可見,顯示畫布正是 -->
+          <!-- layoutsubtree:fallback content 被排版但不顯示,供 drawElementImage
+               取 paint record——宿主必須在視口內且可見,顯示畫布正是。
+               常駐居民 = 錨進圖層堆疊的標籤;匯出時浮動標籤也短暫 clone 進來 -->
           <canvas
             ref="canvasEl"
             class="block"
             layoutsubtree
             style="image-rendering: pixelated; box-shadow: 0 0 0 1px var(--border)"
-          />
+          >
+            <div
+              v-for="l in anchoredLabels"
+              :key="l.id"
+              :ref="(el) => setAnchorEl(l.id, el)"
+              :style="baseTextStyle()"
+            >{{ l.text }}</div>
+          </canvas>
           <div
             v-for="(b, i) in currentBlocks"
             :key="i"
@@ -1221,10 +1353,12 @@ const TOOL_KEYS: Record<string, Tool> = {
               background: 'rgba(201,100,66,0.12)',
             }"
           />
-          <!-- 標籤文字投影(DOM,doc 空間):排版外包 Chromium(直排/斷行),
-               transform 縮放下向量銳利;拖曳只 patch 單節點 style -->
+          <!-- 浮動標籤投影(DOM,doc 空間):排版外包 Chromium(直排/斷行),
+               transform 縮放下向量銳利;拖曳只 patch 單節點 style。
+               錨進圖層堆疊的標籤不在這裡——它們住在顯示 canvas 的 fallback,
+               由合成的 interleave hook 畫進層與層之間 -->
           <div
-            v-for="l in currentLabels"
+            v-for="l in floatingLabels"
             :key="l.id"
             :ref="(el) => setLabelEl(l.id, el)"
             class="pointer-events-none absolute"
@@ -1233,6 +1367,13 @@ const TOOL_KEYS: Record<string, Tool> = {
             <span v-if="l.text === ''" class="block rounded-full" :style="dotStyle(l)" />
             <template v-else>{{ l.text }}</template>
           </div>
+          <!-- 錨定標籤的選中指示框(本體在合成裡,框浮在上面) -->
+          <div
+            v-for="l in anchoredLabels.filter((a) => a.id === editorStore.selectedLabelId)"
+            :key="`anchor-sel-${l.id}`"
+            class="pointer-events-none absolute"
+            :style="anchorSelectionStyle(l)"
+          />
           <!-- 選區蟻線(doc 空間,最上層) -->
           <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
         </div>
@@ -1304,6 +1445,23 @@ const TOOL_KEYS: Record<string, Tool> = {
             >
               <option v-for="(g, i) in projectStore.header.groups" :key="i" :value="i + 1">
                 {{ i + 1 }} · {{ g }}
+              </option>
+            </select>
+          </label>
+          <label class="mt-1 block">圖層位置
+            <select
+              class="w-full rounded px-1 py-0.5"
+              style="background: var(--accent); color: var(--foreground)"
+              :value="labelAnchors.get(selectedLabel.id) ?? ''"
+              @change="onAnchorChange"
+            >
+              <option value="">最上層（浮動，放大銳利）</option>
+              <option
+                v-for="ly in [...(doc?.layers ?? [])].reverse()"
+                :key="ly.id"
+                :value="ly.id"
+              >
+                壓在「{{ ly.name }}」之下
               </option>
             </select>
           </label>

@@ -133,12 +133,23 @@ export class ShashokuDoc {
 
   /**
    * 顯示合成:清空 target,由下往上 drawImage 每個可見圖層(帶 opacity 與
-   * blend mode),最後畫文字。Tier 2 邊界:blend 全走 canvas 原生運算子,
-   * 無巢狀群組 → 不需要離屏遞迴。
+   * blend mode)。Tier 2 邊界:blend 全走 canvas 原生運算子,無巢狀群組
+   * → 不需要離屏遞迴。
+   *
+   * interleave:畫第 index 層之前的插畫 hook(不可見層也會呼叫,錨定語義
+   * 以堆疊位置為準)。mode 層用它把「錨進堆疊的標籤文字」drawElementImage
+   * 進正確的 z 位置——engine 只知道「有東西要插在層與層之間」,不知道文字。
    */
-  compositeInto(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
+  compositeInto(
+    ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+    interleave?: (ctx2: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, beforeLayerIndex: number) => void,
+  ): void {
     ctx.clearRect(0, 0, this.width, this.height);
-    for (const layer of this.layers) {
+    for (let i = 0; i < this.layers.length; i++) {
+      const layer = this.layers[i];
+      interleave?.(ctx, i);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
       if (!layer.visible || layer.opacity === 0) continue;
       const canvas = this.cache.get(layer.id)?.canvas;
       if (!canvas) continue;
@@ -148,8 +159,7 @@ export class ShashokuDoc {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    // 文字不在這裡:文字是標籤(SSOT)的投影,由 mode 層以 canvasTextPreview
-    // 畫在 overlay / 匯出時疊加。engine 回歸純像素。
+    // 浮動文字(未錨定)不在這裡:它們是 DOM overlay,永遠在畫布之上。
   }
 
   /**
