@@ -4,8 +4,7 @@ import { ShashokuDoc } from "@/engine/document";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
 import { benchmarkCpuComposite, timeMs } from "@/engine/perf";
-import { gaussianBlur, brightnessContrast } from "@/engine/filters";
-import type { RasterLayer, Rect, TextObject } from "@/engine/types";
+import type { Rect, TextObject } from "@/engine/types";
 import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { clamp, screenToContentPx } from "@/lib/coords";
 import { hexToRgb } from "@/lib/color";
@@ -40,14 +39,10 @@ let displayCtx: CanvasRenderingContext2D | null = null;
 let paintLayerId = "";
 let toneLayerId = "";
 let inpaintLayerId = "";
-const baseLayerId = ref(""); // 濾鏡壓力測試作用對象
-// 底圖的原始像素副本:濾鏡每次從乾淨底圖套用(非累積),量測才穩定、半徑可反覆調。
-let baseOriginal: Uint8ClampedArray | null = null;
 
 const tool = ref<Tool>("brush");
 const brush = reactive({ size: 22, hardness: 0.85, color: "#e23b3b" });
 const tone = reactive({ pitch: 6, angle: 45, density: 0.5, color: "#000000" });
-const filter = reactive({ blurRadius: 6, brightness: 0, contrast: 0 });
 const textStyle = reactive({
   fontSizePx: 32,
   fontFamily: "sans-serif",
@@ -86,8 +81,6 @@ const perf = reactive({
   cpuComposite: 0, // 純 CPU 全畫面合成中位數 ms
   lastStamp: 0, // 上一次筆刷/網點寫 buffer 的 ms
   lastDraw: 0, // 上一次 drawImage 顯示合成 ms
-  blurMs: 0, // 全頁高斯模糊 ms（重濾鏡,WASM 抉擇的直接輸入）
-  adjustMs: 0, // 全頁亮度/對比 ms（輕濾鏡基準）
 });
 
 const spaceDown = ref(false);
@@ -148,8 +141,6 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   const d = new ShashokuDoc(bitmap.width, bitmap.height);
   const base = d.addLayerFromBitmap("底圖", bitmap);
   base.locked = true; // PS 慣例:背景層預設鎖定,防誤畫(面板可解鎖)
-  baseLayerId.value = base.id;
-  baseOriginal = base.data.slice();
   inpaintLayerId = d.addBlankLayer("去字").id;
   paintLayerId = d.addBlankLayer("筆刷").id;
   toneLayerId = d.addBlankLayer("網點").id;
@@ -797,42 +788,6 @@ function setDirection(d: "horizontal" | "vertical"): void {
   editSelected("direction", d);
 }
 
-// ---- 濾鏡（CPU/WASM 壓力測試,套用在底圖）----
-function baseLayer(): RasterLayer | undefined {
-  return doc.value?.layers.find((l) => l.id === baseLayerId.value);
-}
-function fullRect(): Rect {
-  return { x: 0, y: 0, w: doc.value!.width, h: doc.value!.height };
-}
-function applyBlur(): void {
-  const d = doc.value;
-  const layer = baseLayer();
-  if (!d || !layer || !baseOriginal) return;
-  perf.blurMs = timeMs(() =>
-    gaussianBlur(baseOriginal!, layer.data, d.width, d.height, filter.blurRadius),
-  );
-  d.syncLayer(baseLayerId.value, fullRect());
-  editor.changed();
-}
-function applyAdjust(): void {
-  const d = doc.value;
-  const layer = baseLayer();
-  if (!d || !layer || !baseOriginal) return;
-  perf.adjustMs = timeMs(() =>
-    brightnessContrast(baseOriginal!, layer.data, filter.brightness, filter.contrast),
-  );
-  d.syncLayer(baseLayerId.value, fullRect());
-  editor.changed();
-}
-function restoreBase(): void {
-  const d = doc.value;
-  const layer = baseLayer();
-  if (!d || !layer || !baseOriginal) return;
-  layer.data.set(baseOriginal);
-  d.syncLayer(baseLayerId.value, fullRect());
-  editor.changed();
-}
-
 // ---- 匯出 ----
 async function onExport(): Promise<void> {
   const d = doc.value;
@@ -1137,20 +1092,6 @@ const TOOL_KEYS: Record<string, Tool> = {
 
     <!-- 右:參數 + 圖層 + 效能 -->
     <aside class="flex w-64 flex-col gap-3 overflow-y-auto border-l p-3" style="border-color: var(--border); background: var(--panel)">
-      <!-- 工具參數 -->
-      <section v-if="tool === 'brush' || tool === 'erase'">
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">筆刷</h3>
-        <label class="block">大小 {{ brush.size }}px
-          <input type="range" min="1" :max="BRUSH_MAX" v-model.number="brush.size" class="w-full" />
-        </label>
-        <label class="block">硬度 {{ brush.hardness.toFixed(2) }}
-          <input type="range" min="0" max="1" step="0.01" v-model.number="brush.hardness" class="w-full" />
-        </label>
-        <label class="mt-1 flex items-center gap-2" v-if="tool === 'brush'">顏色
-          <input type="color" v-model="brush.color" />
-        </label>
-      </section>
-
       <section v-if="tool === 'tone'">
         <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">網點（拖出矩形填入）</h3>
         <label class="block">格距 {{ tone.pitch }}px
@@ -1262,31 +1203,6 @@ const TOOL_KEYS: Record<string, Tool> = {
         </ul>
       </section>
 
-      <!-- 濾鏡壓力測試 -->
-      <section v-if="doc">
-        <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">
-          濾鏡 · CPU/WASM 壓力測試（套用在底圖）
-        </h3>
-        <label class="block">模糊半徑 {{ filter.blurRadius }}
-          <input type="range" min="1" max="30" v-model.number="filter.blurRadius" class="w-full" />
-        </label>
-        <button class="mt-1 w-full rounded px-2 py-1.5" style="background: var(--panel-2)" @click="applyBlur">
-          套用高斯模糊（計時）
-        </button>
-        <label class="mt-2 block">亮度 {{ filter.brightness.toFixed(2) }}
-          <input type="range" min="-1" max="1" step="0.01" v-model.number="filter.brightness" class="w-full" />
-        </label>
-        <label class="block">對比 {{ filter.contrast.toFixed(2) }}
-          <input type="range" min="-1" max="1" step="0.01" v-model.number="filter.contrast" class="w-full" />
-        </label>
-        <button class="mt-1 w-full rounded px-2 py-1.5" style="background: var(--panel-2)" @click="applyAdjust">
-          套用亮度/對比（計時）
-        </button>
-        <button class="mt-1 w-full rounded px-2 py-1.5 text-xs" style="background: var(--panel-2); color: var(--muted)" @click="restoreBase">
-          還原底圖
-        </button>
-      </section>
-
       <!-- 圖層面板(點列 = 作用層;拖曳排序;雙擊改名;Ctrl+click 縮圖 = 選區) -->
       <section v-if="doc">
         <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">圖層</h3>
@@ -1306,15 +1222,6 @@ const TOOL_KEYS: Record<string, Tool> = {
         <div class="flex justify-between">
           <span>drawImage 顯示合成</span><span>{{ perf.lastDraw.toFixed(2) }} ms</span>
         </div>
-        <div class="mt-1 flex justify-between font-semibold" style="color: var(--fg)">
-          <span>全頁高斯模糊 r={{ filter.blurRadius }}</span><span>{{ perf.blurMs.toFixed(1) }} ms</span>
-        </div>
-        <div class="flex justify-between" style="color: var(--fg)">
-          <span>全頁亮度/對比</span><span>{{ perf.adjustMs.toFixed(1) }} ms</span>
-        </div>
-        <p class="mt-1 leading-tight" style="color: var(--muted)">
-          上兩條是整頁逐像素濾鏡 = WASM 去留的直接依據。上面互動數字便宜是照設計,不是壓力。
-        </p>
       </section>
     </aside>
   </div>
