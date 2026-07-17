@@ -116,12 +116,21 @@ watch(
   },
 )
 
-/** 原版文字框快捷鍵：Ctrl+Enter / Ctrl+↑↓ 切標籤、Ctrl+←→ 換頁 */
+/** 文字框快捷鍵:Esc 回操作層(modal);Ctrl+Enter / Ctrl+↑↓ 切標籤、Ctrl+←→ 換頁 */
 function onKeydown(e: KeyboardEvent) {
+  // Esc = blur 回操作層。IME 組字中的 Esc 是取消組字,不攔;
+  // stopPropagation:blur 後這顆 Esc 別漏到 window 層被算進「連按重置視角」
+  if (e.key === 'Escape') {
+    if (e.isComposing) return
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.target as HTMLTextAreaElement).blur()
+    return
+  }
   if (!(e.ctrlKey || e.metaKey)) return
   if (e.key === 'Enter' || e.key === 'ArrowDown') {
     e.preventDefault()
-    editor.selectLabelBy(1)
+    editor.selectLabelBy(e.key === 'Enter' && e.shiftKey ? -1 : 1) // Ctrl+Shift+Enter = 上一個
     editor.requestEditorFocus()
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()

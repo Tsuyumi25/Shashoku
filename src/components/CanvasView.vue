@@ -27,6 +27,14 @@
               :height="natural.h"
               :labels="currentFile.labels"
               :text-style="textPreviewStyle"
+              interactive
+              @select="(id) => (editor.selectedLabelId = id)"
+              @edit="
+                (id) => {
+                  editor.selectedLabelId = id
+                  editor.requestEditorFocus()
+                }
+              "
             />
             <LabelMarker
               v-for="(label, i) in currentFile.labels"
@@ -37,12 +45,12 @@
               :rotate="view.rotate"
               :natural
               :selected="label.id === editor.selectedLabelId"
-              :show-group="editor.mode === 'check'"
+              :show-group="editor.showGroups"
               :group-name="project.header.groups[label.category - 1] ?? `分組${label.category}`"
               @marker-pointerdown="onMarkerPointerDown(label, $event)"
               @marker-pointermove="onMarkerPointerMove($event)"
               @marker-pointerup="onMarkerPointerUp($event)"
-              @marker-pointerenter="onMarkerPointerEnter(label)"
+              @marker-dblclick="editor.requestEditorFocus()"
               @marker-contextmenu="onMarkerContextMenu(label, $event)"
             />
           </template>
@@ -74,7 +82,7 @@ import LabelMarker from '@/components/LabelMarker.vue'
 import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
 import { useZoomPan } from '@/composables/useZoomPan'
 import { appMode } from '@/lib/appMode'
-import { clamp, screenToContentPx } from '@/lib/coords'
+import { clamp, contentToScreenPx, screenToContentPx } from '@/lib/coords'
 import { sharedView, viewFit } from '@/lib/viewState'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -165,31 +173,20 @@ const panning = ref(false)
 watch(view, scheduleBaseDraw)
 watch(imageReady, scheduleBaseDraw)
 
-// R 按住 = 旋轉視角(spring-loaded,與嵌字 mode 同手勢);輕點 R(按下放開
-// 沒拖曳)= 切檢查模式——R 在翻譯 mode 一鍵兩用,靠「有沒有旋轉」分流
+// R 按住 = 旋轉視角(spring-loaded,與嵌字 mode 同手勢)
 const rDown = ref(false)
 const rotating = ref(false)
-let didRotate = false
 let rotatePivot = { x: 0, y: 0 }
 let rotateStartAngle = 0
 let rotateStartTheta = 0
 let lastEscAt = 0 // Esc 連按偵測(雙擊窗 400ms)= 視角重置,同嵌字 mode
 
-// 標號模式（或按住 Ctrl）游標 = 十字，對齊原版
-const ctrlHeld = ref(false)
-useEventListener(window, 'keydown', (e) => {
-  if (appMode.value !== 'translate') return
-  if (e.key === 'Control') ctrlHeld.value = true
-})
-useEventListener(window, 'keyup', (e) => {
-  if (e.key === 'Control') ctrlHeld.value = false // 放開不 guard:切 mode 前按住的要能歸零
-})
-const labelModeActive = computed(() => editor.mode === 'label' || ctrlHeld.value)
+// 工作模式退場後滑鼠是無模式的直接操作:點空白新增、點 marker 選取、
+// 拖 marker 移動、右鍵 marker 刪除、拖空白 pan——靠拖曳閾值與事件目標區分
 const canvasCursor = computed(() => {
   if (panning.value) return 'cursor-grabbing'
   if (rotating.value || rDown.value) return 'cursor-grab'
-  if (labelModeActive.value) return 'cursor-crosshair'
-  return 'cursor-default'
+  return 'cursor-crosshair'
 })
 
 watch(
@@ -197,6 +194,30 @@ watch(
   () => {
     imageReady.value = false
     scheduleBaseDraw()
+  },
+)
+
+// 選中標籤變更(j/k、表格點選、Ctrl+Enter)→ 畫布自動跟蹤到標籤位置
+// (原錄入模式的 SetLabelVisual 精髓,常駐化)。只 pan 不動 zoom;
+// guard appMode:view 是 sharedView,隱藏側不可亂動另一 mode 的視角
+const FOLLOW_MARGIN = 48
+watch(
+  () => editor.selectedLabelId,
+  (id) => {
+    if (appMode.value !== 'translate' || !id || !imageReady.value || !containerRef.value) return
+    const label = currentFile.value?.labels.find((l) => l.id === id)
+    if (!label) return
+    const rect = containerRef.value.getBoundingClientRect()
+    const p = contentToScreenPx(label.x * natural.value.w, label.y * natural.value.h, view)
+    if (
+      p.x < FOLLOW_MARGIN ||
+      p.x > rect.width - FOLLOW_MARGIN ||
+      p.y < FOLLOW_MARGIN ||
+      p.y > rect.height - FOLLOW_MARGIN
+    ) {
+      view.tx += rect.width / 2 - p.x
+      view.ty += rect.height / 2 - p.y
+    }
   },
 )
 
@@ -244,7 +265,6 @@ function onBgPointerDown(e: PointerEvent) {
   if (rDown.value) {
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     rotating.value = true
-    didRotate = true
     const rect = containerRef.value!.getBoundingClientRect()
     rotatePivot = { x: rect.width / 2, y: rect.height / 2 }
     rotateStartAngle = Math.atan2(
@@ -286,7 +306,7 @@ function onBgPointerUp(e: PointerEvent) {
     bgDownPos && Math.hypot(e.clientX - bgDownPos.x, e.clientY - bgDownPos.y) < DRAG_THRESHOLD_PX
   bgDownPos = null
   panning.value = false
-  if (isClick && labelModeActive.value) addLabelAt(e.clientX, e.clientY)
+  if (isClick) addLabelAt(e.clientX, e.clientY)
 }
 
 let dragging: {
@@ -303,23 +323,18 @@ let dragging: {
 function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
   const file = currentFile.value
   if (!file || e.button !== 0 || !containerRef.value) return
+  // 點 = 選取(游標移到這顆),拖 = 移動;要打字按 i 或雙擊(modal 鍵盤層)
   editor.selectedLabelId = label.id
-  if (labelModeActive.value) {
-    // 標號模式：準備拖曳移動
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    const rect = containerRef.value.getBoundingClientRect()
-    dragging = {
-      id: label.id,
-      filename: file.filename,
-      startX: e.clientX,
-      startY: e.clientY,
-      startContent: screenToContentPx(e.clientX, e.clientY, rect, view),
-      oldPos: { x: label.x, y: label.y },
-      moved: false,
-    }
-  } else {
-    // 瀏覽/錄入/檢查：選取 + 聚焦翻譯框（原版 textbox.Focus()）
-    editor.requestEditorFocus()
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  const rect = containerRef.value.getBoundingClientRect()
+  dragging = {
+    id: label.id,
+    filename: file.filename,
+    startX: e.clientX,
+    startY: e.clientY,
+    startContent: screenToContentPx(e.clientX, e.clientY, rect, view),
+    oldPos: { x: label.x, y: label.y },
+    moved: false,
   }
 }
 
@@ -356,15 +371,11 @@ function onMarkerPointerUp(e: PointerEvent) {
   dragging = null
 }
 
-/** 檢查模式：滑過 marker 即選取（原版 mouseIndexChanged） */
-function onMarkerPointerEnter(label: LabelItem) {
-  if (editor.mode === 'check') editor.selectedLabelId = label.id
-}
-
-/** 標號模式（或 Ctrl）右鍵 marker = 刪除（可 undo，不確認） */
+/** 右鍵 marker = 刪除(可 undo,不確認)。滑過即選已隨檢查模式退場——
+ * 有文字所見即所得後不再需要 hover 掃描。 */
 function onMarkerContextMenu(label: LabelItem, e: MouseEvent) {
   e.preventDefault()
-  if (!labelModeActive.value || !currentFile.value) return
+  if (!currentFile.value) return
   editor.cmdDeleteLabel(currentFile.value.filename, label.id)
 }
 
@@ -384,7 +395,6 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     editor.pageBy(1)
   } else if (e.key.toLowerCase() === 'r') {
-    if (!rDown.value) didRotate = false // 這輪按住尚未旋轉(key repeat 不重置)
     rDown.value = true
   } else if (e.key === 'Escape') {
     // 連按兩下 = 視角全重置(fitToView 含旋轉歸零);單按 + R 按住 = 只回正旋轉
@@ -400,16 +410,9 @@ useEventListener(window, 'keydown', (e) => {
   }
 })
 
-// R 放開:輕點(按住期間沒旋轉)= 切檢查模式——QWER 裡的 R 移到這裡,
-// 與「按住旋轉」共用一顆鍵。keyup 不 guard mode:切走前按住的 R 要能歸零
+// keyup 不 guard mode:切走前按住的 R 要能歸零
 useEventListener(window, 'keyup', (e) => {
-  if (e.key.toLowerCase() !== 'r') return
-  const tapped = rDown.value && !didRotate
-  rDown.value = false
-  if (!tapped || appMode.value !== 'translate') return
-  const el = document.activeElement
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
-  editor.mode = 'check'
+  if (e.key.toLowerCase() === 'r') rDown.value = false
 })
 
 const stageStyle = computed(() => ({

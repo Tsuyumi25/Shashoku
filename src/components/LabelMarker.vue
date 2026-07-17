@@ -7,9 +7,8 @@
     @pointermove="emit('markerPointermove', $event)"
     @pointerup="emit('markerPointerup', $event)"
     @pointercancel="emit('markerPointerup', $event)"
-    @pointerenter="emit('markerPointerenter')"
     @contextmenu.stop="emit('markerContextmenu', $event)"
-    @dblclick.stop
+    @dblclick.stop="emit('markerDblclick')"
   >
     {{ index + 1 }}
     <!-- 檢查模式：常駐顯示分組名（原版 AlwaysShowGroup） -->
@@ -50,7 +49,8 @@ const emit = defineEmits<{
   markerPointerdown: [e: PointerEvent]
   markerPointermove: [e: PointerEvent]
   markerPointerup: [e: PointerEvent]
-  markerPointerenter: []
+  /** 雙擊 = 進輸入層(等同 modal 鍵盤層的 i) */
+  markerDblclick: []
   markerContextmenu: [e: MouseEvent]
 }>()
 

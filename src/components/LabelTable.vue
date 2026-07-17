@@ -14,8 +14,12 @@
       <span class="ml-auto text-xs text-muted-foreground">右鍵設定分組</span>
     </div>
 
-    <!-- 標籤表格：ID | 分組 | 文字 -->
-    <div class="min-h-0 flex-1 overflow-y-auto" :style="{ fontSize: `${editor.fontSize}px` }">
+    <!-- 標籤表格：ID | 分組 | 文字。select-none:列是點擊目標(單擊選取/
+         雙擊進輸入層),雙擊不該順手反白文字;要改字進編輯框 -->
+    <div
+      class="min-h-0 flex-1 overflow-y-auto select-none"
+      :style="{ fontSize: `${editor.fontSize}px` }"
+    >
       <table class="w-full border-collapse">
         <thead class="sticky top-0 bg-card text-xs text-muted-foreground">
           <tr class="border-b border-border text-left">
@@ -32,6 +36,7 @@
                 class="cursor-default border-b border-border/40 hover:bg-secondary/40"
                 :class="[label.id === editor.selectedLabelId && 'bg-accent/50']"
                 @click="onRowClick(label)"
+                @dblclick="onRowDblclick(label)"
               >
                 <td class="px-2 py-1 tabular-nums">{{ i + 1 }}</td>
                 <td class="px-1 py-1">
@@ -112,6 +117,12 @@ watch(
 
 function onRowClick(label: LabelItem) {
   editor.selectedLabelId = label.id
+}
+
+/** 雙擊列 = 選取並進輸入層(與畫布的雙擊 marker/譯文同語義) */
+function onRowDblclick(label: LabelItem) {
+  editor.selectedLabelId = label.id
+  editor.requestEditorFocus()
 }
 
 function onSetCategory(label: LabelItem, category: number) {

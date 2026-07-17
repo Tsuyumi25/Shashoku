@@ -14,15 +14,14 @@ export interface Command {
  * 暫態 UI 狀態 + undo/redo 協調。
  * projectStore 只做純資料操作，所有進 undo 棧的變更都經由這裡的 cmd* action 包裝。
  */
-/** 原版 LabelPlus 的四種工作模式（Q/W/E/R） */
-export type WorkMode = 'browse' | 'label' | 'input' | 'check'
-
 export const useEditorStore = defineStore('editor', () => {
   const currentFilename = ref<string | null>(null)
   const selectedLabelId = ref<string | null>(null)
   /** 新增 label 時使用的分組（1~9） */
   const activeCategory = ref(1)
-  const mode = ref<WorkMode>('browse')
+  /** 畫布 marker 旁常駐顯示分組名。原版檢查模式的 AlwaysShowGroup——工作
+   * 模式退場後,它是顯示偏好不是工作階段,降級為 toggle。 */
+  const showGroups = ref(false)
   /** 遞增即請求翻譯編輯框聚焦（點 marker 後聚焦文字框的原版行為） */
   const focusEditorRequest = ref(0)
   /** 右欄表格/編輯框字級（原版 F+ / F-） */
@@ -131,7 +130,11 @@ export const useEditorStore = defineStore('editor', () => {
       },
       undo: () => project.addLabel(filename, label, index),
     })
-    if (selectedLabelId.value === labelId) selectedLabelId.value = null
+    if (selectedLabelId.value === labelId) {
+      // vim 刪行語義:游標落到下一個(沒有則上一個)——維持「永遠有選中」
+      const labels = project.fileByName(filename)?.labels ?? []
+      selectedLabelId.value = labels[Math.min(index, labels.length - 1)]?.id ?? null
+    }
   }
 
   /** 拖曳結束時提交：位置已在拖曳過程即時套用（lazy-do） */
@@ -204,7 +207,7 @@ export const useEditorStore = defineStore('editor', () => {
     currentFilename,
     selectedLabelId,
     activeCategory,
-    mode,
+    showGroups,
     focusEditorRequest,
     fontSize,
     adjustFontSize,
