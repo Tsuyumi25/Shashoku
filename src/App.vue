@@ -76,7 +76,10 @@ function blockColor(label: OcrBlock["label"]): string {
 
 const containerSize = reactive({ w: 1, h: 1 });
 const contentSize = computed(() => ({ w: doc.value?.width ?? 1, h: doc.value?.height ?? 1 }));
-const { view, ready, fitToView, onWheel, panBy } = useZoomPan(containerSize, contentSize);
+const { view, ready, fitToView, onWheel, panBy, rotateTo } = useZoomPan(
+  containerSize,
+  contentSize,
+);
 
 const perf = reactive({
   imageSize: "",
@@ -88,7 +91,15 @@ const perf = reactive({
 });
 
 const spaceDown = ref(false);
-const toneRect = ref<Rect | null>(null); // 網點拖曳中的預覽(doc 座標)
+const toneRect = ref<Rect | null>(null); // 網點/選取拖曳中的預覽(doc 座標)
+
+// R+drag 旋轉視角(PS Rotate View):繞視窗中心,Shift 吸附 15°,Esc 回正
+let lastEscAt = 0; // Esc 連按偵測(雙擊窗 400ms)
+const rDown = ref(false);
+const rotating = ref(false);
+let rotatePivot = { x: 0, y: 0 };
+let rotateStartAngle = 0;
+let rotateStartTheta = 0;
 
 const selectedText = computed<TextObject | null>(
   () => doc.value?.texts.find((t) => t.id === selectedTextId.value) ?? null,
@@ -98,9 +109,6 @@ const selectedText = computed<TextObject | null>(
 function toDoc(e: PointerEvent | MouseEvent): { x: number; y: number } {
   const rect = containerEl.value!.getBoundingClientRect();
   return screenToContentPx(e.clientX, e.clientY, rect, view);
-}
-function toScreen(x: number, y: number): { x: number; y: number } {
-  return { x: view.tx + x * view.scale, y: view.ty + y * view.scale };
 }
 
 // ---- 重繪 ----
@@ -368,6 +376,19 @@ function onPointerDown(e: PointerEvent): void {
   if (!doc.value) return;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
+  // R+drag:旋轉視角(繞視窗中心)
+  if (rDown.value) {
+    rotating.value = true;
+    const rect = containerEl.value!.getBoundingClientRect();
+    rotatePivot = { x: rect.width / 2, y: rect.height / 2 };
+    rotateStartAngle = Math.atan2(
+      e.clientY - rect.top - rotatePivot.y,
+      e.clientX - rect.left - rotatePivot.x,
+    );
+    rotateStartTheta = view.rotate;
+    return;
+  }
+
   // pan:空白鍵、中鍵、或 hand 工具
   if (spaceDown.value || e.button === 1 || tool.value === "hand") {
     panning = true;
@@ -421,6 +442,18 @@ function onPointerDown(e: PointerEvent): void {
 function onPointerMove(e: PointerEvent): void {
   if (!doc.value) return;
 
+  if (rotating.value) {
+    const rect = containerEl.value!.getBoundingClientRect();
+    const ang = Math.atan2(
+      e.clientY - rect.top - rotatePivot.y,
+      e.clientX - rect.left - rotatePivot.x,
+    );
+    let theta = rotateStartTheta + (ang - rotateStartAngle);
+    if (e.shiftKey) theta = Math.round(theta / (Math.PI / 12)) * (Math.PI / 12); // 吸附 15°
+    rotateTo(theta, rotatePivot.x, rotatePivot.y);
+    return;
+  }
+
   if (panning) {
     panBy(e.clientX - panLast.x, e.clientY - panLast.y);
     panLast = { x: e.clientX, y: e.clientY };
@@ -465,6 +498,10 @@ function onPointerMove(e: PointerEvent): void {
 
 function onPointerUp(e: PointerEvent): void {
   (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  if (rotating.value) {
+    rotating.value = false;
+    return;
+  }
   if (panning) {
     panning = false;
     return;
@@ -591,6 +628,28 @@ function onKeyDown(e: KeyboardEvent): void {
       return;
     }
   }
+  // R 按住 = 旋轉視角模式(spring-loaded,同 Space pan)
+  if (!isTyping(e) && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r") {
+    rDown.value = true;
+    e.preventDefault();
+    return;
+  }
+  // Esc:連按兩下 = 視角全重置(位置/縮放/旋轉);單按 + R 按住 = 只回正旋轉
+  if (e.key === "Escape" && !isTyping(e)) {
+    const now = performance.now();
+    const isDouble = now - lastEscAt < 400;
+    lastEscAt = isDouble ? 0 : now;
+    if (isDouble && doc.value) {
+      measureContainer();
+      fitToView();
+      return;
+    }
+    if (rDown.value && containerEl.value) {
+      const rect = containerEl.value.getBoundingClientRect();
+      rotateTo(0, rect.width / 2, rect.height / 2);
+    }
+    return;
+  }
   // 工具單鍵切換(PS 慣例)
   if (!isTyping(e) && !e.ctrlKey && !e.metaKey && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) {
     tool.value = TOOL_KEYS[e.key.toLowerCase()];
@@ -623,6 +682,7 @@ function onKeyDown(e: KeyboardEvent): void {
 }
 function onKeyUp(e: KeyboardEvent): void {
   if (e.code === "Space") spaceDown.value = false;
+  if (e.key.toLowerCase() === "r") rDown.value = false;
 }
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement;
@@ -736,20 +796,11 @@ onBeforeUnmount(() => {
 });
 
 const canvasTransform = computed(
-  () => `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
+  () => `translate(${view.tx}px, ${view.ty}px) scale(${view.scale}) rotate(${view.rotate}rad)`,
 );
-const toneOverlayStyle = computed(() => {
-  if (!toneRect.value) return { display: "none" };
-  const p = toScreen(toneRect.value.x, toneRect.value.y);
-  return {
-    left: `${p.x}px`,
-    top: `${p.y}px`,
-    width: `${toneRect.value.w * view.scale}px`,
-    height: `${toneRect.value.h * view.scale}px`,
-  };
-});
 
 const cursorClass = computed(() => {
+  if (rotating.value || rDown.value) return "cursor-grab";
   if (spaceDown.value || panning || tool.value === "hand") return "cursor-grab";
   if (tool.value === "text") return "cursor-text";
   return "cursor-crosshair";
@@ -904,15 +955,23 @@ const TOOL_KEYS: Record<string, Tool> = {
               }"
             >{{ i }}</span>
           </div>
+          <!-- 網點/選取拖曳預覽框(doc 空間,跟著旋轉) -->
+          <div
+            v-if="toneRect"
+            class="pointer-events-none absolute border-dashed"
+            :style="{
+              left: toneRect.x + 'px',
+              top: toneRect.y + 'px',
+              width: toneRect.w + 'px',
+              height: toneRect.h + 'px',
+              borderWidth: `${2 / view.scale}px`,
+              borderColor: 'var(--accent)',
+              background: 'rgba(201,100,66,0.12)',
+            }"
+          />
           <!-- 選區蟻線(doc 空間,最上層) -->
           <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
         </div>
-        <!-- 網點拖曳預覽框 -->
-        <div
-          class="pointer-events-none absolute border border-dashed"
-          style="border-color: var(--accent); background: rgba(201,100,66,0.12)"
-          :style="toneOverlayStyle"
-        />
         <div
           v-if="!doc"
           class="absolute inset-0 flex items-center justify-center text-center"
