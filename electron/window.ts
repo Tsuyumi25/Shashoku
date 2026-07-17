@@ -22,9 +22,20 @@ export function createWindow() {
 
   // 畫布有自己的 zoom，攔掉 Chromium 的頁面縮放快捷鍵，避免整頁被縮放。
   win.webContents.setZoomFactor(1);
+  const isDev = Boolean(process.env.ELECTRON_RENDERER_URL);
   win.webContents.on("before-input-event", (e, input) => {
     if (input.control && (input.key === "=" || input.key === "-" || input.key === "0")) {
       e.preventDefault();
+    }
+    // 應用選單已移除（解放 Alt），dev 模式手動補 DevTools/Reload
+    if (isDev && input.type === "keyDown") {
+      if (input.key === "F12") {
+        win.webContents.toggleDevTools();
+        e.preventDefault();
+      } else if (input.control && !input.shift && input.key.toLowerCase() === "r") {
+        win.webContents.reload();
+        e.preventDefault();
+      }
     }
   });
 }

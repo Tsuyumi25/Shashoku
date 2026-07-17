@@ -11,7 +11,10 @@ const MAX_SCALE = 40;
 
 /**
  * CSS transform 型 zoom/pan(搬自 YALP)。view 是 content → container 的變換:
- * 先 translate(tx,ty) 再 scale,transform-origin 0 0。滾輪縮放錨定游標。
+ * 先 translate(tx,ty) 再 scale,transform-origin 0 0。
+ *
+ * 滾輪走 PS 語義:滾 = 垂直平移、Shift+滾 = 水平平移、Alt+滾 = 縮放(錨定
+ * 游標);Ctrl+滾也縮放(觸控板 pinch 在 Chromium 送出的形態)。
  * pan(space+drag / 中鍵)由呼叫端在需要時呼叫 panBy。
  */
 export function useZoomPan(
@@ -39,15 +42,30 @@ export function useZoomPan(
   }
 
   function onWheel(e: WheelEvent) {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const next = clamp(view.scale * Math.exp(-e.deltaY * ZOOM_SPEED), fitScale() * 0.5, MAX_SCALE);
-    if (next === view.scale) return;
-    const k = next / view.scale;
-    view.tx = cx - (cx - view.tx) * k;
-    view.ty = cy - (cy - view.ty) * k;
-    view.scale = next;
+    if (e.altKey || e.ctrlKey) {
+      // 縮放,錨定游標(游標底下的內容點縮放前後不動)
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const next = clamp(
+        view.scale * Math.exp(-e.deltaY * ZOOM_SPEED),
+        fitScale() * 0.5,
+        MAX_SCALE,
+      );
+      if (next === view.scale) return;
+      const k = next / view.scale;
+      view.tx = cx - (cx - view.tx) * k;
+      view.ty = cy - (cy - view.ty) * k;
+      view.scale = next;
+      return;
+    }
+    // 平移:Shift 轉水平(滑鼠滾輪只有 deltaY);觸控板的 deltaX 原生支援
+    if (e.shiftKey && e.deltaX === 0) {
+      view.tx -= e.deltaY;
+    } else {
+      view.tx -= e.deltaX;
+      view.ty -= e.deltaY;
+    }
   }
 
   function panBy(dx: number, dy: number) {

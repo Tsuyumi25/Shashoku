@@ -546,6 +546,8 @@ function maxLineLen(lines: string[]): number {
 
 // ---- 鍵盤 ----
 function onKeyDown(e: KeyboardEvent): void {
+  // Alt 是修飾鍵(Alt+滾輪縮放等),不讓它觸發任何瀏覽器/選單行為
+  if (e.key === "Alt") e.preventDefault();
   // PS 肌肉記憶快捷鍵(輸入框內不攔)
   if (!isTyping(e) && (e.ctrlKey || e.metaKey) && doc.value) {
     const k = e.key.toLowerCase();
