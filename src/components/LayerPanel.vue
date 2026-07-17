@@ -164,15 +164,16 @@ watch(
   { immediate: true }
 );
 
-/** Ctrl+click 縮圖 = 載入該層選區(PS 肌肉記憶)。選區系統未接線,先驗原語。 */
+/** Ctrl+click 縮圖 = 把該層 alpha 載入為選區(PS 肌肉記憶)。 */
 function onThumbClick(e: MouseEvent, l: RasterLayer): void {
   if (!e.ctrlKey) return;
   e.stopPropagation();
   const alpha = editor.doc.value?.extractAlpha(l.id);
   if (!alpha) return;
-  let n = 0;
-  for (let i = 0; i < alpha.length; i++) if (alpha[i] > 0) n++;
-  hint.value = `已抽出「${l.name}」alpha(${n.toLocaleString()} px)——選區系統待接線`;
+  editor.setSelection(alpha);
+  hint.value = editor.selection.value
+    ? `已載入「${l.name}」的選區（Ctrl+D 取消）`
+    : `「${l.name}」是空層，沒有可選像素`;
 }
 </script>
 

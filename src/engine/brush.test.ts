@@ -52,4 +52,18 @@ describe("stampBrush + alphaLock(純 buffer,無 canvas)", () => {
     stampBrush(layer, w, h, 4, 4, 6, 1, RED, "erase");
     expect(layer.data[(4 * w + 4) * 4 + 3]).toBe(0); // 圓心整個擦掉
   });
+
+  it("selection 約束:選區外不落筆,soft 邊按強度落", () => {
+    const w = 8;
+    const h = 8;
+    const layer = createRasterLayer("t", w, h);
+    const sel = new Uint8ClampedArray(w * h);
+    sel[4 * w + 4] = 255; // 只選 (4,4)
+    sel[4 * w + 5] = 128; // (5,4) 半選
+
+    stampBrush(layer, w, h, 4, 4, 6, 1, RED, "paint", false, sel);
+    expect(layer.data[(4 * w + 4) * 4 + 3]).toBe(255); // 全選處全強度
+    expect(layer.data[(4 * w + 5) * 4 + 3]).toBe(128); // 半選處半強度
+    expect(layer.data[(4 * w + 3) * 4 + 3]).toBe(0); // 選區外不落筆
+  });
 });

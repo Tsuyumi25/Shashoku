@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from "vue";
 import type { ShashokuDoc } from "@/engine/document";
-import type { RasterLayer } from "@/engine/types";
+import { boundsOfMask } from "@/engine/selection";
+import type { RasterLayer, Rect } from "@/engine/types";
 import { History } from "./history";
 import type { EditorCtx } from "./types";
 
@@ -12,6 +13,28 @@ const doc = shallowRef<ShashokuDoc | null>(null);
 const history = new History();
 const layersTick = ref(0);
 const activeLayerId = ref("");
+
+// 選區:整頁 8-bit soft mask,null = 無選區(不約束)。bounds 供蟻線/清除用。
+const selection = shallowRef<Uint8ClampedArray | null>(null);
+const selectionBounds = shallowRef<Rect | null>(null);
+
+function setSelection(mask: Uint8ClampedArray | null): void {
+  const d = doc.value;
+  if (!mask || !d) {
+    selection.value = null;
+    selectionBounds.value = null;
+    return;
+  }
+  const b = boundsOfMask(mask, d.width, d.height);
+  if (!b) {
+    // 全空 mask = 取消選區(PS 語意:沒有「選了零像素」這種狀態)
+    selection.value = null;
+    selectionBounds.value = null;
+    return;
+  }
+  selection.value = mask;
+  selectionBounds.value = b;
+}
 
 let redrawCanvas: () => void = () => {};
 
@@ -51,6 +74,9 @@ export function useEditor() {
     activeLayer,
     canUndo,
     canRedo,
+    selection,
+    selectionBounds,
+    setSelection,
     changed,
     setRedraw(fn: () => void): void {
       redrawCanvas = fn;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { ShashokuDoc } from "@/engine/document";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
@@ -16,10 +16,17 @@ import { addText, editText, moveText, removeText } from "@/editor/actions/text";
 import { pushPixelPatch, pushPixelPatches, type PixelPatch } from "@/editor/pixel-history";
 import { copyRect } from "@/engine/pixelPatch";
 import { clampRect } from "@/engine/geom";
+import {
+  boundaryIndices,
+  clearSelected,
+  fullMask,
+  invertMask,
+  rectMask,
+} from "@/engine/selection";
 import LayerPanel from "@/components/LayerPanel.vue";
 import type { OcrBlock } from "../shared/ipc";
 
-type Tool = "hand" | "brush" | "erase" | "tone" | "text";
+type Tool = "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 
 // ---- 狀態 ----
 // doc / activeLayerId / undo 歷史活在 useEditor 單例,LayerPanel 共用同一份。
@@ -27,6 +34,7 @@ const editor = useEditor();
 const { doc, activeLayerId } = editor;
 const containerEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
+const selCanvasEl = ref<HTMLCanvasElement | null>(null); // 選區蟻線 overlay(doc 空間)
 let displayCtx: CanvasRenderingContext2D | null = null;
 
 let paintLayerId = "";
@@ -124,6 +132,7 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
 
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
+  editor.setSelection(null);
   selectedTextId.value = null;
   perf.imageSize = `${d.width}×${d.height}`;
 
@@ -254,10 +263,73 @@ function nextTickCanvas(): Promise<void> {
       c.width = doc.value!.width;
       c.height = doc.value!.height;
       displayCtx = c.getContext("2d");
+      const s = selCanvasEl.value;
+      if (s) {
+        s.width = doc.value!.width;
+        s.height = doc.value!.height;
+      }
       resolve();
     });
   });
 }
+
+// ---- 選區蟻線:邊界像素 + (x+y+phase) 棋盤紋 = 免路徑排序的爬行效果 ----
+let antsRaf = 0;
+let antsPhase = 0;
+let antsLast = 0;
+let antsBoundary: Uint32Array | null = null;
+// 邊界像素過多(如 Ctrl+click 網點層 alpha,每顆點都是邊)時只畫靜態,不動畫
+const ANTS_STATIC_LIMIT = 200_000;
+
+function stopAnts(): void {
+  if (antsRaf) cancelAnimationFrame(antsRaf);
+  antsRaf = 0;
+}
+
+function drawAnts(): void {
+  const el = selCanvasEl.value;
+  const d = doc.value;
+  if (!el) return;
+  const c = el.getContext("2d");
+  if (!c) return;
+  c.clearRect(0, 0, el.width, el.height);
+  if (!antsBoundary || !d) return;
+  const w = d.width;
+  for (let pass = 0; pass < 2; pass++) {
+    c.fillStyle = pass === 0 ? "#000" : "#fff";
+    for (let i = 0; i < antsBoundary.length; i++) {
+      const idx = antsBoundary[i];
+      const x = idx % w;
+      const y = (idx - x) / w;
+      if ((((x + y + antsPhase) >> 2) & 1) === pass) c.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+function antsFrame(now: number): void {
+  antsRaf = requestAnimationFrame(antsFrame);
+  if (now - antsLast < 80) return; // ~12fps 的爬行就夠
+  antsLast = now;
+  antsPhase = (antsPhase + 1) % 8;
+  drawAnts();
+}
+
+function rebuildAnts(): void {
+  stopAnts();
+  antsBoundary = null;
+  const sel = editor.selection.value;
+  const b = editor.selectionBounds.value;
+  const d = doc.value;
+  if (sel && b && d) {
+    antsBoundary = boundaryIndices(sel, d.width, d.height, b);
+  }
+  drawAnts();
+  if (antsBoundary && antsBoundary.length <= ANTS_STATIC_LIMIT) {
+    antsRaf = requestAnimationFrame(antsFrame);
+  }
+}
+
+watch(editor.selection, rebuildAnts);
 
 // ---- 指標互動 ----
 const painting = ref(false);
@@ -286,6 +358,7 @@ function stampAt(x: number, y: number): void {
     hexToRgb(brush.color),
     tool.value === "erase" ? "erase" : "paint",
     layer.alphaLocked,
+    editor.selection.value,
   );
   strokeDirty = unionRect(strokeDirty, r);
   strokeUnion = unionRect(strokeUnion, r);
@@ -316,7 +389,7 @@ function onPointerDown(e: PointerEvent): void {
     lastPt = p;
     doc.value.syncLayer(activeLayerId.value, strokeDirty);
     redraw();
-  } else if (tool.value === "tone") {
+  } else if (tool.value === "tone" || tool.value === "marquee") {
     painting.value = true;
     lastPt = p;
     toneRect.value = { x: p.x, y: p.y, w: 0, h: 0 };
@@ -373,7 +446,7 @@ function onPointerMove(e: PointerEvent): void {
     doc.value.syncLayer(activeLayerId.value, strokeDirty);
     strokeDirty = EMPTY_RECT;
     redraw();
-  } else if (painting.value && tool.value === "tone") {
+  } else if (painting.value && (tool.value === "tone" || tool.value === "marquee")) {
     toneRect.value = {
       x: Math.min(lastPt.x, p.x),
       y: Math.min(lastPt.y, p.y),
@@ -412,6 +485,14 @@ function onPointerUp(e: PointerEvent): void {
     strokeUnion = EMPTY_RECT;
     editor.changed(); // 筆劃結束:刷新面板縮圖
   }
+  if (painting.value && tool.value === "marquee" && toneRect.value) {
+    const d = doc.value!;
+    const r = clampRect(toneRect.value, d.width, d.height);
+    // 點一下(近零面積)= 取消選區,PS 慣例
+    if (r.w < 2 && r.h < 2) editor.setSelection(null);
+    else editor.setSelection(rectMask(d.width, d.height, r));
+    toneRect.value = null;
+  }
   if (painting.value && tool.value === "tone" && toneRect.value) {
     const d = doc.value!;
     const layer = d.layers.find((l) => l.id === toneLayerId);
@@ -419,12 +500,19 @@ function onPointerUp(e: PointerEvent): void {
     if (layer && !layer.locked && r.w > 0 && r.h > 0) {
       const before = copyRect(layer.data, d.width, r);
       perf.lastStamp = timeMs(() => {
-        fillScreentoneRect(layer, d.width, d.height, r, {
-          pitch: tone.pitch,
-          angle: tone.angle,
-          density: tone.density,
-          color: hexToRgb(tone.color),
-        });
+        fillScreentoneRect(
+          layer,
+          d.width,
+          d.height,
+          r,
+          {
+            pitch: tone.pitch,
+            angle: tone.angle,
+            density: tone.density,
+            color: hexToRgb(tone.color),
+          },
+          editor.selection.value,
+        );
       });
       d.syncLayer(toneLayerId, r);
       pushPixelPatch(editor.ctx(), toneLayerId, r, before, "網點填充");
@@ -485,14 +573,50 @@ function onKeyDown(e: KeyboardEvent): void {
       e.preventDefault();
       return;
     }
+    if (k === "d") {
+      editor.setSelection(null); // Ctrl+D 取消選區
+      e.preventDefault();
+      return;
+    }
+    if (k === "a") {
+      editor.setSelection(fullMask(doc.value.width, doc.value.height)); // Ctrl+A 全選
+      e.preventDefault();
+      return;
+    }
+    if (k === "i" && e.shiftKey) {
+      if (editor.selection.value) editor.setSelection(invertMask(editor.selection.value));
+      e.preventDefault();
+      return;
+    }
+  }
+  // 工具單鍵切換(PS 慣例)
+  if (!isTyping(e) && !e.ctrlKey && !e.metaKey && !e.altKey && TOOL_KEYS[e.key.toLowerCase()]) {
+    tool.value = TOOL_KEYS[e.key.toLowerCase()];
+    return;
   }
   if (e.code === "Space" && !isTyping(e)) {
     spaceDown.value = true;
     e.preventDefault();
   }
-  if ((e.key === "Delete" || e.key === "Backspace") && selectedTextId.value && !isTyping(e)) {
-    removeText(editor.ctx(), selectedTextId.value);
-    selectedTextId.value = null;
+  if ((e.key === "Delete" || e.key === "Backspace") && !isTyping(e)) {
+    if (selectedTextId.value) {
+      removeText(editor.ctx(), selectedTextId.value);
+      selectedTextId.value = null;
+      return;
+    }
+    // PS 的 Delete:清除作用層上選區內的像素(入史)
+    const d = doc.value;
+    const sel = editor.selection.value;
+    const b = editor.selectionBounds.value;
+    if (d && sel && b) {
+      const layer = d.layers.find((l) => l.id === activeLayerId.value);
+      if (layer && !layer.locked) {
+        const before = copyRect(layer.data, d.width, b);
+        clearSelected(layer, d.width, sel, b);
+        d.syncLayer(layer.id, b);
+        pushPixelPatch(editor.ctx(), layer.id, b, before, "清除選區內容");
+      }
+    }
   }
 }
 function onKeyUp(e: KeyboardEvent): void {
@@ -606,6 +730,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeyDown);
   window.removeEventListener("keyup", onKeyUp);
   ro?.disconnect();
+  stopAnts();
 });
 
 const canvasTransform = computed(
@@ -630,11 +755,20 @@ const cursorClass = computed(() => {
 
 const TOOLS: { id: Tool; label: string; key: string }[] = [
   { id: "hand", label: "手（平移）", key: "Space" },
+  { id: "marquee", label: "選取（矩形）", key: "M" },
   { id: "brush", label: "筆刷", key: "B" },
   { id: "erase", label: "橡皮擦", key: "E" },
   { id: "tone", label: "網點", key: "G" },
   { id: "text", label: "文字", key: "T" },
 ];
+const TOOL_KEYS: Record<string, Tool> = {
+  m: "marquee",
+  b: "brush",
+  e: "erase",
+  g: "tone",
+  t: "text",
+  h: "hand",
+};
 </script>
 
 <template>
@@ -768,6 +902,8 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
               }"
             >{{ i }}</span>
           </div>
+          <!-- 選區蟻線(doc 空間,最上層) -->
+          <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
         </div>
         <!-- 網點拖曳預覽框 -->
         <div

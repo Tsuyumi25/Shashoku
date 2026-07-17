@@ -16,6 +16,9 @@ export interface RGB {
  *
  * alphaLock = 鎖定透明像素(PS 語意):paint 只重新著色已有像素(alpha 不變、
  * 全透明處不落筆),erase 直接無效。
+ *
+ * selection = 選區 soft mask(w*h,null = 不約束):戳印強度乘上 mask/255,
+ * 選區外完全不落筆,羽化邊得到部分強度。
  */
 export function stampBrush(
   layer: RasterLayer,
@@ -28,6 +31,7 @@ export function stampBrush(
   color: RGB,
   mode: BrushMode,
   alphaLock = false,
+  selection: Uint8ClampedArray | null = null,
 ): Rect {
   if (alphaLock && mode === "erase") return EMPTY_RECT;
   const bounds = clampRect(circleBounds(cx, cy, radius), w, h);
@@ -41,7 +45,12 @@ export function stampBrush(
       const dist = Math.hypot(px - cx, py - cy);
       if (dist > radius) continue;
       // 邊緣 falloff:inner 內為 1,radius 外為 0,中間線性。
-      const sa = dist <= inner ? 1 : 1 - (dist - inner) / (radius - inner);
+      let sa = dist <= inner ? 1 : 1 - (dist - inner) / (radius - inner);
+      if (selection) {
+        const m = selection[py * w + px];
+        if (m === 0) continue;
+        sa *= m / 255;
+      }
       if (sa <= 0) continue;
 
       const idx = (py * w + px) * 4;

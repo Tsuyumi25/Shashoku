@@ -14,6 +14,7 @@ export interface ScreentoneParams {
  * 天天要用的東西 —— POC 要證明它在自足軟體裡做得出來、且是「工具」而非濾鏡。
  *
  * 語意是「填」(覆寫該 rect),不是疊加,所以重複拖同一塊不會越描越黑。
+ * selection(soft mask,null = 不約束):選區外像素保持原樣,羽化邊按強度縮 alpha。
  */
 export function fillScreentoneRect(
   layer: RasterLayer,
@@ -21,6 +22,7 @@ export function fillScreentoneRect(
   h: number,
   rect: Rect,
   p: ScreentoneParams,
+  selection: Uint8ClampedArray | null = null,
 ): Rect {
   const r = clampRect(rect, w, h);
   if (r.w === 0 || r.h === 0) return r;
@@ -36,6 +38,12 @@ export function fillScreentoneRect(
 
   for (let py = r.y; py < r.y + r.h; py++) {
     for (let px = r.x; px < r.x + r.w; px++) {
+      let strength = 1;
+      if (selection) {
+        const m = selection[py * w + px];
+        if (m === 0) continue; // 選區外:保持原樣,不覆寫
+        strength = m / 255;
+      }
       // 旋進網屏座標,找最近的格中心。
       const u = px * cos + py * sin;
       const v = -px * sin + py * cos;
@@ -43,13 +51,13 @@ export function fillScreentoneRect(
       const cv = Math.round(v / pitch) * pitch;
       const dist = Math.hypot(u - cu, v - cv);
       // 邊緣 ±0.5px 抗鋸齒。
-      const a = clamp01((dotR + 0.5 - dist) / 1);
+      const a = clamp01((dotR + 0.5 - dist) / 1) * strength;
 
       const idx = (py * w + px) * 4;
       data[idx] = p.color.r;
       data[idx + 1] = p.color.g;
       data[idx + 2] = p.color.b;
-      data[idx + 3] = a * 255; // 覆寫該 rect
+      data[idx + 3] = a * 255; // 覆寫該 rect(選區內)
     }
   }
   return r;
