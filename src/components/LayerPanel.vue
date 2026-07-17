@@ -183,14 +183,14 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
     <div class="mb-1 flex items-center gap-1">
       <select
         class="min-w-0 flex-1 rounded px-1 py-0.5 text-xs"
-        style="background: var(--panel-2); color: var(--fg)"
+        style="background: var(--accent); color: var(--foreground)"
         :value="active?.blendMode ?? 'normal'"
         :disabled="!active"
         @change="onBlendChange"
       >
         <option v-for="m in BLEND_MODES" :key="m" :value="m">{{ BLEND_MODE_LABELS[m] }}</option>
       </select>
-      <label class="flex items-center gap-1 text-[10px]" style="color: var(--muted)">
+      <label class="flex items-center gap-1 text-[10px]" style="color: var(--muted-foreground)">
         <span>不透明</span>
         <input
           type="range"
@@ -218,8 +218,8 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
           class="mb-0.5 flex items-center gap-1 rounded px-1 py-1"
           :style="
             l.id === activeLayerId
-              ? 'background: var(--accent); color: #fff'
-              : 'background: var(--panel-2)'
+              ? 'background: var(--primary); color: var(--primary-foreground)'
+              : 'background: var(--accent)'
           "
           @click="selectLayer(l)"
         >
@@ -232,7 +232,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
             :ref="(el) => setThumbEl(l.id, el)"
             width="36"
             height="36"
-            class="shrink-0 rounded-sm"
+            class="shrink-0"
             style="box-shadow: 0 0 0 1px var(--border)"
             title="Ctrl+click 載入選區"
             @click="onThumbClick($event, l)"
@@ -242,7 +242,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
             :id="`layer-rename-${l.id}`"
             v-model="editingName"
             class="min-w-0 flex-1 rounded px-1 text-xs"
-            style="background: var(--panel); color: var(--fg)"
+            style="background: var(--card); color: var(--foreground)"
             @keydown.enter="commitRename"
             @keydown.esc="editingId = null"
             @blur="commitRename"
@@ -273,12 +273,12 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
 
     <!-- footer:新增/複製/向下合併/刪除 + undo/redo -->
     <div class="mt-1 flex items-center gap-1 border-t pt-1" style="border-color: var(--border)">
-      <button class="rounded p-1" style="background: var(--panel-2)" title="新增圖層（Ctrl+Shift+N）" @click="onAdd">
+      <button class="rounded p-1" style="background: var(--accent)" title="新增圖層（Ctrl+Shift+N）" @click="onAdd">
         <Plus class="h-3.5 w-3.5" />
       </button>
       <button
         class="rounded p-1"
-        style="background: var(--panel-2)"
+        style="background: var(--accent)"
         title="複製圖層（Ctrl+J）"
         :disabled="!active"
         @click="onDuplicate"
@@ -287,7 +287,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
       </button>
       <button
         class="rounded p-1"
-        style="background: var(--panel-2)"
+        style="background: var(--accent)"
         title="向下合併（Ctrl+E）"
         :disabled="!active"
         @click="onMergeDown"
@@ -296,7 +296,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
       </button>
       <button
         class="rounded p-1"
-        style="background: var(--panel-2)"
+        style="background: var(--accent)"
         title="刪除圖層"
         :disabled="!active"
         @click="onRemove"
@@ -306,7 +306,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
       <span class="flex-1" />
       <button
         class="rounded p-1"
-        style="background: var(--panel-2)"
+        style="background: var(--accent)"
         :disabled="!editor.canUndo.value"
         :title="`復原 ${editor.history.undoLabel ?? ''}（Ctrl+Z）`"
         @click="editor.undo()"
@@ -315,7 +315,7 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
       </button>
       <button
         class="rounded p-1"
-        style="background: var(--panel-2)"
+        style="background: var(--accent)"
         :disabled="!editor.canRedo.value"
         :title="`重做 ${editor.history.redoLabel ?? ''}（Ctrl+Shift+Z）`"
         @click="editor.redo()"
@@ -323,6 +323,6 @@ function onThumbClick(e: MouseEvent, l: RasterLayer): void {
         <Redo2 class="h-3.5 w-3.5" :class="editor.canRedo.value ? '' : 'opacity-25'" />
       </button>
     </div>
-    <p v-if="hint" class="mt-1 text-[10px] leading-tight" style="color: var(--muted)">{{ hint }}</p>
+    <p v-if="hint" class="mt-1 text-[10px] leading-tight" style="color: var(--muted-foreground)">{{ hint }}</p>
   </section>
 </template>

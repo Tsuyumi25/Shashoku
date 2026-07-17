@@ -6,7 +6,7 @@ import { CHANNELS, type ProjectInfo } from "../../shared/ipc";
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp"]);
 
 export function registerProjectHandlers() {
-  ipcMain.handle(CHANNELS.openProjectFolder, async (): Promise<ProjectInfo | null> => {
+  ipcMain.handle(CHANNELS.openImageFolder, async (): Promise<ProjectInfo | null> => {
     const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     if (r.canceled || r.filePaths.length === 0) return null;
     const folder = r.filePaths[0];

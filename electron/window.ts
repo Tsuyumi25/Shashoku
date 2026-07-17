@@ -1,17 +1,22 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
+import { interceptClose } from "./ipc/windowControls";
 
 export function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    backgroundColor: "#1c1c1a",
+    frame: false, // YALP 殼:自畫 titlebar(拖曳區 + mode tab + 視窗控制)
+    backgroundColor: "#262624",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      navigateOnDragDrop: false,
     },
   });
+
+  interceptClose(win); // 關窗攔截:renderer 跑翻譯 dirty 確認流程
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL);

@@ -45,3 +45,31 @@ export function contentToScreenPx(
     y: view.ty + view.scale * (x * sin + y * cos),
   };
 }
+
+// ── 百分比座標(LP 血統):標籤以相對原圖寬高 ∈ [0,1] 存,換解析度不壞 ──
+
+/** 螢幕座標(clientX/Y)→ 圖片 percent 座標 ∈ [0,1](雙擊新增、拖曳 label 用)。 */
+export function screenToPercent(
+  clientX: number,
+  clientY: number,
+  containerRect: { left: number; top: number },
+  view: ViewTransform,
+  naturalWidth: number,
+  naturalHeight: number,
+): { x: number; y: number } {
+  const content = screenToContentPx(clientX, clientY, containerRect, view);
+  return {
+    x: clamp(content.x / naturalWidth, 0, 1),
+    y: clamp(content.y / naturalHeight, 0, 1),
+  };
+}
+
+/** percent → 圖片內容座標 px(marker 定位用;marker 活在被 transform 的容器內,不需要 view)。 */
+export function percentToContentPx(
+  xPercent: number,
+  yPercent: number,
+  naturalWidth: number,
+  naturalHeight: number,
+): { x: number; y: number } {
+  return { x: xPercent * naturalWidth, y: yPercent * naturalHeight };
+}

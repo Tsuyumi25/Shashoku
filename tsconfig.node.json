@@ -15,7 +15,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "types": ["node"],
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
   },
   "include": [
     "electron/**/*",

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "groups": ["框内", "框外"],
+  "images": [
+    {
+      "filename": "001.png",
+      "labels": [
+        { "x": 0.1, "y": 0.2, "category": 2, "lines": ["缺 id 的標籤"] }
+      ]
+    }
+  ]
+}
