@@ -10,6 +10,8 @@ import type { EditorCtx } from "./types";
 // layersTick 計數驅動衍生 computed 與縮圖刷新。
 
 const doc = shallowRef<ShashokuDoc | null>(null);
+/** doc 對應的專案頁檔名(單檔模式 = null)。校對 mode 靠它判斷 doc 可不可用。 */
+const docPage = shallowRef<string | null>(null);
 const history = new History();
 const layersTick = ref(0);
 const activeLayerId = ref("");
@@ -67,6 +69,7 @@ const canRedo = computed(() => {
 export function useEditor() {
   return {
     doc,
+    docPage,
     history,
     layersTick,
     activeLayerId,

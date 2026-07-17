@@ -379,7 +379,8 @@ useEventListener(window, 'keydown', (e) => {
 
   if (e.key === '0' && imageReady.value) fitToView()
   else if (e.key === 'ArrowLeft') editor.pageBy(-1)
-  else if (e.key === 'ArrowRight' || e.key === 'Tab') {
+  else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
+    // Shift+Tab 留給 AppShell 的 mode 循環
     e.preventDefault()
     editor.pageBy(1)
   } else if (e.key.toLowerCase() === 'r') {

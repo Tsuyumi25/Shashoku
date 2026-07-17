@@ -42,10 +42,11 @@
       </div>
     </header>
 
-    <!-- 兩個 mode 以 v-show 常駐：切換不丟狀態（翻譯在 pinia、嵌字在 useEditor 單例） -->
+    <!-- 各 mode 以 v-show 常駐：切換不丟狀態（翻譯在 pinia、嵌字在 useEditor 單例） -->
     <main class="min-h-0 flex-1">
       <TranslateMode v-show="appMode === 'translate'" />
       <LetterMode v-show="appMode === 'letter'" />
+      <ProofreadMode v-show="appMode === 'proofread'" />
     </main>
 
     <!-- dirty 時的確認（原版 是/否/取消 對話框），新建/開啟/關窗共用 -->
@@ -90,6 +91,7 @@ import { Minus, Moon, Square, Sun, X } from '@lucide/vue'
 import { toast, Toaster } from 'vue-sonner'
 import AppMenuBar from '@/components/AppMenuBar.vue'
 import LetterMode from '@/modes/LetterMode.vue'
+import ProofreadMode from '@/modes/ProofreadMode.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -100,7 +102,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { SSK_FILE_SUFFIX } from '@shared/ssk/constants'
-import { appMode } from '@/lib/appMode'
+import { appMode, type AppMode } from '@/lib/appMode'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -274,6 +276,21 @@ useEventListener(window, 'keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
     if (project.isOpen) onSave()
+    return
+  }
+  // Shift+Tab 循環切 mode(翻譯 → 嵌字 → 校對 → …)。輸入框聚焦時不攔,
+  // 保留反向 tab 的原生焦點行為
+  if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const el = document.activeElement
+    if (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      el instanceof HTMLSelectElement
+    )
+      return
+    e.preventDefault()
+    const order: AppMode[] = ['translate', 'letter', 'proofread']
+    appMode.value = order[(order.indexOf(appMode.value) + 1) % order.length]
   }
 })
 

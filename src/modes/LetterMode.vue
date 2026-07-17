@@ -296,6 +296,7 @@ async function onPickFile(e: Event): Promise<void> {
   if (!file) return;
   loadedPage.value = null; // 單檔模式:無專案頁,OCR/標籤投影不可用
   await buildDoc(await createImageBitmap(file));
+  editor.docPage.value = null;
   input.value = "";
 }
 
@@ -308,6 +309,7 @@ async function loadPage(name: string): Promise<void> {
   const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
   loadedPage.value = name;
   await buildDoc(bitmap);
+  editor.docPage.value = name; // 校對 mode 靠它判斷 doc 屬於哪一頁
 }
 
 /** 點頁列表 = 移動全域頁游標;載入由下面的 watch 統一處理(翻譯側換頁同路)。 */
