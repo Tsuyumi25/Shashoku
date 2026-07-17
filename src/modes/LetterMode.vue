@@ -23,7 +23,7 @@ import {
 } from "@/engine/selection";
 import LayerPanel from "@/components/LayerPanel.vue";
 import { appMode } from "@/lib/appMode";
-import { canvasTextPreviewStyleFromExportConfig, drawCanvasTextPreview } from "@/lib/canvasTextPreview";
+import { canvasTextPreviewStyleFromExportConfig } from "@/lib/canvasTextPreview";
 import { CATEGORY_COLORS } from "@shared/ssk/constants";
 import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
@@ -906,28 +906,61 @@ function setExportStyle<K extends "font" | "fontSizePx" | "textColor" | "textDir
   projectStore.dirty = true;
 }
 
-// ---- 匯出:像素合成 + 標籤文字投影(與畫面同一渲染 = WYSIWYG)----
+// ---- 匯出:像素合成 + drawElementImage 疊標籤文字 ----
+// 文字由 DOM 排版(顯示同一套 CSS:直排/斷行/字體),經 HTML-in-Canvas 畫進
+// 點陣——「軟體內 = 匯出」的所見即所得。空標籤(色點)是工作標記,不進成品。
+//
+// 宿主用「顯示畫布本身」:paint record 只給視口內、實際被 paint 的元素
+// (藏到視口外/opacity:0/visibility:hidden 都拿不到,實測),而顯示畫布永遠在視口內。clone 進它的 fallback
+// content 不會顯示,疊字+toBlob 之後 redraw 一幀恢復純像素顯示。
 async function onExport(): Promise<void> {
   const d = doc.value;
-  if (!d) return;
-  const canvas = new OffscreenCanvas(d.width, d.height);
-  const c = canvas.getContext("2d")!;
-  d.compositeInto(c);
-  c.globalCompositeOperation = "destination-over"; // 白底墊在最下
-  c.fillStyle = "#ffffff";
-  c.fillRect(0, 0, d.width, d.height);
-  c.globalCompositeOperation = "source-over";
-  const style = textPreviewStyle.value;
-  for (const l of currentLabels.value) {
-    if (l.text !== "") drawCanvasTextPreview(c as unknown as CanvasRenderingContext2D, l, d.width, d.height, style);
+  const cv = canvasEl.value;
+  if (!d || !cv || !displayCtx) return;
+  const clones: { el: HTMLElement; l: LabelItem }[] = [];
+  try {
+    // 畫面上的文字節點 clone 進顯示畫布子樹:inline style 全帶走,
+    // 拿掉定位(位置改由 drawElementImage 座標給)與選中框
+    for (const l of currentLabels.value) {
+      if (l.text === "") continue;
+      const src = labelEls.get(l.id);
+      if (!src) continue;
+      const el = src.cloneNode(true) as HTMLElement;
+      el.style.position = "static";
+      el.style.left = "";
+      el.style.top = "";
+      el.style.transform = "";
+      el.style.outline = "none";
+      el.style.width = "max-content";
+      cv.appendChild(el);
+      clones.push({ el, l });
+    }
+    // 等渲染管線給 clone 們 paint record(否則 InvalidStateError / 畫空)
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const c = displayCtx;
+    d.compositeInto(c); // 乾淨合成(顯示畫布短暫成為匯出畫面,結尾 redraw 恢復)
+    c.globalCompositeOperation = "destination-over"; // 白底墊在最下
+    c.fillStyle = "#ffffff";
+    c.fillRect(0, 0, d.width, d.height);
+    c.globalCompositeOperation = "source-over";
+    for (const { el, l } of clones) {
+      // 中心錨點:量排版後尺寸,回推左上角
+      c.drawElementImage(el, l.x * d.width - el.offsetWidth / 2, l.y * d.height - el.offsetHeight / 2);
+    }
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      cv.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png"),
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "shashoku-export.png";
+    a.click();
+    URL.revokeObjectURL(url);
+  } finally {
+    for (const { el } of clones) el.remove();
+    redraw(); // 顯示畫布回到純像素合成
   }
-  const blob = await canvas.convertToBlob({ type: "image/png" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "shashoku-export.png";
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ---- 生命週期 ----
@@ -1144,9 +1177,12 @@ const TOOL_KEYS: Record<string, Tool> = {
           class="absolute left-0 top-0 origin-top-left"
           :style="{ transform: canvasTransform }"
         >
+          <!-- layoutsubtree:匯出時文字節點 clone 進 fallback content(不顯示)
+               取 paint record——宿主必須在視口內且可見,顯示畫布正是 -->
           <canvas
             ref="canvasEl"
             class="block"
+            layoutsubtree
             style="image-rendering: pixelated; box-shadow: 0 0 0 1px var(--border)"
           />
           <div

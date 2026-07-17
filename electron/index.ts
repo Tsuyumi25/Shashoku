@@ -12,6 +12,12 @@ import { createWindow } from "./window";
 // 代價:DevTools/Reload 的內建加速鍵消失,由 window.ts 在 dev 模式補 F12/Ctrl+R。
 Menu.setApplicationMenu(null);
 
+// HTML-in-Canvas(drawElementImage,Chromium 150 DevTrial):匯出管線把
+// DOM 排版的標籤文字畫進 canvas 合成——「軟體內 = 匯出」的所見即所得。
+// 已實測:直排 OK、不 taint。Electron 鎖定 Chromium 版本,實驗 API 的
+// 變動風險由我們的升級時機控制。
+app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
+
 registerLocalFileScheme();
 
 app.whenReady().then(() => {
