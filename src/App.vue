@@ -276,6 +276,23 @@ useEventListener(window, 'keydown', (e) => {
     if (project.isOpen) onSave()
   }
 })
+
+// dev 便利:.env 的 RENDERER_VITE_DEV_PROJECT 指定工程檔路徑,啟動即開,
+// 省去每次 pnpm dev 重新 File > Open(見 .env.example;僅 dev build 生效)
+if (import.meta.env.DEV && import.meta.env.RENDERER_VITE_DEV_PROJECT) {
+  void project
+    .openByPath(import.meta.env.RENDERER_VITE_DEV_PROJECT)
+    .then((opened) => {
+      if (opened === null) return
+      editor.clearHistory()
+      editor.selectFile(project.files[0]?.filename ?? null)
+    })
+    .catch((err) => {
+      toast.error('自動開啟 dev 專案失敗', {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    })
+}
 </script>
 
 <style scoped>

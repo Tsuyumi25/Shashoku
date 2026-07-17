@@ -4,6 +4,10 @@ dist/
 .tsbuild/
 *.log
 
+# 本機開發環境變數(.env.example 是範本)
+.env
+.env.local
+
 # Python sidecar（venv 由 uv 自帶 .gitignore 自我忽略，這裡防其餘產物）
 ocr-sidecar/__pycache__/
 ocr-sidecar/crops/

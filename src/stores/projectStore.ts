@@ -143,6 +143,20 @@ export const useProjectStore = defineStore('project', () => {
     return picked.filename
   }
 
+  /**
+   * 以既知路徑開啟工程檔(不經對話框):dev 自動開啟用,未來「最近專案」
+   * 也走這裡。路徑格式不合法回 null;讀取/解析失敗往上拋。
+   */
+  async function openByPath(sskPath: string): Promise<string | null> {
+    const m = sskPath.match(/^(.+)[\\/]([^\\/]+)$/)
+    if (!m) return null
+    const [, dir, filename] = m
+    const images = await window.api.listImages(dir)
+    await loadProjectFile(sskPath, images)
+    folderPath.value = dir
+    return filename
+  }
+
   async function loadProjectFile(path: string, diskImages?: string[]) {
     const images =
       diskImages ?? (folderPath.value ? await window.api.listImages(folderPath.value) : [])
@@ -257,6 +271,7 @@ export const useProjectStore = defineStore('project', () => {
     serialize,
     createNewProject,
     openExisting,
+    openByPath,
     loadProjectFile,
     newProject,
     addLabel,
