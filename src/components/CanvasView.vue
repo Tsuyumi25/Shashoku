@@ -13,14 +13,14 @@
       @auxclick="onAuxClick"
     >
       <template v-if="currentFile && !currentFile.missing">
-        <!-- stage：img 與所有 marker 同在一個 transform 容器內 -->
+        <!-- 底圖:視口 canvas + ctx transform(與嵌字同一條渲染路)。
+             CSS transform 縮小 <img> 走 Chromium 的 mipmap 平滑,fit 倍率下
+             明顯偏糊;canvas 畫「高品質預縮版」+ 殘餘 bilinear,銳而不混疊。
+             img 藏起來只當解碼源 -->
+        <img ref="imgRef" :src="src" class="hidden" @load="onImageLoad" />
+        <canvas ref="baseCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
+        <!-- stage:marker 與文字投影同在一個 transform 容器內(輕量 DOM) -->
         <div class="absolute top-0 left-0" :style="stageStyle">
-          <img
-            :src="src"
-            draggable="false"
-            class="block max-w-none select-none"
-            @load="onImageLoad"
-          />
           <template v-if="imageReady">
             <LabelTextOverlay
               :width="natural.w"
@@ -91,7 +91,54 @@ const containerSize = ref({ w: 0, h: 0 })
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
   containerSize.value = { w: width, h: height }
+  scheduleBaseDraw()
 })
+
+// ---- 底圖繪製(視口 canvas,rAF + 髒標記,同嵌字 mode 的重繪形狀)----
+//
+// 縮小檢視的採樣品質用 imageSmoothingQuality 'high'(Chromium 對同一張
+// 圖快取 mip,逐幀成本無感):單步 bilinear 在大幅縮小時混疊(細線忽粗
+// 忽細、網點摩爾紋,實測條紋不均度 78→39),CSS transform 縮 <img> 的
+// mipmap 又過糊(高頻能量只剩 51%,'high' 有 86%)。只動顯示:標籤
+// 資料/匯出與這條路無關。
+const imgRef = useTemplateRef('imgRef')
+const baseCanvasRef = useTemplateRef('baseCanvasRef')
+
+let baseDrawScheduled = false
+function scheduleBaseDraw() {
+  if (baseDrawScheduled) return
+  baseDrawScheduled = true
+  requestAnimationFrame(() => {
+    baseDrawScheduled = false
+    drawBase()
+  })
+}
+
+function drawBase() {
+  const cv = baseCanvasRef.value
+  if (!cv) return
+  const g = cv.getContext('2d')
+  if (!g) return
+  const dpr = window.devicePixelRatio || 1
+  const w = Math.max(1, Math.round(containerSize.value.w * dpr))
+  const h = Math.max(1, Math.round(containerSize.value.h * dpr))
+  // v-if 重新掛載時 RO 不會補發,backing store 尺寸在每次繪製時對齊
+  if (cv.width !== w || cv.height !== h) {
+    cv.width = w
+    cv.height = h
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0)
+  g.clearRect(0, 0, cv.width, cv.height)
+  const img = imgRef.value
+  if (!img || !imageReady.value) return
+  g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  g.translate(view.tx, view.ty)
+  g.scale(view.scale, view.scale)
+  g.rotate(view.rotate)
+  g.imageSmoothingEnabled = view.scale < 3 // 高倍看像素格,同嵌字
+  g.imageSmoothingQuality = view.scale < 1 ? 'high' : 'low'
+  g.drawImage(img, 0, 0)
+}
 
 const natural = ref({ w: 0, h: 0 })
 const imageReady = ref(false)
@@ -112,6 +159,11 @@ const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(
   sharedView,
 )
 const panning = ref(false)
+
+// view 變更(pan/zoom/rotate,含另一 mode 調整後切回)與載圖 → 重繪底圖
+// (drawBase 尾端自己追預縮版級距)
+watch(view, scheduleBaseDraw)
+watch(imageReady, scheduleBaseDraw)
 
 // R 按住 = 旋轉視角(spring-loaded,與嵌字 mode 同手勢);輕點 R(按下放開
 // 沒拖曳)= 切檢查模式——R 在翻譯 mode 一鍵兩用,靠「有沒有旋轉」分流
@@ -144,6 +196,7 @@ watch(
   () => currentFile.value?.filename,
   () => {
     imageReady.value = false
+    scheduleBaseDraw()
   },
 )
 
