@@ -7,7 +7,7 @@ import { benchmarkCpuComposite, timeMs } from "@/engine/perf";
 import { gaussianBlur, brightnessContrast } from "@/engine/filters";
 import type { RasterLayer, Rect, TextObject } from "@/engine/types";
 import { unionRect, EMPTY_RECT } from "@/engine/geom";
-import { screenToContentPx } from "@/lib/coords";
+import { clamp, screenToContentPx } from "@/lib/coords";
 import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
@@ -100,6 +100,24 @@ const rotating = ref(false);
 let rotatePivot = { x: 0, y: 0 };
 let rotateStartAngle = 0;
 let rotateStartTheta = 0;
+
+// Alt+右鍵拖曳:HUD 調筆刷大小/硬度(PS 手勢;Alt+左鍵留給吸色)。
+// 不檢查 Ctrl——Windows PS 兩派肌肉記憶(Alt+右鍵 / Ctrl+Alt+右鍵)都收。
+const brushHud = ref<{ sx: number; sy: number; size0: number; hardness0: number } | null>(null);
+const BRUSH_MAX = 500;
+
+// 筆刷游標:實際落筆尺寸的圓圈輪廓;Caps Lock = 十字(precise,PS 慣例)。
+// CSS cursor 圖有 128px 上限,大圈只能藏系統游標 + 自畫跟隨 div。
+const capsLock = ref(false);
+const cursorPos = ref<{ x: number; y: number } | null>(null); // container 相對座標
+
+// [ ] 的階梯步進:小筆刷細調、大筆刷粗調(PS 體感;精確表無文件,自訂)
+function bracketStep(size: number): number {
+  if (size < 10) return 1;
+  if (size < 100) return 5;
+  if (size < 300) return 10;
+  return 25;
+}
 
 const selectedText = computed<TextObject | null>(
   () => doc.value?.texts.find((t) => t.id === selectedTextId.value) ?? null,
@@ -389,6 +407,18 @@ function onPointerDown(e: PointerEvent): void {
     return;
   }
 
+  // Alt+右鍵拖曳 = 筆刷 HUD(水平調大小、垂直調硬度;Esc 取消)
+  if (e.button === 2 && e.altKey && (tool.value === "brush" || tool.value === "erase")) {
+    const rect = containerEl.value!.getBoundingClientRect();
+    brushHud.value = {
+      sx: e.clientX - rect.left,
+      sy: e.clientY - rect.top,
+      size0: brush.size,
+      hardness0: brush.hardness,
+    };
+    return;
+  }
+
   // pan:空白鍵、中鍵、或 hand 工具
   if (spaceDown.value || e.button === 1 || tool.value === "hand") {
     panning = true;
@@ -442,6 +472,13 @@ function onPointerDown(e: PointerEvent): void {
 function onPointerMove(e: PointerEvent): void {
   if (!doc.value) return;
 
+  // 游標圈跟隨 + Caps Lock 狀態同步(在視窗外切換,移進來一動就修正)
+  {
+    const rect = containerEl.value!.getBoundingClientRect();
+    cursorPos.value = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    capsLock.value = e.getModifierState("CapsLock");
+  }
+
   if (rotating.value) {
     const rect = containerEl.value!.getBoundingClientRect();
     const ang = Math.atan2(
@@ -451,6 +488,20 @@ function onPointerMove(e: PointerEvent): void {
     let theta = rotateStartTheta + (ang - rotateStartAngle);
     if (e.shiftKey) theta = Math.round(theta / (Math.PI / 12)) * (Math.PI / 12); // 吸附 15°
     rotateTo(theta, rotatePivot.x, rotatePivot.y);
+    return;
+  }
+
+  if (brushHud.value) {
+    const rect = containerEl.value!.getBoundingClientRect();
+    const dx = e.clientX - rect.left - brushHud.value.sx;
+    const dy = e.clientY - rect.top - brushHud.value.sy;
+    // 水平:指數映射(小筆刷微調細、大筆刷變化快);垂直:線性 ~200px 拖滿,上軟下硬
+    brush.size = clamp(Math.round(brushHud.value.size0 * Math.exp(dx / 120)), 1, BRUSH_MAX);
+    brush.hardness = clamp(
+      Math.round((brushHud.value.hardness0 + dy / 200) * 100) / 100,
+      0,
+      1,
+    );
     return;
   }
 
@@ -498,6 +549,10 @@ function onPointerMove(e: PointerEvent): void {
 
 function onPointerUp(e: PointerEvent): void {
   (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  if (brushHud.value) {
+    brushHud.value = null; // 放開右鍵 = 收下新值
+    return;
+  }
   if (rotating.value) {
     rotating.value = false;
     return;
@@ -585,6 +640,7 @@ function maxLineLen(lines: string[]): number {
 function onKeyDown(e: KeyboardEvent): void {
   // Alt 是修飾鍵(Alt+滾輪縮放等),不讓它觸發任何瀏覽器/選單行為
   if (e.key === "Alt") e.preventDefault();
+  capsLock.value = e.getModifierState("CapsLock");
   // PS 肌肉記憶快捷鍵(輸入框內不攔)
   if (!isTyping(e) && (e.ctrlKey || e.metaKey) && doc.value) {
     const k = e.key.toLowerCase();
@@ -636,6 +692,13 @@ function onKeyDown(e: KeyboardEvent): void {
   }
   // Esc:連按兩下 = 視角全重置(位置/縮放/旋轉);單按 + R 按住 = 只回正旋轉
   if (e.key === "Escape" && !isTyping(e)) {
+    // 筆刷 HUD 拖曳中:取消 = 恢復起始值(不計入視角重置的連按窗)
+    if (brushHud.value) {
+      brush.size = brushHud.value.size0;
+      brush.hardness = brushHud.value.hardness0;
+      brushHud.value = null;
+      return;
+    }
     const now = performance.now();
     const isDouble = now - lastEscAt < 400;
     lastEscAt = isDouble ? 0 : now;
@@ -647,6 +710,24 @@ function onKeyDown(e: KeyboardEvent): void {
     if (rDown.value && containerEl.value) {
       const rect = containerEl.value.getBoundingClientRect();
       rotateTo(0, rect.width / 2, rect.height / 2);
+    }
+    return;
+  }
+  // [ / ] 步進筆刷大小;Shift+[ / ] 硬度 ±25%(僅畫筆類工具,PS 慣例)
+  if (
+    !isTyping(e) &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    (e.code === "BracketLeft" || e.code === "BracketRight") &&
+    (tool.value === "brush" || tool.value === "erase")
+  ) {
+    const dir = e.code === "BracketLeft" ? -1 : 1;
+    if (e.shiftKey) {
+      brush.hardness = clamp(Math.round((brush.hardness + dir * 0.25) * 100) / 100, 0, 1);
+    } else {
+      // 遞減時按目標側取步進,10 按 [ 到 9 而不是 5
+      const step = bracketStep(dir < 0 ? brush.size - 1 : brush.size);
+      brush.size = clamp(brush.size + dir * step, 1, BRUSH_MAX);
     }
     return;
   }
@@ -681,6 +762,7 @@ function onKeyDown(e: KeyboardEvent): void {
   }
 }
 function onKeyUp(e: KeyboardEvent): void {
+  capsLock.value = e.getModifierState("CapsLock"); // keydown/keyup 都同步,吃掉平台時序差
   if (e.code === "Space") spaceDown.value = false;
   if (e.key.toLowerCase() === "r") rDown.value = false;
 }
@@ -799,10 +881,58 @@ const canvasTransform = computed(
   () => `translate(${view.tx}px, ${view.ty}px) scale(${view.scale}) rotate(${view.rotate}rad)`,
 );
 
+// 筆刷 HUD 疊加(螢幕空間,錨定手勢起點):圈徑 = 文件 px × 縮放,
+// 漸層起點 = 硬度(與引擎 falloff 同構:inner 內滿格、外緣線性衰減)
+const hudCircleStyle = computed(() => {
+  const g = brushHud.value;
+  if (!g) return {};
+  const d = brush.size * view.scale;
+  const inner = Math.min(99.9, brush.hardness * 100);
+  return {
+    left: `${g.sx - d / 2}px`,
+    top: `${g.sy - d / 2}px`,
+    width: `${d}px`,
+    height: `${d}px`,
+    background: `radial-gradient(circle closest-side, rgba(226,59,59,0.4) ${inner}%, rgba(226,59,59,0) 100%)`,
+    border: "1px solid rgba(226,59,59,0.9)",
+  };
+});
+
+// 圈的螢幕直徑小於此值改用十字——小圈看不清,PS 同樣會自動退回 precise
+const CURSOR_MIN_DIA = 6;
+const brushCursorDia = computed(() => brush.size * view.scale);
+const showBrushCursor = computed(
+  () =>
+    cursorPos.value !== null &&
+    !capsLock.value &&
+    (tool.value === "brush" || tool.value === "erase") &&
+    brushCursorDia.value >= CURSOR_MIN_DIA &&
+    !brushHud.value &&
+    !rotating.value &&
+    !rDown.value &&
+    !spaceDown.value,
+);
+const brushCursorStyle = computed(() => {
+  const p = cursorPos.value;
+  if (!p) return {};
+  const d = brushCursorDia.value;
+  return {
+    left: `${p.x - d / 2}px`,
+    top: `${p.y - d / 2}px`,
+    width: `${d}px`,
+    height: `${d}px`,
+    border: "1px solid rgba(0,0,0,0.9)",
+    boxShadow: "0 0 0 1px rgba(255,255,255,0.6)", // 黑圈外加白暈,深淺底都看得見
+  };
+});
+
 const cursorClass = computed(() => {
+  // HUD 拖曳中游標保持可見:用戶全程追蹤得到游標,放開時「游標在這,筆刷自然在這」
+  if (brushHud.value) return "cursor-default";
   if (rotating.value || rDown.value) return "cursor-grab";
   if (spaceDown.value || panning || tool.value === "hand") return "cursor-grab";
   if (tool.value === "text") return "cursor-text";
+  if (showBrushCursor.value) return "cursor-none"; // 圓圈輪廓即游標
   return "cursor-crosshair";
 });
 
@@ -921,6 +1051,8 @@ const TOOL_KEYS: Record<string, Tool> = {
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
+        @pointerleave="cursorPos = null"
+        @contextmenu.prevent
       >
         <!-- 文件空間:canvas 與 OCR 框同住一個被 transform 的容器,框直接用原圖 px -->
         <div
@@ -972,6 +1104,27 @@ const TOOL_KEYS: Record<string, Tool> = {
           <!-- 選區蟻線(doc 空間,最上層) -->
           <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
         </div>
+        <!-- 筆刷游標圈(實際落筆尺寸;Caps Lock 切回十字) -->
+        <div
+          v-if="showBrushCursor"
+          class="pointer-events-none absolute rounded-full"
+          :style="brushCursorStyle"
+        />
+        <!-- 筆刷 HUD(螢幕空間,錨定手勢起點,不隨視角旋轉) -->
+        <template v-if="brushHud">
+          <div class="pointer-events-none absolute rounded-full" :style="hudCircleStyle" />
+          <div
+            class="pointer-events-none absolute rounded px-2 py-1 text-xs"
+            :style="{
+              left: `${brushHud.sx + 16}px`,
+              top: `${brushHud.sy - 36}px`,
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+            }"
+          >
+            直徑 {{ brush.size }}px · 硬度 {{ Math.round(brush.hardness * 100) }}%
+          </div>
+        </template>
         <div
           v-if="!doc"
           class="absolute inset-0 flex items-center justify-center text-center"
@@ -988,7 +1141,7 @@ const TOOL_KEYS: Record<string, Tool> = {
       <section v-if="tool === 'brush' || tool === 'erase'">
         <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted)">筆刷</h3>
         <label class="block">大小 {{ brush.size }}px
-          <input type="range" min="2" max="120" v-model.number="brush.size" class="w-full" />
+          <input type="range" min="1" :max="BRUSH_MAX" v-model.number="brush.size" class="w-full" />
         </label>
         <label class="block">硬度 {{ brush.hardness.toFixed(2) }}
           <input type="range" min="0" max="1" step="0.01" v-model.number="brush.hardness" class="w-full" />
