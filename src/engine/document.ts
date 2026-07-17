@@ -1,4 +1,4 @@
-import type { RasterLayer, Rect, TextObject } from "./types";
+import type { RasterLayer, Rect } from "./types";
 import { toCompositeOp } from "./blend";
 import { createRasterLayer, rasterLayerFromBitmap } from "./layer";
 
@@ -11,14 +11,14 @@ interface LayerCache {
 
 /**
  * 文件模型:一疊 raster 圖層(每層 buffer 是真相,外加一個 canvas 快取供 drawImage
- * 合成)+ 一組文字物件。像素編輯寫 buffer 的 dirty-rect,再 putImageData 那一小塊
- * 到 layer canvas;顯示與匯出都靠 drawImage 疊 layer canvas(對齊 BitMappery/zcanvas)。
+ * 合成)。像素編輯寫 buffer 的 dirty-rect,再 putImageData 那一小塊到 layer canvas;
+ * 顯示與匯出都靠 drawImage 疊 layer canvas(對齊 BitMappery/zcanvas)。
+ * 文字不在這層——標籤是 projectStore 的 SSOT,由 mode 層畫進合成(見 compositeInto)。
  */
 export class ShashokuDoc {
   readonly width: number;
   readonly height: number;
   layers: RasterLayer[] = [];
-  texts: TextObject[] = [];
 
   private cache = new Map<string, LayerCache>();
 
@@ -159,7 +159,8 @@ export class ShashokuDoc {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    // 浮動文字(未錨定)不在這裡:它們是 DOM overlay,永遠在畫布之上。
+    // 文字由 mode 層畫:錨定的走 interleave hook 插層間,浮動的在本函式
+    // 返回後畫最上層(drawFloatingTop)——engine 只管像素。
   }
 
   /**

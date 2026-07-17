@@ -23,7 +23,8 @@ import {
 } from "@/engine/selection";
 import LayerPanel from "@/components/LayerPanel.vue";
 import { appMode } from "@/lib/appMode";
-import { canvasTextPreviewStyleFromExportConfig } from "@/lib/canvasTextPreview";
+import { labelTextCss, labelTextStyleFromExportConfig } from "@/lib/labelTextStyle";
+import { drawLabelElement } from "@/lib/labelPaint";
 import { CATEGORY_COLORS } from "@shared/ssk/constants";
 import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
@@ -63,10 +64,12 @@ const currentLabels = computed<LabelItem[]>(() =>
 const selectedLabel = computed<LabelItem | null>(
   () => currentLabels.value.find((l) => l.id === editorStore.selectedLabelId) ?? null,
 );
-// 文字渲染樣式:exportConfig(全域)→ canvasTextPreview,與翻譯 mode 同一份渲染
+// 文字渲染樣式:exportConfig(全域)→ labelTextStyle,與翻譯 mode 同一份
+// CSS = 同一個 Chromium 排版,座標與樣式跨 mode 一致
 const textPreviewStyle = computed(() =>
-  canvasTextPreviewStyleFromExportConfig(projectStore.exportConfig),
+  labelTextStyleFromExportConfig(projectStore.exportConfig),
 );
+const textCss = computed(() => labelTextCss(textPreviewStyle.value));
 
 // ---- OCR 狀態 ----
 const ocrData = reactive<Record<string, OcrBlock[]>>({});
@@ -133,7 +136,37 @@ function toDoc(e: PointerEvent | MouseEvent): { x: number; y: number } {
 }
 
 // ---- 重繪 ----
-/** interleave hook:畫第 index 層之前,把錨定在該層之下的標籤 drawElementImage 進去。 */
+// 視口解析度合成:顯示 canvas = 容器尺寸 × dpr,view transform 進 ctx
+// (setTransform),pan/zoom/rotate = 重合成(0.3ms 級)。文字統一在合成
+// 序列裡 drawElementImage:錨定的插在對應層前(interleave),浮動的畫在
+// 最上——「浮動 vs 錨定」只差 z 序,清晰度一律向量銳利。
+
+// rAF 對齊 + 髒標記:一幀多次變更(高輪詢率滑鼠、多個 watch)只合成一次
+let redrawScheduled = false;
+let redrawSuspended = false; // 匯出中 backing store 暫為 doc 尺寸,視口重繪停火
+function scheduleRedraw(): void {
+  if (redrawScheduled) return;
+  redrawScheduled = true;
+  requestAnimationFrame(() => {
+    redrawScheduled = false;
+    redraw();
+  });
+}
+
+// paint record 未就緒(節點剛掛上/剛改字)時等兩幀重試,合流防抖
+let retryPending = false;
+function retryRedraw(): void {
+  if (retryPending) return;
+  retryPending = true;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      retryPending = false;
+      scheduleRedraw();
+    }),
+  );
+}
+
+/** interleave hook:畫第 index 層之前,把錨定在該層之下的標籤畫進去。 */
 function drawAnchoredBefore(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   beforeLayerIndex: number,
@@ -144,32 +177,79 @@ function drawAnchoredBefore(
   if (!layerId) return;
   for (const l of anchoredLabels.value) {
     if (labelAnchors.value.get(l.id) !== layerId || l.text === "") continue;
-    const el = anchorEls.get(l.id);
+    const el = textEls.get(l.id);
     if (!el) continue;
-    try {
-      (ctx as CanvasRenderingContext2D).drawElementImage(
-        el,
-        l.x * d.width - el.offsetWidth / 2,
-        l.y * d.height - el.offsetHeight / 2,
-      );
-    } catch {
-      // 節點剛掛上、paint record 未就緒(等下一次 redraw 自然補上)
-      requestAnimationFrame(() => redraw());
-    }
+    if (!drawLabelElement(ctx, el, l.x * d.width, l.y * d.height)) retryRedraw();
   }
 }
 
-function redraw(): void {
+/** 浮動標籤 = 合成序列的最上層(在所有圖層之後畫)。 */
+function drawFloatingTop(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
   const d = doc.value;
-  if (!d || !displayCtx) return;
-  perf.lastDraw = timeMs(() => d.compositeInto(displayCtx!, drawAnchoredBefore));
+  if (!d) return;
+  for (const l of floatingLabels.value) {
+    if (l.text === "") continue;
+    const el = textEls.get(l.id);
+    if (!el) continue;
+    if (!drawLabelElement(ctx, el, l.x * d.width, l.y * d.height)) retryRedraw();
+  }
 }
 
-function measureContainer(): void {
+// 高倍 zoom 關閉平滑採樣(看得到像素格,PS 慣例);低倍平滑
+const SMOOTH_OFF_ZOOM = 3;
+
+/** 把 view transform(含 dpr)套上 ctx——顯示合成與蟻線共用同一個變換。 */
+function applyViewTransform(c: CanvasRenderingContext2D): void {
+  const dpr = window.devicePixelRatio || 1;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.translate(view.tx, view.ty);
+  c.scale(view.scale, view.scale);
+  c.rotate(view.rotate);
+}
+
+function redraw(): void {
+  // 隱藏中(翻譯 mode)display:none 拿不到 paint record,畫了必失敗
+  // → retry 迴圈;切回 letter 時由 appMode watch / RO 補一次重繪
+  if (appMode.value !== "letter") return;
+  const d = doc.value;
+  const cv = canvasEl.value;
+  if (!d || !displayCtx || !cv || redrawSuspended) return;
+  const c = displayCtx;
+  perf.lastDraw = timeMs(() => {
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, cv.width, cv.height);
+    applyViewTransform(c);
+    c.imageSmoothingEnabled = view.scale < SMOOTH_OFF_ZOOM;
+    d.compositeInto(c, drawAnchoredBefore);
+    drawFloatingTop(c);
+    // 文件邊界(1 螢幕 px,取代舊 CSS box-shadow)
+    c.lineWidth = 1 / view.scale;
+    c.strokeStyle = "rgba(128,128,128,0.6)";
+    c.strokeRect(0, 0, d.width, d.height);
+  });
+}
+
+/** 量容器 + 對齊兩個視口 canvas 的 backing store(容器尺寸 × dpr)。 */
+function resizeCanvases(): void {
   const el = containerEl.value;
-  if (!el) return;
+  const cv = canvasEl.value;
+  if (!el || !cv) return;
   containerSize.w = el.clientWidth;
   containerSize.h = el.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(el.clientWidth * dpr));
+  const h = Math.max(1, Math.round(el.clientHeight * dpr));
+  if (cv.width !== w || cv.height !== h) {
+    cv.width = w;
+    cv.height = h;
+  }
+  const sc = selCanvasEl.value;
+  if (sc && (sc.width !== w || sc.height !== h)) {
+    sc.width = w;
+    sc.height = h;
+  }
+  scheduleRedraw();
+  drawAnts();
 }
 
 // ---- 載圖 ----
@@ -189,10 +269,9 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   labelAnchors.value = new Map(); // 錨定跟著圖層生命週期走(圖層已全部重建)
   perf.imageSize = `${d.width}×${d.height}`;
 
-  // canvas 尺寸 = 文件尺寸;縮放/平移由 CSS transform 負責。
-  await nextTickCanvas();
+  // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
   perf.cpuComposite = benchmarkCpuComposite(d.layers, d.width, d.height);
-  measureContainer();
+  resizeCanvases();
   fitToView();
   editor.changed(); // 面板列表/縮圖刷新 + 重繪
 }
@@ -363,25 +442,9 @@ function blockToLabel(b: OcrBlock): void {
   tool.value = "text";
 }
 
-// 等 canvas 尺寸套用後再拿 context
-function nextTickCanvas(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      const c = canvasEl.value!;
-      c.width = doc.value!.width;
-      c.height = doc.value!.height;
-      displayCtx = c.getContext("2d");
-      const s = selCanvasEl.value;
-      if (s) {
-        s.width = doc.value!.width;
-        s.height = doc.value!.height;
-      }
-      resolve();
-    });
-  });
-}
-
 // ---- 選區蟻線:邊界像素 + (x+y+phase) 棋盤紋 = 免路徑排序的爬行效果 ----
+// 蟻線 canvas 也是視口尺寸(doc 尺寸的蟻線 buffer 在大頁是數百 MB 級),
+// 畫的時候套同一個 view transform,doc 空間的邊界像素直接落到正確螢幕位置。
 let antsRaf = 0;
 let antsPhase = 0;
 let antsLast = 0;
@@ -400,8 +463,10 @@ function drawAnts(): void {
   if (!el) return;
   const c = el.getContext("2d");
   if (!c) return;
+  c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, el.width, el.height);
   if (!antsBoundary || !d) return;
+  applyViewTransform(c);
   const w = d.width;
   for (let pass = 0; pass < 2; pass++) {
     c.fillStyle = pass === 0 ? "#000" : "#fff";
@@ -438,6 +503,21 @@ function rebuildAnts(): void {
 }
 
 watch(editor.selection, rebuildAnts);
+
+// view 變更(wheel/pan/rotate/fit)= 重合成——CSS transform 已退役,
+// 「移動視角」就是「用新變換再畫一次」(PS/Figma 的顯示架構)
+watch(view, () => {
+  scheduleRedraw();
+  drawAnts();
+});
+
+// 切回 letter mode:隱藏期間積欠的重繪補上(等兩幀讓 paint record 復活)
+watch(appMode, (m) => {
+  if (m === "letter") {
+    resizeCanvases();
+    retryRedraw();
+  }
+});
 
 // ---- 指標互動 ----
 const painting = ref(false);
@@ -521,7 +601,7 @@ function onPointerDown(e: PointerEvent): void {
     stampAt(p.x, p.y);
     lastPt = p;
     doc.value.syncLayer(activeLayerId.value, strokeDirty);
-    redraw();
+    scheduleRedraw();
   } else if (tool.value === "tone" || tool.value === "marquee") {
     painting.value = true;
     lastPt = p;
@@ -603,7 +683,7 @@ function onPointerMove(e: PointerEvent): void {
     lastPt = p;
     doc.value.syncLayer(activeLayerId.value, strokeDirty);
     strokeDirty = EMPTY_RECT;
-    redraw();
+    scheduleRedraw();
   } else if (painting.value && (tool.value === "tone" || tool.value === "marquee")) {
     toneRect.value = {
       x: Math.min(lastPt.x, p.x),
@@ -696,26 +776,20 @@ function onPointerUp(e: PointerEvent): void {
   dragLabelFrom = null;
 }
 
-// ---- 標籤投影(DOM):排版外包 Chromium,命中測試量 DOM 實際包圍盒 ----
+// ---- 標籤投影:排版外包 Chromium(隱形節點住 canvas fallback),顯示由
+// 合成序列 drawElementImage 統一畫(浮動=最上層、錨定=插層間),任意倍率
+// 向量銳利。命中測試全幾何(中心 ± 排版尺寸)——節點不在畫布位置。 ----
 
-const labelEls = new Map<string, HTMLElement>();
-function setLabelEl(id: string, el: unknown): void {
-  if (el instanceof HTMLElement) labelEls.set(id, el);
-  else labelEls.delete(id);
+const textEls = new Map<string, HTMLElement>();
+function setTextEl(id: string, el: unknown): void {
+  if (el instanceof HTMLElement) textEls.set(id, el);
+  else textEls.delete(id);
 }
 
 // ---- 圖層錨定(夾層):labelId → 「畫在該圖層之下」的 layerId ----
 // runtime 暫態:圖層本身尚未落地(D7),layerId 換頁即重生,現在寫進
-// .ssk.json 只會存斷裂引用——落地跟 D7 一起。錨定的標籤節點改掛在顯示
-// canvas 的 fallback content(layoutsubtree,有 paint record 不顯示),
-// 合成時經 interleave hook drawElementImage 進正確 z 位置;未錨定的照舊
-// 是浮在最上的 DOM overlay(向量銳利)。
+// .ssk.json 只會存斷裂引用——落地跟 D7 一起。
 const labelAnchors = ref(new Map<string, string>());
-const anchorEls = new Map<string, HTMLElement>();
-function setAnchorEl(id: string, el: unknown): void {
-  if (el instanceof HTMLElement) anchorEls.set(id, el);
-  else anchorEls.delete(id);
-}
 /** 錨定且錨定圖層仍存在的標籤(圖層被刪自動回浮動)。 */
 const anchoredLabels = computed<LabelItem[]>(() => {
   const d = doc.value;
@@ -729,67 +803,29 @@ const floatingLabels = computed<LabelItem[]>(() =>
   currentLabels.value.filter((l) => !anchoredLabels.value.includes(l)),
 );
 
-/** 命中測試:浮動走 DOM 包圍盒(量 Chromium 排的最準);錨定的節點躺在
- * canvas fallback 裡、rect 不在畫布位置,改用幾何(中心 ± 排版尺寸)。 */
+/** 命中測試:全幾何(中心 ± 排版尺寸;空標籤用色點直徑)。節點躺在
+ * canvas fallback 裡,DOM rect 不在畫布位置,量不得。 */
+const DOT_SIZE = 18; // 空標籤色點直徑(doc px)
+
 function hitLabel(e: PointerEvent): LabelItem | null {
   const d = doc.value;
   if (!d) return null;
-  const pad = 6; // 螢幕 px 容差
+  const pad = 6 / view.scale; // 螢幕 px 容差 → doc px
   const labels = currentLabels.value;
   const p = toDoc(e);
   for (let i = labels.length - 1; i >= 0; i--) {
     const l = labels[i];
-    const anchored = anchoredLabels.value.includes(l);
-    const el = anchored ? anchorEls.get(l.id) : labelEls.get(l.id);
-    if (!el) continue;
-    if (anchored) {
-      const hw = el.offsetWidth / 2 + pad / view.scale;
-      const hh = el.offsetHeight / 2 + pad / view.scale;
-      const cx = l.x * d.width;
-      const cy = l.y * d.height;
-      if (Math.abs(p.x - cx) <= hw && Math.abs(p.y - cy) <= hh) return l;
-    } else {
-      const r = el.getBoundingClientRect();
-      if (
-        e.clientX >= r.left - pad &&
-        e.clientX <= r.right + pad &&
-        e.clientY >= r.top - pad &&
-        e.clientY <= r.bottom + pad
-      ) {
-        return l;
-      }
+    const el = textEls.get(l.id);
+    const w = l.text === "" || !el ? DOT_SIZE : el.offsetWidth;
+    const h = l.text === "" || !el ? DOT_SIZE : el.offsetHeight;
+    if (
+      Math.abs(p.x - l.x * d.width) <= w / 2 + pad &&
+      Math.abs(p.y - l.y * d.height) <= h / 2 + pad
+    ) {
+      return l;
     }
   }
   return null;
-}
-
-/** 文字本體樣式(浮動 overlay 與錨定節點共用):顯式斷行 + 直排交給 writing-mode。 */
-function baseTextStyle(): Record<string, string> {
-  const s = textPreviewStyle.value;
-  return {
-    fontFamily: s.fontFamily,
-    fontSize: `${s.fontSizePx}px`,
-    lineHeight: "1.2",
-    color: s.color,
-    whiteSpace: "pre",
-    writingMode: s.direction === "vertical" ? "vertical-rl" : "horizontal-tb",
-    textAlign: "center",
-    width: "max-content",
-  };
-}
-
-/** 浮動 overlay 節點:文字樣式 + 中心錨點定位 + 選中框。 */
-function labelStyle(l: LabelItem): Record<string, string> {
-  const d = doc.value!;
-  const selected = l.id === editorStore.selectedLabelId;
-  return {
-    ...baseTextStyle(),
-    left: `${l.x * d.width}px`,
-    top: `${l.y * d.height}px`,
-    transform: "translate(-50%, -50%)",
-    outline: selected ? `${2 / view.scale}px dashed rgba(80,160,255,0.9)` : "none",
-    outlineOffset: `${4 / view.scale}px`,
-  };
 }
 
 /** 設定/解除標籤的圖層錨定(null = 回浮動),入嵌字 History。 */
@@ -810,20 +846,24 @@ function setLabelAnchor(labelId: string, layerId: string | null): void {
   });
 }
 
-// 錨定標籤的內容/樣式/位置變更 → 重合成(等一幀讓 paint record 跟上;
-// 浮動標籤是 Vue 響應式 DOM,不需要這條)
+// 標籤/錨定/樣式變更 → 重合成:立即排一次(位置變更用既有 paint record
+// 就正確,拖曳手感不等幀),再等兩幀補一次(內容/樣式變更的新 record)
 watch(
-  [anchoredLabels, labelAnchors, textPreviewStyle],
-  () => requestAnimationFrame(() => requestAnimationFrame(() => redraw())),
+  [currentLabels, labelAnchors, textPreviewStyle],
+  () => {
+    scheduleRedraw();
+    retryRedraw();
+  },
   { deep: true, flush: "post" },
 );
 
-/** 錨定標籤的選中指示框(節點本體藏在 canvas fallback,框畫在 overlay)。 */
-function anchorSelectionStyle(l: LabelItem): Record<string, string> {
-  const d = doc.value!;
-  const el = anchorEls.get(l.id);
-  const w = el?.offsetWidth ?? 24;
-  const h = el?.offsetHeight ?? 24;
+/** 選中標籤的虛線指示框(本體在合成裡,框畫在 doc 空間 overlay)。 */
+function labelSelectionStyle(l: LabelItem): Record<string, string> {
+  const d = doc.value;
+  if (!d) return {}; // 頁切換空窗:v-show 不擋子節點渲染,style 仍會被求值
+  const el = textEls.get(l.id);
+  const w = (l.text === "" ? DOT_SIZE : el?.offsetWidth) || 24;
+  const h = (l.text === "" ? DOT_SIZE : el?.offsetHeight) || 24;
   return {
     left: `${l.x * d.width - w / 2}px`,
     top: `${l.y * d.height - h / 2}px`,
@@ -834,10 +874,15 @@ function anchorSelectionStyle(l: LabelItem): Record<string, string> {
   };
 }
 
+/** 空標籤的工作標記色點(doc 空間 overlay,不進合成、不進匯出)。 */
 function dotStyle(l: LabelItem): Record<string, string> {
+  const d = doc.value;
+  if (!d) return {}; // 同上:頁切換空窗防禦
   return {
-    width: "18px",
-    height: "18px",
+    left: `${l.x * d.width - DOT_SIZE / 2}px`,
+    top: `${l.y * d.height - DOT_SIZE / 2}px`,
+    width: `${DOT_SIZE}px`,
+    height: `${DOT_SIZE}px`,
     background: CATEGORY_COLORS[(l.category - 1) % CATEGORY_COLORS.length],
   };
 }
@@ -910,7 +955,7 @@ function onKeyDown(e: KeyboardEvent): void {
     const isDouble = now - lastEscAt < 400;
     lastEscAt = isDouble ? 0 : now;
     if (isDouble && doc.value) {
-      measureContainer();
+      resizeCanvases();
       fitToView();
       return;
     }
@@ -1029,49 +1074,33 @@ function setExportStyle<K extends "font" | "fontSizePx" | "textColor" | "textDir
   projectStore.dirty = true;
 }
 
-// ---- 匯出:像素合成 + drawElementImage 疊標籤文字 ----
-// 文字由 DOM 排版(顯示同一套 CSS:直排/斷行/字體),經 HTML-in-Canvas 畫進
-// 點陣——「軟體內 = 匯出」的所見即所得。空標籤(色點)是工作標記,不進成品。
+// ---- 匯出:同一條合成管線的無變換(doc 1:1)版本 ----
+// 全部標籤常駐顯示畫布 fallback(不再需要 clone),所見即所得是同一份代碼
+// 的結構保證。空標籤(色點)是 overlay 工作標記,本來就不在合成裡。
 //
-// 宿主用「顯示畫布本身」:paint record 只給視口內、實際被 paint 的元素
-// (藏到視口外/opacity:0/visibility:hidden 都拿不到,實測),而顯示畫布永遠在視口內。clone 進它的 fallback
-// content 不會顯示,疊字+toBlob 之後 redraw 一幀恢復純像素顯示。
+// 宿主仍是「顯示畫布本身」:paint record 只給視口內、實際被 paint 的元素,
+// 而 drawElementImage 只能畫「自己 canvas」的子元素(ElementImage 進
+// OffscreenCanvas 在 Chromium 150 拋 InvalidStateError,實測)。
+// 所以匯出 = backing store 暫換 doc 尺寸(CSS 尺寸不動)→ 等兩幀(CSS↔grid
+// 比例落定)→ identity 合成 → toBlob → 換回。
 async function onExport(): Promise<void> {
   const d = doc.value;
   const cv = canvasEl.value;
-  if (!d || !cv || !displayCtx) return;
-  const clones: { el: HTMLElement; l: LabelItem }[] = [];
+  const c = displayCtx;
+  if (!d || !cv || !c) return;
+  redrawSuspended = true; // 排程中的視口重繪不可落在 doc 尺寸的 buffer 上
   try {
-    // 浮動標籤的節點 clone 進顯示畫布子樹:inline style 全帶走,
-    // 拿掉定位(位置改由 drawElementImage 座標給)與選中框。
-    // 錨定標籤不 clone——常駐節點已在 fallback,由 interleave hook 畫進堆疊
-    for (const l of floatingLabels.value) {
-      if (l.text === "") continue;
-      const src = labelEls.get(l.id);
-      if (!src) continue;
-      const el = src.cloneNode(true) as HTMLElement;
-      el.style.position = "static";
-      el.style.left = "";
-      el.style.top = "";
-      el.style.transform = "";
-      el.style.outline = "none";
-      el.style.width = "max-content";
-      cv.appendChild(el);
-      clones.push({ el, l });
-    }
-    // 等渲染管線給 clone 們 paint record(否則 InvalidStateError / 畫空)
+    cv.width = d.width;
+    cv.height = d.height;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-    const c = displayCtx;
-    d.compositeInto(c, drawAnchoredBefore); // 含錨定文字的合成(顯示畫布短暫成為匯出畫面,結尾 redraw 恢復)
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    d.compositeInto(c, drawAnchoredBefore);
+    drawFloatingTop(c);
     c.globalCompositeOperation = "destination-over"; // 白底墊在最下
     c.fillStyle = "#ffffff";
     c.fillRect(0, 0, d.width, d.height);
     c.globalCompositeOperation = "source-over";
-    for (const { el, l } of clones) {
-      // 中心錨點:量排版後尺寸,回推左上角
-      c.drawElementImage(el, l.x * d.width - el.offsetWidth / 2, l.y * d.height - el.offsetHeight / 2);
-    }
     const blob = await new Promise<Blob>((resolve, reject) =>
       cv.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png"),
     );
@@ -1082,15 +1111,15 @@ async function onExport(): Promise<void> {
     a.click();
     URL.revokeObjectURL(url);
   } finally {
-    for (const { el } of clones) el.remove();
-    redraw(); // 顯示畫布回到純像素合成
+    redrawSuspended = false;
+    resizeCanvases(); // backing store 回視口尺寸 + 重繪
   }
 }
 
 // ---- 生命週期 ----
 let ro: ResizeObserver | null = null;
 onMounted(() => {
-  editor.setRedraw(redraw);
+  editor.setRedraw(scheduleRedraw);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   window.api?.onOcrStatus((e) => {
@@ -1106,10 +1135,14 @@ onMounted(() => {
               : `OCR 錯誤:${e.detail ?? ""}`;
   });
   ro = new ResizeObserver(() => {
-    measureContainer();
+    if (redrawSuspended) return; // 匯出中 backing store 是 doc 尺寸,別打斷
+    resizeCanvases();
     if (doc.value && !ready.value) fitToView();
   });
-  nextTick(() => containerEl.value && ro!.observe(containerEl.value));
+  nextTick(() => {
+    displayCtx = canvasEl.value?.getContext("2d") ?? null;
+    if (containerEl.value) ro!.observe(containerEl.value);
+  });
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeyDown);
@@ -1118,7 +1151,9 @@ onBeforeUnmount(() => {
   stopAnts();
 });
 
-const canvasTransform = computed(
+// doc 空間 UI overlay(OCR 框/色點/選中框)的容器變換——與 ctx 的
+// applyViewTransform 同一組參數,overlay 內只有輕量 DOM,無 canvas 無文字本體
+const overlayTransform = computed(
   () => `translate(${view.tx}px, ${view.ty}px) scale(${view.scale}) rotate(${view.rotate}rad)`,
 );
 
@@ -1295,28 +1330,27 @@ const TOOL_KEYS: Record<string, Tool> = {
         @pointerleave="cursorPos = null"
         @contextmenu.prevent
       >
-        <!-- 文件空間:canvas 與 OCR 框同住一個被 transform 的容器,框直接用原圖 px -->
+        <!-- 顯示畫布(螢幕空間,視口尺寸 × dpr):view transform 在 ctx 內,
+             pan/zoom/rotate = 重合成。fallback content = 全部標籤節點
+             (layoutsubtree:被排版、有 paint record、不顯示)——浮動與錨定
+             同住,由合成序列統一 drawElementImage,任意倍率向量銳利 -->
+        <canvas ref="canvasEl" class="absolute inset-0 h-full w-full" layoutsubtree>
+          <div
+            v-for="l in currentLabels"
+            :key="l.id"
+            :ref="(el) => setTextEl(l.id, el)"
+            :style="textCss"
+          >{{ l.text }}</div>
+        </canvas>
+        <!-- 選區蟻線(螢幕空間 canvas,ctx 內套同一 view transform) -->
+        <canvas ref="selCanvasEl" class="pointer-events-none absolute inset-0 h-full w-full" />
+        <!-- doc 空間 UI overlay(輕量 DOM,無 canvas 無文字本體):
+             OCR 框/拖曳預覽/空標籤色點/選中框,座標直接用原圖 px -->
         <div
           v-show="doc"
-          class="absolute left-0 top-0 origin-top-left"
-          :style="{ transform: canvasTransform }"
+          class="pointer-events-none absolute left-0 top-0 origin-top-left"
+          :style="{ transform: overlayTransform }"
         >
-          <!-- layoutsubtree:fallback content 被排版但不顯示,供 drawElementImage
-               取 paint record——宿主必須在視口內且可見,顯示畫布正是。
-               常駐居民 = 錨進圖層堆疊的標籤;匯出時浮動標籤也短暫 clone 進來 -->
-          <canvas
-            ref="canvasEl"
-            class="block"
-            layoutsubtree
-            style="image-rendering: pixelated; box-shadow: 0 0 0 1px var(--border)"
-          >
-            <div
-              v-for="l in anchoredLabels"
-              :key="l.id"
-              :ref="(el) => setAnchorEl(l.id, el)"
-              :style="baseTextStyle()"
-            >{{ l.text }}</div>
-          </canvas>
           <div
             v-for="(b, i) in currentBlocks"
             :key="i"
@@ -1353,29 +1387,20 @@ const TOOL_KEYS: Record<string, Tool> = {
               background: 'rgba(201,100,66,0.12)',
             }"
           />
-          <!-- 浮動標籤投影(DOM,doc 空間):排版外包 Chromium(直排/斷行),
-               transform 縮放下向量銳利;拖曳只 patch 單節點 style。
-               錨進圖層堆疊的標籤不在這裡——它們住在顯示 canvas 的 fallback,
-               由合成的 interleave hook 畫進層與層之間 -->
+          <!-- 空標籤 = 工作標記色點(不進合成,也就不進匯出) -->
           <div
-            v-for="l in floatingLabels"
-            :key="l.id"
-            :ref="(el) => setLabelEl(l.id, el)"
-            class="pointer-events-none absolute"
-            :style="labelStyle(l)"
-          >
-            <span v-if="l.text === ''" class="block rounded-full" :style="dotStyle(l)" />
-            <template v-else>{{ l.text }}</template>
-          </div>
-          <!-- 錨定標籤的選中指示框(本體在合成裡,框浮在上面) -->
-          <div
-            v-for="l in anchoredLabels.filter((a) => a.id === editorStore.selectedLabelId)"
-            :key="`anchor-sel-${l.id}`"
-            class="pointer-events-none absolute"
-            :style="anchorSelectionStyle(l)"
+            v-for="l in currentLabels.filter((x) => x.text === '')"
+            :key="`dot-${l.id}`"
+            class="pointer-events-none absolute rounded-full"
+            :style="dotStyle(l)"
           />
-          <!-- 選區蟻線(doc 空間,最上層) -->
-          <canvas ref="selCanvasEl" class="pointer-events-none absolute left-0 top-0" />
+          <!-- 選中標籤的虛線指示框(文字本體在合成裡,框畫在 overlay) -->
+          <div
+            v-for="l in currentLabels.filter((x) => x.id === editorStore.selectedLabelId)"
+            :key="`sel-${l.id}`"
+            class="pointer-events-none absolute"
+            :style="labelSelectionStyle(l)"
+          />
         </div>
         <!-- 筆刷游標圈(實際落筆尺寸;Caps Lock 切回十字) -->
         <div

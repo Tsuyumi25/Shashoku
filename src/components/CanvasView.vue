@@ -22,7 +22,7 @@
             @load="onImageLoad"
           />
           <template v-if="imageReady">
-            <CanvasTextPreview
+            <LabelTextOverlay
               :width="natural.w"
               :height="natural.h"
               :labels="currentFile.labels"
@@ -99,9 +99,9 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import { ChevronLeft, ChevronRight, Maximize, ZoomIn, ZoomOut } from '@lucide/vue'
 import type { LabelItem } from '@/types/project'
-import CanvasTextPreview from '@/components/CanvasTextPreview.vue'
+import LabelTextOverlay from '@/components/LabelTextOverlay.vue'
 import LabelMarker from '@/components/LabelMarker.vue'
-import { canvasTextPreviewStyleFromExportConfig } from '@/lib/canvasTextPreview'
+import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
 import { useZoomPan } from '@/composables/useZoomPanLp'
 import { appMode } from '@/lib/appMode'
 import { clamp, screenToContentPx } from '@/lib/coords'
@@ -112,7 +112,7 @@ import { imageSrc } from '@/utils/mediaUrls'
 const project = useProjectStore()
 const editor = useEditorStore()
 const textPreviewStyle = computed(() =>
-  canvasTextPreviewStyleFromExportConfig(project.exportConfig),
+  labelTextStyleFromExportConfig(project.exportConfig),
 )
 
 const containerRef = useTemplateRef('containerRef')

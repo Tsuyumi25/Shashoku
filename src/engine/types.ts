@@ -29,15 +29,3 @@ export interface RasterLayer {
   /** w*h*4，直通（非預乘）alpha 的 RGBA。 */
   data: Uint8ClampedArray;
 }
-
-export interface TextObject {
-  id: string;
-  /** 文字區塊中心錨點，doc px。 */
-  x: number;
-  y: number;
-  text: string;
-  fontSizePx: number;
-  fontFamily: string;
-  color: string;
-  direction: "horizontal" | "vertical";
-}
