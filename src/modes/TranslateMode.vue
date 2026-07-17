@@ -1,14 +1,14 @@
 <template>
-  <div class="flex h-full flex-col">
-    <!-- 模式 + 分組工具列 -->
-    <ModeToolbar />
+  <div class="flex h-full">
+    <!-- 左:工作模式 + 分組 + mode 切換 -->
+    <TranslateSidebar />
 
     <!-- 主區：畫布（含底部換頁列）｜右欄（標籤表格 + 翻譯編輯框） -->
-    <main class="flex min-h-0 flex-1">
+    <main class="flex min-h-0 min-w-0 flex-1">
       <section class="min-w-0 flex-1 border-r border-border">
         <CanvasView />
       </section>
-      <aside class="flex w-80 shrink-0 flex-col">
+      <aside class="flex shrink-0 flex-col bg-card" style="width: var(--layout-panel-w)">
         <div class="h-[45%] min-h-0">
           <LabelTable />
         </div>
@@ -24,8 +24,8 @@
 import { useEventListener } from '@vueuse/core'
 import CanvasView from '@/components/CanvasView.vue'
 import LabelTable from '@/components/LabelTable.vue'
-import ModeToolbar from '@/components/ModeToolbar.vue'
 import TranslateEditor from '@/components/TranslateEditor.vue'
+import TranslateSidebar from '@/components/TranslateSidebar.vue'
 import { appMode } from '@/lib/appMode'
 import { useEditorStore, type WorkMode } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -34,7 +34,9 @@ const project = useProjectStore()
 const editor = useEditorStore()
 
 // ── 翻譯 mode 全域快捷鍵（原版鍵位；Ctrl+S 存檔升級到 AppShell 全 mode 通用）──
-const MODE_KEYS: Record<string, WorkMode> = { q: 'browse', w: 'label', e: 'input', r: 'check' }
+// R 不在這裡:它是 spring-loaded 鍵(按住拖曳 = 旋轉視角、輕點 = 切檢查),
+// keydown/keyup 的分流在 CanvasView
+const MODE_KEYS: Record<string, WorkMode> = { q: 'browse', w: 'label', e: 'input' }
 
 useEventListener(window, 'keydown', (e) => {
   if (appMode.value !== 'translate') return // 嵌字 mode 有自己的工具單鍵,互不越界

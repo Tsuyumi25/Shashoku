@@ -17,23 +17,7 @@
         />
       </div>
 
-      <!-- mode 頁籤（Resolve 式工序分頁：同一份專案資料的兩種投影） -->
-      <nav class="flex h-full items-center gap-1 px-2" style="-webkit-app-region: no-drag">
-        <button
-          v-for="m in MODES"
-          :key="m.id"
-          class="rounded-md px-3 py-1 text-xs transition-colors"
-          :class="
-            appMode === m.id
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-secondary'
-          "
-          @click="appMode = m.id"
-        >
-          {{ m.label }}
-        </button>
-      </nav>
-
+      <!-- mode 切換在各視圖 sidebar 底部(ModeSwitcher),titlebar 只留標題 -->
       <span class="flex-1 truncate px-3 text-center text-sm text-muted-foreground">
         {{ titleText }}
       </span>
@@ -116,18 +100,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { SSK_FILE_SUFFIX } from '@shared/ssk/constants'
-import { appMode, type AppMode } from '@/lib/appMode'
+import { appMode } from '@/lib/appMode'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 const api = window.api
 const project = useProjectStore()
 const editor = useEditorStore()
-
-const MODES: { id: AppMode; label: string }[] = [
-  { id: 'translate', label: '翻譯' },
-  { id: 'letter', label: '嵌字' },
-]
 
 // 亮/暗主題：寫入 <html> 的 .dark class，記憶在 localStorage
 const isDark = useDark({ initialValue: 'dark' })

@@ -35,6 +35,8 @@ const props = defineProps<{
   index: number
   /** 外層 stage 的縮放值，用於反縮放讓徽章視覺尺寸恆定 */
   scale: number
+  /** 外層 stage 的旋轉(弧度),用於反旋轉讓徽章保持正立 */
+  rotate?: number
   natural: { w: number; h: number }
   selected?: boolean
   /** 檢查模式：顯示分組名 */
@@ -60,8 +62,8 @@ const markerStyle = computed(() => {
     left: `${p.x}px`,
     top: `${p.y}px`,
     // transform-origin 保持預設 center：translate(-50%,-50%) 讓中心落在錨點，
-    // scale(1/s) 抵銷外層縮放後中心仍不動（origin 改 0 0 反而會偏）
-    transform: `translate(-50%, -50%) scale(${1 / props.scale})`,
+    // rotate(-θ)/scale(1/s) 抵銷外層旋轉縮放後中心仍不動（origin 改 0 0 反而會偏）
+    transform: `translate(-50%, -50%) rotate(${-(props.rotate ?? 0)}rad) scale(${1 / props.scale})`,
     backgroundColor: color.value,
   }
 })

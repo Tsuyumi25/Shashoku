@@ -2,9 +2,9 @@
   <div class="flex h-full min-h-0 flex-col">
     <div
       ref="containerRef"
-      class="relative min-h-0 w-full flex-1 touch-none overflow-hidden"
+      class="relative min-h-0 w-full flex-1 touch-none overflow-hidden bg-muted"
       :class="[canvasCursor]"
-      @wheel.prevent="onWheel"
+      @wheel.prevent="wheelZoom"
       @pointerdown="onBgPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onBgPointerUp"
@@ -34,6 +34,7 @@
               :label
               :index="i"
               :scale="view.scale"
+              :rotate="view.rotate"
               :natural
               :selected="label.id === editor.selectedLabelId"
               :show-group="editor.mode === 'check'"
@@ -58,51 +59,20 @@
       </div>
     </div>
 
-    <!-- 底部列：縮放（左）＋ 檔案切換（右），對齊原版 toolStripPicView -->
-    <div class="flex h-7 shrink-0 items-center gap-1 border-t border-border px-1 select-none">
-      <button class="page-btn" title="縮小" @click="zoomBy(1 / 1.25)">
-        <ZoomOut :size="14" />
-      </button>
-      <button class="page-btn" title="放大" @click="zoomBy(1.25)">
-        <ZoomIn :size="14" />
-      </button>
-      <span class="px-1 text-xs text-muted-foreground tabular-nums">
-        {{ Math.round(view.scale * 100) }}%
-      </span>
-      <button class="page-btn" title="適應視窗 (0)" @click="fitToView">
-        <Maximize :size="13" />
-      </button>
-
-      <div class="flex-1" />
-
-      <select
-        class="h-5 max-w-64 min-w-0 rounded border border-input bg-background px-1 text-xs"
-        :value="editor.currentFilename ?? ''"
-        @change="onFileSelect"
-      >
-        <option v-for="f in project.files" :key="f.filename" :value="f.filename">
-          {{ f.filename }}{{ f.labels.length > 0 ? `（${f.labels.length}）` : '' }}
-        </option>
-      </select>
-      <button class="page-btn" title="上一頁 (←)" @click="editor.pageBy(-1)">
-        <ChevronLeft :size="15" />
-      </button>
-      <button class="page-btn" title="下一頁 (→ / Tab / 中鍵)" @click="editor.pageBy(1)">
-        <ChevronRight :size="15" />
-      </button>
-    </div>
+    <!-- 底部列：縮放 + 檔案切換(兩視圖共用元件,對齊原版 toolStripPicView) -->
+    <CanvasBottomBar :scale="view.scale" @zoom-by="zoomBy" @fit="fitToView" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
-import { ChevronLeft, ChevronRight, Maximize, ZoomIn, ZoomOut } from '@lucide/vue'
 import type { LabelItem } from '@/types/project'
+import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import LabelTextOverlay from '@/components/LabelTextOverlay.vue'
 import LabelMarker from '@/components/LabelMarker.vue'
 import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
-import { useZoomPan } from '@/composables/useZoomPanLp'
+import { useZoomPan } from '@/composables/useZoomPan'
 import { appMode } from '@/lib/appMode'
 import { clamp, screenToContentPx } from '@/lib/coords'
 import { useEditorStore } from '@/stores/editorStore'
@@ -134,8 +104,18 @@ const src = computed(() =>
     : '',
 )
 
-const { view, panning, fitToView, onWheel, onPointerDown, onPointerMove, onPointerUp } =
-  useZoomPan(containerSize, natural)
+const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(containerSize, natural)
+const panning = ref(false)
+
+// R 按住 = 旋轉視角(spring-loaded,與嵌字 mode 同手勢);輕點 R(按下放開
+// 沒拖曳)= 切檢查模式——R 在翻譯 mode 一鍵兩用,靠「有沒有旋轉」分流
+const rDown = ref(false)
+const rotating = ref(false)
+let didRotate = false
+let rotatePivot = { x: 0, y: 0 }
+let rotateStartAngle = 0
+let rotateStartTheta = 0
+let lastEscAt = 0 // Esc 連按偵測(雙擊窗 400ms)= 視角重置,同嵌字 mode
 
 // 標號模式（或按住 Ctrl）游標 = 十字，對齊原版
 const ctrlHeld = ref(false)
@@ -149,6 +129,7 @@ useEventListener(window, 'keyup', (e) => {
 const labelModeActive = computed(() => editor.mode === 'label' || ctrlHeld.value)
 const canvasCursor = computed(() => {
   if (panning.value) return 'cursor-grabbing'
+  if (rotating.value || rDown.value) return 'cursor-grab'
   if (labelModeActive.value) return 'cursor-crosshair'
   return 'cursor-default'
 })
@@ -165,21 +146,6 @@ function onImageLoad(e: Event) {
   natural.value = { w: img.naturalWidth, h: img.naturalHeight }
   imageReady.value = true
   fitToView()
-}
-
-function onFileSelect(e: Event) {
-  editor.selectFile((e.target as HTMLSelectElement).value)
-}
-
-function zoomBy(factor: number) {
-  // 以視窗中心為錨點
-  const cx = containerSize.value.w / 2
-  const cy = containerSize.value.h / 2
-  const next = clamp(view.scale * factor, 0.02, 40)
-  const k = next / view.scale
-  view.tx = cx - (cx - view.tx) * k
-  view.ty = cy - (cy - view.ty) * k
-  view.scale = next
 }
 
 /** 中鍵 = 下一頁（原版行為） */
@@ -209,18 +175,55 @@ function addLabelAt(clientX: number, clientY: number) {
   })
 }
 
-/** 背景 pointerdown：拖 = pan；標號模式下短按 = 新增 label */
+/** 背景 pointerdown：R 按住 = 旋轉;拖 = pan;標號模式下短按 = 新增 label */
 let bgDownPos: { x: number; y: number } | null = null
+let panLast = { x: 0, y: 0 }
 function onBgPointerDown(e: PointerEvent) {
+  if (rDown.value) {
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    rotating.value = true
+    didRotate = true
+    const rect = containerRef.value!.getBoundingClientRect()
+    rotatePivot = { x: rect.width / 2, y: rect.height / 2 }
+    rotateStartAngle = Math.atan2(
+      e.clientY - rect.top - rotatePivot.y,
+      e.clientX - rect.left - rotatePivot.x,
+    )
+    rotateStartTheta = view.rotate
+    return
+  }
   if (e.button !== 0) return
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   bgDownPos = { x: e.clientX, y: e.clientY }
-  onPointerDown(e)
+  panning.value = true
+  panLast = { x: e.clientX, y: e.clientY }
+}
+function onPointerMove(e: PointerEvent) {
+  if (rotating.value) {
+    const rect = containerRef.value!.getBoundingClientRect()
+    const ang = Math.atan2(
+      e.clientY - rect.top - rotatePivot.y,
+      e.clientX - rect.left - rotatePivot.x,
+    )
+    let theta = rotateStartTheta + (ang - rotateStartAngle)
+    if (e.shiftKey) theta = Math.round(theta / (Math.PI / 12)) * (Math.PI / 12) // 吸附 15°
+    rotateTo(theta, rotatePivot.x, rotatePivot.y)
+    return
+  }
+  if (!panning.value) return
+  panBy(e.clientX - panLast.x, e.clientY - panLast.y)
+  panLast = { x: e.clientX, y: e.clientY }
 }
 function onBgPointerUp(e: PointerEvent) {
+  ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+  if (rotating.value) {
+    rotating.value = false
+    return
+  }
   const isClick =
     bgDownPos && Math.hypot(e.clientX - bgDownPos.x, e.clientY - bgDownPos.y) < DRAG_THRESHOLD_PX
   bgDownPos = null
-  onPointerUp(e)
+  panning.value = false
   if (isClick && labelModeActive.value) addLabelAt(e.clientX, e.clientY)
 }
 
@@ -229,22 +232,26 @@ let dragging: {
   filename: string
   startX: number
   startY: number
+  /** 拖曳起點的內容座標(px)——位移經 screenToContentPx 差分,旋轉視角下才正確 */
+  startContent: { x: number; y: number }
   oldPos: { x: number; y: number }
   moved: boolean
 } | null = null
 
 function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
   const file = currentFile.value
-  if (!file || e.button !== 0) return
+  if (!file || e.button !== 0 || !containerRef.value) return
   editor.selectedLabelId = label.id
   if (labelModeActive.value) {
     // 標號模式：準備拖曳移動
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const rect = containerRef.value.getBoundingClientRect()
     dragging = {
       id: label.id,
       filename: file.filename,
       startX: e.clientX,
       startY: e.clientY,
+      startContent: screenToContentPx(e.clientX, e.clientY, rect, view),
       oldPos: { x: label.x, y: label.y },
       moved: false,
     }
@@ -255,16 +262,20 @@ function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
 }
 
 function onMarkerPointerMove(e: PointerEvent) {
-  if (!dragging) return
-  const dx = e.clientX - dragging.startX
-  const dy = e.clientY - dragging.startY
-  if (!dragging.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+  if (!dragging || !containerRef.value) return
+  if (
+    !dragging.moved &&
+    Math.hypot(e.clientX - dragging.startX, e.clientY - dragging.startY) < DRAG_THRESHOLD_PX
+  )
+    return
   dragging.moved = true
+  const rect = containerRef.value.getBoundingClientRect()
+  const content = screenToContentPx(e.clientX, e.clientY, rect, view)
   project.moveLabel(
     dragging.filename,
     dragging.id,
-    clamp(dragging.oldPos.x + dx / view.scale / natural.value.w, 0, 1),
-    clamp(dragging.oldPos.y + dy / view.scale / natural.value.h, 0, 1),
+    clamp(dragging.oldPos.x + (content.x - dragging.startContent.x) / natural.value.w, 0, 1),
+    clamp(dragging.oldPos.y + (content.y - dragging.startContent.y) / natural.value.h, 0, 1),
   )
 }
 
@@ -295,7 +306,8 @@ function onMarkerContextMenu(label: LabelItem, e: MouseEvent) {
   editor.cmdDeleteLabel(currentFile.value.filename, label.id)
 }
 
-// 畫布快捷鍵（輸入框聚焦時不攔）：0 適應視窗、←/→/Tab 換頁
+// 畫布快捷鍵（輸入框聚焦時不攔）：0 適應視窗、←/→/Tab 換頁、
+// R 按住旋轉、Esc 連按重置視角(同嵌字 mode)
 useEventListener(window, 'keydown', (e) => {
   if (appMode.value !== 'translate') return
   const el = document.activeElement
@@ -308,29 +320,40 @@ useEventListener(window, 'keydown', (e) => {
   else if (e.key === 'ArrowRight' || e.key === 'Tab') {
     e.preventDefault()
     editor.pageBy(1)
+  } else if (e.key.toLowerCase() === 'r') {
+    if (!rDown.value) didRotate = false // 這輪按住尚未旋轉(key repeat 不重置)
+    rDown.value = true
+  } else if (e.key === 'Escape') {
+    // 連按兩下 = 視角全重置(fitToView 含旋轉歸零);單按 + R 按住 = 只回正旋轉
+    const now = performance.now()
+    const isDouble = now - lastEscAt < 400
+    lastEscAt = isDouble ? 0 : now
+    if (isDouble && imageReady.value) {
+      fitToView()
+    } else if (rDown.value && containerRef.value) {
+      const rect = containerRef.value.getBoundingClientRect()
+      rotateTo(0, rect.width / 2, rect.height / 2)
+    }
   }
+})
+
+// R 放開:輕點(按住期間沒旋轉)= 切檢查模式——QWER 裡的 R 移到這裡,
+// 與「按住旋轉」共用一顆鍵。keyup 不 guard mode:切走前按住的 R 要能歸零
+useEventListener(window, 'keyup', (e) => {
+  if (e.key.toLowerCase() !== 'r') return
+  const tapped = rDown.value && !didRotate
+  rDown.value = false
+  if (!tapped || appMode.value !== 'translate') return
+  const el = document.activeElement
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+  editor.mode = 'check'
 })
 
 const stageStyle = computed(() => ({
   width: `${natural.value.w}px`,
   height: `${natural.value.h}px`,
-  transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
+  transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale}) rotate(${view.rotate}rad)`,
   transformOrigin: '0 0',
 }))
 </script>
 
-<style scoped>
-.page-btn {
-  display: flex;
-  height: 1.25rem;
-  width: 1.5rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-  color: var(--muted-foreground);
-}
-.page-btn:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-</style>

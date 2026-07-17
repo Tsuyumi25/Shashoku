@@ -3,6 +3,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 三欄佈局:與視圖解耦——兩個 mode 共用同一組寬度,切換視圖不動版面
+   (未來的佈局設定只改這裡) */
+:root {
+  --layout-sidebar-w: 11rem; /* 左欄:視圖功能 + mode 切換 */
+  --layout-panel-w: 20rem; /* 右欄:參數面板 / 標籤表格 */
+}
+
 /* 主題：tweakcn「Claude +」（cmdght103000n04lh3e2ae93r）官方匯出 */
 :root {
   --background: oklch(0.9818 0.0054 95.0986);

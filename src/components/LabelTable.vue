@@ -17,7 +17,7 @@
     <!-- 標籤表格：ID | 分組 | 文字 -->
     <div class="min-h-0 flex-1 overflow-y-auto" :style="{ fontSize: `${editor.fontSize}px` }">
       <table class="w-full border-collapse">
-        <thead class="sticky top-0 bg-background text-xs text-muted-foreground">
+        <thead class="sticky top-0 bg-card text-xs text-muted-foreground">
           <tr class="border-b border-border text-left">
             <th class="w-10 px-2 py-1 font-normal">ID</th>
             <th class="w-12 px-1 py-1 font-normal">分組</th>

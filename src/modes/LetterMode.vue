@@ -21,7 +21,9 @@ import {
   invertMask,
   rectMask,
 } from "@/engine/selection";
+import CanvasBottomBar from "@/components/CanvasBottomBar.vue";
 import LayerPanel from "@/components/LayerPanel.vue";
+import ModeSwitcher from "@/components/ModeSwitcher.vue";
 import { appMode } from "@/lib/appMode";
 import { labelTextCss, labelTextStyleFromExportConfig } from "@/lib/labelTextStyle";
 import { drawLabelElement } from "@/lib/labelPaint";
@@ -88,7 +90,7 @@ function blockColor(label: OcrBlock["label"]): string {
 
 const containerSize = reactive({ w: 1, h: 1 });
 const contentSize = computed(() => ({ w: doc.value?.width ?? 1, h: doc.value?.height ?? 1 }));
-const { view, ready, fitToView, onWheel, panBy, rotateTo } = useZoomPan(
+const { view, ready, fitToView, onWheel, zoomBy, panBy, rotateTo } = useZoomPan(
   containerSize,
   contentSize,
 );
@@ -227,6 +229,12 @@ function redraw(): void {
     c.strokeStyle = "rgba(128,128,128,0.6)";
     c.strokeRect(0, 0, d.width, d.height);
   });
+}
+
+/** 重量容器 + 適應視窗(Esc 連按與底部列的「適應視窗」共用)。 */
+function refit(): void {
+  resizeCanvases();
+  fitToView();
 }
 
 /** 量容器 + 對齊兩個視口 canvas 的 backing store(容器尺寸 × dpr)。 */
@@ -955,8 +963,7 @@ function onKeyDown(e: KeyboardEvent): void {
     const isDouble = now - lastEscAt < 400;
     lastEscAt = isDouble ? 0 : now;
     if (isDouble && doc.value) {
-      resizeCanvases();
-      fitToView();
+      refit();
       return;
     }
     if (rDown.value && containerEl.value) {
@@ -1233,7 +1240,7 @@ const TOOL_KEYS: Record<string, Tool> = {
 <template>
   <div class="flex h-full w-full select-none text-sm">
     <!-- 左:工具列 -->
-    <aside class="flex w-44 flex-col gap-1 border-r p-2" style="border-color: var(--border); background: var(--card)">
+    <aside class="flex shrink-0 flex-col gap-1 border-r p-2" style="width: var(--layout-sidebar-w); border-color: var(--border); background: var(--card)">
       <div class="mb-1 px-1 text-xs font-semibold" style="color: var(--muted-foreground)">写植 Shashoku · POC</div>
       <button
         v-for="t in TOOLS"
@@ -1313,10 +1320,13 @@ const TOOL_KEYS: Record<string, Tool> = {
           </button>
         </li>
       </ul>
+
+      <ModeSwitcher class="mt-auto" />
     </aside>
 
-    <!-- 中:畫布 -->
-    <main class="relative flex-1 overflow-hidden" style="background: var(--muted)">
+    <!-- 中:畫布 + 底部列 -->
+    <main class="flex min-w-0 flex-1 flex-col">
+      <div class="relative min-h-0 flex-1 overflow-hidden" style="background: var(--muted)">
       <div
         ref="containerEl"
         class="absolute inset-0"
@@ -1431,10 +1441,12 @@ const TOOL_KEYS: Record<string, Tool> = {
           左側「開啟圖片」載入一頁漫畫 →<br />筆刷塗改、網點填補、放文字、匯出。
         </div>
       </div>
+      </div>
+      <CanvasBottomBar :scale="view.scale" @zoom-by="zoomBy" @fit="refit" />
     </main>
 
     <!-- 右:參數 + 圖層 + 效能 -->
-    <aside class="flex w-64 flex-col gap-3 overflow-y-auto border-l p-3" style="border-color: var(--border); background: var(--card)">
+    <aside class="flex shrink-0 flex-col gap-3 overflow-y-auto border-l p-3" style="width: var(--layout-panel-w); border-color: var(--border); background: var(--card)">
       <section v-if="tool === 'tone'">
         <h3 class="mb-1 text-xs font-semibold" style="color: var(--muted-foreground)">網點（拖出矩形填入）</h3>
         <label class="block">格距 {{ tone.pitch }}px

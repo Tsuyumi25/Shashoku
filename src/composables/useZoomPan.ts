@@ -10,12 +10,14 @@ const ZOOM_SPEED = 0.0015;
 const MAX_SCALE = 40;
 
 /**
- * CSS transform 型 zoom/pan(搬自 YALP)。view 是 content → container 的變換:
- * 先 translate(tx,ty) 再 scale,transform-origin 0 0。
+ * 兩個 mode 共用的視角變換 composable。view 是 content → container 的變換:
+ * translate(tx,ty) ∘ scale ∘ rotate,transform-origin 0 0(見 lib/coords.ts)。
+ * 翻譯 mode 把它套成 CSS transform,嵌字 mode 套進 ctx.setTransform——變換
+ * 語義同一份,顯示手段各自選。
  *
- * 滾輪走 PS 語義:滾 = 垂直平移、Shift+滾 = 水平平移、Alt+滾 = 縮放(錨定
- * 游標);Ctrl+滾也縮放(觸控板 pinch 在 Chromium 送出的形態)。
- * pan(space+drag / 中鍵)由呼叫端在需要時呼叫 panBy。
+ * onWheel 是 PS 語義:滾 = 垂直平移、Shift+滾 = 水平平移、Alt/Ctrl+滾 =
+ * 縮放錨定游標(嵌字 mode 用);wheelZoom 是純游標縮放(翻譯 mode 的主滾輪,
+ * LabelPlus 慣例)。pan(space+drag / 中鍵 / 背景拖曳)由呼叫端呼叫 panBy。
  */
 export function useZoomPan(
   containerSize: MaybeRefOrGetter<Size>,
@@ -62,22 +64,35 @@ export function useZoomPan(
     view.rotate = theta;
   }
 
+  /** 縮放到 next(clamp),保持螢幕點 (px,py) 底下的內容不動。 */
+  function zoomTo(next: number, px: number, py: number) {
+    const clamped = clamp(next, fitScale() * 0.5, MAX_SCALE);
+    if (clamped === view.scale) return;
+    const k = clamped / view.scale;
+    view.tx = px - (px - view.tx) * k;
+    view.ty = py - (py - view.ty) * k;
+    view.scale = clamped;
+  }
+
+  /** 按倍率縮放,錨定容器中心(底部列 +/- 按鈕用)。 */
+  function zoomBy(factor: number) {
+    const container = toValue(containerSize);
+    zoomTo(view.scale * factor, container.w / 2, container.h / 2);
+  }
+
+  /** 滾輪縮放錨定游標。翻譯 mode 的主滾輪語義;嵌字 onWheel 的 Alt/Ctrl 分支同源。 */
+  function wheelZoom(e: WheelEvent) {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    zoomTo(
+      view.scale * Math.exp(-e.deltaY * ZOOM_SPEED),
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+    );
+  }
+
   function onWheel(e: WheelEvent) {
     if (e.altKey || e.ctrlKey) {
-      // 縮放,錨定游標(游標底下的內容點縮放前後不動)
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      const next = clamp(
-        view.scale * Math.exp(-e.deltaY * ZOOM_SPEED),
-        fitScale() * 0.5,
-        MAX_SCALE,
-      );
-      if (next === view.scale) return;
-      const k = next / view.scale;
-      view.tx = cx - (cx - view.tx) * k;
-      view.ty = cy - (cy - view.ty) * k;
-      view.scale = next;
+      wheelZoom(e);
       return;
     }
     // 平移:Shift 轉水平(滑鼠滾輪只有 deltaY);觸控板的 deltaX 原生支援
@@ -94,5 +109,5 @@ export function useZoomPan(
     view.ty += dy;
   }
 
-  return { view, ready, fitScale, fitToView, onWheel, panBy, rotateTo };
+  return { view, ready, fitScale, fitToView, onWheel, wheelZoom, zoomBy, panBy, rotateTo };
 }

@@ -15,7 +15,7 @@
 
     <textarea
       ref="textareaRef"
-      class="min-h-0 w-full flex-1 resize-none bg-background px-3 py-2 leading-relaxed focus:outline-none"
+      class="min-h-0 w-full flex-1 resize-none bg-card px-3 py-2 leading-relaxed focus:outline-none"
       :style="{ fontSize: `${editor.fontSize}px` }"
       :value="selectedLabel?.text ?? ''"
       :disabled="!selectedLabel"
