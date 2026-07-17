@@ -114,6 +114,44 @@ describe('editorStore undo/redo', () => {
     expect(l().text).toBe('')
   })
 
+  it('selectLabelBy 跨頁：頁界換頁、空頁也是一站、文件邊界停下', () => {
+    const editor = useEditorStore()
+    const project = useProjectStore()
+    project.newProject(['001.jpg', '002.jpg', '003.jpg']) // 002 留空頁
+    for (const id of ['a1', 'a2']) editor.cmdAddLabel('001.jpg', label(id))
+    editor.cmdAddLabel('003.jpg', label('c1'))
+
+    editor.selectFile('001.jpg')
+    expect(editor.selectedLabelId).toBe('a1')
+    editor.selectLabelBy(1)
+    expect(editor.selectedLabelId).toBe('a2')
+
+    // 頁尾向下 → 落在空頁(不跳過),再向下 → 003 第一個
+    editor.selectLabelBy(1)
+    expect(editor.currentFilename).toBe('002.jpg')
+    expect(editor.selectedLabelId).toBeNull()
+    editor.selectLabelBy(1)
+    expect(editor.currentFilename).toBe('003.jpg')
+    expect(editor.selectedLabelId).toBe('c1')
+
+    // 倒著走:空頁一站,再向上落在前頁「最後一個」
+    editor.selectLabelBy(-1)
+    expect(editor.currentFilename).toBe('002.jpg')
+    editor.selectLabelBy(-1)
+    expect(editor.currentFilename).toBe('001.jpg')
+    expect(editor.selectedLabelId).toBe('a2')
+
+    // 文件邊界:第一頁頁首向上、最後一頁頁尾向下都停在原地
+    editor.selectLabelBy(-1)
+    editor.selectLabelBy(-1)
+    expect(editor.currentFilename).toBe('001.jpg')
+    expect(editor.selectedLabelId).toBe('a1')
+    editor.selectFile('003.jpg')
+    editor.selectLabelBy(1)
+    expect(editor.currentFilename).toBe('003.jpg')
+    expect(editor.selectedLabelId).toBe('c1')
+  })
+
   it('整合：store 操作後 serialize 輸出正確的 .ssk.json', () => {
     const editor = useEditorStore()
     const project = useProjectStore()

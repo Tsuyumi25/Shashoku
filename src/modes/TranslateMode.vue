@@ -71,7 +71,7 @@ const HELP_SECTIONS: { title: string; rows: [string, string][] }[] = [
   {
     title: '操作層(鍵盤)',
     rows: [
-      ['j / ↓ · k / ↑', '下/上一個標籤(畫布自動跟蹤)'],
+      ['j / ↓ · k / ↑', '下/上一個標籤(到頁界自動換頁)'],
       ['i · Enter', '編輯譯文(進輸入層)'],
       ['dd · Delete', '刪除選中標籤'],
       ['Ctrl+Enter(+Shift)', '下(上)一個標籤並編輯'],

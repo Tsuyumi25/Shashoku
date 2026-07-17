@@ -45,26 +45,37 @@ export const useEditorStore = defineStore('editor', () => {
       : null
   }
 
-  /** 換頁：offset ±1（原版 ←/→/Tab/中鍵/Ctrl+←→） */
-  function pageBy(offset: number) {
+  /** 換頁：offset ±1（原版 ←/→/Tab/中鍵/Ctrl+←→）。landOn 決定落點選中哪個 label——
+   * 向上跨頁(倒著走)要落在前頁最後一個,才接得上 item 流 */
+  function pageBy(offset: number, landOn: 'first' | 'last' = 'first') {
     const project = useProjectStore()
     if (project.files.length === 0) return
     const index = project.files.findIndex((f) => f.filename === currentFilename.value)
     const next = index === -1 ? 0 : index + offset
     if (next < 0 || next >= project.files.length) return
     selectFile(project.files[next].filename)
+    if (landOn === 'last') {
+      const labels = project.files[next].labels
+      selectedLabelId.value = labels[labels.length - 1]?.id ?? null
+    }
   }
 
-  /** 切選中 label：offset ±1（原版 Ctrl+Enter / Ctrl+↑↓） */
+  /** 切選中 label：offset ±1（原版 Ctrl+Enter / Ctrl+↑↓）。
+   * 到頁界跨頁——item 流的全序跨頁存在,空頁也是一站(不跳,跳頁不直覺) */
   function selectLabelBy(offset: number) {
     const project = useProjectStore()
     if (!currentFilename.value) return
     const labels = project.fileByName(currentFilename.value)?.labels ?? []
-    if (labels.length === 0) return
     const index = labels.findIndex((l) => l.id === selectedLabelId.value)
-    const next = index === -1 ? 0 : index + offset
-    if (next < 0 || next >= labels.length) return
-    selectedLabelId.value = labels[next].id
+    if (index === -1 && labels.length > 0) {
+      selectedLabelId.value = labels[offset > 0 ? 0 : labels.length - 1].id
+      return
+    }
+    // 空頁時 index = -1:向下 next = 0 ≥ 0 = length、向上 next = -2 < 0,兩邊都正確跨頁
+    const next = index + offset
+    if (next >= labels.length) pageBy(1)
+    else if (next < 0) pageBy(-1, 'last')
+    else selectedLabelId.value = labels[next].id
   }
 
   function requestEditorFocus() {
