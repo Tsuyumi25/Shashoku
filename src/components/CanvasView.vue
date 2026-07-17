@@ -75,6 +75,7 @@ import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
 import { useZoomPan } from '@/composables/useZoomPan'
 import { appMode } from '@/lib/appMode'
 import { clamp, screenToContentPx } from '@/lib/coords'
+import { sharedView, viewFit } from '@/lib/viewState'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { imageSrc } from '@/utils/mediaUrls'
@@ -104,7 +105,12 @@ const src = computed(() =>
     : '',
 )
 
-const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(containerSize, natural)
+// 視角是全域狀態(sharedView):與嵌字 mode 共用,切視圖繼承座標與縮放
+const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(
+  containerSize,
+  natural,
+  sharedView,
+)
 const panning = ref(false)
 
 // R 按住 = 旋轉視角(spring-loaded,與嵌字 mode 同手勢);輕點 R(按下放開
@@ -145,7 +151,10 @@ function onImageLoad(e: Event) {
   const img = e.target as HTMLImageElement
   natural.value = { w: img.naturalWidth, h: img.naturalHeight }
   imageReady.value = true
-  fitToView()
+  // 自動 fit 走 viewFit 守門:換頁重 fit、切視圖繼承。隱藏側的 load
+  // (v-show 不擋 img 載入)容器 0×0,fitToView 自動 no-op 不污染視角
+  const page = editor.currentFilename
+  if (viewFit.page !== page && fitToView()) viewFit.page = page
 }
 
 /** 中鍵 = 下一頁（原版行為） */

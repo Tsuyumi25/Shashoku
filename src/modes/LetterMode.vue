@@ -7,6 +7,7 @@ import { benchmarkCpuComposite, timeMs } from "@/engine/perf";
 import type { Rect } from "@/engine/types";
 import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { clamp, screenToContentPx } from "@/lib/coords";
+import { sharedView, viewFit } from "@/lib/viewState";
 import { hexToRgb } from "@/lib/color";
 import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
@@ -90,9 +91,11 @@ function blockColor(label: OcrBlock["label"]): string {
 
 const containerSize = reactive({ w: 1, h: 1 });
 const contentSize = computed(() => ({ w: doc.value?.width ?? 1, h: doc.value?.height ?? 1 }));
-const { view, ready, fitToView, onWheel, zoomBy, panBy, rotateTo } = useZoomPan(
+// 視角是全域狀態(sharedView):與翻譯 mode 共用,切視圖繼承座標與縮放
+const { view, fitToView, onWheel, zoomBy, panBy, rotateTo } = useZoomPan(
   containerSize,
   contentSize,
+  sharedView,
 );
 
 const perf = reactive({
@@ -280,7 +283,10 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
   perf.cpuComposite = benchmarkCpuComposite(d.layers, d.width, d.height);
   resizeCanvases();
-  fitToView();
+  // 自動 fit 走 viewFit 守門:換頁重 fit;同一頁(翻譯側已 fit 過、視角
+  // 可能已被調過)繼承現有視角。單檔模式(無專案頁)一律 fit
+  const pageKey = loadedPage.value;
+  if ((pageKey === null || viewFit.page !== pageKey) && fitToView()) viewFit.page = pageKey;
   editor.changed(); // 面板列表/縮圖刷新 + 重繪
 }
 
@@ -1143,8 +1149,7 @@ onMounted(() => {
   });
   ro = new ResizeObserver(() => {
     if (redrawSuspended) return; // 匯出中 backing store 是 doc 尺寸,別打斷
-    resizeCanvases();
-    if (doc.value && !ready.value) fitToView();
+    resizeCanvases(); // 初始 fit 由 buildDoc 同步處理,RO 只管尺寸對齊
   });
   nextTick(() => {
     displayCtx = canvasEl.value?.getContext("2d") ?? null;

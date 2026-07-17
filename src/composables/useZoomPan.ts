@@ -22,8 +22,11 @@ const MAX_SCALE = 40;
 export function useZoomPan(
   containerSize: MaybeRefOrGetter<Size>,
   contentSize: MaybeRefOrGetter<Size>,
+  externalView?: ViewTransform,
 ) {
-  const view = reactive<ViewTransform>({ scale: 1, tx: 0, ty: 0, rotate: 0 });
+  // 預設每個實例自己的 view;傳入 externalView(lib/viewState 的 sharedView)
+  // 則兩個 mode 共用同一份變換——切視圖繼承座標與縮放
+  const view = externalView ?? reactive<ViewTransform>({ scale: 1, tx: 0, ty: 0, rotate: 0 });
   const ready = ref(false);
 
   function fitScale(): number {
@@ -33,15 +36,21 @@ export function useZoomPan(
     return Math.min(container.w / content.w, container.h / content.h);
   }
 
-  function fitToView() {
+  /**
+   * 適應視窗。容器或內容尺寸未就緒(display:none 的 mode 容器是 0×0)時
+   * 不動 view 並回傳 false——隱藏側的自動 fit 不可污染另一側正在用的視角。
+   */
+  function fitToView(): boolean {
     const container = toValue(containerSize);
     const content = toValue(contentSize);
+    if (!container.w || !container.h || !content.w || !content.h) return false;
     const s = fitScale();
     view.scale = s;
     view.rotate = 0;
     view.tx = (container.w - content.w * s) / 2;
     view.ty = (container.h - content.h * s) / 2;
     ready.value = true;
+    return true;
   }
 
   /**
