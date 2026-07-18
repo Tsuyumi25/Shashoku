@@ -98,6 +98,9 @@ function parseImages(v: unknown, groupCount: number): SskImage[] {
   const images = v.map((img, i) => {
     if (!isRecord(img)) fail(`images[${i}] 必須是物件`)
     if (typeof img.filename !== 'string' || img.filename.length === 0) fail(`images[${i}].filename 必須是非空字串`)
+    // 工程檔在團隊間互傳:filename 會拼進 local-file:// URL,必須是純檔名——
+    // 含路徑分隔符即可指向專案資料夾外(../../…),是任意檔案讀取鏈的入口
+    if (/[\\/]/.test(img.filename)) fail(`images[${i}].filename 只能是檔名,不可含路徑`)
     const labels = Array.isArray(img.labels)
       ? img.labels.map((l, j) => parseLabel(l, i, j, groupCount))
       : fail(`images[${i}].labels 必須是陣列`)

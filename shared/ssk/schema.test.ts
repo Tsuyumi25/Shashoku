@@ -98,6 +98,15 @@ describe('parseSskProject / 非法輸入', () => {
     }
   })
 
+  it('filename 含路徑分隔符 → 拒絕(任意讀取鏈入口)', () => {
+    for (const name of ['../escape.png', 'a/b.png', '..\\up.png', '/etc/passwd']) {
+      const raw = patched((d) => {
+        ;(d.images as { filename: string }[])[0].filename = name
+      })
+      expect(() => parseSskProject(raw)).toThrow(/不可含路徑/)
+    }
+  })
+
   it('分組名重複 → 拒絕', () => {
     const raw = patched((d) => {
       d.groups = ['框内', '框内']
