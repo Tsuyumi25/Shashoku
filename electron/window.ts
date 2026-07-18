@@ -6,7 +6,7 @@ export function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    frame: false, // YALP 殼:自畫 titlebar(拖曳區 + mode tab + 視窗控制)
+    frame: false, // 自畫 titlebar(拖曳區 + mode tab + 視窗控制)
     backgroundColor: "#262624",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),

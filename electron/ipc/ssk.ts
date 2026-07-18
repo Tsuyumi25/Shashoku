@@ -60,7 +60,7 @@ export function registerSskHandlers(): void {
         title: "儲存工程檔",
         defaultPath: join(defaultDir, suggestedName),
         // Electron filter 不支援複合副檔名,只能寬鬆到 .json
-        filters: [{ name: "LabelPlusType 工程檔", extensions: ["json"] }],
+        filters: [{ name: "Shashoku 工程檔", extensions: ["json"] }],
       });
       if (result.canceled || !result.filePath) return null;
       await writeSskAtomic(result.filePath, content);

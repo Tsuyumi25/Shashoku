@@ -1,7 +1,7 @@
 // main ↔ renderer 的協議:channel 名與跨界型別的唯一定義處。
 
 // openImageFolder:嵌字 mode 的「開圖片資料夾」。翻譯 mode 的 openProjectFolder
-// (YALP 血統,@shared/ipc/channels)回傳路徑字串,是不同操作,合併 API 時改名區分。
+// (@shared/ipc/channels)回傳路徑字串,是不同操作,合併 API 時改名區分。
 export const CHANNELS = {
   openImageFolder: "project:openFolder",
   readImage: "project:readImage",

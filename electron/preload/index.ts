@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { CHANNELS as TR, type TranslateApi } from "@shared/ipc/channels";
 import { CHANNELS as SSK, type OcrStatusEvent, type ShashokuApi } from "../../shared/ipc";
 
-// 單一 window.api 同時承載兩個 mode:翻譯(YALP 血統,ssk 工程檔 + 視窗控制)
+// 單一 window.api 同時承載兩個 mode:翻譯(ssk 工程檔 + 視窗控制)
 // 與嵌字(圖片資料夾 + OCR/去字 sidecar)。
 const api: TranslateApi & ShashokuApi = {
   // ── 翻譯 mode(TR = 翻譯頻道)──

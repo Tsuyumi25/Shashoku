@@ -1,5 +1,5 @@
 // .ssk.json 工程檔 schema v1 的型別定義。
-// 這個檔案同時被 YALP(現代 TS)與 scripts/ps(ES3/noLib tsconfig)消費,
+// 這個檔案同時被 app(現代 TS)與 Photoshop 匯出腳本(ES3/noLib tsconfig)消費,
 // 只允許純資料形狀:string/number/boolean/null/array/字面量聯合,禁止引用任何標準庫型別。
 
 export const SSK_VERSION = 1

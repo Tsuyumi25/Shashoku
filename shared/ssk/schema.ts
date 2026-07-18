@@ -1,5 +1,5 @@
-// .ssk.json 的解析/序列化/驗證。只在 YALP 端(node/瀏覽器)使用;
-// jsx 端(ES3)有自己的最小解析器,兩端行為以本檔的 fixtures 對齊。
+// .ssk.json 的解析/序列化/驗證。在 app 端(node/瀏覽器)使用;
+// Photoshop 匯出腳本端(ES3)有自己的最小解析器,兩端行為以本檔的 fixtures 對齊。
 import type {
   DocTemplateMode,
   SskExportConfig,

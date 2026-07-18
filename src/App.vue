@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-full flex-col">
-    <!-- Titlebar：選單 + mode 頁籤 + 標題 + 主題/視窗控制（frameless 自畫殼，YALP 血統） -->
+    <!-- Titlebar：選單 + mode 頁籤 + 標題 + 主題/視窗控制（frameless 自畫殼） -->
     <header
       class="flex h-9 shrink-0 items-center border-b border-border select-none"
       style="-webkit-app-region: drag"
