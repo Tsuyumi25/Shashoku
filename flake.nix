@@ -1,4 +1,6 @@
 {
+  description = "Shashoku 写植 — 漫畫翻譯、校對、嵌字工作流";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
   };
@@ -44,6 +46,10 @@
     in
     {
       devShells.${system}.default = pkgs.mkShell {
+        packages = with pkgs; [
+          nodejs_22
+          pnpm_10
+        ];
         shellHook = ''
           export NIX_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath electronLibs}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
         '';
