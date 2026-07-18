@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { ShashokuDoc } from "@/engine/document";
+import { createRasterLayer } from "@/engine/layer";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
-import { benchmarkCpuComposite, timeMs } from "@/engine/perf";
+import { timeMs } from "@/engine/perf";
 import type { Rect } from "@/engine/types";
 import { unionRect, EMPTY_RECT } from "@/engine/geom";
 import { clamp, screenToContentPx } from "@/lib/coords";
@@ -45,9 +46,8 @@ const canvasEl = ref<HTMLCanvasElement | null>(null);
 const selCanvasEl = ref<HTMLCanvasElement | null>(null); // 選區蟻線 overlay(doc 空間)
 let displayCtx: CanvasRenderingContext2D | null = null;
 
-let paintLayerId = "";
-let toneLayerId = "";
-let inpaintLayerId = "";
+// 去字層惰性建立:第一次 inpaint 才生,插在底圖正上方;跟 doc 同生命週期
+let inpaintLayerId: string | null = null;
 
 const tool = ref<Tool>("brush");
 const brush = reactive({ size: 22, hardness: 0.85, color: "#e23b3b" });
@@ -61,8 +61,11 @@ const projectStore = useProjectStore();
 const editorStore = useEditorStore();
 const currentPage = computed(() => editorStore.currentFilename); // 頁游標與翻譯共享
 const loadedPage = ref<string | null>(null); // 已建成 doc 的頁(惰性重載判斷)
+// 標籤/OCR 的讀寫錨在 loadedPage(畫面上這張 doc 的頁),不是 currentPage:
+// 游標按下就變、doc 要等載入,錨錯邊會出現「新頁文字疊舊頁底圖」的撕裂幀,
+// 寫入端更會把操作寫進還沒顯示的頁。currentPage 只負責導航(頁列表/換頁 watch)
 const currentLabels = computed<LabelItem[]>(() =>
-  currentPage.value ? (projectStore.fileByName(currentPage.value)?.labels ?? []) : [],
+  loadedPage.value ? (projectStore.fileByName(loadedPage.value)?.labels ?? []) : [],
 );
 const selectedLabel = computed<LabelItem | null>(
   () => currentLabels.value.find((l) => l.id === editorStore.selectedLabelId) ?? null,
@@ -82,7 +85,7 @@ const batchRunning = ref(false);
 const hoveredBlock = ref<number | null>(null);
 
 const currentBlocks = computed<OcrBlock[]>(() =>
-  currentPage.value ? (ocrData[currentPage.value] ?? []) : []
+  loadedPage.value ? (ocrData[loadedPage.value] ?? []) : []
 );
 
 function blockColor(label: OcrBlock["label"]): string {
@@ -100,7 +103,6 @@ const { view, fitToView, onWheel, zoomBy, panBy, rotateTo } = useZoomPan(
 
 const perf = reactive({
   imageSize: "",
-  cpuComposite: 0, // 純 CPU 全畫面合成中位數 ms
   lastStamp: 0, // 上一次筆刷/網點寫 buffer 的 ms
   lastDraw: 0, // 上一次 drawImage 顯示合成 ms
 });
@@ -268,10 +270,10 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   const d = new ShashokuDoc(bitmap.width, bitmap.height);
   const base = d.addLayerFromBitmap("底圖", bitmap);
   base.locked = true; // PS 慣例:背景層預設鎖定,防誤畫(面板可解鎖)
-  inpaintLayerId = d.addBlankLayer("去字").id;
-  paintLayerId = d.addBlankLayer("筆刷").id;
-  toneLayerId = d.addBlankLayer("網點").id;
-  activeLayerId.value = paintLayerId;
+  // 文件開場只有底圖(PS 語意):筆刷/網點畫在使用中圖層(面板自行加層),
+  // 去字層由第一次 inpaint 惰性建立。換頁少三次全幅 buffer 配置+putImageData
+  inpaintLayerId = null;
+  activeLayerId.value = base.id;
   bitmap.close();
 
   doc.value = d;
@@ -281,7 +283,6 @@ async function buildDoc(bitmap: ImageBitmap): Promise<void> {
   perf.imageSize = `${d.width}×${d.height}`;
 
   // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
-  perf.cpuComposite = benchmarkCpuComposite(d.layers, d.width, d.height);
   resizeCanvases();
   // 自動 fit 走 viewFit 守門:換頁重 fit;同一頁(翻譯側已 fit 過、視角
   // 可能已被調過)繼承現有視角。單檔模式(無專案頁)一律 fit
@@ -343,7 +344,7 @@ async function ocrOne(name: string): Promise<void> {
 }
 
 async function ocrCurrent(): Promise<void> {
-  if (currentPage.value) await ocrOne(currentPage.value);
+  if (loadedPage.value) await ocrOne(loadedPage.value);
 }
 
 /** 批次:整個專案逐頁跑(sidecar 端序列處理)。再按一次 = 停止。 */
@@ -366,7 +367,7 @@ const inpaintBusy = ref(false);
 
 /** 對指定框去字:sidecar 回 RGBA 補丁,貼進「去字」圖層(可切作用層擦回)。 */
 async function runInpaint(blocks: OcrBlock[]): Promise<void> {
-  const name = currentPage.value;
+  const name = loadedPage.value; // 補丁貼進 doc 圖層,必須與 doc 同頁
   const d = doc.value;
   if (!name || !d || inpaintBusy.value) return;
   // 拆成 plain object:blocks 來自 reactive state,是 Proxy,IPC structured clone 不吃
@@ -375,18 +376,23 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   inpaintBusy.value = true;
   try {
     const res = await window.api.inpaintBlocks(projectStore.folderPath!, name, targets);
-    const layer = d.layers.find((l) => l.id === inpaintLayerId);
+    // 惰性取得/建立去字層:機器輸出有自己的層(可切作用層擦回),插在
+    // 底圖正上方維持 z 語意。用戶從面板刪掉的話,下次去字重建
+    let layer = d.layers.find((l) => l.id === inpaintLayerId);
+    if (!layer) {
+      layer = createRasterLayer("去字", d.width, d.height);
+      d.insertLayer(layer, 1);
+      inpaintLayerId = layer.id;
+    }
     const patches: PixelPatch[] = [];
     for (const p of res.patches) {
       const rect = clampRect({ x: p.x, y: p.y, w: p.w, h: p.h }, d.width, d.height);
-      const before = layer ? copyRect(layer.data, d.width, rect) : null;
-      await d.blitPngPatch(inpaintLayerId, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
-      if (layer && before) {
-        patches.push({ rect, before, after: copyRect(layer.data, d.width, rect) });
-      }
+      const before = copyRect(layer.data, d.width, rect);
+      await d.blitPngPatch(layer.id, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
+      patches.push({ rect, before, after: copyRect(layer.data, d.width, rect) });
     }
     // 整批去字 = 一步 undo
-    if (layer && patches.length) pushPixelPatches(editor.ctx(), inpaintLayerId, patches, "去字");
+    if (patches.length) pushPixelPatches(editor.ctx(), layer.id, patches, "去字");
     editor.changed();
   } catch (err) {
     console.error("inpaint failed:", err);
@@ -452,7 +458,7 @@ function pushLabelMove(
 /** OCR 框 → 翻譯標籤:落在框中心,譯文由人打(原文留在面板對照)。 */
 function blockToLabel(b: OcrBlock): void {
   const d = doc.value;
-  const page = currentPage.value;
+  const page = loadedPage.value;
   if (!d || !page) return;
   pushLabelAdd(page, makeLabel((b.x + b.w / 2) / d.width, (b.y + b.h / 2) / d.height));
   tool.value = "text";
@@ -623,7 +629,7 @@ function onPointerDown(e: PointerEvent): void {
     lastPt = p;
     toneRect.value = { x: p.x, y: p.y, w: 0, h: 0 };
   } else if (tool.value === "text") {
-    const page = currentPage.value;
+    const page = loadedPage.value;
     if (!page) return; // 標籤活在工程檔:單檔模式沒有可寫的 SSOT
     const hit = hitLabel(e);
     if (hit) {
@@ -707,10 +713,10 @@ function onPointerMove(e: PointerEvent): void {
       w: Math.abs(p.x - lastPt.x),
       h: Math.abs(p.y - lastPt.y),
     };
-  } else if (draggingLabelId && currentPage.value) {
+  } else if (draggingLabelId && loadedPage.value) {
     // 拖曳中即時寫回 SSOT(percent);overlay 由 watch 自動重畫,翻譯視圖同步跟動
     projectStore.moveLabel(
-      currentPage.value,
+      loadedPage.value,
       draggingLabelId,
       clamp(p.x / doc.value.width, 0, 1),
       clamp(p.y / doc.value.height, 0, 1),
@@ -758,7 +764,8 @@ function onPointerUp(e: PointerEvent): void {
   }
   if (painting.value && tool.value === "tone" && toneRect.value) {
     const d = doc.value!;
-    const layer = d.layers.find((l) => l.id === toneLayerId);
+    // 網點與筆刷同語義:畫在使用中圖層,鎖定守門(底圖鎖定時 no-op)
+    const layer = d.layers.find((l) => l.id === activeLayerId.value);
     const r = clampRect(toneRect.value, d.width, d.height);
     if (layer && !layer.locked && r.w > 0 && r.h > 0) {
       const before = copyRect(layer.data, d.width, r);
@@ -777,15 +784,15 @@ function onPointerUp(e: PointerEvent): void {
           editor.selection.value,
         );
       });
-      d.syncLayer(toneLayerId, r);
-      pushPixelPatch(editor.ctx(), toneLayerId, r, before, "網點填充");
+      d.syncLayer(layer.id, r);
+      pushPixelPatch(editor.ctx(), layer.id, r, before, "網點填充");
     }
     toneRect.value = null;
     editor.changed();
   }
-  if (draggingLabelId && currentPage.value && dragLabelFrom) {
+  if (draggingLabelId && loadedPage.value && dragLabelFrom) {
     const l = currentLabels.value.find((ll) => ll.id === draggingLabelId);
-    if (l) pushLabelMove(currentPage.value, draggingLabelId, dragLabelFrom, { x: l.x, y: l.y });
+    if (l) pushLabelMove(loadedPage.value, draggingLabelId, dragLabelFrom, { x: l.x, y: l.y });
   }
   painting.value = false;
   draggingLabelId = null;
@@ -1008,8 +1015,8 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
   }
   if ((e.key === "Delete" || e.key === "Backspace") && !isTyping(e)) {
-    if (editorStore.selectedLabelId && currentPage.value && tool.value === "text") {
-      pushLabelDelete(currentPage.value, editorStore.selectedLabelId);
+    if (editorStore.selectedLabelId && loadedPage.value && tool.value === "text") {
+      pushLabelDelete(loadedPage.value, editorStore.selectedLabelId);
       return;
     }
     // PS 的 Delete:清除作用層上選區內的像素(入史)
@@ -1043,7 +1050,7 @@ function isTyping(e: KeyboardEvent): boolean {
 // 樣式(字級/字體/顏色/方向)是 exportConfig 全域設定——per-label 樣式屬於
 // 之後的「樣式群組」,這裡不入 undo(設定不進歷史,兩 mode 一致)。
 function onLabelTextInput(e: Event): void {
-  const page = currentPage.value;
+  const page = loadedPage.value;
   const l = selectedLabel.value;
   const v = (e.target as HTMLTextAreaElement).value;
   if (!page || !l || l.text === v) return;
@@ -1066,7 +1073,7 @@ function onAnchorChange(e: Event): void {
 }
 
 function onLabelCategoryChange(e: Event): void {
-  const page = currentPage.value;
+  const page = loadedPage.value;
   const l = selectedLabel.value;
   const v = Number((e.target as HTMLSelectElement).value);
   if (!page || !l || l.category === v) return;
@@ -1286,7 +1293,7 @@ const TOOL_KEYS: Record<string, Tool> = {
           <button
             class="w-full rounded px-2 py-1.5"
             style="background: var(--accent)"
-            :disabled="!currentPage"
+            :disabled="!loadedPage"
             @click="ocrCurrent"
           >
             偵測+OCR 本頁
@@ -1511,7 +1518,7 @@ const TOOL_KEYS: Record<string, Tool> = {
           </label>
           <p class="mt-1 text-[11px]" style="color: var(--muted-foreground)">Delete 刪除選取標籤</p>
         </template>
-        <p v-else-if="!currentPage" class="text-[11px]" style="color: var(--muted-foreground)">
+        <p v-else-if="!loadedPage" class="text-[11px]" style="color: var(--muted-foreground)">
           文字即翻譯標籤,需先在「翻譯」頁開啟工程。
         </p>
         <p v-else class="text-[11px]" style="color: var(--muted-foreground)">點畫布空白處新增標籤;點文字選取/拖曳。</p>
@@ -1591,7 +1598,7 @@ const TOOL_KEYS: Record<string, Tool> = {
                 去字
               </button>
               <button
-                v-if="b.text !== undefined && currentPage"
+                v-if="b.text !== undefined && loadedPage"
                 class="rounded px-1 py-0.5 text-[10px]"
                 style="background: var(--card)"
                 @click="blockToLabel(b)"
@@ -1614,9 +1621,6 @@ const TOOL_KEYS: Record<string, Tool> = {
       <section class="mt-auto rounded p-2 text-[11px]" style="background: var(--accent)">
         <h3 class="mb-1 font-semibold" style="color: var(--muted-foreground)">效能（CPU/WASM 驗證）</h3>
         <div class="flex justify-between"><span>圖片</span><span>{{ perf.imageSize || "—" }}</span></div>
-        <div class="flex justify-between">
-          <span>純 CPU 全畫面合成</span><span>{{ perf.cpuComposite.toFixed(1) }} ms</span>
-        </div>
         <div class="flex justify-between">
           <span>像素寫入（筆刷/網點）</span><span>{{ perf.lastStamp.toFixed(2) }} ms</span>
         </div>
