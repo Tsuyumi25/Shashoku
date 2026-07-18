@@ -303,11 +303,18 @@ async function onPickFile(e: Event): Promise<void> {
 
 // ---- 專案頁載入(專案本身由翻譯 mode 開啟,這裡只消費)----
 
-/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點像素編輯。 */
-async function loadPage(name: string): Promise<void> {
+/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點像素編輯。
+ * isStale:呼叫端的作廢判定——IPC/解碼完成順序不保證跟請求順序一致,
+ * 讀檔解碼完回來先問一聲,已作廢就丟棄,不讓舊頁覆蓋新頁。 */
+async function loadPage(name: string, isStale: () => boolean = () => false): Promise<void> {
   if (!projectStore.folderPath) return;
   const bytes = await window.api.readImage(projectStore.folderPath, name);
   const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+  if (isStale()) {
+    bitmap.close();
+    return;
+  }
+  // 從這裡到 buildDoc 完成是同步一氣(buildDoc 體內無 await),不會再被插隊
   loadedPage.value = name;
   await buildDoc(bitmap);
   editor.docPage.value = name; // 校對 mode 靠它判斷 doc 屬於哪一頁
@@ -320,11 +327,15 @@ function selectPage(name: string): void {
 
 // 惰性重載:只在嵌字 mode 顯示中且頁游標指向未載入的頁時才建 doc,
 // 翻譯側連續換頁不會拖著嵌字重建文件。
+// 競態守門:watch 重新觸發(用戶又換頁/切 mode)先跑上一輪的 onCleanup
+// ——舊輪立 stale 旗標自行作廢,快速連續換頁時慢的舊請求不再覆蓋新頁
 watch(
   [appMode, currentPage],
-  async ([m, page]) => {
+  async ([m, page], _old, onCleanup) => {
     if (m !== "letter" || !page || page === loadedPage.value) return;
-    await loadPage(page);
+    let stale = false;
+    onCleanup(() => (stale = true));
+    await loadPage(page, () => stale);
   },
   { immediate: true },
 );
@@ -376,6 +387,9 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   inpaintBusy.value = true;
   try {
     const res = await window.api.inpaintBlocks(projectStore.folderPath!, name, targets);
+    // 等 sidecar 的幾秒裡可能已換頁:d 指向被丟棄的舊 doc,寫進去等於
+    // 資料靜默遺失,而收尾的 undo 又會塞進「新頁」的 History 變死條目
+    if (doc.value !== d) return;
     // 惰性取得/建立去字層:機器輸出有自己的層(可切作用層擦回),插在
     // 底圖正上方維持 z 語意。用戶從面板刪掉的話,下次去字重建
     let layer = d.layers.find((l) => l.id === inpaintLayerId);
@@ -391,6 +405,8 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
       await d.blitPngPatch(layer.id, { x: p.x, y: p.y, w: p.w, h: p.h }, p.png);
       patches.push({ rect, before, after: copyRect(layer.data, d.width, rect) });
     }
+    // blitPngPatch 逐補丁解碼也有 await:再驗一次才敢動 History
+    if (doc.value !== d) return;
     // 整批去字 = 一步 undo
     if (patches.length) pushPixelPatches(editor.ctx(), layer.id, patches, "去字");
     editor.changed();
