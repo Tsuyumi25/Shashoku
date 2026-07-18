@@ -90,7 +90,15 @@ class OcrSidecar {
       );
 
       proc.on("error", (err) => {
+        // spawn 失敗(如 venv 沒建好的 ENOENT)只發 error 不發 exit——
+        // state 重置必須在這裡也做一份,否則 readyPromise 永遠快取著同一個
+        // 失敗,修好路徑也只能重啟 app。重置後下次請求會重新 spawn
         this.broadcast({ state: "error", detail: String(err) });
+        const e = new Error(`sidecar error: ${String(err)}`);
+        for (const p of this.pending.values()) p.reject(e);
+        this.pending.clear();
+        this.proc = null;
+        this.readyPromise = null;
         if (!ready) rejectReady(err);
       });
       proc.on("exit", (code) => {
@@ -106,19 +114,40 @@ class OcrSidecar {
     return this.readyPromise;
   }
 
-  async request<T>(cmd: string, params: Record<string, unknown>): Promise<T> {
+  /** timeoutMs 從 ready 之後起算(模型首次下載/載入由 ensureStarted 管,
+   * 有 loading 進度事件,不設限)。sidecar 活著但卡死(病態圖片、native 層
+   * hang)時,pending 不再永久懸置,renderer 端拿到明確錯誤可重試。 */
+  async request<T>(cmd: string, params: Record<string, unknown>, timeoutMs = 120_000): Promise<T> {
     await this.ensureStarted();
     if (!this.proc) throw new Error("sidecar not running");
     const id = this.nextId++;
     const payload = JSON.stringify({ id, cmd, ...params }) + "\n";
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: never) => void, reject });
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error(`sidecar timeout: ${cmd}(${timeoutMs}ms)`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: ((v: never) => {
+          clearTimeout(timer);
+          resolve(v);
+        }) as (v: never) => void,
+        reject: (e: Error) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
       this.proc!.stdin.write(payload);
     });
   }
 
   dispose() {
-    this.proc?.kill();
+    const proc = this.proc;
+    if (!proc) return;
+    proc.kill();
+    // ONNX/torch 卡在 native call 時對 SIGTERM 沒有反應點:2 秒沒退就 SIGKILL。
+    // 已知限制:app 若在計時器到期前完全退出,兜底不會執行(POC 接受)
+    const killTimer = setTimeout(() => proc.kill("SIGKILL"), 2000);
+    proc.once("exit", () => clearTimeout(killTimer));
   }
 }
 
