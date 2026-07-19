@@ -1,11 +1,17 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { registerDialogHandlers } from "./ipc/dialog";
+import { registerFontHandlers } from "./ipc/fonts";
 import { registerSskHandlers } from "./ipc/ssk";
 import { registerOcrHandlers } from "./ipc/ocr";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerWindowControlHandlers } from "./ipc/windowControls";
 import { handleLocalFileProtocol, registerLocalFileScheme } from "./protocol";
+import { applyFontconfig } from "./fonts/fontconfig";
 import { createWindow } from "./window";
+
+// 匯入字體資料夾接進 app 私有 fontconfig。必須趕在 Chromium 初始化
+// 字體棧之前設 env,所以擺在 module 頂層、任何 ready 之前
+applyFontconfig();
 
 // 單實例(桌面應用慣例:再次啟動 = 喚起既有視窗)。同時根絕多實例共搶
 // userData 的問題——Chromium 沒設計成多進程共用同一 profile,兩個實例
@@ -42,6 +48,7 @@ app.whenReady().then(() => {
   registerSskHandlers();
   registerProjectHandlers();
   registerOcrHandlers();
+  registerFontHandlers();
   createWindow();
 });
 

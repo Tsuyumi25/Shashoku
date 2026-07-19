@@ -22,10 +22,11 @@
 <script setup lang="ts">
 import { appMode, type AppMode } from '@/lib/appMode'
 
-// 工序順序:翻譯 → 嵌字 → 校對
+// 工序順序:翻譯 → 嵌字 → 校對;字體是工序外的參考視圖,排最後
 const MODES: { id: AppMode; label: string }[] = [
   { id: 'translate', label: '翻譯' },
   { id: 'letter', label: '嵌字' },
   { id: 'proofread', label: '校對' },
+  { id: 'fonts', label: '字體' },
 ]
 </script>

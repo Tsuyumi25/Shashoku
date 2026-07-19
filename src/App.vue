@@ -47,6 +47,7 @@
       <TranslateMode v-show="appMode === 'translate'" />
       <LetterMode v-show="appMode === 'letter'" />
       <ProofreadMode v-show="appMode === 'proofread'" />
+      <FontMode v-show="appMode === 'fonts'" />
     </main>
 
     <!-- dirty 時的確認（原版 是/否/取消 對話框），新建/開啟/關窗共用 -->
@@ -90,6 +91,7 @@ import { useDark, useEventListener } from '@vueuse/core'
 import { Minus, Moon, Square, Sun, X } from '@lucide/vue'
 import { toast, Toaster } from 'vue-sonner'
 import AppMenuBar from '@/components/AppMenuBar.vue'
+import FontMode from '@/modes/FontMode.vue'
 import LetterMode from '@/modes/LetterMode.vue'
 import ProofreadMode from '@/modes/ProofreadMode.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
@@ -103,12 +105,17 @@ import {
 } from '@/components/ui/dialog'
 import { SSK_FILE_SUFFIX } from '@shared/ssk/constants'
 import { appMode, type AppMode } from '@/lib/appMode'
+import { initImportedFonts } from '@/lib/importedFonts'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 const api = window.api
 const project = useProjectStore()
 const editor = useEditorStore()
+
+// 匯入字體資料夾清單開機即載入(含 v1 localStorage 遷移)。渲染本身
+// 由 main 側 fontconfig 在啟動時接管,這裡只負責清單與分組資料
+void initImportedFonts()
 
 // 亮/暗主題：寫入 <html> 的 .dark class，記憶在 localStorage
 const isDark = useDark({ initialValue: 'dark' })
@@ -289,7 +296,7 @@ useEventListener(window, 'keydown', (e) => {
     )
       return
     e.preventDefault()
-    const order: AppMode[] = ['translate', 'letter', 'proofread']
+    const order: AppMode[] = ['translate', 'letter', 'proofread', 'fonts']
     appMode.value = order[(order.indexOf(appMode.value) + 1) % order.length]
   }
 })

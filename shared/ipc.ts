@@ -8,6 +8,10 @@ export const CHANNELS = {
   ocrPage: "ocr:page",
   ocrStatus: "ocr:status",
   inpaintBlocks: "ocr:inpaint",
+  pickFontFolder: "fonts:pickFolder",
+  scanFontFolder: "fonts:scan",
+  listFontFolders: "fonts:listFolders",
+  setFontFolders: "fonts:setFolders",
 } as const;
 
 export interface ProjectInfo {
@@ -51,10 +55,28 @@ export interface InpaintResult {
   patches: InpaintPatch[];
 }
 
+/** 字體檔 name table 解析出的一個 face 的名稱組 */
+export interface FontFaceName {
+  family: string;
+  fullName: string;
+  postscriptName: string;
+}
+
+/** 資料夾掃描結果的一個字體檔。ttc 集合檔 faces 會有多個。 */
+export interface ScannedFontFile {
+  path: string;
+  faces: FontFaceName[];
+}
+
 export interface ShashokuApi {
   openImageFolder(): Promise<ProjectInfo | null>;
   readImage(folder: string, name: string): Promise<Uint8Array>;
   ocrPage(folder: string, name: string): Promise<OcrPageResult>;
   inpaintBlocks(folder: string, name: string, blocks: OcrBlock[]): Promise<InpaintResult>;
   onOcrStatus(cb: (e: OcrStatusEvent) => void): void;
+  pickFontFolder(): Promise<string | null>;
+  scanFontFolder(folder: string): Promise<ScannedFontFile[]>;
+  listFontFolders(): Promise<string[]>;
+  /** 持久化 + 重寫 app 私有 fonts.conf;重啟後 fontconfig 生效 */
+  setFontFolders(folders: string[]): Promise<void>;
 }

@@ -32,6 +32,12 @@ const api: TranslateApi & ShashokuApi = {
   onOcrStatus: (cb) => {
     ipcRenderer.on(SSK.ocrStatus, (_e, ev: OcrStatusEvent) => cb(ev));
   },
+
+  // ── 字體 mode ──
+  pickFontFolder: () => ipcRenderer.invoke(SSK.pickFontFolder),
+  scanFontFolder: (folder) => ipcRenderer.invoke(SSK.scanFontFolder, folder),
+  listFontFolders: () => ipcRenderer.invoke(SSK.listFontFolders),
+  setFontFolders: (folders) => ipcRenderer.invoke(SSK.setFontFolders, folders),
 };
 
 contextBridge.exposeInMainWorld("api", api);

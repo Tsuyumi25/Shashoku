@@ -6,7 +6,13 @@ import { fileURLToPath } from "node:url";
 
 export function registerLocalFileScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: "local-file", privileges: { bypassCSP: true, stream: true } },
+    {
+      scheme: "local-file",
+      // supportFetchAPI + corsEnabled:字體載入(FontFace/CSS)是 web 平台
+      // 唯一強制 CORS 的資源類型,scheme 不在 CORS 允許清單就直接 ERR_FAILED
+      // (<img> 不走 CORS,所以圖片一直沒事)。回應側還要配 ACAO header。
+      privileges: { bypassCSP: true, stream: true, supportFetchAPI: true, corsEnabled: true },
+    },
   ]);
 }
 
@@ -23,7 +29,10 @@ export function handleLocalFileProtocol(): void {
       if (!info.isFile()) return new Response(null, { status: 404 });
       return new Response(Readable.toWeb(createReadStream(filePath)) as ReadableStream, {
         status: 200,
-        headers: { "content-length": String(info.size) },
+        headers: {
+          "content-length": String(info.size),
+          "access-control-allow-origin": "*",
+        },
       });
     } catch {
       return new Response(null, { status: 404 });
