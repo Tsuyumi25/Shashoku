@@ -35,7 +35,7 @@ import { useEditorStore } from "@/stores/editorStore";
 import { useProjectStore } from "@/stores/projectStore";
 import type { OcrBlock } from "../../shared/ipc";
 
-type Tool = "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
+type Tool = "move" | "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 
 // ---- 狀態 ----
 // doc / activeLayerId / undo 歷史活在 useEditor 單例,LayerPanel 共用同一份。
@@ -49,7 +49,7 @@ let displayCtx: CanvasRenderingContext2D | null = null;
 // 去字層惰性建立:第一次 inpaint 才生,插在底圖正上方;跟 doc 同生命週期
 let inpaintLayerId: string | null = null;
 
-const tool = ref<Tool>("brush");
+const tool = ref<Tool>("move"); // PS 慣例:開場是移動工具(home base,絕不誤創建)
 const brush = reactive({ size: 22, hardness: 0.85, color: "#e23b3b" });
 const tone = reactive({ pitch: 6, angle: 45, density: 0.5, color: "#000000" });
 
@@ -644,6 +644,16 @@ function onPointerDown(e: PointerEvent): void {
     painting.value = true;
     lastPt = p;
     toneRect.value = { x: p.x, y: p.y, w: 0, h: 0 };
+  } else if (tool.value === "move") {
+    // PS 的 Move tool:點物件 = 選取(+可拖移),點空白 = 取消選取,絕不創建
+    const hit = hitLabel(e);
+    if (hit) {
+      editorStore.selectedLabelId = hit.id;
+      draggingLabelId = hit.id;
+      dragLabelFrom = { x: hit.x, y: hit.y };
+    } else {
+      editorStore.selectedLabelId = null;
+    }
   } else if (tool.value === "text") {
     const page = loadedPage.value;
     if (!page) return; // 標籤活在工程檔:單檔模式沒有可寫的 SSOT
@@ -1031,7 +1041,11 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
   }
   if ((e.key === "Delete" || e.key === "Backspace") && !isTyping(e)) {
-    if (editorStore.selectedLabelId && loadedPage.value && tool.value === "text") {
+    if (
+      editorStore.selectedLabelId &&
+      loadedPage.value &&
+      (tool.value === "text" || tool.value === "move")
+    ) {
       pushLabelDelete(loadedPage.value, editorStore.selectedLabelId);
       return;
     }
@@ -1244,12 +1258,14 @@ const cursorClass = computed(() => {
   if (brushHud.value) return "cursor-default";
   if (rotating.value || rDown.value) return "cursor-grab";
   if (spaceDown.value || panning || tool.value === "hand") return "cursor-grab";
+  if (tool.value === "move") return "cursor-default";
   if (tool.value === "text") return "cursor-text";
   if (showBrushCursor.value) return "cursor-none"; // 圓圈輪廓即游標
   return "cursor-crosshair";
 });
 
 const TOOLS: { id: Tool; label: string; key: string }[] = [
+  { id: "move", label: "移動（選取物件）", key: "V" },
   { id: "hand", label: "手（平移）", key: "Space" },
   { id: "marquee", label: "選取（矩形）", key: "M" },
   { id: "brush", label: "筆刷", key: "B" },
@@ -1258,6 +1274,7 @@ const TOOLS: { id: Tool; label: string; key: string }[] = [
   { id: "text", label: "文字", key: "T" },
 ];
 const TOOL_KEYS: Record<string, Tool> = {
+  v: "move",
   m: "marquee",
   b: "brush",
   e: "erase",

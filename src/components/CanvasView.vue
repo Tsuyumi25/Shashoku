@@ -22,12 +22,13 @@
         <!-- stage:marker 與文字投影同在一個 transform 容器內(輕量 DOM) -->
         <div class="absolute top-0 left-0" :style="stageStyle">
           <template v-if="imageReady">
+            <!-- Space 按住 = pan 手勢:標籤/marker 全部穿透,事件一律落到背景 -->
             <LabelTextOverlay
               :width="natural.w"
               :height="natural.h"
               :labels="currentFile.labels"
               :text-style="textPreviewStyle"
-              interactive
+              :interactive="!spaceDown"
               @select="(id) => (editor.selectedLabelId = id)"
               @edit="
                 (id) => {
@@ -39,6 +40,7 @@
             <LabelMarker
               v-for="(label, i) in currentFile.labels"
               :key="label.id"
+              :class="spaceDown && 'pointer-events-none'"
               :label
               :index="i"
               :scale="view.scale"
@@ -181,12 +183,15 @@ let rotateStartAngle = 0
 let rotateStartTheta = 0
 let lastEscAt = 0 // Esc 連按偵測(雙擊窗 400ms)= 視角重置,同嵌字 mode
 
-// 工作模式退場後滑鼠是無模式的直接操作:點空白新增、點 marker 選取、
-// 拖 marker 移動、右鍵 marker 刪除、拖空白 pan——靠拖曳閾值與事件目標區分
+// V/T 雙工具(V 同 PS Move,T 同嵌字的文字工具):move = 點 marker 選取/
+// 拖移、點空白取消選取,絕不創建;label = 點空白新增標號。
+// pan 統一走 Space 按住 + 拖(全視圖同手勢)
+const tool = ref<'move' | 'label'>('move')
+const spaceDown = ref(false)
 const canvasCursor = computed(() => {
   if (panning.value) return 'cursor-grabbing'
-  if (rotating.value || rDown.value) return 'cursor-grab'
-  return 'cursor-crosshair'
+  if (rotating.value || rDown.value || spaceDown.value) return 'cursor-grab'
+  return tool.value === 'label' ? 'cursor-crosshair' : 'cursor-default'
 })
 
 watch(
@@ -237,9 +242,6 @@ function onAuxClick(e: MouseEvent) {
 }
 
 // ── label 互動（模式化，對齊原版）──
-// 標號模式（或 Ctrl）：單擊空白 = 新增、右鍵 marker = 刪除、拖曳 marker = 移動
-// 其他模式：點 marker = 選取 + 聚焦翻譯框；檢查模式滑過 marker 即選取
-
 const DRAG_THRESHOLD_PX = 3
 
 function addLabelAt(clientX: number, clientY: number) {
@@ -258,7 +260,8 @@ function addLabelAt(clientX: number, clientY: number) {
   })
 }
 
-/** 背景 pointerdown：R 按住 = 旋轉;拖 = pan;標號模式下短按 = 新增 label */
+/** 背景 pointerdown：R 按住 = 旋轉;Space 按住 + 拖 = pan;
+ * 短按依工具分流——label 新增標號、move 取消選取 */
 let bgDownPos: { x: number; y: number } | null = null
 let panLast = { x: 0, y: 0 }
 function onBgPointerDown(e: PointerEvent) {
@@ -277,8 +280,10 @@ function onBgPointerDown(e: PointerEvent) {
   if (e.button !== 0) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   bgDownPos = { x: e.clientX, y: e.clientY }
-  panning.value = true
-  panLast = { x: e.clientX, y: e.clientY }
+  if (spaceDown.value) {
+    panning.value = true
+    panLast = { x: e.clientX, y: e.clientY }
+  }
 }
 function onPointerMove(e: PointerEvent) {
   if (rotating.value) {
@@ -302,11 +307,14 @@ function onBgPointerUp(e: PointerEvent) {
     rotating.value = false
     return
   }
+  const wasPanning = panning.value
   const isClick =
     bgDownPos && Math.hypot(e.clientX - bgDownPos.x, e.clientY - bgDownPos.y) < DRAG_THRESHOLD_PX
   bgDownPos = null
   panning.value = false
-  if (isClick) addLabelAt(e.clientX, e.clientY)
+  if (!isClick || wasPanning) return
+  if (tool.value === 'label') addLabelAt(e.clientX, e.clientY)
+  else editor.selectedLabelId = null
 }
 
 let dragging: {
@@ -380,6 +388,7 @@ function onMarkerContextMenu(label: LabelItem, e: MouseEvent) {
 }
 
 // 畫布快捷鍵（輸入框聚焦時不攔）：0 適應視窗、←/→/Tab 換頁、
+// V/T 切工具、Shift+T 輪換分組、Space 按住 pan、
 // R 按住旋轉、Esc 連按重置視角(同嵌字 mode)
 useEventListener(window, 'keydown', (e) => {
   if (appMode.value !== 'translate') return
@@ -394,6 +403,19 @@ useEventListener(window, 'keydown', (e) => {
     // Shift+Tab 留給 AppShell 的 mode 循環
     e.preventDefault()
     editor.pageBy(1)
+  } else if (e.key.toLowerCase() === 'v') {
+    tool.value = 'move'
+  } else if (e.key.toLowerCase() === 't') {
+    if (e.shiftKey) {
+      // Shift+T:輪換標號的作用分組(1-9 直選的循環版)
+      const n = project.header.groups.length
+      if (n > 0) editor.activeCategory = (editor.activeCategory % n) + 1
+    } else {
+      tool.value = 'label'
+    }
+  } else if (e.code === 'Space') {
+    spaceDown.value = true
+    e.preventDefault()
   } else if (e.key.toLowerCase() === 'r') {
     rDown.value = true
   } else if (e.key === 'Escape') {
@@ -410,9 +432,10 @@ useEventListener(window, 'keydown', (e) => {
   }
 })
 
-// keyup 不 guard mode:切走前按住的 R 要能歸零
+// keyup 不 guard mode:切走前按住的 R/Space 要能歸零
 useEventListener(window, 'keyup', (e) => {
   if (e.key.toLowerCase() === 'r') rDown.value = false
+  if (e.code === 'Space') spaceDown.value = false
 })
 
 const stageStyle = computed(() => ({

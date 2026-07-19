@@ -38,7 +38,7 @@
     <main class="flex min-w-0 flex-1 flex-col">
       <div
         class="relative flex min-h-0 flex-1 select-none overflow-hidden"
-        :class="panning ? 'cursor-grabbing' : 'cursor-grab'"
+        :class="panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'"
         style="touch-action: none"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
@@ -288,11 +288,12 @@ watch(
 // 嵌字側的像素/圖層變更與 doc 換頁 → 成品側重畫
 watch([engine.layersTick, engine.docPage], scheduleRedraw)
 
-// ---- pan(拖曳,左鍵/中鍵)----
+// ---- pan(Space 按住 + 拖,全視圖統一手勢;中鍵拖曳同嵌字)----
+const spaceDown = ref(false)
 const panning = ref(false)
 let panLast = { x: 0, y: 0 }
 function onPointerDown(e: PointerEvent): void {
-  if (e.button !== 0 && e.button !== 1) return
+  if (!(e.button === 1 || (e.button === 0 && spaceDown.value))) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   panning.value = true
   panLast = { x: e.clientX, y: e.clientY }
@@ -307,7 +308,7 @@ function onPointerUp(e: PointerEvent): void {
   panning.value = false
 }
 
-// ---- 鍵盤:0 = fit、←/→/Tab 換頁、Esc 連按 = 重置視角 ----
+// ---- 鍵盤:0 = fit、←/→/Tab 換頁、Space 按住 pan、Esc 連按 = 重置視角 ----
 let lastEscAt = 0
 useEventListener(window, 'keydown', (e) => {
   if (appMode.value !== 'proofread') return
@@ -315,7 +316,10 @@ useEventListener(window, 'keydown', (e) => {
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
   if (el instanceof HTMLSelectElement) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
-  if (e.key === '0') refit()
+  if (e.code === 'Space') {
+    spaceDown.value = true
+    e.preventDefault()
+  } else if (e.key === '0') refit()
   else if (e.key === 'ArrowLeft') editorStore.pageBy(-1)
   else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
     // Shift+Tab 留給 AppShell 的 mode 循環
@@ -327,6 +331,11 @@ useEventListener(window, 'keydown', (e) => {
     lastEscAt = isDouble ? 0 : now
     if (isDouble) refit()
   }
+})
+
+// keyup 不 guard mode:切走前按住的 Space 要能歸零
+useEventListener(window, 'keyup', (e) => {
+  if (e.code === 'Space') spaceDown.value = false
 })
 </script>
 
