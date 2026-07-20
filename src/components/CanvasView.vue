@@ -14,7 +14,7 @@
       @contextmenu.prevent
       @auxclick="onAuxClick"
     >
-      <template v-if="currentFile && !currentFile.missing">
+      <template v-if="currentFile && currentFile.badge === 'ok'">
         <!-- 底圖:視口 canvas + ctx transform(與嵌字同一條渲染路)。
              CSS transform 縮小 <img> 走 Chromium 的 mipmap 平滑,fit 倍率下
              明顯偏糊;canvas 畫「高品質預縮版」+ 殘餘 bilinear,銳而不混疊。
@@ -74,7 +74,7 @@
         v-else
         class="flex h-full items-center justify-center text-sm text-muted-foreground select-none"
       >
-        <template v-if="currentFile?.missing">圖檔不存在：{{ currentFile.filename }}</template>
+        <template v-if="currentFile && currentFile.badge !== 'ok'">圖檔不存在：{{ currentFile.filename }}</template>
         <template v-else-if="project.isOpen">底部選一張圖</template>
         <template v-else>開啟一個漫畫圖片資料夾開始工作</template>
       </div>
@@ -265,7 +265,7 @@ const DRAG_THRESHOLD_PX = 3
 
 function addLabelAt(clientX: number, clientY: number) {
   const file = currentFile.value
-  if (!file || file.missing || !imageReady.value || !containerRef.value) return
+  if (!file || file.badge !== 'ok' || !imageReady.value || !containerRef.value) return
   const rect = containerRef.value.getBoundingClientRect()
   const content = screenToContentPx(clientX, clientY, rect, view)
   if (content.x < 0 || content.x > natural.value.w || content.y < 0 || content.y > natural.value.h)
@@ -434,7 +434,7 @@ function onLabelDragOver(e: DragEvent) {
     !e.dataTransfer ||
     !Array.from(e.dataTransfer.types).includes(LABEL_DRAG_TYPE) ||
     !currentFile.value ||
-    currentFile.value.missing ||
+    currentFile.value.badge !== 'ok' ||
     !imageReady.value
   ) return
   e.preventDefault()
@@ -443,7 +443,7 @@ function onLabelDragOver(e: DragEvent) {
 
 function onLabelDrop(e: DragEvent) {
   const file = currentFile.value
-  if (!file || file.missing || !imageReady.value || !containerRef.value || !e.dataTransfer) return
+  if (!file || file.badge !== 'ok' || !imageReady.value || !containerRef.value || !e.dataTransfer) return
   const payload = parseLabelDrag(e.dataTransfer.getData(LABEL_DRAG_TYPE))
   if (!payload) return
   e.preventDefault()

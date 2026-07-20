@@ -223,7 +223,9 @@ export const useEditorStore = defineStore('editor', () => {
         project.addGroup(name)
       },
       undo: () => {
-        project.header.groups.pop()
+        // 用 store method 才會標 metaDirty;直接 pop 會繞過 dirty flag
+        // 導致 Ctrl+S 認為無需存檔,但磁碟其實已含被 undo 的 group(finding 5)
+        project.removeLastGroup()
       },
     })
   }

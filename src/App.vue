@@ -104,7 +104,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { SSK_FILE_SUFFIX } from '@shared/ssk/constants'
 import { appMode, type AppMode } from '@/lib/appMode'
 import { initImportedFonts } from '@/lib/importedFonts'
 import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
@@ -270,25 +269,9 @@ async function onSave() {
 }
 
 async function onSaveAs() {
-  await flushPendingEdit()
-  if (!project.folderPath) return
-  try {
-    const folderBasename = project.folderPath.split(/[\\/]/).pop() || 'project'
-    const saved = await api.saveSskAs(
-      project.folderPath,
-      `${folderBasename}${SSK_FILE_SUFFIX}`,
-      project.serialize(),
-    )
-    if (saved !== null) {
-      project.projectFilePath = saved
-      project.dirty = false
-      toast.success('已另存新檔')
-    }
-  } catch (err) {
-    toast.error('另存失敗', {
-      description: err instanceof Error ? err.message : String(err),
-    })
-  }
+  // 新架構下專案位置由 root 資料夾決定,「另存」需要複製整個資料夾。
+  // Stage 3 的 Import UI 會涵蓋這個場景;現階段先提示未實作。
+  toast.info('新架構下另存需要複製整個專案資料夾;請用檔案總管手動處理')
 }
 
 // Ctrl+S 全 mode 通用：SSOT 是 ssk 工程檔，嵌字 mode 按下也是存翻譯資料

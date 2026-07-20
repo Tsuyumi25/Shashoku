@@ -103,7 +103,7 @@ const previewDirection = computed(() =>
 )
 
 function markDirty() {
-  project.dirty = true
+  project.markMetaDirty()
 }
 
 function toggleDirection() {

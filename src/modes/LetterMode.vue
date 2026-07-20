@@ -1404,7 +1404,7 @@ function setExportStyle<K extends "font" | "fontSizePx" | "textColor" | "textDir
 ): void {
   if (projectStore.exportConfig[key] === value) return;
   projectStore.exportConfig[key] = value;
-  projectStore.dirty = true;
+  projectStore.markMetaDirty();
 }
 
 // ---- 匯出:同一條合成管線的無變換(doc 1:1)版本 ----

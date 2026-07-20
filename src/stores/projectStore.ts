@@ -1,193 +1,207 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { LabelItem, ProjectFile, ProjectHeader } from '@/types/project'
-import type { SskExportConfig, SskProject } from '@shared/ssk/types'
-import { SSK_VERSION } from '@shared/ssk/types'
-import { DEFAULT_GROUPS, SSK_FILE_SUFFIX, MAX_GROUPS } from '@shared/ssk/constants'
-import { defaultExportConfig, parseSskProject, serializeSskProject } from '@shared/ssk/schema'
+import type { SskExportConfig } from '@shared/ssk/types'
+import type { ProjectJson } from '@shared/project/types'
+import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
+import { parseTranslation, serializeTranslation } from '@shared/page/schema'
+import { MAX_GROUPS } from '@shared/ssk/constants'
+import { SHASHOKU_DIR } from '@shared/ssk/constants'
 
-function defaultHeader(): ProjectHeader {
-  return {
-    groups: [...DEFAULT_GROUPS],
-    comment: '',
-  }
+// 內部 model:UI 用單一 text string(換行原生),序列化邊界才轉 lines[]
+function toLines(text: string): string[] {
+  return text.split('\n')
+}
+function fromLines(lines: string[]): string {
+  return lines.join('\n')
 }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-
-// ── 內部模型 ⇄ 工程檔格式的邊界轉換 ──
-// UI 的譯文是單一 string;檔案格式是行陣列(斷行語義顯式化)
-
-function toSskProject(
-  header: ProjectHeader,
-  files: ProjectFile[],
-  exportConfig: SskExportConfig,
-): SskProject {
-  return {
-    version: SSK_VERSION,
-    groups: [...header.groups],
-    comment: header.comment,
-    images: files.map((f) => ({
-      filename: f.filename,
-      labels: f.labels.map((l) => ({
-        id: l.id,
-        x: l.x,
-        y: l.y,
-        category: l.category,
-        lines: l.text.split('\n'),
-      })),
+/** 把一個 ProjectFile 序列化成該頁 translation.json 內容(module level,test 可 import) */
+export function serializeTranslationForFile(file: ProjectFile): string {
+  return serializeTranslation({
+    schemaVersion: 1,
+    labels: file.labels.map((l) => ({
+      id: l.id,
+      x: l.x,
+      y: l.y,
+      category: l.category,
+      lines: toLines(l.text),
     })),
-    exportConfig,
-  }
+  })
 }
 
-function fromSskProject(p: SskProject): { header: ProjectHeader; files: ProjectFile[] } {
-  return {
-    header: { groups: p.groups, comment: p.comment },
-    files: p.images.map((img) => ({
-      filename: img.filename,
-      labels: img.labels.map((l): LabelItem => ({
-        id: l.id,
-        x: l.x,
-        y: l.y,
-        category: l.category,
-        text: l.lines.join('\n'),
-      })),
-    })),
-  }
+/** rootPath + separator 拼接 shashoku/ 資料夾路徑;純字串,不觸碰 fs。 */
+function shashokuDirOf(rootPath: string): string {
+  return joinPath(rootPath, SHASHOKU_DIR)
+}
+function joinPath(...parts: string[]): string {
+  // 前端用 forward slash;electron 端傳來的 pageDir 已是絕對路徑,不會經過這裡
+  return parts.filter(Boolean).join('/')
 }
 
-/** 新建工程的預設檔名:資料夾名.ssk.json,撞名則加 _2、_3⋯ */
-export function nextProjectFilename(folderBasename: string, existing: string[]): string {
-  const taken = new Set(existing.map((n) => n.toLowerCase()))
-  let candidate = `${folderBasename}${SSK_FILE_SUFFIX}`
-  for (let n = 2; taken.has(candidate.toLowerCase()); n++) {
-    candidate = `${folderBasename}_${n}${SSK_FILE_SUFFIX}`
-  }
-  return candidate
-}
-
-/** 磁碟圖檔與工程檔記錄對帳:檔案有磁碟無 → missing;磁碟有檔案無 → 排序後附加 */
-export function reconcile(parsedFiles: ProjectFile[], diskImages: string[]): ProjectFile[] {
-  const diskSet = new Set(diskImages)
-  const known = new Set(parsedFiles.map((f) => f.filename))
-
-  const result = parsedFiles.map((f) => ({ ...f, missing: !diskSet.has(f.filename) }))
-  const extra = diskImages
-    .filter((name) => !known.has(name))
-    .sort(collator.compare)
-    .map((filename): ProjectFile => ({ filename, labels: [] }))
-
-  return [...result, ...extra]
-}
-
-/** 專案資料的唯一事實來源:header、files、exportConfig、dirty 與開檔/存檔。undo 由 editorStore 包裝。 */
+/**
+ * 專案資料的唯一事實來源。新架構:
+ * - rootPath = 使用者選的原圖資料夾(其下有 shashoku/)
+ * - projectMeta = shashoku/project.json 的解析結果
+ * - files = 每頁一個條目(對應 pages/<stem>/ 資料夾)
+ * - dirty 拆成 metaDirty + dirtyPages Set:save() 只寫變動的部分
+ */
 export const useProjectStore = defineStore('project', () => {
-  const folderPath = ref<string | null>(null)
-  const projectFilePath = ref<string | null>(null)
-  const header = ref<ProjectHeader>(defaultHeader())
+  const rootPath = ref<string | null>(null)
+  const projectMeta = ref<ProjectJson>(defaultProjectJson())
   const files = ref<ProjectFile[]>([])
-  const exportConfig = ref<SskExportConfig>(defaultExportConfig())
-  const dirty = ref(false)
+  const metaDirty = ref(false)
+  // dirty 頁的 filename 集合;用 array + include 檢查(頁數不多,reactivity 直觀)
+  const dirtyFilenames = ref<string[]>([])
 
-  const isOpen = computed(() => folderPath.value !== null)
+  const isOpen = computed(() => rootPath.value !== null)
+  const folderPath = computed(() => rootPath.value)
+  const header = computed<ProjectHeader>(() => ({
+    groups: projectMeta.value.groups,
+    comment: projectMeta.value.comment,
+  }))
+  const exportConfig = computed<SskExportConfig>(() => projectMeta.value.exportConfig)
+  const dirty = computed(() => metaDirty.value || dirtyFilenames.value.length > 0)
 
   function fileByName(filename: string): ProjectFile | undefined {
     return files.value.find((f) => f.filename === filename)
   }
 
-  function serialize(): string {
-    return serializeSskProject(toSskProject(header.value, files.value, exportConfig.value))
+  function markPageDirty(filename: string) {
+    if (!dirtyFilenames.value.includes(filename)) dirtyFilenames.value.push(filename)
   }
 
-  /**
-   * File > New:選圖片資料夾 → 建新工程 → 以「資料夾名.ssk.json」直接存檔。
-   * 回傳建立的工程檔名;取消回傳 null。
-   */
+  function reset() {
+    rootPath.value = null
+    projectMeta.value = defaultProjectJson()
+    files.value = []
+    metaDirty.value = false
+    dirtyFilenames.value = []
+  }
+
+  /** 把 IPC 回來的 OpenProjectResult 灌進 store(讀完每頁 translation.json)。 */
+  async function ingestProject(newRootPath: string, projectMetaRaw: string, pages: Array<{
+    filename: string
+    pageDir: string
+    badge: 'ok' | 'raw-missing' | 'page-missing'
+  }>): Promise<void> {
+    const meta = parseProjectJson(projectMetaRaw)
+    const loaded: ProjectFile[] = []
+    for (const p of pages) {
+      if (p.badge === 'raw-missing') {
+        // 孤兒 page 資料夾:仍讀 translation,讓使用者可查看/刪除
+      }
+      let labels: LabelItem[] = []
+      try {
+        const raw = await window.api.readPage(p.pageDir)
+        const t = parseTranslation(raw.translationRaw, meta.groups.length)
+        labels = t.labels.map((l) => ({
+          id: l.id,
+          x: l.x,
+          y: l.y,
+          category: l.category,
+          text: fromLines(l.lines),
+        }))
+      } catch {
+        // 損毀頁面:設空 labels,badge 已標示,不阻塞開檔
+      }
+      loaded.push({ filename: p.filename, pageDir: p.pageDir, labels, badge: p.badge })
+    }
+    rootPath.value = newRootPath
+    projectMeta.value = meta
+    files.value = loaded
+    metaDirty.value = false
+    dirtyFilenames.value = []
+  }
+
+  /** File > New:選 root → mkdir shashoku/ → 全複製原圖 → 灌 store。取消回傳 null。 */
   async function createNewProject(): Promise<string | null> {
-    const folder = await window.api.openProjectFolder()
-    if (folder === null) return null
-
-    const [images, ssks] = await Promise.all([
-      window.api.listImages(folder),
-      window.api.listSskFiles(folder),
-    ])
-
-    folderPath.value = folder
-    newProject(images)
-
-    const folderBasename = folder.split(/[\\/]/).pop() || 'project'
-    const filename = nextProjectFilename(
-      folderBasename,
-      ssks.map((f) => f.filename),
-    )
-
-    const path = `${folder}/${filename}`
-    await window.api.writeSskFile(path, serialize())
-    projectFilePath.value = path
-    dirty.value = false
-    return filename
-  }
-
-  /**
-   * File > Open:選 .ssk.json 檔,其所在資料夾即圖片資料夾。
-   * 取消回傳 null;解析失敗往上拋(由 UI 顯示錯誤)。
-   */
-  async function openExisting(): Promise<string | null> {
-    const picked = await window.api.openSskFile()
+    const picked = await window.api.pickRoot()
     if (picked === null) return null
+    const scan = await window.api.scanRoot(picked)
+    if (scan.hasShashokuDir) {
+      throw new Error(`此資料夾已含 ${SHASHOKU_DIR}/,請改用「開啟」`)
+    }
+    const result = await window.api.createProject(picked)
+    await ingestProject(picked, result.projectMetaRaw, result.pages)
+    return picked
+  }
 
-    const images = await window.api.listImages(picked.dir)
-    await loadProjectFile(picked.path, images)
-    folderPath.value = picked.dir
-    return picked.filename
+  /** File > Open:選 root → 讀 shashoku/project.json + pages 對帳。取消回傳 null。 */
+  async function openExisting(): Promise<string | null> {
+    const picked = await window.api.pickRoot()
+    if (picked === null) return null
+    const scan = await window.api.scanRoot(picked)
+    if (!scan.hasShashokuDir || !scan.hasSentinel) {
+      throw new Error(`此資料夾不是 Shashoku 專案(缺 ${SHASHOKU_DIR}/ 或 sentinel)`)
+    }
+    const result = await window.api.openProject(picked)
+    await ingestProject(picked, result.projectMetaRaw, result.pages)
+    return picked
   }
 
   /**
-   * 以既知路徑開啟工程檔(不經對話框):dev 自動開啟用,未來「最近專案」
-   * 也走這裡。路徑格式不合法回 null;讀取/解析失敗往上拋。
+   * 建立純 in-memory 專案(不寫檔、不呼叫 IPC)。給測試 hydrate 用,
+   * 也給未來「快速草稿模式」保留。rootPath 維持 null,save() 會走 noop。
    */
-  async function openByPath(sskPath: string): Promise<string | null> {
-    const m = sskPath.match(/^(.+)[\\/]([^\\/]+)$/)
-    if (!m) return null
-    const [, dir, filename] = m
-    const images = await window.api.listImages(dir)
-    await loadProjectFile(sskPath, images)
-    folderPath.value = dir
-    return filename
+  function newProject(diskImages: string[]): void {
+    projectMeta.value = defaultProjectJson()
+    files.value = diskImages.map((filename): ProjectFile => ({
+      filename,
+      pageDir: '',
+      labels: [],
+      badge: 'ok',
+    }))
+    rootPath.value = null
+    metaDirty.value = true
+    dirtyFilenames.value = []
   }
 
-  async function loadProjectFile(path: string, diskImages?: string[]) {
-    const images =
-      diskImages ?? (folderPath.value ? await window.api.listImages(folderPath.value) : [])
-    const raw = await window.api.readSskFile(path)
-    const parsed = parseSskProject(raw)
-    const { header: parsedHeader, files: parsedFiles } = fromSskProject(parsed)
-
-    header.value = parsedHeader
-    exportConfig.value = parsed.exportConfig
-    files.value = reconcile(parsedFiles, images)
-    projectFilePath.value = path
-    // 對帳若附加了工程檔沒有的新圖檔,記憶體狀態已與磁碟不同
-    dirty.value = parsedFiles.length !== files.value.length
+  /** dev 開機自動開啟用;傳入 rootPath 直接載入。失敗往上拋。 */
+  async function openByPath(rootPathToOpen: string): Promise<string | null> {
+    const scan = await window.api.scanRoot(rootPathToOpen)
+    if (!scan.hasShashokuDir || !scan.hasSentinel) return null
+    const result = await window.api.openProject(rootPathToOpen)
+    await ingestProject(rootPathToOpen, result.projectMetaRaw, result.pages)
+    return rootPathToOpen
   }
 
-  function newProject(diskImages: string[]) {
-    header.value = defaultHeader()
-    exportConfig.value = defaultExportConfig()
-    files.value = diskImages.map((filename): ProjectFile => ({ filename, labels: [] }))
-    projectFilePath.value = null
-    dirty.value = true
+  /** 存所有 dirty 頁 + project.json(若 metaDirty)。無 open 專案回 'noop'。 */
+  async function save(): Promise<'saved' | 'canceled' | 'noop'> {
+    if (rootPath.value === null) return 'noop'
+    if (!dirty.value) return 'saved'
+
+    // 存 dirty 頁的 translation
+    for (const filename of [...dirtyFilenames.value]) {
+      const file = fileByName(filename)
+      if (!file) continue
+      const raw = await window.api.readPage(file.pageDir).catch(() => null)
+      await window.api.writePage(file.pageDir, {
+        // manifest 保持既有內容(Stage 4 才會由 autosave 觸發 layer 落地)
+        manifestRaw: raw?.manifestRaw ?? '{"schemaVersion":1,"layers":[]}\n',
+        translationRaw: serializeTranslationForFile(file),
+      })
+    }
+    dirtyFilenames.value = []
+
+    if (metaDirty.value) {
+      await window.api.writeProjectMeta(
+        shashokuDirOf(rootPath.value),
+        serializeProjectJson(projectMeta.value),
+      )
+      metaDirty.value = false
+    }
+    return 'saved'
   }
 
-  // ── label CRUD(純資料操作;undo 命令由 editorStore 建構)──
+  // ── label CRUD(語意跟舊版一致;每動一次標該頁 dirty)──
 
   function addLabel(filename: string, label: LabelItem, index?: number) {
     const file = fileByName(filename)
     if (!file) return
     if (index === undefined) file.labels.push(label)
     else file.labels.splice(index, 0, label)
-    dirty.value = true
+    markPageDirty(filename)
   }
 
   function deleteLabel(filename: string, labelId: string): number {
@@ -196,7 +210,7 @@ export const useProjectStore = defineStore('project', () => {
     const index = file.labels.findIndex((l) => l.id === labelId)
     if (index !== -1) {
       file.labels.splice(index, 1)
-      dirty.value = true
+      markPageDirty(filename)
     }
     return index
   }
@@ -206,74 +220,78 @@ export const useProjectStore = defineStore('project', () => {
     if (!label) return
     label.x = x
     label.y = y
-    dirty.value = true
+    markPageDirty(filename)
   }
 
   function updateLabelText(filename: string, labelId: string, text: string) {
     const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
     if (!label) return
     label.text = text
-    dirty.value = true
+    markPageDirty(filename)
   }
 
   function updateLabelCategory(filename: string, labelId: string, category: number) {
     const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
     if (!label) return
     label.category = category
-    dirty.value = true
+    markPageDirty(filename)
   }
 
-  // ── group ──
+  // ── group(專案級 metadata,標 metaDirty)──
 
   function addGroup(name: string): boolean {
-    if (header.value.groups.length >= MAX_GROUPS) return false
-    header.value.groups.push(name)
-    dirty.value = true
+    if (projectMeta.value.groups.length >= MAX_GROUPS) return false
+    projectMeta.value.groups.push(name)
+    metaDirty.value = true
     return true
   }
 
   function renameGroup(index: number, name: string) {
-    if (index < 0 || index >= header.value.groups.length) return
-    header.value.groups[index] = name
-    dirty.value = true
+    const groups = projectMeta.value.groups
+    if (index < 0 || index >= groups.length) return
+    groups[index] = name
+    metaDirty.value = true
   }
 
-  // ── save ──
+  /** 移除尾部一組;供 cmdAddGroup 的 undo 呼叫,以確保 metaDirty 被標。 */
+  function removeLastGroup(): void {
+    if (projectMeta.value.groups.length === 0) return
+    projectMeta.value.groups.pop()
+    metaDirty.value = true
+  }
 
-  async function save(): Promise<'saved' | 'canceled' | 'noop'> {
-    if (!folderPath.value) return 'noop'
-    const content = serialize()
-    if (projectFilePath.value) {
-      await window.api.writeSskFile(projectFilePath.value, content)
-    } else {
-      const folderBasename = folderPath.value.split(/[\\/]/).pop() || 'project'
-      const saved = await window.api.saveSskAs(
-        folderPath.value,
-        `${folderBasename}${SSK_FILE_SUFFIX}`,
-        content,
-      )
-      if (saved === null) return 'canceled'
-      projectFilePath.value = saved
-    }
-    dirty.value = false
-    return 'saved'
+  function updateComment(text: string) {
+    if (projectMeta.value.comment === text) return
+    projectMeta.value.comment = text
+    metaDirty.value = true
+  }
+
+  /** 直接改 exportConfig 或 groups 後,UI 呼叫這個標髒(避免直接動 dirty computed) */
+  function markMetaDirty() {
+    metaDirty.value = true
   }
 
   return {
-    folderPath,
-    projectFilePath,
-    header,
+    // state (readonly-ish;某些欄位對外可寫是為了跟舊 test 保留相容)
+    rootPath,
+    projectMeta,
     files,
+    dirtyFilenames,
+    // computed
+    folderPath,
+    header,
     exportConfig,
     dirty,
     isOpen,
+    metaDirty,
+    // methods
     fileByName,
-    serialize,
+    reset,
+    newProject,
     createNewProject,
     openExisting,
     openByPath,
-    loadProjectFile,
-    newProject,
+    save,
     addLabel,
     deleteLabel,
     moveLabel,
@@ -281,6 +299,8 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelCategory,
     addGroup,
     renameGroup,
-    save,
+    removeLastGroup,
+    updateComment,
+    markMetaDirty,
   }
 })

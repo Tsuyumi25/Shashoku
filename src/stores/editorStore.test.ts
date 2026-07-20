@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { LabelItem } from '@/types/project'
 import { useEditorStore } from './editorStore'
-import { useProjectStore } from './projectStore'
+import { serializeTranslationForFile, useProjectStore } from './projectStore'
 
 function label(id: string, x = 0.1, y = 0.2, category = 1, text = ''): LabelItem {
   return { id, x, y, category, text }
@@ -133,6 +133,9 @@ describe('editorStore undo/redo', () => {
     expect(project.header.groups[2]).toBe('分組3')
     editor.undo() // add group
     expect(project.header.groups).toHaveLength(2)
+    // finding 5:undo add group 必須走 store method 才會標 metaDirty,
+    // 否則 save() 會 short-circuit,磁碟仍留著已 undo 的分組
+    expect(project.metaDirty).toBe(true)
     editor.undo() // category
     expect(l().category).toBe(1)
     editor.undo() // text
@@ -184,14 +187,16 @@ describe('editorStore undo/redo', () => {
     editor.cmdAddLabel('001.jpg', label('a', 0.123456, 0.5, 1, '第一句'))
     editor.cmdAddLabel('002.jpg', label('b', 0.9, 0.05, 2, '第二句\n第二行'))
 
-    const out = JSON.parse(project.serialize())
-    expect(out.version).toBe(1)
-    expect(out.images.map((i: { filename: string }) => i.filename)).toEqual(['001.jpg', '002.jpg'])
+    // 新架構:每頁一份 translation.json,分別序列化驗
+    const t1 = JSON.parse(serializeTranslationForFile(project.fileByName('001.jpg')!))
+    const t2 = JSON.parse(serializeTranslationForFile(project.fileByName('002.jpg')!))
+    expect(t1.schemaVersion).toBe(1)
+    expect(t2.schemaVersion).toBe(1)
     // 譯文的手動斷行序列化為行陣列
-    expect(out.images[0].labels[0].lines).toEqual(['第一句'])
-    expect(out.images[1].labels[0].lines).toEqual(['第二句', '第二行'])
+    expect(t1.labels[0].lines).toEqual(['第一句'])
+    expect(t2.labels[0].lines).toEqual(['第二句', '第二行'])
     // JSON 保留完整座標精度(txt 時代截三位的限制不再存在)
-    expect(out.images[0].labels[0].x).toBe(0.123456)
+    expect(t1.labels[0].x).toBe(0.123456)
     expect(project.dirty).toBe(true)
   })
 })

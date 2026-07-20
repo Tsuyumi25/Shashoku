@@ -96,8 +96,7 @@ function onAddGroup() {
 function onCommentBlur(e: Event) {
   const text = (e.target as HTMLTextAreaElement).value
   if (text !== commentBeforeEdit.value) {
-    project.header.comment = text
-    project.dirty = true
+    project.updateComment(text)
   }
 }
 </script>
