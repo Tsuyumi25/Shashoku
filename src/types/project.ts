@@ -11,6 +11,8 @@ export interface LabelItem {
   /** 分組編號 1~9,對應 header.groups 的 index+1 */
   category: number
   text: string
+  /** z-order 錨定:label 疊在此 layer 之上;undefined = 未錨定(最頂層) */
+  anchorLayerId?: string
 }
 
 export interface ProjectFile {

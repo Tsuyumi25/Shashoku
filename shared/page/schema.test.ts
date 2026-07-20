@@ -242,6 +242,19 @@ describe('translation.json', () => {
     const parsed = parseTranslation(JSON.stringify(noId))
     expect(parsed.labels[0].id).toBeTruthy()
   })
+
+  it('anchorLayerId roundtrip:有錨定的 label 序列化後可讀回(gpt-11)', () => {
+    const t: TranslationJson = {
+      schemaVersion: TRANSLATION_SCHEMA_VERSION,
+      labels: [
+        { id: 'a', x: 0.1, y: 0.2, category: 1, lines: ['浮動,無錨'] },
+        { id: 'b', x: 0.3, y: 0.4, category: 1, lines: ['錨到底圖上方'], anchorLayerId: 'layer-bg' },
+      ],
+    }
+    const back = parseTranslation(serializeTranslation(t))
+    expect(back.labels[0].anchorLayerId).toBeUndefined()
+    expect(back.labels[1].anchorLayerId).toBe('layer-bg')
+  })
 })
 
 // ── ocr.json ──

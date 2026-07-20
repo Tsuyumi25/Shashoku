@@ -15,6 +15,12 @@ export interface SskLabel {
   category: number
   /** 譯文行陣列:每元素一行,禁止內嵌換行(手動斷行顯式化) */
   lines: string[]
+  /**
+   * z-order 錨定:label 渲染在此 layer 之上、下一 layer 之下(scene 疊層)。
+   * undefined = 未錨定(繪製在所有 layer 上方,即傳統 label overlay 位置)。
+   * layerId 對應 ManifestJson.layers[].id;若對應 layer 消失,渲染時視為未錨定。
+   */
+  anchorLayerId?: string
 }
 
 export type DocTemplateMode = 'auto' | 'none' | 'custom'

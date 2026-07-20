@@ -293,7 +293,13 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
-  labelAnchors.value = new Map(); // 錨定跟著圖層生命週期走(圖層已全部重建)
+  // 從 store 內 labels.anchorLayerId 還原錨定 Map(gpt-11);單檔模式無專案頁 → 空
+  const currentFile = loadedPage.value ? projectStore.fileByName(loadedPage.value) : null;
+  const anchors: Array<[string, string]> = [];
+  for (const l of currentFile?.labels ?? []) {
+    if (l.anchorLayerId) anchors.push([l.id, l.anchorLayerId]);
+  }
+  labelAnchors.value = new Map(anchors);
   perf.imageSize = `${d.width}×${d.height}`;
 
   // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
@@ -1254,7 +1260,7 @@ function hitLabel(e: PointerEvent): LabelItem | null {
   return null;
 }
 
-/** 設定/解除標籤的圖層錨定(null = 回浮動),入嵌字 History。 */
+/** 設定/解除標籤的圖層錨定(null = 回浮動),入嵌字 History,並同步至 store 持久化。 */
 function setLabelAnchor(labelId: string, layerId: string | null): void {
   const prev = labelAnchors.value.get(labelId) ?? null;
   if (prev === layerId) return;
@@ -1263,6 +1269,8 @@ function setLabelAnchor(labelId: string, layerId: string | null): void {
     if (v === null) next.delete(labelId);
     else next.set(labelId, v);
     labelAnchors.value = next; // 換新 Map:讓 computed/watch 確定看見變更
+    // 同步 store:進 translation.json 的 anchorLayerId 欄位,Ctrl+S 落地(gpt-11)
+    if (loadedPage.value) projectStore.updateLabelAnchor(loadedPage.value, labelId, v);
   };
   apply(layerId);
   editor.history.push({

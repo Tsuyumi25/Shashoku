@@ -167,7 +167,12 @@ function parseLabelForTranslation(v: unknown, i: number, groupCount: number | nu
     return line
   })
   const id = typeof v.id === 'string' && v.id.length > 0 ? v.id : generateId()
-  return { id, x, y, category, lines: parsedLines }
+  const label: SskLabel = { id, x, y, category, lines: parsedLines }
+  // anchorLayerId 選用:字串則保留;未設或非字串則不帶(undefined)
+  if (typeof v.anchorLayerId === 'string' && v.anchorLayerId.length > 0) {
+    label.anchorLayerId = v.anchorLayerId
+  }
+  return label
 }
 
 export function defaultTranslation(): TranslationJson {
@@ -197,13 +202,17 @@ export function parseTranslation(raw: string, groupCount: number | null = null):
 export function serializeTranslation(t: TranslationJson): string {
   const out = {
     schemaVersion: t.schemaVersion,
-    labels: t.labels.map((l) => ({
-      id: l.id,
-      x: l.x,
-      y: l.y,
-      category: l.category,
-      lines: l.lines,
-    })),
+    labels: t.labels.map((l) => {
+      const entry: Record<string, unknown> = {
+        id: l.id,
+        x: l.x,
+        y: l.y,
+        category: l.category,
+        lines: l.lines,
+      }
+      if (l.anchorLayerId !== undefined) entry.anchorLayerId = l.anchorLayerId
+      return entry
+    }),
   }
   return `${JSON.stringify(out, null, 2)}\n`
 }

@@ -20,13 +20,17 @@ function fromLines(lines: string[]): string {
 export function serializeTranslationForFile(file: ProjectFile): string {
   return serializeTranslation({
     schemaVersion: 1,
-    labels: file.labels.map((l) => ({
-      id: l.id,
-      x: l.x,
-      y: l.y,
-      category: l.category,
-      lines: toLines(l.text),
-    })),
+    labels: file.labels.map((l) => {
+      const entry: import('@shared/ssk/types').SskLabel = {
+        id: l.id,
+        x: l.x,
+        y: l.y,
+        category: l.category,
+        lines: toLines(l.text),
+      }
+      if (l.anchorLayerId !== undefined) entry.anchorLayerId = l.anchorLayerId
+      return entry
+    }),
   })
 }
 
@@ -113,6 +117,7 @@ export const useProjectStore = defineStore('project', () => {
           y: l.y,
           category: l.category,
           text: fromLines(l.lines),
+          anchorLayerId: l.anchorLayerId,
         }))
       } catch {
         // 損毀頁面:設空 labels,badge 已標示,不阻塞開檔
@@ -265,6 +270,15 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /** 設定 label 的 z-order 錨定:null = 清除(回到頂層 overlay);字串 = 錨到該 layer */
+  function updateLabelAnchor(filename: string, labelId: string, layerId: string | null) {
+    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    if (!label) return
+    if (layerId === null) delete label.anchorLayerId
+    else label.anchorLayerId = layerId
+    markPageDirty(filename)
+  }
+
   // ── group(專案級 metadata,標 metaDirty)──
 
   function addGroup(name: string): boolean {
@@ -330,6 +344,7 @@ export const useProjectStore = defineStore('project', () => {
     moveLabel,
     updateLabelText,
     updateLabelCategory,
+    updateLabelAnchor,
     addGroup,
     renameGroup,
     removeLastGroup,
