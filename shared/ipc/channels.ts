@@ -48,8 +48,14 @@ export interface ScanRootResult {
   hasSentinel: boolean
 }
 
-/** 檔名對應的 raw ↔ page 配對狀態,可見化雲端截斷與手動變更 */
-export type PageBadge = 'ok' | 'raw-missing' | 'page-missing'
+/**
+ * 檔名對應的 raw ↔ page 配對狀態,可見化雲端截斷與手動變更。
+ * - ok:raws + pages 對齊,可正常編輯
+ * - raw-missing:只有 pages/<n>/,raws/<n> 缺失(使用者刪了原檔)
+ * - page-missing:raws/<n> 有但 pages/<n>/ 缺(尚未 import 或雲端截斷)
+ * - damaged:manifest.json 損毀或無法 parse;禁止 autosave 覆寫,避免摧毀救援資料
+ */
+export type PageBadge = 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
 
 /** projectStore 用的頁面條目:結合 raws/ 檔名與 pages/ 資料夾 */
 export interface PageEntry {

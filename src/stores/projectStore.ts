@@ -99,7 +99,7 @@ export const useProjectStore = defineStore('project', () => {
   async function ingestProject(newRootPath: string, projectMetaRaw: string, pages: Array<{
     filename: string
     pageDir: string
-    badge: 'ok' | 'raw-missing' | 'page-missing'
+    badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
   }>): Promise<void> {
     const meta = parseProjectJson(projectMetaRaw)
     const loaded: ProjectFile[] = []

@@ -75,6 +75,17 @@ function stemOf(filename: string): string {
   return ext ? filename.slice(0, -ext.length) : filename;
 }
 
+/** 檢查 pages/<stem>/manifest.json 存在且可 parse。損毀 → false → damaged badge。 */
+async function manifestIsHealthy(pageDir: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
+    parseManifest(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function scanRoot(rootPath: string): Promise<ScanRootResult> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
   const [rootImages, hasShashokuDir] = await Promise.all([
@@ -100,12 +111,21 @@ async function buildOpenResult(rootPath: string): Promise<OpenProjectResult> {
   const pages: PageEntry[] = [];
   const seenStems = new Set<string>();
 
-  // 先按 raws 順序輸出「有 raw 的頁」
+  // 先按 raws 順序輸出「有 raw 的頁」;若對應 pages/<stem>/ 的 manifest 解不出來,
+  // 標 damaged(避免 autosave 用新 manifest 覆蓋還可能救援的 layers)
   for (const filename of rawFiles) {
     const stem = stemOf(filename);
     seenStems.add(stem);
-    const badge: PageBadge = pageDirSet.has(stem) ? "ok" : "page-missing";
-    pages.push({ filename, pageDir: join(pagesRoot, stem), badge });
+    const pageDir = join(pagesRoot, stem);
+    let badge: PageBadge;
+    if (!pageDirSet.has(stem)) {
+      badge = "page-missing";
+    } else if (await manifestIsHealthy(pageDir)) {
+      badge = "ok";
+    } else {
+      badge = "damaged";
+    }
+    pages.push({ filename, pageDir, badge });
   }
 
   // 再補「只有 page 資料夾、沒有對應 raw」的孤兒頁

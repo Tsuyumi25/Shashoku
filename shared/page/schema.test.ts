@@ -243,7 +243,7 @@ describe('translation.json', () => {
     expect(parsed.labels[0].id).toBeTruthy()
   })
 
-  it('anchorLayerId roundtrip:有錨定的 label 序列化後可讀回(gpt-11)', () => {
+  it('anchorLayerId roundtrip:有錨定的 label 序列化後可讀回', () => {
     const t: TranslationJson = {
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
       labels: [

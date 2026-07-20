@@ -20,8 +20,8 @@ export interface ProjectFile {
   labels: LabelItem[]
   /** 新架構下,pages/<stem>/ 的絕對路徑;save/load per-page 都靠它 */
   pageDir: string
-  /** raws ↔ pages 對帳狀態,可見化雲端同步斷裂與手動變更 */
-  badge: 'ok' | 'raw-missing' | 'page-missing'
+  /** raws ↔ pages 對帳狀態,可見化雲端同步斷裂與手動變更;damaged 禁 autosave */
+  badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
 }
 
 export interface ProjectHeader {

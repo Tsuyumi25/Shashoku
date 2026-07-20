@@ -45,6 +45,7 @@ import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
 import { useProjectStore } from "@/stores/projectStore";
 import type { OcrBlock } from "@shared/ipc/channels";
+import { toast } from "vue-sonner";
 
 type Tool = "move" | "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 
@@ -293,7 +294,7 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
-  // 從 store 內 labels.anchorLayerId 還原錨定 Map(gpt-11);單檔模式無專案頁 → 空
+  // 從 store 內 labels.anchorLayerId 還原錨定 Map;單檔模式無專案頁 → 空
   const currentFile = loadedPage.value ? projectStore.fileByName(loadedPage.value) : null;
   const anchors: Array<[string, string]> = [];
   for (const l of currentFile?.labels ?? []) {
@@ -343,6 +344,15 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
   const file = projectStore.fileByName(name);
   if (!rawsDir || !file || !file.pageDir) return;
 
+  // damaged 頁:openProject 已偵測 manifest 損毀;拒絕載入,提示使用者手動處理。
+  // 不建 doc 也不觸發 autosave(watch 已擋),避免用新 manifest 覆寫救援資料。
+  if (file.badge === "damaged") {
+    toast.error(`第 ${name} 頁的 manifest 損毀`, {
+      description: `請檢查 pages/${name.replace(/\.[^.]+$/, "")}/ 內部檔案`,
+    });
+    return;
+  }
+
   // 先讀 raws 拿 bitmap 尺寸(即使 manifest 有 layers 也要,因為需要 doc 的 w/h)
   const rawBytes = await window.api.readImage(rawsDir, name);
   const rawBitmap = await createImageBitmap(new Blob([rawBytes as unknown as BlobPart]));
@@ -353,7 +363,8 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
   const w = rawBitmap.width;
   const h = rawBitmap.height;
 
-  // 平行讀 manifest;解 manifest 失敗(損毀 / 舊格式)不阻斷,退到底圖層
+  // 讀 manifest;解析失敗代表 openProject 之後 disk 端有變化(邊際 case),
+  // 同樣拒絕載入而非靜默 fallback(避免覆寫救援資料)。
   let manifestLayers: import("@shared/page/types").LayerEntry[] = [];
   let pageOcrRaw: string | null = null;
   try {
@@ -364,11 +375,15 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
     }
     manifestLayers = parseManifest(pageData.manifestRaw).layers;
     pageOcrRaw = pageData.ocrRaw;
-  } catch {
-    manifestLayers = [];
+  } catch (err) {
+    rawBitmap.close();
+    toast.error(`第 ${name} 頁的 manifest 讀取失敗`, {
+      description: err instanceof Error ? err.message : String(err),
+    });
+    return;
   }
 
-  // OCR 快取還原(關 app 前跑過 OCR,重開時直接用)(gpt-9)
+  // OCR 快取還原:關 app 前跑過 OCR,重開時直接用
   if (pageOcrRaw !== null && ocrState[name] !== "running") {
     try {
       const ocr = parseOcr(pageOcrRaw);
@@ -427,13 +442,15 @@ watch(
 );
 
 // 統一 raster dirty hook:任何路徑呼叫 editor.changed() 都會 tick,涵蓋
-// inpaint / 圖層 CRUD / undo redo / merge down 等 mutation(gpt-7)。
+// inpaint / 圖層 CRUD / undo redo / merge down 等 mutation。
 // onPointerUp 的手工 schedule 保留是防止 layersTick 沒 tick 的邊際場景;
 // 兩者互為 safety net(autosave pending Map 會 dedupe 同頁重複排程)。
+// damaged 頁禁 autosave:避免用新 manifest 覆蓋還可救援的 layers。
 watch(layersTick, () => {
   if (!loadedPage.value || !doc.value) return;
   const file = projectStore.fileByName(loadedPage.value);
-  if (file?.pageDir) scheduleRasterAutosave(file.pageDir, doc.value);
+  if (!file?.pageDir || file.badge === "damaged") return;
+  scheduleRasterAutosave(file.pageDir, doc.value);
 });
 
 // ---- OCR(sidecar)----
@@ -444,7 +461,7 @@ async function ocrOne(name: string): Promise<void> {
     const res = await window.api.ocrPage(projectStore.rawsDir, name);
     ocrData[name] = res.blocks;
     ocrState[name] = "done";
-    // 落地 pages/<n>/ocr.json:關 app 後仍能還原,不必重跑 (gpt-9)
+    // 落地 pages/<n>/ocr.json:關 app 後仍能還原,不必重跑
     const file = projectStore.fileByName(name);
     if (file?.pageDir) {
       await window.api.writePage(file.pageDir, {
@@ -1000,7 +1017,9 @@ function onPointerUp(e: PointerEvent): void {
     doc.value
   ) {
     const file = projectStore.fileByName(loadedPage.value);
-    if (file?.pageDir) scheduleRasterAutosave(file.pageDir, doc.value);
+    if (file?.pageDir && file.badge !== "damaged") {
+      scheduleRasterAutosave(file.pageDir, doc.value);
+    }
   }
 
   painting.value = false;
@@ -1269,7 +1288,7 @@ function setLabelAnchor(labelId: string, layerId: string | null): void {
     if (v === null) next.delete(labelId);
     else next.set(labelId, v);
     labelAnchors.value = next; // 換新 Map:讓 computed/watch 確定看見變更
-    // 同步 store:進 translation.json 的 anchorLayerId 欄位,Ctrl+S 落地(gpt-11)
+    // 同步 store:進 translation.json 的 anchorLayerId 欄位,Ctrl+S 落地
     if (loadedPage.value) projectStore.updateLabelAnchor(loadedPage.value, labelId, v);
   };
   apply(layerId);

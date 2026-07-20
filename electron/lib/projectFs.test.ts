@@ -153,6 +153,23 @@ describe("openProject", () => {
     expect(r.pages.find((p) => p.filename === "01.png")!.badge).toBe("ok");
   });
 
+  it("badge=damaged:pages/<stem>/manifest.json 損毀無法 parse", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await fakePng(join(workDir, "02.png"), 2);
+    await createProject(workDir);
+    // 弄壞 01 頁的 manifest
+    await writeFile(
+      join(workDir, SHASHOKU_DIR, DIR_PAGES, "01", PAGE_MANIFEST_FILENAME),
+      "{ 完全不是合法 JSON",
+    );
+
+    const r = await openProject(workDir);
+    const p01 = r.pages.find((p) => p.filename === "01.png")!;
+    expect(p01.badge).toBe("damaged");
+    // 其他頁仍 ok
+    expect(r.pages.find((p) => p.filename === "02.png")!.badge).toBe("ok");
+  });
+
   it("badge=raw-missing:pages 有孤兒資料夾但 raws 無對應原圖", async () => {
     await fakePng(join(workDir, "01.png"), 1);
     await createProject(workDir);
