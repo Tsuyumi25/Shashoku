@@ -76,8 +76,10 @@ function bool(v: unknown, at: string, fallback: boolean): boolean {
 }
 
 /** 缺欄位補預設值(升級路徑);存在但值非法則拋錯(手改檔案的錯字要大聲失敗)。
- * export 給 shared/project/schema.ts 共用(全書 exportConfig 邏輯一致)。 */
-export function parseExportConfigStrict(v: unknown, groups: string[]): SskExportConfig {
+ * export 給 shared/project/schema.ts 共用(全書 exportConfig 邏輯一致)。
+ * `groupNames`:project.groups 的 name 陣列(用於驗 exportGroups[i] 是有效 group 名);
+ * 型別故意用 readonly string[] 而非 StyleGroup[],避免 shared/ssk ← shared/project 迴圈依賴。 */
+export function parseExportConfigStrict(v: unknown, groupNames: readonly string[]): SskExportConfig {
   const d = defaultExportConfig()
   if (v === undefined || v === null) return d
   if (!isRecord(v)) fail('exportConfig 必須是物件')
@@ -105,7 +107,7 @@ export function parseExportConfigStrict(v: unknown, groups: string[]): SskExport
   if (exportGroupsRaw !== undefined && exportGroupsRaw !== null) {
     if (!Array.isArray(exportGroupsRaw)) fail('exportConfig.exportGroups 必須是分組名陣列或 null')
     exportGroups = exportGroupsRaw.map((g, i) => {
-      if (typeof g !== 'string' || !groups.includes(g))
+      if (typeof g !== 'string' || !groupNames.includes(g))
         fail(`exportConfig.exportGroups[${i}] 必須是 groups 內既有的分組名`)
       return g
     })

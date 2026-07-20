@@ -194,10 +194,10 @@ useEventListener(window, 'keydown', (e) => {
     helpOpen.value = !helpOpen.value
     return
   }
-  // 1-9 切分組(新增 label 用的預設分組)
+  // 1-9 切分組(新增 label 用的預設分組;n 對應 groups[n-1].id)
   if (/^[1-9]$/.test(key)) {
     const n = Number(key)
-    if (n <= project.header.groups.length) editor.activeCategory = n
+    if (n <= project.header.groups.length) editor.activeGroupId = project.header.groups[n - 1].id
     return
   }
   if (key === 'Delete') {

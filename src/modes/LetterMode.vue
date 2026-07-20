@@ -36,11 +36,10 @@ import { setLabelDragPreview } from "@/lib/labelDragPreview";
 import {
   LABEL_DRAG_TYPE,
   parseLabelDrag,
-  resolveDropCategory,
+  resolveDropGroupId,
   serializeLabelDrag,
   type LabelDragPayload,
 } from "@/lib/labelDrag";
-import { CATEGORY_COLORS } from "@shared/ssk/constants";
 import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
 import { useProjectStore } from "@/stores/projectStore";
@@ -551,7 +550,7 @@ function makeLabel(xPercent: number, yPercent: number, text = ""): LabelItem {
     id: crypto.randomUUID(),
     x: clamp(xPercent, 0, 1),
     y: clamp(yPercent, 0, 1),
-    category: editorStore.activeCategory,
+    groupId: editorStore.activeGroupId ?? projectStore.header.groups[0]?.id ?? null,
     text,
   };
 }
@@ -1080,7 +1079,7 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const operation = e.altKey ? "copy" : "move";
   const payload: LabelDragPayload = {
-    version: 1,
+    version: 2,
     kind: "label",
     source: "main",
     operation,
@@ -1088,8 +1087,8 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
     sourceId: label.id,
     label: {
       text: label.text,
-      category: label.category,
-      groupName: projectStore.header.groups[label.category - 1] ?? "",
+      groupId: label.groupId,
+      groupName: groupNameOfLabel(label) || null,
     },
     grabOffset: {
       x: e.clientX - rect.left,
@@ -1116,6 +1115,7 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
     rotation: view.rotate,
     sourceRect: rect,
     hotspot: payload.grabOffset,
+    emptyDotColor: groupColorOfLabel(label),
   });
   payload.grabOffset = preview.grabOffset;
   e.dataTransfer.clearData();
@@ -1220,10 +1220,10 @@ function onLabelDrop(e: DragEvent): void {
     id: crypto.randomUUID(),
     x,
     y,
-    category: resolveDropCategory(
+    groupId: resolveDropGroupId(
       payload,
       projectStore.header.groups,
-      editorStore.activeCategory,
+      editorStore.activeGroupId ?? projectStore.header.groups[0]?.id ?? null,
     ),
     text: payload.label.text,
   });
@@ -1346,8 +1346,18 @@ function dotStyle(l: LabelItem): Record<string, string> {
     top: `${l.y * d.height - DOT_SIZE / 2}px`,
     width: `${DOT_SIZE}px`,
     height: `${DOT_SIZE}px`,
-    background: CATEGORY_COLORS[(l.category - 1) % CATEGORY_COLORS.length],
+    background: groupColorOfLabel(l) ?? "rgb(128, 128, 128)",
   };
+}
+
+/** label 綁的 group name(未綁時空字串);drag payload 與 marker 顯示共用 */
+function groupNameOfLabel(l: LabelItem): string {
+  if (l.groupId === null) return "";
+  return projectStore.header.groups.find((g) => g.id === l.groupId)?.name ?? "";
+}
+function groupColorOfLabel(l: LabelItem): string | undefined {
+  if (l.groupId === null) return undefined;
+  return projectStore.header.groups.find((g) => g.id === l.groupId)?.color;
 }
 
 // ---- 鍵盤 ----
@@ -1516,18 +1526,19 @@ function onAnchorChange(e: Event): void {
   setLabelAnchor(l.id, v === "" ? null : v);
 }
 
-function onLabelCategoryChange(e: Event): void {
+function onLabelGroupChange(e: Event): void {
   const page = loadedPage.value;
   const l = selectedLabel.value;
-  const v = Number((e.target as HTMLSelectElement).value);
-  if (!page || !l || l.category === v) return;
-  const prev = l.category;
+  const raw = (e.target as HTMLSelectElement).value;
+  const v: string | null = raw === "" ? null : raw;
+  if (!page || !l || l.groupId === v) return;
+  const prev = l.groupId;
   const id = l.id;
-  projectStore.updateLabelCategory(page, id, v);
+  projectStore.updateLabelGroupId(page, id, v);
   editor.history.push({
     label: "變更分組",
-    undo: () => projectStore.updateLabelCategory(page, id, prev),
-    redo: () => projectStore.updateLabelCategory(page, id, v),
+    undo: () => projectStore.updateLabelGroupId(page, id, prev),
+    redo: () => projectStore.updateLabelGroupId(page, id, v),
   });
 }
 
@@ -1951,11 +1962,12 @@ const TOOL_KEYS: Record<string, Tool> = {
             <select
               class="w-full rounded px-1 py-0.5"
               style="background: var(--accent); color: var(--foreground)"
-              :value="selectedLabel.category"
-              @change="onLabelCategoryChange"
+              :value="selectedLabel.groupId ?? ''"
+              @change="onLabelGroupChange"
             >
-              <option v-for="(g, i) in projectStore.header.groups" :key="i" :value="i + 1">
-                {{ i + 1 }} · {{ g }}
+              <option value="">未分組</option>
+              <option v-for="(g, i) in projectStore.header.groups" :key="g.id" :value="g.id">
+                {{ i + 1 }} · {{ g.name }}
               </option>
             </select>
           </label>

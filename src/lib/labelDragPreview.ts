@@ -1,4 +1,3 @@
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 import { labelTextCss, type LabelTextStyle } from '@/lib/labelTextStyle'
 import type { LabelItem } from '@/types/project'
 
@@ -7,6 +6,8 @@ interface LabelDragPreviewOptions {
   rotation: number
   sourceRect: DOMRect
   hotspot: { x: number; y: number }
+  /** 空 label 時的圓點色(通常從 label 綁的 group.color 取);未提供時 fallback 灰 */
+  emptyDotColor?: string
 }
 
 interface LabelDragPreviewMetrics {
@@ -40,7 +41,7 @@ export function setLabelDragPreview(
       width: `${diameter}px`,
       height: `${diameter}px`,
       borderRadius: '9999px',
-      backgroundColor: CATEGORY_COLORS[label.category - 1] ?? 'rgb(128, 128, 128)',
+      backgroundColor: options.emptyDotColor ?? 'rgb(128, 128, 128)',
     })
     wrapper.style.width = `${diameter}px`
     wrapper.style.height = `${diameter}px`

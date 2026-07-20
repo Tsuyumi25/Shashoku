@@ -58,7 +58,7 @@
               :natural
               :selected="label.id === editor.selectedLabelId"
               :show-group="editor.showGroups"
-              :group-name="project.header.groups[label.category - 1] ?? `分組${label.category}`"
+              :group-name="groupNameOf(label)"
               :native-draggable="!spaceDown"
               @marker-pointerdown="onMarkerPointerDown(label, $event)"
               @marker-dblclick="editor.requestEditorFocus()"
@@ -104,7 +104,7 @@ import { setLabelDragPreview } from '@/lib/labelDragPreview'
 import {
   LABEL_DRAG_TYPE,
   parseLabelDrag,
-  resolveDropCategory,
+  resolveDropGroupId,
   serializeLabelDrag,
   type LabelDragPayload,
 } from '@/lib/labelDrag'
@@ -114,6 +114,16 @@ const editor = useEditorStore()
 const textPreviewStyle = computed(() =>
   labelTextStyleFromExportConfig(project.exportConfig),
 )
+
+/** label 綁的 group name(未綁時空字串);marker overlay + drag payload 共用 */
+function groupNameOf(label: LabelItem): string {
+  if (label.groupId === null) return ''
+  return project.header.groups.find((g) => g.id === label.groupId)?.name ?? ''
+}
+function groupColorOf(label: LabelItem): string | undefined {
+  if (label.groupId === null) return undefined
+  return project.header.groups.find((g) => g.id === label.groupId)?.color
+}
 
 const containerRef = useTemplateRef('containerRef')
 const containerSize = ref({ w: 0, h: 0 })
@@ -274,7 +284,7 @@ function addLabelAt(clientX: number, clientY: number) {
     id: crypto.randomUUID(),
     x: content.x / natural.value.w,
     y: content.y / natural.value.h,
-    category: editor.activeCategory,
+    groupId: editor.activeGroupId ?? project.header.groups[0]?.id ?? null,
     text: '',
   })
 }
@@ -375,7 +385,7 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent) {
   const canvasRect = containerRef.value.getBoundingClientRect()
   const operation = e.altKey ? 'copy' : 'move'
   const payload: LabelDragPayload = {
-    version: 1,
+    version: 2,
     kind: 'label',
     source: 'main',
     operation,
@@ -383,8 +393,8 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent) {
     sourceId: label.id,
     label: {
       text: label.text,
-      category: label.category,
-      groupName: project.header.groups[label.category - 1] ?? '',
+      groupId: label.groupId,
+      groupName: groupNameOf(label) || null,
     },
     grabOffset: {
       x: e.clientX - rect.left,
@@ -410,6 +420,7 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent) {
     rotation: view.rotate,
     sourceRect: rect,
     hotspot: payload.grabOffset,
+    emptyDotColor: groupColorOf(label),
   })
   payload.grabOffset = preview.grabOffset
   e.dataTransfer.clearData()
@@ -492,7 +503,11 @@ function onLabelDrop(e: DragEvent) {
     id: crypto.randomUUID(),
     x,
     y,
-    category: resolveDropCategory(payload, project.header.groups, editor.activeCategory),
+    groupId: resolveDropGroupId(
+      payload,
+      project.header.groups,
+      editor.activeGroupId ?? project.header.groups[0]?.id ?? null,
+    ),
     text: payload.label.text,
   })
 }
@@ -530,8 +545,11 @@ useEventListener(window, 'keydown', (e) => {
   } else if (e.key.toLowerCase() === 't') {
     if (e.shiftKey) {
       // Shift+T:輪換標號的作用分組(1-9 直選的循環版)
-      const n = project.header.groups.length
-      if (n > 0) editor.activeCategory = (editor.activeCategory % n) + 1
+      const groups = project.header.groups
+      if (groups.length > 0) {
+        const cur = groups.findIndex((g) => g.id === editor.activeGroupId)
+        editor.activeGroupId = groups[(cur + 1) % groups.length].id
+      }
     } else {
       tool.value = 'label'
     }

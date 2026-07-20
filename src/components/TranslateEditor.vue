@@ -7,9 +7,9 @@
       <span v-if="selectedLabel" class="ml-2 flex items-center gap-1 text-xs text-muted-foreground">
         <span
           class="inline-block h-2.5 w-2.5 rounded-full"
-          :style="{ backgroundColor: CATEGORY_COLORS[selectedLabel.category - 1] ?? 'gray' }"
+          :style="{ backgroundColor: selectedGroup?.color ?? 'gray' }"
         />
-        {{ project.header.groups[selectedLabel.category - 1] ?? `分組${selectedLabel.category}` }}
+        {{ selectedGroup?.name ?? '未分組' }}
       </span>
     </div>
 
@@ -34,7 +34,6 @@
 
 <script setup lang="ts">
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -50,6 +49,11 @@ const selectedIndex = computed(() => labels.value.findIndex((l) => l.id === edit
 const selectedLabel = computed(() =>
   selectedIndex.value >= 0 ? labels.value[selectedIndex.value] : undefined,
 )
+const selectedGroup = computed(() => {
+  const gid = selectedLabel.value?.groupId
+  if (!gid) return undefined
+  return project.header.groups.find((g) => g.id === gid)
+})
 
 // 原版打字即時寫入 store；undo 粒度為「一次編輯段落」：
 // focus / 切換標籤時記下舊值，blur / 切換時 diff 提交一筆 command（lazy-do）

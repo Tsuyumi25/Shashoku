@@ -14,13 +14,19 @@ import {
   SENTINEL_FILENAME,
   SHASHOKU_DIR,
 } from "@shared/ssk/constants";
-import { parseProjectJson } from "@shared/project/schema";
+import {
+  defaultProjectJson,
+  parseProjectJson,
+  serializeProjectJson,
+} from "@shared/project/schema";
 import {
   parseManifest,
   parseTranslation,
   serializeManifest,
   serializeTranslation,
 } from "@shared/page/schema";
+import type { TranslationJson } from "@shared/page/types";
+import { TRANSLATION_SCHEMA_VERSION } from "@shared/page/types";
 import {
   createProject,
   importPages,
@@ -190,7 +196,10 @@ describe("openProject", () => {
     // 用手動組合模擬:建立 shashoku 但無圖無頁
     await mkdir(join(workDir, SHASHOKU_DIR, DIR_RAWS), { recursive: true });
     await mkdir(join(workDir, SHASHOKU_DIR, DIR_PAGES), { recursive: true });
-    await writeFile(join(workDir, SHASHOKU_DIR, PROJECT_JSON_FILENAME), '{"schemaVersion":1,"groups":["a"],"comment":"","exportConfig":{"docTemplate":"auto","docTemplateFilename":null,"outputFormat":"psd","ignoreNoLabelImages":true,"createLayerGroups":true,"font":null,"fontSizePx":null,"textColor":"#000000","textLeadingPercent":null,"textDirection":"keep","outputLabelIndex":false,"actionSetName":null,"outputFolderName":null,"exportGroups":null}}');
+    await writeFile(
+      join(workDir, SHASHOKU_DIR, PROJECT_JSON_FILENAME),
+      serializeProjectJson(defaultProjectJson()),
+    );
 
     const r = await openProject(workDir);
     expect(r.pages).toEqual([]);
@@ -203,9 +212,9 @@ describe("readPage / writePage", () => {
     await createProject(workDir);
 
     const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
-    const t = {
-      schemaVersion: 1 as const,
-      labels: [{ id: "l1", x: 0.5, y: 0.5, category: 1, lines: ["hi"] }],
+    const t: TranslationJson = {
+      schemaVersion: TRANSLATION_SCHEMA_VERSION,
+      labels: [{ id: "l1", x: 0.5, y: 0.5, groupId: null, lines: ["hi"] }],
     };
     const m = {
       schemaVersion: 1 as const,
@@ -243,7 +252,7 @@ describe("readPage / writePage", () => {
     const rdBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 8, 7]);
     await writePage(pageDir, {
       manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
-      translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
+      translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
       layerParts: { "background.png": bgBytes, "redraw.png": rdBytes },
     });
 
@@ -261,7 +270,7 @@ describe("readPage / writePage", () => {
     await expect(
       writePage(pageDir, {
         manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
-        translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
+        translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
         layerParts: { "../evil.png": new Uint8Array([1]) },
       }),
     ).rejects.toThrow(/路徑分隔符/);
@@ -291,7 +300,7 @@ describe("readPage / writePage", () => {
     };
     await writePage(pageDir, {
       manifestRaw: serializeManifest(m2),
-      translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
+      translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
     });
     const back = await readPage(pageDir);
     expect(parseManifest(back.manifestRaw)).toEqual(m2);
@@ -492,7 +501,7 @@ describe("寫入順序:「manifest 最後寫」 pattern", () => {
           },
         ],
       }),
-      translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
+      translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
       layerParts: { "bg.png": new Uint8Array([1, 2, 3]) },
     });
 

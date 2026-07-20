@@ -17,8 +17,9 @@ export interface Command {
 export const useEditorStore = defineStore('editor', () => {
   const currentFilename = ref<string | null>(null)
   const selectedLabelId = ref<string | null>(null)
-  /** 新增 label 時使用的分組（1~9） */
-  const activeCategory = ref(1)
+  /** 新增 label 時使用的分組 id;null = 未綁 group(走 project.defaultStyle)。
+   * UI 端(TranslateSidebar / LabelTable 等)負責決定初始值 fallback。 */
+  const activeGroupId = ref<string | null>(null)
   /** 畫布 marker 旁常駐顯示分組名。原版檢查模式的 AlwaysShowGroup——工作
    * 模式退場後,它是顯示偏好不是工作階段,降級為 toggle。 */
   const showGroups = ref(false)
@@ -200,34 +201,41 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  function cmdUpdateLabelCategory(
+  function cmdUpdateLabelGroupId(
     filename: string,
     labelId: string,
-    oldCategory: number,
-    newCategory: number,
+    oldGroupId: string | null,
+    newGroupId: string | null,
   ) {
-    if (oldCategory === newCategory) return
+    if (oldGroupId === newGroupId) return
     const project = useProjectStore()
     pushCommand({
-      label: `update-category ${labelId}`,
-      do: () => project.updateLabelCategory(filename, labelId, newCategory),
-      undo: () => project.updateLabelCategory(filename, labelId, oldCategory),
+      label: `update-groupId ${labelId}`,
+      do: () => project.updateLabelGroupId(filename, labelId, newGroupId),
+      undo: () => project.updateLabelGroupId(filename, labelId, oldGroupId),
     })
   }
 
-  function cmdAddGroup(name: string) {
+  /**
+   * 新增樣式群組;若 addGroup fail(超上限或重名)不 push undo。
+   * undo 用 restoreLastGroup 精準還原(帶完整 id + style,不是重建同名新 id)。
+   */
+  function cmdAddGroup(name: string): boolean {
     const project = useProjectStore()
-    pushCommand({
-      label: `add-group ${name}`,
-      do: () => {
-        project.addGroup(name)
+    const added = project.addGroup(name)
+    if (added === null) return false
+    pushCommand(
+      {
+        label: `add-group ${name}`,
+        do: () => project.restoreLastGroup(added),
+        undo: () => {
+          // 用 store method 才會標 metaDirty;直接 pop 會繞過 dirty flag。
+          project.removeLastGroup()
+        },
       },
-      undo: () => {
-        // 用 store method 才會標 metaDirty;直接 pop 會繞過 dirty flag
-        // 導致 Ctrl+S 認為無需存檔,但磁碟其實已含被 undo 的 group(finding 5)
-        project.removeLastGroup()
-      },
-    })
+      { alreadyApplied: true },
+    )
+    return true
   }
 
   function cmdRenameGroup(index: number, oldName: string, newName: string) {
@@ -243,7 +251,7 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     currentFilename,
     selectedLabelId,
-    activeCategory,
+    activeGroupId,
     showGroups,
     focusEditorRequest,
     fontSize,
@@ -263,7 +271,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDeleteLabel,
     cmdMoveLabel,
     cmdUpdateLabelText,
-    cmdUpdateLabelCategory,
+    cmdUpdateLabelGroupId,
     cmdAddGroup,
     cmdRenameGroup,
   }

@@ -205,55 +205,78 @@ describe('translation.json', () => {
     })
   })
 
-  it('roundtrip: 多 label', () => {
+  it('roundtrip: 多 label(groupId + styleOverride)', () => {
     const t: TranslationJson = {
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
       labels: [
-        { id: 'a', x: 0.5, y: 0.3, category: 1, lines: ['Hi', 'there'] },
-        { id: 'b', x: 0.1, y: 0.9, category: 2, lines: ['bang!'] },
+        { id: 'a', x: 0.5, y: 0.3, groupId: 'grp-x', lines: ['Hi', 'there'] },
+        {
+          id: 'b',
+          x: 0.1,
+          y: 0.9,
+          groupId: null,
+          lines: ['bang!'],
+          styleOverride: { fontSizePx: 42, color: '#ff0000' },
+        },
       ],
     }
     expect(parseTranslation(serializeTranslation(t))).toEqual(t)
   })
 
-  it('groupCount 傳入時嚴格驗證 category 上限', () => {
+  it('validGroupIds 傳入時嚴格驗證 groupId 有效', () => {
     const t: TranslationJson = {
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
-      labels: [{ id: 'a', x: 0, y: 0, category: 5, lines: [] }],
+      labels: [{ id: 'a', x: 0, y: 0, groupId: 'grp-unknown', lines: [] }],
     }
     const raw = serializeTranslation(t)
-    expect(() => parseTranslation(raw, 3)).toThrow(/超出目前 groups 數量/)
+    expect(() => parseTranslation(raw, ['grp-a', 'grp-b'])).toThrow(/不在目前 project.groups/)
     expect(() => parseTranslation(raw, null)).not.toThrow()
   })
 
   it('lines 內嵌換行抛錯', () => {
     const bad = {
-      schemaVersion: 1,
-      labels: [{ id: 'a', x: 0, y: 0, category: 1, lines: ['a\nb'] }],
+      schemaVersion: TRANSLATION_SCHEMA_VERSION,
+      labels: [{ id: 'a', x: 0, y: 0, groupId: null, lines: ['a\nb'] }],
     }
     expect(() => parseTranslation(JSON.stringify(bad))).toThrow(/不可內嵌換行/)
   })
 
   it('缺 id 會補一個', () => {
     const noId = {
-      schemaVersion: 1,
-      labels: [{ x: 0, y: 0, category: 1, lines: ['hi'] }],
+      schemaVersion: TRANSLATION_SCHEMA_VERSION,
+      labels: [{ x: 0, y: 0, groupId: null, lines: ['hi'] }],
     }
     const parsed = parseTranslation(JSON.stringify(noId))
     expect(parsed.labels[0].id).toBeTruthy()
   })
 
-  it('anchorLayerId roundtrip:有錨定的 label 序列化後可讀回', () => {
+  it('anchorLayerId 過渡欄位 roundtrip:Stage C2 才砍', () => {
     const t: TranslationJson = {
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
       labels: [
-        { id: 'a', x: 0.1, y: 0.2, category: 1, lines: ['浮動,無錨'] },
-        { id: 'b', x: 0.3, y: 0.4, category: 1, lines: ['錨到底圖上方'], anchorLayerId: 'layer-bg' },
+        { id: 'a', x: 0.1, y: 0.2, groupId: null, lines: ['浮動,無錨'] },
+        {
+          id: 'b',
+          x: 0.3,
+          y: 0.4,
+          groupId: null,
+          lines: ['錨到底圖上方'],
+          anchorLayerId: 'layer-bg',
+        },
       ],
     }
     const back = parseTranslation(serializeTranslation(t))
     expect(back.labels[0].anchorLayerId).toBeUndefined()
     expect(back.labels[1].anchorLayerId).toBe('layer-bg')
+  })
+
+  it('styleOverride:空物件不序列化(避免噪音)', () => {
+    const t: TranslationJson = {
+      schemaVersion: TRANSLATION_SCHEMA_VERSION,
+      labels: [{ id: 'a', x: 0, y: 0, groupId: null, lines: [], styleOverride: {} }],
+    }
+    const raw = serializeTranslation(t)
+    expect(raw).not.toContain('styleOverride')
   })
 })
 

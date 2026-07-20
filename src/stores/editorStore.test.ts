@@ -4,8 +4,12 @@ import type { LabelItem } from '@/types/project'
 import { useEditorStore } from './editorStore'
 import { serializeTranslationForFile, useProjectStore } from './projectStore'
 
-function label(id: string, x = 0.1, y = 0.2, category = 1, text = ''): LabelItem {
-  return { id, x, y, category, text }
+/**
+ * 建 label 只吃座標與文字,groupId 一律 null(單元測試不涉及 group 綁定;
+ * 涉及 group 的 case 需先用 project.addGroup 拿到 real id 再手動組)。
+ */
+function label(id: string, x = 0.1, y = 0.2, text = ''): LabelItem {
+  return { id, x, y, groupId: null, text }
 }
 
 describe('editorStore undo/redo', () => {
@@ -57,18 +61,18 @@ describe('editorStore undo/redo', () => {
     expect(project.fileByName('001.jpg')!.labels.map((l) => l.id)).toEqual(['a', 'b'])
   })
 
-  it('cmdDuplicateLabel（lazy-do）：拖曳副本只佔一筆 undo', () => {
+  it('cmdDuplicateLabel(lazy-do):拖曳副本只佔一筆 undo', () => {
     const editor = useEditorStore()
     const project = useProjectStore()
-    editor.cmdAddLabel('001.jpg', label('source', 0.1, 0.2, 2, '文字'))
+    editor.cmdAddLabel('001.jpg', label('source', 0.1, 0.2, '文字'))
 
-    const copy = label('copy', 0.8, 0.9, 2, '文字')
-    // 模擬 Alt+drag：越過門檻時先插入，拖曳中已移到最終位置。
+    const copy = label('copy', 0.8, 0.9, '文字')
+    // 模擬 Alt+drag:越過門檻時先插入,拖曳中已移到最終位置。
     project.addLabel('001.jpg', copy)
     editor.cmdDuplicateLabel('001.jpg', copy, { alreadyApplied: true })
 
     expect(project.fileByName('001.jpg')!.labels).toEqual([
-      label('source', 0.1, 0.2, 2, '文字'),
+      label('source', 0.1, 0.2, '文字'),
       copy,
     ])
     expect(editor.selectedLabelId).toBe('copy')
@@ -77,7 +81,7 @@ describe('editorStore undo/redo', () => {
     expect(project.fileByName('001.jpg')!.labels.map((l) => l.id)).toEqual(['source'])
     editor.redo()
     expect(project.fileByName('001.jpg')!.labels).toEqual([
-      label('source', 0.1, 0.2, 2, '文字'),
+      label('source', 0.1, 0.2, '文字'),
       copy,
     ])
   })
@@ -114,32 +118,41 @@ describe('editorStore undo/redo', () => {
     expect(get()).toEqual({ x: 0.8, y: 0.9 })
   })
 
-  it('文字/分類/分組命令 undo 鏈', () => {
+  it('文字/分組綁定/分組 CRUD 命令 undo 鏈', () => {
     const editor = useEditorStore()
     const project = useProjectStore()
     editor.cmdAddLabel('001.jpg', label('a'))
+    const defaultGroups = project.header.groups.map((g) => g.name)
+    // 兩個預設 group 由 defaultProjectJson 產出;取 groups[0].id 給 label
+    const grp0 = project.header.groups[0].id
+    const grp1 = project.header.groups[1].id
 
     editor.cmdUpdateLabelText('001.jpg', 'a', '', '你好')
-    editor.cmdUpdateLabelCategory('001.jpg', 'a', 1, 2)
+    editor.cmdUpdateLabelGroupId('001.jpg', 'a', null, grp0)
+    editor.cmdUpdateLabelGroupId('001.jpg', 'a', grp0, grp1)
     editor.cmdAddGroup('分組3')
+    const grp2 = project.header.groups[2].id
     editor.cmdRenameGroup(2, '分組3', '註釋')
 
-    expect(project.header.groups).toEqual(['框内', '框外', '註釋'])
+    expect(project.header.groups.map((g) => g.name)).toEqual([...defaultGroups, '註釋'])
     const l = () => project.fileByName('001.jpg')!.labels[0]
     expect(l().text).toBe('你好')
-    expect(l().category).toBe(2)
+    expect(l().groupId).toBe(grp1)
 
     editor.undo() // rename
-    expect(project.header.groups[2]).toBe('分組3')
+    expect(project.header.groups[2].name).toBe('分組3')
     editor.undo() // add group
     expect(project.header.groups).toHaveLength(2)
-    // finding 5:undo add group 必須走 store method 才會標 metaDirty,
-    // 否則 save() 會 short-circuit,磁碟仍留著已 undo 的分組
+    // undo add group 必須走 store method 才會標 metaDirty(否則 save() short-circuit)
     expect(project.metaDirty).toBe(true)
-    editor.undo() // category
-    expect(l().category).toBe(1)
+    editor.undo() // groupId grp0 → grp1
+    expect(l().groupId).toBe(grp0)
+    editor.undo() // groupId null → grp0
+    expect(l().groupId).toBeNull()
     editor.undo() // text
     expect(l().text).toBe('')
+    // grp2 是 add-group 產生的 id;確認 undo 後不再存在於 groups
+    expect(project.header.groups.find((g) => g.id === grp2)).toBeUndefined()
   })
 
   it('selectLabelBy 跨頁：頁界換頁、空頁也是一站、文件邊界停下', () => {
@@ -184,19 +197,21 @@ describe('editorStore undo/redo', () => {
     const editor = useEditorStore()
     const project = useProjectStore()
 
-    editor.cmdAddLabel('001.jpg', label('a', 0.123456, 0.5, 1, '第一句'))
-    editor.cmdAddLabel('002.jpg', label('b', 0.9, 0.05, 2, '第二句\n第二行'))
+    editor.cmdAddLabel('001.jpg', label('a', 0.123456, 0.5, '第一句'))
+    editor.cmdAddLabel('002.jpg', label('b', 0.9, 0.05, '第二句\n第二行'))
 
     // 新架構:每頁一份 translation.json,分別序列化驗
     const t1 = JSON.parse(serializeTranslationForFile(project.fileByName('001.jpg')!))
     const t2 = JSON.parse(serializeTranslationForFile(project.fileByName('002.jpg')!))
-    expect(t1.schemaVersion).toBe(1)
-    expect(t2.schemaVersion).toBe(1)
+    expect(t1.schemaVersion).toBe(2)
+    expect(t2.schemaVersion).toBe(2)
     // 譯文的手動斷行序列化為行陣列
     expect(t1.labels[0].lines).toEqual(['第一句'])
     expect(t2.labels[0].lines).toEqual(['第二句', '第二行'])
     // JSON 保留完整座標精度(txt 時代截三位的限制不再存在)
     expect(t1.labels[0].x).toBe(0.123456)
+    // 未綁 group 序列化為 groupId: null
+    expect(t1.labels[0].groupId).toBeNull()
     expect(project.dirty).toBe(true)
   })
 })

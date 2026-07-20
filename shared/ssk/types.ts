@@ -4,6 +4,8 @@
 // 檔案內只允許純資料形狀:string/number/boolean/null/array/字面量聯合,禁止引用任何標準庫型別
 // (因為 Photoshop 匯出腳本使用 ES3 tsconfig 消費相同型別)。
 
+import type { TextStyle } from '../text-style/types'
+
 export interface SskLabel {
   /** 前端追蹤用 UUID;jsx 端不使用 */
   id: string
@@ -11,14 +13,26 @@ export interface SskLabel {
   x: number
   /** Y 座標,相對原圖高度 ∈ [0,1] */
   y: number
-  /** 分組編號 1~groups.length,對應 groups[category-1] */
-  category: number
+  /**
+   * 樣式群組綁定;對應 ProjectJson.groups[].id;null = 未綁 group
+   * (樣式走 project.defaultStyle,label 出現在圖層樹 root)。
+   */
+  groupId: string | null
   /** 譯文行陣列:每元素一行,禁止內嵌換行(手動斷行顯式化) */
   lines: string[]
+  /**
+   * 個別樣式覆寫(diff 存法,只存跟 group style 不同的欄位);
+   * 樣式解析鍊:{ ...projectDefault, ...groupStyle, ...styleOverride }。
+   * group style 是預設繼承,不是強制套用——支援用戶顆粒度差異。
+   */
+  styleOverride?: Partial<TextStyle>
   /**
    * z-order 錨定:label 渲染在此 layer 之上、下一 layer 之下(scene 疊層)。
    * undefined = 未錨定(繪製在所有 layer 上方,即傳統 label overlay 位置)。
    * layerId 對應 ManifestJson.layers[].id;若對應 layer 消失,渲染時視為未錨定。
+   *
+   * **過渡欄位**:Stage C2 隨 text layer 進圖層樹一併退役(z-order 由 tree
+   * 位置驅動),屆時從 schema 全砍。目前 Stage A/B 保留維持既有錨定行為。
    */
   anchorLayerId?: string
 }

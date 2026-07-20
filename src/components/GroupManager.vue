@@ -19,17 +19,17 @@
       </DialogHeader>
 
       <ul class="flex flex-col gap-1.5">
-        <li v-for="(group, i) in project.header.groups" :key="i" class="flex items-center gap-2">
+        <li v-for="(group, i) in project.header.groups" :key="group.id" class="flex items-center gap-2">
           <span
             class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-            :style="{ backgroundColor: CATEGORY_COLORS[i] }"
+            :style="{ backgroundColor: group.color }"
           >
             {{ i + 1 }}
           </span>
           <input
             class="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-sm"
-            :value="group"
-            @focus="nameBeforeEdit = group"
+            :value="group.name"
+            @focus="nameBeforeEdit = group.name"
             @blur="onRename(i, $event)"
           />
         </li>
@@ -58,7 +58,7 @@
 import { ref } from 'vue'
 import { Plus, Settings2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { CATEGORY_COLORS, MAX_GROUPS, RESERVED_GROUP_NAMES } from '@shared/ssk/constants'
+import { MAX_GROUPS, RESERVED_GROUP_NAMES } from '@shared/ssk/constants'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

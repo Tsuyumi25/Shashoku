@@ -15,6 +15,7 @@ import {
   OCR_SCHEMA_VERSION,
   TRANSLATION_SCHEMA_VERSION,
 } from './types'
+import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
 
 // blend mode 白名單:與 src/engine/blend.ts 的 BLEND_MODES 保持同步(有 spec test 驗)
 export const BLEND_MODE_ALLOWLIST = [
@@ -150,16 +151,16 @@ export function serializeManifest(m: ManifestJson): string {
 
 // ── translation.json ──
 
-function parseLabelForTranslation(v: unknown, i: number, groupCount: number | null): SskLabel {
+function parseLabelForTranslation(v: unknown, i: number, validGroupIds: readonly string[] | null): SskLabel {
   const at = `labels[${i}]`
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { x, y, category, lines } = v
+  const { x, y, groupId, lines } = v
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
-  if (typeof category !== 'number' || !Number.isInteger(category) || category < 1)
-    fail(`${at}.category 必須是 ≥ 1 的整數`)
-  if (groupCount !== null && category > groupCount)
-    fail(`${at}.category (${category}) 超出目前 groups 數量 (${groupCount})`)
+  if (groupId !== null && typeof groupId !== 'string')
+    fail(`${at}.groupId 必須是 string(對應 project.groups[].id)或 null`)
+  if (validGroupIds !== null && typeof groupId === 'string' && !validGroupIds.includes(groupId))
+    fail(`${at}.groupId「${groupId}」不在目前 project.groups 內`)
   if (!Array.isArray(lines)) fail(`${at}.lines 必須是字串陣列`)
   const parsedLines = lines.map((line, j) => {
     if (typeof line !== 'string') fail(`${at}.lines[${j}] 必須是字串`)
@@ -167,8 +168,11 @@ function parseLabelForTranslation(v: unknown, i: number, groupCount: number | nu
     return line
   })
   const id = typeof v.id === 'string' && v.id.length > 0 ? v.id : generateId()
-  const label: SskLabel = { id, x, y, category, lines: parsedLines }
-  // anchorLayerId 選用:字串則保留;未設或非字串則不帶(undefined)
+  const label: SskLabel = { id, x, y, groupId: groupId as string | null, lines: parsedLines }
+  if (v.styleOverride !== undefined) {
+    label.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
+  }
+  // anchorLayerId 選用(Stage A 過渡,Stage C2 砍):字串則保留;未設或非字串則不帶
   if (typeof v.anchorLayerId === 'string' && v.anchorLayerId.length > 0) {
     label.anchorLayerId = v.anchorLayerId
   }
@@ -180,22 +184,27 @@ export function defaultTranslation(): TranslationJson {
 }
 
 /**
- * @param groupCount 若已知 project.json 的 groups 數量,傳入用於嚴格 category 驗證;
- *                   null 代表尚未載入 project.json,先寬鬆通過(呼叫端負責之後對齊)
+ * @param validGroupIds 若已知 project.json 的 groups id 集合,傳入用於嚴格 groupId 驗證;
+ *                       null 代表尚未載入 project.json,先寬鬆通過(呼叫端負責之後對齊)
  */
-export function parseTranslation(raw: string, groupCount: number | null = null): TranslationJson {
+export function parseTranslation(
+  raw: string,
+  validGroupIds: readonly string[] | null = null,
+): TranslationJson {
   const data = parseJson(raw, 'translation.json')
   if (!isRecord(data)) fail('translation.json 頂層必須是物件')
 
   if (data.schemaVersion !== TRANSLATION_SCHEMA_VERSION) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > TRANSLATION_SCHEMA_VERSION)
       fail(`translation.json 由較新版本建立,請更新軟體`)
-    fail(`不支援的 translation.json 版本:${JSON.stringify(data.schemaVersion)}`)
+    fail(
+      `不支援的 translation.json 版本:${JSON.stringify(data.schemaVersion)}(v2 以下的舊格式需以新版重建專案)`,
+    )
   }
 
   const labelsRaw = data.labels
   if (!Array.isArray(labelsRaw)) fail('translation.json.labels 必須是陣列')
-  const labels = labelsRaw.map((l, i) => parseLabelForTranslation(l, i, groupCount))
+  const labels = labelsRaw.map((l, i) => parseLabelForTranslation(l, i, validGroupIds))
   return { schemaVersion: TRANSLATION_SCHEMA_VERSION, labels }
 }
 
@@ -207,9 +216,11 @@ export function serializeTranslation(t: TranslationJson): string {
         id: l.id,
         x: l.x,
         y: l.y,
-        category: l.category,
+        groupId: l.groupId,
         lines: l.lines,
       }
+      if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
+        entry.styleOverride = serializePartialTextStyle(l.styleOverride)
       if (l.anchorLayerId !== undefined) entry.anchorLayerId = l.anchorLayerId
       return entry
     }),

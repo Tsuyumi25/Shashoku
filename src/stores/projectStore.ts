@@ -2,11 +2,24 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { LabelItem, ProjectFile, ProjectHeader } from '@/types/project'
 import type { SskExportConfig } from '@shared/ssk/types'
-import type { ProjectJson } from '@shared/project/types'
-import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
+import type { ProjectJson, StyleGroup } from '@shared/project/types'
+import {
+  defaultColorForGroupIndex,
+  defaultProjectJson,
+  parseProjectJson,
+  serializeProjectJson,
+} from '@shared/project/schema'
+import { TRANSLATION_SCHEMA_VERSION } from '@shared/page/types'
 import { parseTranslation, serializeTranslation } from '@shared/page/schema'
 import { previewImport, type ImportDiff } from '@shared/project/import'
 import { DIR_LAYERS, DIR_RAWS, MAX_GROUPS, SHASHOKU_DIR } from '@shared/ssk/constants'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+
+function generateGroupId(): string {
+  const c = globalThis.crypto
+  if (c?.randomUUID) return c.randomUUID()
+  return `grp-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
+}
 
 // 內部 model:UI 用單一 text string(換行原生),序列化邊界才轉 lines[]
 function toLines(text: string): string[] {
@@ -19,15 +32,16 @@ function fromLines(lines: string[]): string {
 /** 把一個 ProjectFile 序列化成該頁 translation.json 內容(module level,test 可 import) */
 export function serializeTranslationForFile(file: ProjectFile): string {
   return serializeTranslation({
-    schemaVersion: 1,
+    schemaVersion: TRANSLATION_SCHEMA_VERSION,
     labels: file.labels.map((l) => {
       const entry: import('@shared/ssk/types').SskLabel = {
         id: l.id,
         x: l.x,
         y: l.y,
-        category: l.category,
+        groupId: l.groupId,
         lines: toLines(l.text),
       }
+      if (l.styleOverride !== undefined) entry.styleOverride = l.styleOverride
       if (l.anchorLayerId !== undefined) entry.anchorLayerId = l.anchorLayerId
       return entry
     }),
@@ -110,13 +124,14 @@ export const useProjectStore = defineStore('project', () => {
       let labels: LabelItem[] = []
       try {
         const raw = await window.api.readPage(p.pageDir)
-        const t = parseTranslation(raw.translationRaw, meta.groups.length)
+        const t = parseTranslation(raw.translationRaw, meta.groups.map((g) => g.id))
         labels = t.labels.map((l) => ({
           id: l.id,
           x: l.x,
           y: l.y,
-          category: l.category,
+          groupId: l.groupId,
           text: fromLines(l.lines),
+          styleOverride: l.styleOverride,
           anchorLayerId: l.anchorLayerId,
         }))
       } catch {
@@ -263,10 +278,24 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
-  function updateLabelCategory(filename: string, labelId: string, category: number) {
+  function updateLabelGroupId(filename: string, labelId: string, groupId: string | null) {
     const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
     if (!label) return
-    label.category = category
+    label.groupId = groupId
+    markPageDirty(filename)
+  }
+
+  /** 覆寫 label 的個別樣式(diff);傳 undefined 清掉整個 override 回歸 group default */
+  function updateLabelStyleOverride(
+    filename: string,
+    labelId: string,
+    styleOverride: LabelItem['styleOverride'],
+  ) {
+    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    if (!label) return
+    if (styleOverride === undefined || Object.keys(styleOverride).length === 0)
+      delete label.styleOverride
+    else label.styleOverride = styleOverride
     markPageDirty(filename)
   }
 
@@ -281,24 +310,45 @@ export const useProjectStore = defineStore('project', () => {
 
   // ── group(專案級 metadata,標 metaDirty)──
 
-  function addGroup(name: string): boolean {
-    if (projectMeta.value.groups.length >= MAX_GROUPS) return false
-    projectMeta.value.groups.push(name)
+  /**
+   * 新增樣式群組;name 唯一(重名回 null),達 MAX_GROUPS 回 null。
+   * color / style 帶預設(從 CATEGORY_COLORS 循環取色 + DEFAULT_TEXT_STYLE);
+   * undo 端可用回傳的 group 引用做精準還原(比只給 name 好)。
+   */
+  function addGroup(name: string): StyleGroup | null {
+    const groups = projectMeta.value.groups
+    if (groups.length >= MAX_GROUPS) return null
+    if (groups.some((g) => g.name === name)) return null
+    const group: StyleGroup = {
+      id: generateGroupId(),
+      name,
+      color: defaultColorForGroupIndex(groups.length),
+      style: { ...DEFAULT_TEXT_STYLE },
+    }
+    groups.push(group)
     metaDirty.value = true
-    return true
+    return group
   }
 
   function renameGroup(index: number, name: string) {
     const groups = projectMeta.value.groups
     if (index < 0 || index >= groups.length) return
-    groups[index] = name
+    groups[index].name = name
     metaDirty.value = true
   }
 
-  /** 移除尾部一組;供 cmdAddGroup 的 undo 呼叫,以確保 metaDirty 被標。 */
-  function removeLastGroup(): void {
-    if (projectMeta.value.groups.length === 0) return
-    projectMeta.value.groups.pop()
+  /** 移除尾部一組;回傳被移除的 group(供 undo 還原完整資料);空陣列回 null。 */
+  function removeLastGroup(): StyleGroup | null {
+    const groups = projectMeta.value.groups
+    if (groups.length === 0) return null
+    const removed = groups.pop() ?? null
+    metaDirty.value = true
+    return removed
+  }
+
+  /** 直接把整個 group 物件塞回尾端(供 removeLastGroup 的 undo 精準還原) */
+  function restoreLastGroup(group: StyleGroup): void {
+    projectMeta.value.groups.push(group)
     metaDirty.value = true
   }
 
@@ -343,11 +393,13 @@ export const useProjectStore = defineStore('project', () => {
     deleteLabel,
     moveLabel,
     updateLabelText,
-    updateLabelCategory,
+    updateLabelGroupId,
+    updateLabelStyleOverride,
     updateLabelAnchor,
     addGroup,
     renameGroup,
     removeLastGroup,
+    restoreLastGroup,
     updateComment,
     markMetaDirty,
   }

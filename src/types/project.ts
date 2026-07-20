@@ -1,6 +1,9 @@
 // UI 執行期的內部模型。和工程檔格式(shared/ssk/types)的差異:
 // - 譯文用單一 string(textarea 原生行為),序列化邊界才轉 lines[]
 // - missing 是對帳的執行期產物,不進檔案
+import type { TextStyle } from '@shared/text-style/types'
+import type { StyleGroup } from '@shared/project/types'
+
 export interface LabelItem {
   /** 前端追蹤用 UUID,寫入工程檔的 id 欄位 */
   id: string
@@ -8,10 +11,13 @@ export interface LabelItem {
   x: number
   /** Y 座標,相對原圖高度的百分比 ∈ [0,1] */
   y: number
-  /** 分組編號 1~9,對應 header.groups 的 index+1 */
-  category: number
+  /** 樣式群組綁定;對應 ProjectHeader.groups[].id;null = 未綁(走 defaultStyle) */
+  groupId: string | null
   text: string
-  /** z-order 錨定:label 疊在此 layer 之上;undefined = 未錨定(最頂層) */
+  /** 個別樣式覆寫(diff 存法);詳見 shared/ssk/types.ts SskLabel.styleOverride */
+  styleOverride?: Partial<TextStyle>
+  /** z-order 錨定:label 疊在此 layer 之上;undefined = 未錨定(最頂層)。
+   * Stage C2 隨 text layer 進圖層樹退役。 */
   anchorLayerId?: string
 }
 
@@ -25,7 +31,7 @@ export interface ProjectFile {
 }
 
 export interface ProjectHeader {
-  /** index 0 = category 1,上限 9 個 */
-  groups: string[]
+  /** 樣式群組陣列(有序);上限 MAX_GROUPS */
+  groups: StyleGroup[]
   comment: string
 }

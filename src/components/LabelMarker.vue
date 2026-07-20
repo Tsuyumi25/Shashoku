@@ -25,8 +25,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LabelItem } from '@/types/project'
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 import { percentToContentPx } from '@/lib/coords'
+import { useProjectStore } from '@/stores/projectStore'
+
+const project = useProjectStore()
 
 const props = defineProps<{
   label: LabelItem
@@ -55,7 +57,10 @@ const emit = defineEmits<{
   markerDragend: [e: DragEvent]
 }>()
 
-const color = computed(() => CATEGORY_COLORS[props.label.category - 1] ?? 'rgb(128, 128, 128)')
+const color = computed(() => {
+  if (props.label.groupId === null) return 'rgb(128, 128, 128)'
+  return project.header.groups.find((g) => g.id === props.label.groupId)?.color ?? 'rgb(128, 128, 128)'
+})
 
 const markerStyle = computed(() => {
   const p = percentToContentPx(props.label.x, props.label.y, props.natural.w, props.natural.h)

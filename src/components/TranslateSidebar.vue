@@ -10,18 +10,18 @@
       <div class="mb-1 px-1 text-xs font-semibold text-muted-foreground">分組</div>
       <button
         v-for="(group, i) in project.header.groups"
-        :key="i"
+        :key="group.id"
         class="flex w-full items-center justify-between rounded border px-2 py-1 text-left text-sm font-medium"
         :class="
-          editor.activeCategory === i + 1
+          editor.activeGroupId === group.id
             ? 'border-current bg-secondary/60'
             : 'border-transparent hover:bg-secondary/40'
         "
-        :style="{ color: CATEGORY_COLORS[i] }"
+        :style="{ color: group.color }"
         :title="`分組 ${i + 1}（快捷鍵 ${i + 1}）`"
-        @click="editor.activeCategory = i + 1"
+        @click="editor.activeGroupId = group.id"
       >
-        <span class="truncate">{{ group }}</span>
+        <span class="truncate">{{ group.name }}</span>
         <kbd class="text-[10px] opacity-60">{{ i + 1 }}</kbd>
       </button>
     </div>
@@ -49,7 +49,6 @@
 
 <script setup lang="ts">
 import { Eye } from '@lucide/vue'
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 import ModeSwitcher from '@/components/ModeSwitcher.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'

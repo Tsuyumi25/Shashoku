@@ -11,7 +11,10 @@ describe('projectStore', () => {
     const project = useProjectStore()
     project.newProject(['001.png', '002.png'])
     expect(project.files.map((f) => f.filename)).toEqual(['001.png', '002.png'])
-    expect(project.header.groups).toEqual(['框内', '框外'])
+    expect(project.header.groups.map((g) => g.name)).toEqual(['框内', '框外'])
+    // 每個預設 group 帶隨機 id、CATEGORY_COLORS 循環色、DEFAULT_TEXT_STYLE
+    expect(project.header.groups[0].id).toMatch(/./)
+    expect(project.header.groups[0].style.fontFamily).toBeTruthy()
     expect(project.exportConfig.outputFormat).toBe('psd')
     // metaDirty(exportConfig 是預設值但也算 pending 寫入)
     expect(project.dirty).toBe(true)
@@ -26,12 +29,13 @@ describe('projectStore', () => {
       id: 'a',
       x: 0.5,
       y: 0.5,
-      category: 1,
+      groupId: project.header.groups[0].id,
       text: '一行\n二行',
     })
     const t = JSON.parse(serializeTranslationForFile(project.fileByName('001.png')!))
-    expect(t.schemaVersion).toBe(1)
+    expect(t.schemaVersion).toBe(2)
     expect(t.labels[0].lines).toEqual(['一行', '二行'])
+    expect(t.labels[0].groupId).toBe(project.header.groups[0].id)
   })
 
   it('label CRUD 各自標對應頁為 dirty', () => {
@@ -44,7 +48,7 @@ describe('projectStore', () => {
     project.markMetaDirty()
     // 起手 dirty state 由 markMetaDirty 觸發,以下改 page 觀察 dirtyFilenames
 
-    project.addLabel('001.png', { id: 'a', x: 0.1, y: 0.1, category: 1, text: '' })
+    project.addLabel('001.png', { id: 'a', x: 0.1, y: 0.1, groupId: null, text: '' })
     expect(project.dirtyFilenames).toContain('001.png')
 
     project.updateLabelText('001.png', 'a', '改')
@@ -54,7 +58,7 @@ describe('projectStore', () => {
     expect(project.dirtyFilenames).toContain('001.png')
 
     // 動 002 標 002
-    project.addLabel('002.png', { id: 'b', x: 0.1, y: 0.1, category: 1, text: '' })
+    project.addLabel('002.png', { id: 'b', x: 0.1, y: 0.1, groupId: null, text: '' })
     expect(project.dirtyFilenames).toContain('002.png')
 
     project.deleteLabel('001.png', 'a')
@@ -65,19 +69,24 @@ describe('projectStore', () => {
     const project = useProjectStore()
     project.newProject([])
     // 開始 metaDirty=true(newProject 觸發);先觀察 addGroup / renameGroup 保持
-    project.addGroup('第三組')
+    const added = project.addGroup('第三組')
+    expect(added).not.toBeNull()
     project.renameGroup(2, '改名')
-    expect(project.header.groups[2]).toBe('改名')
+    expect(project.header.groups[2].name).toBe('改名')
     expect(project.metaDirty).toBe(true)
   })
 
-  it('addGroup 超過上限(9)回傳 false', () => {
+  it('addGroup 超過上限(9)回傳 null;重名回 null', () => {
     const project = useProjectStore()
     project.newProject([])
     for (let i = project.header.groups.length; i < 9; i++)
-      expect(project.addGroup(`g${i}`)).toBe(true)
-    expect(project.addGroup('第十組')).toBe(false)
+      expect(project.addGroup(`g${i}`)).not.toBeNull()
+    expect(project.addGroup('第十組')).toBeNull()
     expect(project.header.groups).toHaveLength(9)
+    // 重名 fail
+    project.reset()
+    project.newProject([])
+    expect(project.addGroup('框内')).toBeNull()
   })
 
   it('updateComment 標 metaDirty', () => {

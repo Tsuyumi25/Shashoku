@@ -43,15 +43,17 @@ import {
 import { labelTextCss } from '@/lib/labelTextStyle'
 import { setLabelDragPreview } from '@/lib/labelDragPreview'
 import { useTextBoardStyle } from '@/lib/textBoardAppearance'
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 
+// TextBoard 是獨立 renderer,沒有 pinia projectStore 訪問——所以只保留
+// 從 drag payload 帶進來的最小資訊(groupId + groupName,用於再拖回主視窗
+// 時對齊語意)。空 label 的圓點色無法反查 group.color,一律 fallback 灰。
 interface BoardItem {
   id: string
   x: number
   y: number
   text: string
-  category: number
-  groupName: string
+  groupId: string | null
+  groupName: string | null
 }
 
 const boardEl = useTemplateRef('boardEl')
@@ -75,7 +77,7 @@ function itemStyle(item: BoardItem): Record<string, string> {
   if (item.text !== '') return { ...position, ...textCss.value }
   return {
     ...position,
-    backgroundColor: CATEGORY_COLORS[item.category - 1] ?? 'rgb(128, 128, 128)',
+    backgroundColor: 'rgb(128, 128, 128)',
   }
 }
 
@@ -94,7 +96,7 @@ function onDragStart(item: BoardItem, e: DragEvent): void {
   if (!e.dataTransfer) return
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const payload: LabelDragPayload = {
-    version: 1,
+    version: 2,
     kind: 'label',
     source: 'text-board',
     operation: e.altKey ? 'copy' : 'move',
@@ -102,7 +104,7 @@ function onDragStart(item: BoardItem, e: DragEvent): void {
     sourceId: item.id,
     label: {
       text: item.text,
-      category: item.category,
+      groupId: item.groupId,
       groupName: item.groupName,
     },
     grabOffset: {
@@ -173,7 +175,7 @@ function onDrop(e: DragEvent): void {
     x,
     y,
     text: payload.label.text,
-    category: payload.label.category,
+    groupId: payload.label.groupId,
     groupName: payload.label.groupName,
   })
 }

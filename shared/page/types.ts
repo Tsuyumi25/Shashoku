@@ -9,7 +9,9 @@
 import type { SskLabel } from '../ssk/types'
 
 export const MANIFEST_SCHEMA_VERSION = 1
-export const TRANSLATION_SCHEMA_VERSION = 1
+/** v2 (2026-07):label.category:int → label.groupId: string | null(對應
+ * ProjectJson.groups[].id);新增 label.styleOverride?: Partial<TextStyle>。 */
+export const TRANSLATION_SCHEMA_VERSION = 2
 export const OCR_SCHEMA_VERSION = 1
 
 /** manifest 內每一層的描述;PNG 資料在 layers/<file> 檔案本身。 */

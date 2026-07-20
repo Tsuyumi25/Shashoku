@@ -42,9 +42,10 @@
                 <td class="px-1 py-1">
                   <span
                     class="inline-block h-3.5 w-3.5 rounded-full align-middle text-center text-[10px] leading-3.5 font-bold text-white"
-                    :style="{ backgroundColor: CATEGORY_COLORS[label.category - 1] ?? 'gray' }"
+                    :style="{ backgroundColor: groupColorOf(label) }"
+                    :title="groupNameOf(label)"
                   >
-                    {{ label.category }}
+                    {{ groupIndexOf(label) }}
                   </span>
                 </td>
                 <td class="h-7 max-w-0 truncate px-2 py-1">
@@ -55,15 +56,20 @@
             <ContextMenuContent>
               <ContextMenuLabel class="text-xs">設定分組</ContextMenuLabel>
               <ContextMenuItem
-                v-for="(group, gi) in project.header.groups"
-                :key="gi"
-                @select="onSetCategory(label, gi + 1)"
+                v-for="group in project.header.groups"
+                :key="group.id"
+                @select="onSetGroup(label, group.id)"
               >
                 <span
                   class="mr-2 inline-block h-3 w-3 rounded-full"
-                  :style="{ backgroundColor: CATEGORY_COLORS[gi] }"
+                  :style="{ backgroundColor: group.color }"
                 />
-                {{ group }}
+                {{ group.name }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem @select="onSetGroup(label, null)">
+                <span class="mr-2 inline-block h-3 w-3 rounded-full bg-gray-400" />
+                未分組
               </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem variant="destructive" @select="onDelete(label)">
@@ -82,7 +88,6 @@
 import { computed, watch, type ComponentPublicInstance } from 'vue'
 import { Minus, Plus, Trash2 } from '@lucide/vue'
 import type { LabelItem } from '@/types/project'
-import { CATEGORY_COLORS } from '@shared/ssk/constants'
 import GroupManager from '@/components/GroupManager.vue'
 import TextPreviewSettings from '@/components/TextPreviewSettings.vue'
 import {
@@ -125,10 +130,26 @@ function onRowDblclick(label: LabelItem) {
   editor.requestEditorFocus()
 }
 
-function onSetCategory(label: LabelItem, category: number) {
+function onSetGroup(label: LabelItem, groupId: string | null) {
   if (!editor.currentFilename) return
-  editor.cmdUpdateLabelCategory(editor.currentFilename, label.id, label.category, category)
-  editor.activeCategory = category
+  editor.cmdUpdateLabelGroupId(editor.currentFilename, label.id, label.groupId, groupId)
+  editor.activeGroupId = groupId
+}
+
+function groupOf(label: LabelItem) {
+  if (label.groupId === null) return undefined
+  return project.header.groups.find((g) => g.id === label.groupId)
+}
+function groupColorOf(label: LabelItem): string {
+  return groupOf(label)?.color ?? 'gray'
+}
+function groupNameOf(label: LabelItem): string {
+  return groupOf(label)?.name ?? '未分組'
+}
+/** 分組序號(1-based);未分組回空字串。原版標號的視覺對應。 */
+function groupIndexOf(label: LabelItem): string {
+  const i = project.header.groups.findIndex((g) => g.id === label.groupId)
+  return i === -1 ? '' : String(i + 1)
 }
 
 function onDelete(label: LabelItem) {

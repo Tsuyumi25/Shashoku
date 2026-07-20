@@ -1,10 +1,11 @@
 // shashoku/project.json 的解析/序列化/驗證。純函數,無 IO。
-// 對比 shared/ssk/schema.ts 的 parseSskProject:此檔負責「全書 metadata」,
-// 那邊(未來拆分後)負責「per-page 資料」。
-import type { Glossary, ProjectJson } from './types'
+// 對比 shared/page/schema.ts:此檔負責「全書 metadata」,那邊負責「per-page 資料」。
+import type { Glossary, ProjectJson, StyleGroup } from './types'
 import { PROJECT_SCHEMA_VERSION } from './types'
+import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { defaultExportConfig, parseExportConfigStrict } from '../ssk/schema'
-import { MAX_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
+import { CATEGORY_COLORS, DEFAULT_GROUPS, MAX_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
 
 export class ProjectParseError extends Error {}
 
@@ -16,16 +17,33 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function parseGroups(v: unknown): string[] {
-  if (!Array.isArray(v) || v.length === 0) fail('groups 必須是至少一個分組名的陣列')
+function generateId(): string {
+  const c = globalThis.crypto
+  if (c?.randomUUID) return c.randomUUID()
+  return `grp-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function parseStyleGroup(v: unknown, i: number): StyleGroup {
+  const at = `groups[${i}]`
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const { id, name, color, style } = v
+  if (typeof name !== 'string' || name.length === 0) fail(`${at}.name 必須是非空字串`)
+  if (RESERVED_GROUP_NAMES.includes(name))
+    fail(`${at}.name「${name}」是保留字(${RESERVED_GROUP_NAMES.join('、')}),請改名`)
+  if (typeof color !== 'string' || color.length === 0) fail(`${at}.color 必須是非空字串`)
+  const parsedStyle = parseTextStyle(style, `${at}.style`, fail)
+  const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
+  return { id: finalId, name, color, style: parsedStyle }
+}
+
+function parseGroups(v: unknown): StyleGroup[] {
+  if (!Array.isArray(v) || v.length === 0) fail('groups 必須是至少一個 StyleGroup 的陣列')
   if (v.length > MAX_GROUPS) fail(`分組數量上限為 ${MAX_GROUPS},檔案內有 ${v.length} 個`)
-  const groups = v.map((g, i) => {
-    if (typeof g !== 'string' || g.length === 0) fail(`groups[${i}] 必須是非空字串`)
-    if (RESERVED_GROUP_NAMES.includes(g))
-      fail(`分組名「${g}」是保留字(${RESERVED_GROUP_NAMES.join('、')}),請改名`)
-    return g
-  })
-  if (new Set(groups).size !== groups.length) fail('分組名不可重複')
+  const groups = v.map((g, i) => parseStyleGroup(g, i))
+  const names = groups.map((g) => g.name)
+  if (new Set(names).size !== names.length) fail('分組 name 不可重複')
+  const ids = groups.map((g) => g.id)
+  if (new Set(ids).size !== ids.length) fail('分組 id 不可重複')
   return groups
 }
 
@@ -40,10 +58,21 @@ function parseGlossary(v: unknown): Glossary | undefined {
   return out
 }
 
+/** 依 index 從 CATEGORY_COLORS 循環取色,超過 length 回到 0 */
+export function defaultColorForGroupIndex(i: number): string {
+  return CATEGORY_COLORS[i % CATEGORY_COLORS.length]
+}
+
 export function defaultProjectJson(): ProjectJson {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
-    groups: ['框内', '框外'],
+    groups: DEFAULT_GROUPS.map((name, i) => ({
+      id: generateId(),
+      name,
+      color: defaultColorForGroupIndex(i),
+      style: { ...DEFAULT_TEXT_STYLE },
+    })),
+    defaultStyle: { ...DEFAULT_TEXT_STYLE },
     comment: '',
     exportConfig: defaultExportConfig(),
   }
@@ -64,19 +93,23 @@ export function parseProjectJson(raw: string): ProjectJson {
   if (data.schemaVersion !== PROJECT_SCHEMA_VERSION) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > PROJECT_SCHEMA_VERSION)
       fail(`project.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
-    fail(`不支援的 project.json 版本:${JSON.stringify(data.schemaVersion)}`)
+    fail(
+      `不支援的 project.json 版本:${JSON.stringify(data.schemaVersion)}(v2 以下的舊格式需以新版重建專案)`,
+    )
   }
 
   const groups = parseGroups(data.groups)
+  const defaultStyle = parseTextStyle(data.defaultStyle, 'defaultStyle', fail)
   const comment = data.comment === undefined ? '' : data.comment
   if (typeof comment !== 'string') fail('comment 必須是字串')
 
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     groups,
+    defaultStyle,
     comment,
     glossary: parseGlossary(data.glossary),
-    exportConfig: parseExportConfigStrict(data.exportConfig, groups),
+    exportConfig: parseExportConfigStrict(data.exportConfig, groups.map((g) => g.name)),
   }
 }
 
@@ -84,7 +117,13 @@ export function parseProjectJson(raw: string): ProjectJson {
 export function serializeProjectJson(project: ProjectJson): string {
   const out: Record<string, unknown> = {
     schemaVersion: project.schemaVersion,
-    groups: project.groups,
+    groups: project.groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      color: g.color,
+      style: serializeTextStyle(g.style),
+    })),
+    defaultStyle: serializeTextStyle(project.defaultStyle),
     comment: project.comment,
   }
   if (project.glossary !== undefined) out.glossary = project.glossary
