@@ -5,8 +5,8 @@ import type { SskExportConfig } from '@shared/ssk/types'
 import type { ProjectJson } from '@shared/project/types'
 import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
 import { parseTranslation, serializeTranslation } from '@shared/page/schema'
-import { MAX_GROUPS } from '@shared/ssk/constants'
-import { SHASHOKU_DIR } from '@shared/ssk/constants'
+import { previewImport, type ImportDiff } from '@shared/project/import'
+import { DIR_LAYERS, DIR_RAWS, MAX_GROUPS, SHASHOKU_DIR } from '@shared/ssk/constants'
 
 // 內部 model:UI 用單一 text string(換行原生),序列化邊界才轉 lines[]
 function toLines(text: string): string[] {
@@ -62,6 +62,18 @@ export const useProjectStore = defineStore('project', () => {
   }))
   const exportConfig = computed<SskExportConfig>(() => projectMeta.value.exportConfig)
   const dirty = computed(() => metaDirty.value || dirtyFilenames.value.length > 0)
+  /** shashoku/raws/ 的絕對路徑;LetterMode / autosave 讀底圖用 */
+  const rawsDir = computed(() =>
+    rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR, DIR_RAWS),
+  )
+  /** shashoku/ 的絕對路徑;寫 project.json 用 */
+  const shashokuDir = computed(() =>
+    rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR),
+  )
+  /** pages/<stem>/layers/ 的絕對路徑;每頁不同,取當前 file 用 file.pageDir 拼 */
+  function layersDirOf(pageDir: string): string {
+    return joinPath(pageDir, DIR_LAYERS)
+  }
 
   function fileByName(filename: string): ProjectFile | undefined {
     return files.value.find((f) => f.filename === filename)
@@ -155,6 +167,25 @@ export const useProjectStore = defineStore('project', () => {
     rootPath.value = null
     metaDirty.value = true
     dirtyFilenames.value = []
+  }
+
+  /** 掃 root 跟目前 raws/ 對照,回傳 diff 給 UI 呈現。專案未開回 null。 */
+  async function previewRescanImport(): Promise<ImportDiff | null> {
+    if (rootPath.value === null) return null
+    const scan = await window.api.scanRoot(rootPath.value)
+    // raws/ 內的檔名 = files.value 已載入的 filename(with badge='ok' 或 'raw-missing');
+    // 只認 badge !== 'raw-missing' 的(避免把「使用者已刪 root 但 raws 還有」的 orphan 又混進來)
+    const rawImages = files.value
+      .filter((f) => f.badge !== 'raw-missing')
+      .map((f) => f.filename)
+    return previewImport(scan.rootImages, rawImages)
+  }
+
+  /** 呼叫 IPC importPages 把選中的 root 圖匯入,並重載 store state。 */
+  async function commitRescanImport(filenames: string[]): Promise<void> {
+    if (rootPath.value === null) return
+    const result = await window.api.importPages(rootPath.value, filenames)
+    await ingestProject(rootPath.value, result.projectMetaRaw, result.pages)
   }
 
   /** dev 開機自動開啟用;傳入 rootPath 直接載入。失敗往上拋。 */
@@ -284,6 +315,9 @@ export const useProjectStore = defineStore('project', () => {
     dirty,
     isOpen,
     metaDirty,
+    rawsDir,
+    shashokuDir,
+    layersDirOf,
     // methods
     fileByName,
     reset,
@@ -291,6 +325,8 @@ export const useProjectStore = defineStore('project', () => {
     createNewProject,
     openExisting,
     openByPath,
+    previewRescanImport,
+    commitRescanImport,
     save,
     addLabel,
     deleteLabel,

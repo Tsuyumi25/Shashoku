@@ -109,7 +109,7 @@ const engine = useEditor() // 嵌字引擎單例:doc + docPage = 成品像素的
 
 const currentPage = computed(() => editorStore.currentFilename) // 頁游標全域共享
 const src = computed(() =>
-  project.folderPath && currentPage.value ? imageSrc(project.folderPath, currentPage.value) : '',
+  project.rawsDir && currentPage.value ? imageSrc(project.rawsDir, currentPage.value) : '',
 )
 const currentLabels = computed<LabelItem[]>(() =>
   currentPage.value ? (project.fileByName(currentPage.value)?.labels ?? []) : [],
@@ -153,7 +153,7 @@ function setTextEl(id: string, el: unknown): void {
 
 // ---- 頁面縮圖列表(PPT 式):點縮圖 = 移動全域頁游標 ----
 function thumbSrc(filename: string): string {
-  return project.folderPath ? imageSrc(project.folderPath, filename) : ''
+  return project.rawsDir ? imageSrc(project.rawsDir, filename) : ''
 }
 
 const thumbEls = new Map<string, HTMLElement>()

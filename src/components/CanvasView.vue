@@ -176,8 +176,8 @@ const currentFile = computed(() =>
   editor.currentFilename ? project.fileByName(editor.currentFilename) : undefined,
 )
 const src = computed(() =>
-  project.folderPath && currentFile.value
-    ? imageSrc(project.folderPath, currentFile.value.filename)
+  project.rawsDir && currentFile.value
+    ? imageSrc(project.rawsDir, currentFile.value.filename)
     : '',
 )
 

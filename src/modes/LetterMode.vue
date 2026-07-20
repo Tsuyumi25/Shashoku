@@ -317,8 +317,8 @@ async function onPickFile(e: Event): Promise<void> {
  * isStale:呼叫端的作廢判定——IPC/解碼完成順序不保證跟請求順序一致,
  * 讀檔解碼完回來先問一聲,已作廢就丟棄,不讓舊頁覆蓋新頁。 */
 async function loadPage(name: string, isStale: () => boolean = () => false): Promise<void> {
-  if (!projectStore.folderPath) return;
-  const bytes = await window.api.readImage(projectStore.folderPath, name);
+  if (!projectStore.rawsDir) return;
+  const bytes = await window.api.readImage(projectStore.rawsDir, name);
   const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
   if (isStale()) {
     bitmap.close();

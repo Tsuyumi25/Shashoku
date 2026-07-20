@@ -11,6 +11,7 @@
           @open="onOpen"
           @save="onSave"
           @save-as="onSaveAs"
+          @rescan="onRescan"
           @open-text-board="api.openTextBoard()"
           @exit="onExit"
           @help="api.openHelp()"
@@ -50,6 +51,14 @@
       <ProofreadMode v-show="appMode === 'proofread'" />
       <FontMode v-show="appMode === 'fonts'" />
     </main>
+
+    <!-- 重新掃描資料夾:比對 root vs raws 選擇性匯入新頁 -->
+    <ImportDialog
+      :open="importDialogOpen"
+      :diff="importDiff"
+      @cancel="onImportCancel"
+      @confirm="onImportConfirm"
+    />
 
     <!-- dirty 時的確認（原版 是/否/取消 對話框），新建/開啟/關窗共用 -->
     <Dialog
@@ -92,6 +101,7 @@ import { useDark, useEventListener } from '@vueuse/core'
 import { Minus, Moon, Square, Sun, X } from '@lucide/vue'
 import { toast, Toaster } from 'vue-sonner'
 import AppMenuBar from '@/components/AppMenuBar.vue'
+import ImportDialog from '@/components/ImportDialog.vue'
 import FontMode from '@/modes/FontMode.vue'
 import LetterMode from '@/modes/LetterMode.vue'
 import ProofreadMode from '@/modes/ProofreadMode.vue'
@@ -265,6 +275,46 @@ async function onSave() {
     toast.error('存檔失敗', {
       description: err instanceof Error ? err.message : String(err),
     })
+  }
+}
+
+// ── 重新掃描資料夾(Import UI)──
+import type { ImportDiff } from '@shared/project/import'
+
+const importDialogOpen = ref(false)
+const importDiff = ref<ImportDiff | null>(null)
+
+async function onRescan() {
+  if (!project.isOpen) return
+  try {
+    const diff = await project.previewRescanImport()
+    if (!diff) return
+    importDiff.value = diff
+    importDialogOpen.value = true
+  } catch (err) {
+    toast.error('掃描資料夾失敗', {
+      description: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+function onImportCancel() {
+  importDialogOpen.value = false
+  importDiff.value = null
+}
+
+async function onImportConfirm(filenames: string[]) {
+  importDialogOpen.value = false
+  try {
+    await project.commitRescanImport(filenames)
+    editor.clearHistory()
+    if (filenames.length > 0) toast.success(`已匯入 ${filenames.length} 頁`)
+  } catch (err) {
+    toast.error('匯入失敗', {
+      description: err instanceof Error ? err.message : String(err),
+    })
+  } finally {
+    importDiff.value = null
   }
 }
 

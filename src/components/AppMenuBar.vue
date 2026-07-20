@@ -11,6 +11,10 @@
         </MenubarItem>
         <MenubarItem :disabled="!project.isOpen" @select="emit('save-as')">另存新檔(S)…</MenubarItem>
         <MenubarSeparator />
+        <MenubarItem :disabled="!project.isOpen" @select="emit('rescan')">
+          重新掃描資料夾(R)…
+        </MenubarItem>
+        <MenubarSeparator />
         <MenubarItem @select="emit('exit')">結束(E)</MenubarItem>
       </MenubarContent>
     </MenubarMenu>
@@ -64,6 +68,7 @@ const emit = defineEmits<{
   open: []
   save: []
   'save-as': []
+  rescan: []
   'open-text-board': []
   exit: []
   help: []
