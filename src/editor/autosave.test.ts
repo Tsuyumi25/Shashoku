@@ -165,3 +165,22 @@ describe('writePage payload shape', () => {
     expect(input.ocrRaw).toBeUndefined()
   })
 })
+
+describe('生成式檔名(P0 transaction fix)', () => {
+  it('layer PNG 檔名含 .rev<N>.png,manifest revision 遞增', async () => {
+    const doc = makeDoc()
+    const layer = doc.addBlankLayer('底圖')
+    scheduleRasterAutosave('/proj/pages/01', doc)
+    await vi.advanceTimersByTimeAsync(800)
+
+    const [, input] = writePageMock.mock.calls[0]
+    // readCurrentRevision fallback = 0(readPage mock 未定義,catch),新 rev = 1
+    const filenames = Object.keys(input.layerParts)
+    expect(filenames.length).toBe(1)
+    expect(filenames[0]).toMatch(new RegExp(`^${layer.id}\\.rev1\\.png$`))
+    // manifest 內 revision 也是 1
+    const manifest = JSON.parse(input.manifestRaw)
+    expect(manifest.revision).toBe(1)
+    expect(manifest.layers[0].file).toBe(filenames[0])
+  })
+})

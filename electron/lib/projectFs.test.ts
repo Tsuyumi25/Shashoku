@@ -192,6 +192,7 @@ describe("readPage / writePage", () => {
     };
     const m = {
       schemaVersion: 1 as const,
+      revision: 0,
       layers: [
         {
           id: "bg",
@@ -224,7 +225,7 @@ describe("readPage / writePage", () => {
     const bgBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
     const rdBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 8, 7]);
     await writePage(pageDir, {
-      manifestRaw: serializeManifest({ schemaVersion: 1, layers: [] }),
+      manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
       translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
       layerParts: { "background.png": bgBytes, "redraw.png": rdBytes },
     });
@@ -242,7 +243,7 @@ describe("readPage / writePage", () => {
     const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
     await expect(
       writePage(pageDir, {
-        manifestRaw: serializeManifest({ schemaVersion: 1, layers: [] }),
+        manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
         translationRaw: serializeTranslation({ schemaVersion: 1, labels: [] }),
         layerParts: { "../evil.png": new Uint8Array([1]) },
       }),
@@ -257,6 +258,7 @@ describe("readPage / writePage", () => {
     // 第二次寫入
     const m2 = {
       schemaVersion: 1 as const,
+      revision: 0,
       layers: [
         {
           id: "x",
@@ -372,6 +374,63 @@ describe("createProject 對 root 檔名 stem 衝突拒絕", () => {
   });
 });
 
+describe("openProject GC(生成式檔名的孤兒清理)", () => {
+  it("layers/ 內有 orphan PNG(不在 manifest.layers 內)→ openProject 後清除", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
+    const layersDir = join(pageDir, DIR_LAYERS);
+    await mkdir(layersDir, { recursive: true });
+
+    // 寫個假 manifest 引用 rev2 檔
+    await writeFile(
+      join(pageDir, PAGE_MANIFEST_FILENAME),
+      serializeManifest({
+        schemaVersion: 1,
+        revision: 2,
+        layers: [
+          {
+            id: "bg",
+            file: "bg.rev2.png",
+            name: "",
+            visible: true,
+            opacity: 1,
+            blendMode: "normal",
+            locked: false,
+            alphaLocked: false,
+          },
+        ],
+      }),
+    );
+    // rev1 (orphan) + rev2 (referenced) + 完全不相關的檔
+    await writeFile(join(layersDir, "bg.rev1.png"), Buffer.from([1]));
+    await writeFile(join(layersDir, "bg.rev2.png"), Buffer.from([2]));
+    await writeFile(join(layersDir, "orphan.png"), Buffer.from([3]));
+
+    await openProject(workDir);
+
+    expect(await exists(join(layersDir, "bg.rev2.png"))).toBe(true);
+    expect(await exists(join(layersDir, "bg.rev1.png"))).toBe(false);
+    expect(await exists(join(layersDir, "orphan.png"))).toBe(false);
+  });
+
+  it("manifest 損毀 → 不 GC(保守,不誤刪救援資料)", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
+    const layersDir = join(pageDir, DIR_LAYERS);
+    await mkdir(layersDir, { recursive: true });
+    await writeFile(join(layersDir, "possibly-recoverable.png"), Buffer.from([9]));
+    // 弄壞 manifest
+    await writeFile(join(pageDir, PAGE_MANIFEST_FILENAME), "{ this is broken json");
+
+    await openProject(workDir);
+
+    // manifest 壞的話 GC 不動 layers,保留使用者可能還要的檔
+    expect(await exists(join(layersDir, "possibly-recoverable.png"))).toBe(true);
+  });
+});
+
 describe("writeProjectMeta", () => {
   it("更新 project.json,readback 內容相同", async () => {
     await fakePng(join(workDir, "01.png"), 1);
@@ -402,6 +461,7 @@ describe("寫入順序:「manifest 最後寫」 pattern", () => {
     await writePage(pageDir, {
       manifestRaw: serializeManifest({
         schemaVersion: 1,
+        revision: 0,
         layers: [
           {
             id: "bg",

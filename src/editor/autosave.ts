@@ -17,7 +17,7 @@
 //   直到 pending 空為止。
 // - flushPendingRasterSave 語意:「處理完當下 inflight + pending 內所有頁」
 
-import { serializeManifest } from '@shared/page/schema'
+import { parseManifest, serializeManifest } from '@shared/page/schema'
 import type { LayerEntry, ManifestJson } from '@shared/page/types'
 import type { ShashokuDoc } from '@/engine/document'
 
@@ -42,16 +42,26 @@ function clearTimers(): void {
   }
 }
 
-/** doc 的當前 layers 序列化成 manifest + 每層獨立 PNG bytes。 */
-async function snapshotDoc(doc: ShashokuDoc): Promise<{
+/**
+ * doc 的當前 layers 序列化成 manifest + 每層獨立 PNG bytes。
+ *
+ * 生成式檔名(generation-based storage):新 rev 用 `<layer-id>.rev<N>.png`,
+ * 舊 rev 檔仍在磁碟上不被覆寫。這保證 crash 於「寫 layers 中間、manifest
+ * 未更新」時,舊 manifest 指向的舊 rev PNG 完全沒動,是**真正的完整 snapshot**,
+ * 不是「舊 metadata + 新舊混合的檔案」。清理由 openProject 的 GC 負責。
+ */
+async function snapshotDoc(
+  doc: ShashokuDoc,
+  revision: number,
+): Promise<{
   manifest: ManifestJson
   layerParts: Record<string, Uint8Array>
 }> {
   const entries: LayerEntry[] = []
   const layerParts: Record<string, Uint8Array> = {}
   for (const layer of doc.layers) {
-    // 檔名 = layer.id + .png(id 已是 UUID / seq,無路徑分隔符風險)
-    const file = `${layer.id}.png`
+    // 檔名帶 revision:舊 rev 保留,crash 復原用
+    const file = `${layer.id}.rev${revision}.png`
     layerParts[file] = await doc.exportLayerPng(layer.id)
     entries.push({
       id: layer.id,
@@ -65,8 +75,18 @@ async function snapshotDoc(doc: ShashokuDoc): Promise<{
     })
   }
   return {
-    manifest: { schemaVersion: 1, layers: entries },
+    manifest: { schemaVersion: 1, revision, layers: entries },
     layerParts,
+  }
+}
+
+/** 讀當前 pageDir 的 manifest 拿 revision;不存在或損毀視為 0。 */
+async function readCurrentRevision(pageDir: string): Promise<number> {
+  try {
+    const raw = await window.api.readPage(pageDir)
+    return parseManifest(raw.manifestRaw).revision
+  } catch {
+    return 0
   }
 }
 
@@ -88,7 +108,9 @@ async function performSave(): Promise<void> {
 
   const promise = (async () => {
     try {
-      const { manifest, layerParts } = await snapshotDoc(doc)
+      // 拿現有 manifest 的 revision,新版 = +1
+      const prevRev = await readCurrentRevision(pageDir)
+      const { manifest, layerParts } = await snapshotDoc(doc, prevRev + 1)
       await window.api.writePage(pageDir, {
         manifestRaw: serializeManifest(manifest),
         layerParts,

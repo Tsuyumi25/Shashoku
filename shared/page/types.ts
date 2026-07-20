@@ -31,6 +31,13 @@ export interface LayerEntry {
 /** 每頁 manifest.json 的完整結構。 */
 export interface ManifestJson {
   schemaVersion: typeof MANIFEST_SCHEMA_VERSION
+  /**
+   * 每次 autosave 遞增的 revision counter,用於「生成式檔名」pattern:
+   * layers/<layer-id>.rev<N>.png。同一頁的舊 rev PNG 保留不覆寫,直到
+   * openProject 時 GC。防止「manifest 是舊、layers 是新舊混合」的
+   * 多檔 transaction race。初始值 0(空 manifest);第一次寫入變 1。
+   */
+  revision: number
   /** 陣列順序 = layer 堆疊順序(底 → 頂) */
   layers: LayerEntry[]
 }

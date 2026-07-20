@@ -27,9 +27,10 @@ import {
 // ── manifest.json ──
 
 describe('manifest.json', () => {
-  it('defaultManifest 為空 layers', () => {
+  it('defaultManifest 為空 layers,revision 從 0 開始', () => {
     expect(defaultManifest()).toEqual({
       schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
       layers: [],
     })
   })
@@ -37,6 +38,7 @@ describe('manifest.json', () => {
   it('roundtrip: 含多層', () => {
     const m: ManifestJson = {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 7,
       layers: [
         {
           id: 'l1',
@@ -157,6 +159,19 @@ describe('manifest.json', () => {
 
   it('schemaVersion 較新抛「請更新軟體」', () => {
     expect(() => parseManifest('{"schemaVersion":999,"layers":[]}')).toThrow(/請更新軟體/)
+  })
+
+  it('缺 revision 欄位視為 0(向前相容舊 manifest)', () => {
+    const legacy = JSON.stringify({ schemaVersion: 1, layers: [] })
+    const parsed = parseManifest(legacy)
+    expect(parsed.revision).toBe(0)
+  })
+
+  it('revision 負數或非整數抛錯', () => {
+    const bad1 = JSON.stringify({ schemaVersion: 1, revision: -1, layers: [] })
+    expect(() => parseManifest(bad1)).toThrow(/revision/)
+    const bad2 = JSON.stringify({ schemaVersion: 1, revision: 1.5, layers: [] })
+    expect(() => parseManifest(bad2)).toThrow(/revision/)
   })
 
   it('缺 id 會補一個(向前相容手寫檔案)', () => {

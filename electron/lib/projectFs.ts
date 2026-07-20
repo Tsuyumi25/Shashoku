@@ -1,7 +1,7 @@
 // Shashoku 專案(新架構)的檔案系統操作。純 fs,不依賴 electron,方便單元測試。
 // IPC binding 在 electron/ipc/shashokuProject.ts。
 
-import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type {
   OpenProjectResult,
@@ -28,6 +28,7 @@ import { defaultProjectJson, serializeProjectJson } from "@shared/project/schema
 import {
   defaultManifest,
   defaultTranslation,
+  parseManifest,
   serializeManifest,
   serializeTranslation,
 } from "@shared/page/schema";
@@ -231,7 +232,42 @@ function assertNoStemCollision(filenames: string[]): void {
 }
 
 export async function openProject(rootPath: string): Promise<OpenProjectResult> {
+  // openProject 是「安全時機」(沒有 pending 操作),GC 每頁 layers/ 內的
+  // orphan PNG(不再被 manifest 引用的舊 revision)。crash 中不誤刪:autosave
+  // 只寫新 rev,舊 rev 直到這裡才清。
+  const shashokuDir = join(rootPath, SHASHOKU_DIR);
+  const pagesRoot = join(shashokuDir, DIR_PAGES);
+  const pageDirs = await listPageDirs(pagesRoot);
+  for (const stem of pageDirs) {
+    await gcOrphanLayers(join(pagesRoot, stem));
+  }
   return await buildOpenResult(rootPath);
+}
+
+/**
+ * 掃 pageDir/layers/*.png,刪不再被 manifest.layers[].file 引用的檔案。
+ * manifest 損毀或不存在 → 不動 layers(保守),讓使用者面對錯誤 UI。
+ */
+async function gcOrphanLayers(pageDir: string): Promise<void> {
+  const layersDir = join(pageDir, DIR_LAYERS);
+  if (!(await exists(layersDir))) return;
+  let referenced: Set<string>;
+  try {
+    const manifestRaw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
+    referenced = new Set(parseManifest(manifestRaw).layers.map((l) => l.file));
+  } catch {
+    // manifest 損毀或不存在:不 GC,避免誤刪救援資料
+    return;
+  }
+  const entries = await readdir(layersDir, { withFileTypes: true });
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    if (referenced.has(e.name)) continue;
+    // orphan:不被 manifest 引用的 layer PNG,刪除
+    await unlink(join(layersDir, e.name)).catch(() => {
+      // 併發或已被刪:忽略
+    });
+  }
 }
 
 export async function readPage(pageDir: string): Promise<PageRawData> {

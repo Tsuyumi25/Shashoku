@@ -98,7 +98,7 @@ function parseLayerEntry(v: unknown, index: number): LayerEntry {
 }
 
 export function defaultManifest(): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, layers: [] }
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, layers: [] }
 }
 
 export function parseManifest(raw: string): ManifestJson {
@@ -111,6 +111,15 @@ export function parseManifest(raw: string): ManifestJson {
     fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
   }
 
+  // revision:向後相容 — 舊 manifest 沒這欄位視為 0(下次 autosave 會遞增)
+  const revisionRaw = data.revision
+  let revision = 0
+  if (revisionRaw !== undefined) {
+    if (typeof revisionRaw !== 'number' || !Number.isFinite(revisionRaw) || revisionRaw < 0 || !Number.isInteger(revisionRaw))
+      fail('manifest.json.revision 必須是 ≥ 0 的整數')
+    revision = revisionRaw
+  }
+
   const layersRaw = data.layers
   if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
   const layers = layersRaw.map((l, i) => parseLayerEntry(l, i))
@@ -118,12 +127,13 @@ export function parseManifest(raw: string): ManifestJson {
   const files = layers.map((l) => l.file)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, layers }
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, layers }
 }
 
 export function serializeManifest(m: ManifestJson): string {
   const out = {
     schemaVersion: m.schemaVersion,
+    revision: m.revision,
     layers: m.layers.map((l) => ({
       id: l.id,
       file: l.file,
