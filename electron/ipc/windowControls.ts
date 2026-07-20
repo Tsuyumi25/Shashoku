@@ -15,7 +15,7 @@ export function interceptClose(win: BrowserWindow): void {
   });
 }
 
-export function registerWindowControlHandlers(): void {
+export function registerWindowControlHandlers(openTextBoard: () => void): void {
   ipcMain.on(CHANNELS.windowMinimize, (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
   ipcMain.on(CHANNELS.windowMaximize, (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
@@ -29,6 +29,7 @@ export function registerWindowControlHandlers(): void {
     forceClosable.add(win);
     win.close();
   });
+  ipcMain.on(CHANNELS.openTextBoard, openTextBoard);
   ipcMain.on(CHANNELS.openHelp, () => {
     void shell.openExternal(HELP_URL);
   });

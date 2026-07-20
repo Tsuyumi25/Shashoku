@@ -10,15 +10,23 @@
       v-for="l in textLabels"
       :key="l.id"
       class="absolute"
-      :class="interactive ? 'pointer-events-auto cursor-default' : ''"
+      :class="[
+        interactive ? `pointer-events-auto ${nativeDraggable ? 'cursor-grab' : 'cursor-default'}` : '',
+        l.id === hiddenLabelId && 'opacity-0',
+      ]"
+      :draggable="nativeDraggable"
       :style="{
         ...css,
         left: `${l.x * width}px`,
         top: `${l.y * height}px`,
         transform: 'translate(-50%, -50%)',
       }"
-      @pointerdown.stop="interactive && emit('select', l.id)"
+      @pointerdown.stop="
+        interactive && (emit('select', l.id), emit('labelPointerdown', l, $event))
+      "
       @dblclick.stop="interactive && emit('edit', l.id)"
+      @dragstart.stop="emit('labelDragstart', l, $event)"
+      @dragend="emit('labelDragend', $event)"
     >{{ l.text }}</div>
   </div>
 </template>
@@ -35,6 +43,8 @@ const props = defineProps<{
   textStyle: LabelTextStyle
   /** 文字可點選(翻譯 mode);校對等純顯示場景不傳 = 穿透 */
   interactive?: boolean
+  nativeDraggable?: boolean
+  hiddenLabelId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -42,6 +52,9 @@ const emit = defineEmits<{
   select: [id: string]
   /** 雙擊文字 = 選取並進輸入層(等同雙擊 marker) */
   edit: [id: string]
+  labelPointerdown: [label: LabelItem, e: PointerEvent]
+  labelDragstart: [label: LabelItem, e: DragEvent]
+  labelDragend: [e: DragEvent]
 }>()
 
 const css = computed(() => labelTextCss(props.textStyle))

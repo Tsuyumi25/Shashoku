@@ -1,12 +1,14 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
 import { interceptClose } from "./ipc/windowControls";
+import type { WindowRole } from "@shared/ipc/channels";
 
-export function createWindow() {
+export function createWindow(role: WindowRole): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    frame: false, // 自畫 titlebar(拖曳區 + mode tab + 視窗控制)
+    width: role === "text-board" ? 720 : 1400,
+    height: role === "text-board" ? 640 : 900,
+    frame: role === "text-board", // 文字畫布只用原生標題列；主視窗維持自畫殼
+    title: role === "text-board" ? "草稿紙" : "Shashoku 写植",
     backgroundColor: "#262624",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -16,13 +18,19 @@ export function createWindow() {
     },
   });
 
-  interceptClose(win); // 關窗攔截:renderer 跑翻譯 dirty 確認流程
+  if (role === "main") {
+    interceptClose(win); // 主視窗關閉交給 renderer 跑翻譯 dirty 確認流程
+  }
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL);
-    win.webContents.openDevTools();
+    const url = new URL(process.env.ELECTRON_RENDERER_URL);
+    url.searchParams.set("windowRole", role);
+    win.loadURL(url.toString());
+    if (role === "main") win.webContents.openDevTools();
   } else {
-    win.loadFile(join(__dirname, "../renderer/index.html"));
+    win.loadFile(join(__dirname, "../renderer/index.html"), {
+      query: { windowRole: role },
+    });
   }
 
   // 畫布有自己的 zoom，攔掉 Chromium 的頁面縮放快捷鍵，避免整頁被縮放。
@@ -43,4 +51,6 @@ export function createWindow() {
       }
     }
   });
+
+  return win;
 }

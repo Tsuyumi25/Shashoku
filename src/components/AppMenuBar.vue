@@ -23,6 +23,13 @@
       </MenubarContent>
     </MenubarMenu>
 
+    <MenubarMenu>
+      <MenubarTrigger>視窗(W)</MenubarTrigger>
+      <MenubarContent>
+        <MenubarItem @select="emit('open-text-board')">草稿紙</MenubarItem>
+      </MenubarContent>
+    </MenubarMenu>
+
     <!-- 原版是頂層項，點擊直接開管理視窗。功能未實作，先佔位 -->
     <MenubarMenu>
       <MenubarTrigger disabled>圖片管理(I)</MenubarTrigger>
@@ -57,6 +64,7 @@ const emit = defineEmits<{
   open: []
   save: []
   'save-as': []
+  'open-text-board': []
   exit: []
   help: []
   about: []

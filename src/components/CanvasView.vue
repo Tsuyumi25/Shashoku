@@ -9,6 +9,8 @@
       @pointermove="onPointerMove"
       @pointerup="onBgPointerUp"
       @pointercancel="onBgPointerUp"
+      @dragover="onLabelDragOver"
+      @drop="onLabelDrop"
       @contextmenu.prevent
       @auxclick="onAuxClick"
     >
@@ -29,7 +31,12 @@
               :labels="currentFile.labels"
               :text-style="textPreviewStyle"
               :interactive="!spaceDown"
+              :hidden-label-id="hiddenNativeMoveId"
+              :native-draggable="!spaceDown"
               @select="(id) => (editor.selectedLabelId = id)"
+              @label-pointerdown="onNativeLabelPointerDown"
+              @label-dragstart="onNativeLabelDragStart"
+              @label-dragend="onNativeLabelDragEnd"
               @edit="
                 (id) => {
                   editor.selectedLabelId = id
@@ -40,7 +47,10 @@
             <LabelMarker
               v-for="(label, i) in currentFile.labels"
               :key="label.id"
-              :class="spaceDown && 'pointer-events-none'"
+              :class="[
+                spaceDown && 'pointer-events-none',
+                label.id === hiddenNativeMoveId && 'opacity-0',
+              ]"
               :label
               :index="i"
               :scale="view.scale"
@@ -49,11 +59,12 @@
               :selected="label.id === editor.selectedLabelId"
               :show-group="editor.showGroups"
               :group-name="project.header.groups[label.category - 1] ?? `分組${label.category}`"
+              :native-draggable="!spaceDown"
               @marker-pointerdown="onMarkerPointerDown(label, $event)"
-              @marker-pointermove="onMarkerPointerMove($event)"
-              @marker-pointerup="onMarkerPointerUp($event)"
               @marker-dblclick="editor.requestEditorFocus()"
               @marker-contextmenu="onMarkerContextMenu(label, $event)"
+              @marker-dragstart="onNativeLabelDragStart(label, $event)"
+              @marker-dragend="onNativeLabelDragEnd"
             />
           </template>
         </div>
@@ -89,6 +100,14 @@ import { sharedView, viewFit } from '@/lib/viewState'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { imageSrc } from '@/utils/mediaUrls'
+import { setLabelDragPreview } from '@/lib/labelDragPreview'
+import {
+  LABEL_DRAG_TYPE,
+  parseLabelDrag,
+  resolveDropCategory,
+  serializeLabelDrag,
+  type LabelDragPayload,
+} from '@/lib/labelDrag'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -317,86 +336,169 @@ function onBgPointerUp(e: PointerEvent) {
   else editor.selectedLabelId = null
 }
 
-let dragging: {
-  id: string
+interface ActiveNativeDrag {
+  payload: LabelDragPayload
   filename: string
   source: LabelItem
-  startX: number
-  startY: number
-  /** 拖曳起點的內容座標(px)——位移經 screenToContentPx 差分,旋轉視角下才正確 */
   startContent: { x: number; y: number }
   oldPos: { x: number; y: number }
-  moved: boolean
-  copy: boolean
-  duplicate: LabelItem | null
-} | null = null
+  localCommitted: boolean
+}
 
-function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
+let pendingNativeDrag: {
+  labelId: string
+  filename: string
+  startContent: { x: number; y: number }
+} | null = null
+let activeNativeDrag: ActiveNativeDrag | null = null
+const hiddenNativeMoveId = ref<string | null>(null)
+
+function onNativeLabelPointerDown(label: LabelItem, e: PointerEvent) {
   const file = currentFile.value
-  if (!file || e.button !== 0 || !containerRef.value) return
-  // 點 = 選取(游標移到這顆),拖 = 移動;要打字按 i 或雙擊(modal 鍵盤層)
+  if (!file || e.button !== 0 || !containerRef.value || spaceDown.value) return
   editor.selectedLabelId = label.id
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   const rect = containerRef.value.getBoundingClientRect()
-  dragging = {
-    id: label.id,
+  pendingNativeDrag = {
+    labelId: label.id,
     filename: file.filename,
-    source: { ...label },
-    startX: e.clientX,
-    startY: e.clientY,
     startContent: screenToContentPx(e.clientX, e.clientY, rect, view),
-    oldPos: { x: label.x, y: label.y },
-    moved: false,
-    copy: e.altKey,
-    duplicate: null,
   }
 }
 
-function onMarkerPointerMove(e: PointerEvent) {
-  if (!dragging || !containerRef.value) return
-  if (
-    !dragging.moved &&
-    Math.hypot(e.clientX - dragging.startX, e.clientY - dragging.startY) < DRAG_THRESHOLD_PX
-  )
+function onNativeLabelDragStart(label: LabelItem, e: DragEvent) {
+  const file = currentFile.value
+  if (!file || !e.dataTransfer || !containerRef.value || spaceDown.value) {
+    e.preventDefault()
     return
-  dragging.moved = true
-  if (dragging.copy && !dragging.duplicate) {
-    const duplicate: LabelItem = {
-      ...dragging.source,
-      id: crypto.randomUUID(),
+  }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const canvasRect = containerRef.value.getBoundingClientRect()
+  const operation = e.altKey ? 'copy' : 'move'
+  const payload: LabelDragPayload = {
+    version: 1,
+    kind: 'label',
+    source: 'main',
+    operation,
+    token: crypto.randomUUID(),
+    sourceId: label.id,
+    label: {
+      text: label.text,
+      category: label.category,
+      groupName: project.header.groups[label.category - 1] ?? '',
+    },
+    grabOffset: {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    },
+  }
+  const startContent =
+    pendingNativeDrag?.labelId === label.id && pendingNativeDrag.filename === file.filename
+      ? pendingNativeDrag.startContent
+      : screenToContentPx(e.clientX, e.clientY, canvasRect, view)
+  pendingNativeDrag = null
+  const source = { ...label }
+  activeNativeDrag = {
+    payload,
+    filename: file.filename,
+    source,
+    startContent,
+    oldPos: { x: label.x, y: label.y },
+    localCommitted: false,
+  }
+  const preview = setLabelDragPreview(e.dataTransfer, label, textPreviewStyle.value, {
+    scale: view.scale,
+    rotation: view.rotate,
+    sourceRect: rect,
+    hotspot: payload.grabOffset,
+  })
+  payload.grabOffset = preview.grabOffset
+  e.dataTransfer.clearData()
+  e.dataTransfer.setData(LABEL_DRAG_TYPE, serializeLabelDrag(payload))
+  e.dataTransfer.effectAllowed = operation
+  if (operation === 'move') hiddenNativeMoveId.value = label.id
+}
+
+function onNativeLabelDragEnd(e: DragEvent) {
+  const active = activeNativeDrag
+  activeNativeDrag = null
+  pendingNativeDrag = null
+  hiddenNativeMoveId.value = null
+  if (!active || active.localCommitted) return
+  if (active.payload.operation === 'move' && e.dataTransfer?.dropEffect === 'move') {
+    editor.cmdDeleteLabel(active.filename, active.payload.sourceId)
+  }
+}
+
+function onLabelDragOver(e: DragEvent) {
+  if (
+    !e.dataTransfer ||
+    !Array.from(e.dataTransfer.types).includes(LABEL_DRAG_TYPE) ||
+    !currentFile.value ||
+    currentFile.value.missing ||
+    !imageReady.value
+  ) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = e.dataTransfer.effectAllowed === 'move' ? 'move' : 'copy'
+}
+
+function onLabelDrop(e: DragEvent) {
+  const file = currentFile.value
+  if (!file || file.missing || !imageReady.value || !containerRef.value || !e.dataTransfer) return
+  const payload = parseLabelDrag(e.dataTransfer.getData(LABEL_DRAG_TYPE))
+  if (!payload) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = payload.operation
+  const active = activeNativeDrag
+  if (active?.payload.token === payload.token && active.filename === file.filename) {
+    const rect = containerRef.value.getBoundingClientRect()
+    const content = screenToContentPx(e.clientX, e.clientY, rect, view)
+    const x = clamp(
+      active.oldPos.x + (content.x - active.startContent.x) / natural.value.w,
+      0,
+      1,
+    )
+    const y = clamp(
+      active.oldPos.y + (content.y - active.startContent.y) / natural.value.h,
+      0,
+      1,
+    )
+    if (payload.operation === 'copy') {
+      const duplicate = { ...active.source, id: crypto.randomUUID(), x, y }
+      editor.cmdDuplicateLabel(file.filename, duplicate)
+      editor.selectedLabelId = duplicate.id
+    } else {
+      project.moveLabel(file.filename, payload.sourceId, x, y)
+      editor.cmdMoveLabel(file.filename, payload.sourceId, active.oldPos, { x, y })
+      editor.selectedLabelId = payload.sourceId
     }
-    project.addLabel(dragging.filename, duplicate)
-    dragging.id = duplicate.id
-    dragging.duplicate = duplicate
-    editor.selectedLabelId = duplicate.id
+    active.localCommitted = true
+    return
   }
   const rect = containerRef.value.getBoundingClientRect()
   const content = screenToContentPx(e.clientX, e.clientY, rect, view)
-  project.moveLabel(
-    dragging.filename,
-    dragging.id,
-    clamp(dragging.oldPos.x + (content.x - dragging.startContent.x) / natural.value.w, 0, 1),
-    clamp(dragging.oldPos.y + (content.y - dragging.startContent.y) / natural.value.h, 0, 1),
-  )
-}
-
-function onMarkerPointerUp(e: PointerEvent) {
-  if (!dragging) return
-  if (dragging.moved) {
-    const label = project.fileByName(dragging.filename)?.labels.find((l) => l.id === dragging!.id)
+  const x = clamp(content.x / natural.value.w, 0, 1)
+  const y = clamp(content.y / natural.value.h, 0, 1)
+  if (payload.source === 'main' && payload.operation === 'move') {
+    const label = project.fileByName(file.filename)?.labels.find((item) => item.id === payload.sourceId)
     if (label) {
-      if (dragging.duplicate) {
-        editor.cmdDuplicateLabel(dragging.filename, dragging.duplicate, { alreadyApplied: true })
-      } else {
-        editor.cmdMoveLabel(dragging.filename, dragging.id, dragging.oldPos, {
-          x: label.x,
-          y: label.y,
-        })
-      }
+      const oldPos = { x: label.x, y: label.y }
+      project.moveLabel(file.filename, label.id, x, y)
+      editor.cmdMoveLabel(file.filename, label.id, oldPos, { x, y })
+      editor.selectedLabelId = label.id
+      return
     }
   }
-  ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
-  dragging = null
+  editor.cmdDuplicateLabel(file.filename, {
+    id: crypto.randomUUID(),
+    x,
+    y,
+    category: resolveDropCategory(payload, project.header.groups, editor.activeCategory),
+    text: payload.label.text,
+  })
+}
+
+function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
+  onNativeLabelPointerDown(label, e)
 }
 
 /** 右鍵 marker = 刪除(可 undo,不確認)。滑過即選已隨檢查模式退場——

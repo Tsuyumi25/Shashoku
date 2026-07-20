@@ -9,6 +9,25 @@ import { handleLocalFileProtocol, registerLocalFileScheme } from "./protocol";
 import { applyFontconfig } from "./fonts/fontconfig";
 import { createWindow } from "./window";
 
+let mainWindow: BrowserWindow | null = null;
+let textBoardWindow: BrowserWindow | null = null;
+
+function focusWindow(win: BrowserWindow | null): boolean {
+  if (!win || win.isDestroyed()) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return true;
+}
+
+function openTextBoard(): void {
+  if (focusWindow(textBoardWindow)) return;
+  textBoardWindow = createWindow("text-board");
+  textBoardWindow.once("closed", () => {
+    textBoardWindow = null;
+  });
+}
+
 // 匯入字體資料夾接進 app 私有 fontconfig。必須趕在 Chromium 初始化
 // 字體棧之前設 env,所以擺在 module 頂層、任何 ready 之前
 applyFontconfig();
@@ -21,10 +40,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.focus();
+    if (focusWindow(mainWindow)) return;
+    focusWindow(textBoardWindow);
   });
 }
 
@@ -43,13 +60,16 @@ registerLocalFileScheme();
 
 app.whenReady().then(() => {
   handleLocalFileProtocol();
-  registerWindowControlHandlers();
+  registerWindowControlHandlers(openTextBoard);
   registerDialogHandlers();
   registerSskHandlers();
   registerProjectHandlers();
   registerOcrHandlers();
   registerFontHandlers();
-  createWindow();
+  mainWindow = createWindow("main");
+  mainWindow.once("closed", () => {
+    mainWindow = null;
+  });
 });
 
 app.on("window-all-closed", () => {

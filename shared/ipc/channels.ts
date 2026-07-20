@@ -14,8 +14,11 @@ export const CHANNELS = {
   windowMaximize: 'window-maximize',
   windowClose: 'window-close',
   windowForceClose: 'window-force-close',
+  openTextBoard: 'window-open-text-board',
   closeRequested: 'window-close-requested',
 } as const
+
+export type WindowRole = 'main' | 'text-board'
 
 export interface SskFileEntry {
   filename: string
@@ -55,6 +58,8 @@ export interface TranslateApi {
   windowClose(): void
   /** 跳過關窗攔截直接關(dirty 確認流程結束後呼叫) */
   windowForceClose(): void
+  /** 開啟或聚焦唯一的文字物件畫布 */
+  openTextBoard(): void
   /** 訂閱關窗請求(視窗 X、Alt+F4、選單「結束」都會走到這) */
   onCloseRequested(callback: () => void): void
 }

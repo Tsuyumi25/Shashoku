@@ -1,14 +1,14 @@
 <template>
   <div
-    class="absolute flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-xs font-bold text-white shadow-md ring-1 ring-black/40 select-none"
+    class="absolute flex h-6 w-6 cursor-grab items-center justify-center rounded-full text-xs font-bold text-white shadow-md ring-1 ring-black/40 select-none"
     :class="[selected && 'outline-2 outline-offset-2 outline-white']"
     :style="markerStyle"
+    :draggable="nativeDraggable"
     @pointerdown.stop="emit('markerPointerdown', $event)"
-    @pointermove="emit('markerPointermove', $event)"
-    @pointerup="emit('markerPointerup', $event)"
-    @pointercancel="emit('markerPointerup', $event)"
     @contextmenu.stop="emit('markerContextmenu', $event)"
     @dblclick.stop="emit('markerDblclick')"
+    @dragstart.stop="emit('markerDragstart', $event)"
+    @dragend="emit('markerDragend', $event)"
   >
     {{ index + 1 }}
     <!-- 檢查模式：常駐顯示分組名（原版 AlwaysShowGroup） -->
@@ -41,17 +41,18 @@ const props = defineProps<{
   /** 檢查模式：顯示分組名 */
   showGroup?: boolean
   groupName?: string
+  nativeDraggable?: boolean
 }>()
 
 // 拖曳/選取的幾何運算集中在 CanvasView（它擁有 view 與 container），
-// marker 只轉發 pointer 事件並擋住冒泡（避免觸發畫布 pan / 點擊新增）
+// marker 只轉發選取與原生拖曳事件，並擋住冒泡（避免觸發畫布點擊）
 const emit = defineEmits<{
   markerPointerdown: [e: PointerEvent]
-  markerPointermove: [e: PointerEvent]
-  markerPointerup: [e: PointerEvent]
   /** 雙擊 = 進輸入層(等同 modal 鍵盤層的 i) */
   markerDblclick: []
   markerContextmenu: [e: MouseEvent]
+  markerDragstart: [e: DragEvent]
+  markerDragend: [e: DragEvent]
 }>()
 
 const color = computed(() => CATEGORY_COLORS[props.label.category - 1] ?? 'rgb(128, 128, 128)')

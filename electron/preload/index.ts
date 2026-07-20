@@ -19,6 +19,7 @@ const api: TranslateApi & ShashokuApi = {
   windowMaximize: () => ipcRenderer.send(TR.windowMaximize),
   windowClose: () => ipcRenderer.send(TR.windowClose),
   windowForceClose: () => ipcRenderer.send(TR.windowForceClose),
+  openTextBoard: () => ipcRenderer.send(TR.openTextBoard),
   onCloseRequested: (callback) => {
     ipcRenderer.on(TR.closeRequested, () => callback());
   },

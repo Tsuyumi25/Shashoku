@@ -29,6 +29,14 @@ import ModeSwitcher from "@/components/ModeSwitcher.vue";
 import { appMode } from "@/lib/appMode";
 import { labelTextCss, labelTextStyleFromExportConfig } from "@/lib/labelTextStyle";
 import { drawLabelElement } from "@/lib/labelPaint";
+import { setLabelDragPreview } from "@/lib/labelDragPreview";
+import {
+  LABEL_DRAG_TYPE,
+  parseLabelDrag,
+  resolveDropCategory,
+  serializeLabelDrag,
+  type LabelDragPayload,
+} from "@/lib/labelDrag";
 import { CATEGORY_COLORS } from "@shared/ssk/constants";
 import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
@@ -183,6 +191,7 @@ function drawAnchoredBefore(
   const layerId = d.layers[beforeLayerIndex]?.id;
   if (!layerId) return;
   for (const l of anchoredLabels.value) {
+    if (l.id === hiddenNativeMoveId.value) continue;
     if (labelAnchors.value.get(l.id) !== layerId || l.text === "") continue;
     const el = textEls.get(l.id);
     if (!el) continue;
@@ -195,6 +204,7 @@ function drawFloatingTop(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderin
   const d = doc.value;
   if (!d) return;
   for (const l of floatingLabels.value) {
+    if (l.id === hiddenNativeMoveId.value) continue;
     if (l.text === "") continue;
     const el = textEls.get(l.id);
     if (!el) continue;
@@ -893,6 +903,201 @@ function onPointerUp(e: PointerEvent): void {
   dragLabelDuplicate = null;
 }
 
+interface ActiveNativeDrag {
+  payload: LabelDragPayload;
+  page: string;
+  source: LabelItem;
+  sourceAnchor: string | null;
+  startDoc: { x: number; y: number };
+  oldPos: { x: number; y: number };
+  localCommitted: boolean;
+}
+
+let pendingNativeDrag: {
+  labelId: string;
+  page: string;
+  startDoc: { x: number; y: number };
+} | null = null;
+let activeNativeDrag: ActiveNativeDrag | null = null;
+const hiddenNativeMoveId = ref<string | null>(null);
+
+function onNativeLabelPointerDown(label: LabelItem, e: PointerEvent): void {
+  if (e.button !== 0 || spaceDown.value) return;
+  if (tool.value !== "move" && tool.value !== "text" && !e.altKey) return;
+  const page = loadedPage.value;
+  if (!page) return;
+  e.stopPropagation();
+  editorStore.selectedLabelId = label.id;
+  pendingNativeDrag = {
+    labelId: label.id,
+    page,
+    startDoc: toDoc(e),
+  };
+}
+
+function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
+  const page = loadedPage.value;
+  if (
+    !page ||
+    !e.dataTransfer ||
+    spaceDown.value ||
+    (tool.value !== "move" && tool.value !== "text" && !e.altKey)
+  ) {
+    e.preventDefault();
+    return;
+  }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const operation = e.altKey ? "copy" : "move";
+  const payload: LabelDragPayload = {
+    version: 1,
+    kind: "label",
+    source: "main",
+    operation,
+    token: crypto.randomUUID(),
+    sourceId: label.id,
+    label: {
+      text: label.text,
+      category: label.category,
+      groupName: projectStore.header.groups[label.category - 1] ?? "",
+    },
+    grabOffset: {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    },
+  };
+  const startDoc =
+    pendingNativeDrag?.labelId === label.id && pendingNativeDrag.page === page
+      ? pendingNativeDrag.startDoc
+      : toDoc(e);
+  pendingNativeDrag = null;
+  const source = { ...label };
+  activeNativeDrag = {
+    payload,
+    page,
+    source,
+    sourceAnchor: labelAnchors.value.get(label.id) ?? null,
+    startDoc,
+    oldPos: { x: label.x, y: label.y },
+    localCommitted: false,
+  };
+  const preview = setLabelDragPreview(e.dataTransfer, label, textPreviewStyle.value, {
+    scale: view.scale,
+    rotation: view.rotate,
+    sourceRect: rect,
+    hotspot: payload.grabOffset,
+  });
+  payload.grabOffset = preview.grabOffset;
+  e.dataTransfer.clearData();
+  e.dataTransfer.setData(LABEL_DRAG_TYPE, serializeLabelDrag(payload));
+  e.dataTransfer.effectAllowed = operation;
+  if (operation === "move") {
+    hiddenNativeMoveId.value = label.id;
+    scheduleRedraw();
+  }
+}
+
+function commitNativeDuplicate(active: ActiveNativeDrag, duplicate: LabelItem): void {
+  projectStore.addLabel(active.page, duplicate);
+  if (active.sourceAnchor) {
+    labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, active.sourceAnchor);
+  }
+  let index: number | undefined;
+  editor.history.push({
+    label: "複製文字",
+    undo: () => {
+      index = projectStore.deleteLabel(active.page, duplicate.id);
+      if (active.sourceAnchor) {
+        const next = new Map(labelAnchors.value);
+        next.delete(duplicate.id);
+        labelAnchors.value = next;
+      }
+    },
+    redo: () => {
+      projectStore.addLabel(active.page, duplicate, index);
+      if (active.sourceAnchor) {
+        labelAnchors.value = new Map(labelAnchors.value).set(
+          duplicate.id,
+          active.sourceAnchor,
+        );
+      }
+    },
+  });
+}
+
+function onNativeLabelDragEnd(e: DragEvent): void {
+  const active = activeNativeDrag;
+  activeNativeDrag = null;
+  pendingNativeDrag = null;
+  hiddenNativeMoveId.value = null;
+  scheduleRedraw();
+  if (!active || active.localCommitted) return;
+  if (active.payload.operation === "move" && e.dataTransfer?.dropEffect === "move") {
+    pushLabelDelete(active.page, active.payload.sourceId);
+  }
+}
+
+function onLabelDragOver(e: DragEvent): void {
+  if (
+    !e.dataTransfer ||
+    !Array.from(e.dataTransfer.types).includes(LABEL_DRAG_TYPE) ||
+    !doc.value ||
+    !loadedPage.value
+  ) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = e.dataTransfer.effectAllowed === "move" ? "move" : "copy";
+}
+
+function onLabelDrop(e: DragEvent): void {
+  const d = doc.value;
+  const page = loadedPage.value;
+  if (!d || !page || !e.dataTransfer) return;
+  const payload = parseLabelDrag(e.dataTransfer.getData(LABEL_DRAG_TYPE));
+  if (!payload) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = payload.operation;
+  const active = activeNativeDrag;
+  if (active?.payload.token === payload.token && active.page === page) {
+    const p = toDoc(e);
+    const x = clamp(active.oldPos.x + (p.x - active.startDoc.x) / d.width, 0, 1);
+    const y = clamp(active.oldPos.y + (p.y - active.startDoc.y) / d.height, 0, 1);
+    if (payload.operation === "copy") {
+      const duplicate = { ...active.source, id: crypto.randomUUID(), x, y };
+      commitNativeDuplicate(active, duplicate);
+      editorStore.selectedLabelId = duplicate.id;
+    } else {
+      projectStore.moveLabel(page, payload.sourceId, x, y);
+      pushLabelMove(page, payload.sourceId, active.oldPos, { x, y });
+      editorStore.selectedLabelId = payload.sourceId;
+    }
+    active.localCommitted = true;
+    return;
+  }
+  const p = toDoc(e);
+  const x = clamp(p.x / d.width, 0, 1);
+  const y = clamp(p.y / d.height, 0, 1);
+  if (payload.source === "main" && payload.operation === "move") {
+    const label = projectStore.fileByName(page)?.labels.find((item) => item.id === payload.sourceId);
+    if (label) {
+      const oldPos = { x: label.x, y: label.y };
+      projectStore.moveLabel(page, label.id, x, y);
+      pushLabelMove(page, label.id, oldPos, { x, y });
+      editorStore.selectedLabelId = label.id;
+      return;
+    }
+  }
+  pushLabelAdd(page, {
+    id: crypto.randomUUID(),
+    x,
+    y,
+    category: resolveDropCategory(
+      payload,
+      projectStore.header.groups,
+      editorStore.activeCategory,
+    ),
+    text: payload.label.text,
+  });
+}
+
 // ---- 標籤投影:排版外包 Chromium(隱形節點住 canvas fallback),顯示由
 // 合成序列 drawElementImage 統一畫(浮動=最上層、錨定=插層間),任意倍率
 // 向量銳利。命中測試全幾何(中心 ± 排版尺寸)——節點不在畫布位置。 ----
@@ -988,6 +1193,14 @@ function labelSelectionStyle(l: LabelItem): Record<string, string> {
     height: `${h}px`,
     outline: `${2 / view.scale}px dashed rgba(80,160,255,0.9)`,
     outlineOffset: `${4 / view.scale}px`,
+  };
+}
+
+function labelDragHitStyle(l: LabelItem): Record<string, string> {
+  return {
+    ...labelSelectionStyle(l),
+    outline: "none",
+    outlineOffset: "0",
   };
 }
 
@@ -1452,6 +1665,8 @@ const TOOL_KEYS: Record<string, Tool> = {
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
+        @dragover="onLabelDragOver"
+        @drop="onLabelDrop"
         @pointerleave="cursorPos = null"
         @contextmenu.prevent
       >
@@ -1514,17 +1729,28 @@ const TOOL_KEYS: Record<string, Tool> = {
           />
           <!-- 空標籤 = 工作標記色點(不進合成,也就不進匯出) -->
           <div
-            v-for="l in currentLabels.filter((x) => x.text === '')"
+            v-for="l in currentLabels.filter((x) => x.text === '' && x.id !== hiddenNativeMoveId)"
             :key="`dot-${l.id}`"
             class="pointer-events-none absolute rounded-full"
             :style="dotStyle(l)"
           />
           <!-- 選中標籤的虛線指示框(文字本體在合成裡,框畫在 overlay) -->
           <div
-            v-for="l in currentLabels.filter((x) => x.id === editorStore.selectedLabelId)"
+            v-for="l in currentLabels.filter((x) => x.id === editorStore.selectedLabelId && x.id !== hiddenNativeMoveId)"
             :key="`sel-${l.id}`"
             class="pointer-events-none absolute"
             :style="labelSelectionStyle(l)"
+          />
+          <div
+            v-for="l in currentLabels"
+            :key="`drag-${l.id}`"
+            class="absolute"
+            :class="spaceDown ? 'pointer-events-none' : 'pointer-events-auto'"
+            :style="labelDragHitStyle(l)"
+            :draggable="!spaceDown"
+            @pointerdown="onNativeLabelPointerDown(l, $event)"
+            @dragstart.stop="onNativeLabelDragStart(l, $event)"
+            @dragend="onNativeLabelDragEnd"
           />
         </div>
         <!-- 筆刷游標圈(實際落筆尺寸;Caps Lock 切回十字) -->
