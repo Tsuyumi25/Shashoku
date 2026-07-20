@@ -52,7 +52,7 @@ type Tool = "move" | "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 // ---- 狀態 ----
 // doc / activeLayerId / undo 歷史活在 useEditor 單例,LayerPanel 共用同一份。
 const editor = useEditor();
-const { doc, activeLayerId, layersTick } = editor;
+const { doc, activeLayerId, rasterDirtyTick } = editor;
 const containerEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 const selCanvasEl = ref<HTMLCanvasElement | null>(null); // 選區蟻線 overlay(doc 空間)
@@ -309,7 +309,8 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   // 可能已被調過)繼承現有視角。單檔模式(無專案頁)一律 fit
   const pageKey = loadedPage.value;
   if ((pageKey === null || viewFit.page !== pageKey) && fitToView()) viewFit.page = pageKey;
-  editor.changed(); // 面板列表/縮圖刷新 + 重繪
+  // raster:false —— 純載入,disk 狀態沒變,不該觸發 autosave 重寫 revision
+  editor.changed({ raster: false });
 }
 
 async function onPickFile(e: Event): Promise<void> {
@@ -441,12 +442,13 @@ watch(
   { immediate: true },
 );
 
-// 統一 raster dirty hook:任何路徑呼叫 editor.changed() 都會 tick,涵蓋
-// inpaint / 圖層 CRUD / undo redo / merge down 等 mutation。
-// onPointerUp 的手工 schedule 保留是防止 layersTick 沒 tick 的邊際場景;
-// 兩者互為 safety net(autosave pending Map 會 dedupe 同頁重複排程)。
+// 統一 raster dirty hook:rasterDirtyTick 只在真正 mutate 到持久化狀態時 tick
+// (塗抹、inpaint、圖層 CRUD、undo/redo、merge down、tone 填充)。載入頁走
+// editor.changed({ raster: false }),不會經過這裡,避免打開一頁就 autosave 覆寫。
+// onPointerUp 的手工 schedule 保留是防止 tick 沒 fire 的邊際場景;兩者互為
+// safety net(autosave pending Map 會 dedupe 同頁重複排程)。
 // damaged 頁禁 autosave:避免用新 manifest 覆蓋還可救援的 layers。
-watch(layersTick, () => {
+watch(rasterDirtyTick, () => {
   if (!loadedPage.value || !doc.value) return;
   const file = projectStore.fileByName(loadedPage.value);
   if (!file?.pageDir || file.badge === "damaged") return;

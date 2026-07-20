@@ -7,13 +7,21 @@ import type { EditorCtx } from "./types";
 
 // 模組級單例:App 與圖層面板共用同一份編輯器狀態(POC 不引入 pinia)。
 // doc 用 shallowRef(像素 buffer 不進 Vue 反應系統),結構/屬性變更靠
-// layersTick 計數驅動衍生 computed 與縮圖刷新。
+// tick counter 驅動衍生 computed 與縮圖刷新。
+//
+// 兩條 tick 分工:
+// - layersTick:UI 需要重繪/重算的訊號(面板、縮圖、canvas)。載入頁、
+//   pixel change、layer CRUD 都會 tick——因為畫面呈現的東西變了。
+// - rasterDirtyTick:磁碟持久化狀態變髒的訊號(觸發 raster autosave)。
+//   只有真正 mutate 到 pixel 或 manifest 內容時才 tick;純載入頁不 tick。
+// 拆兩個 tick 是為了避免「打開一頁就 autosave 覆寫」的規避 case。
 
 const doc = shallowRef<ShashokuDoc | null>(null);
 /** doc 對應的專案頁檔名(單檔模式 = null)。校對 mode 靠它判斷 doc 可不可用。 */
 const docPage = shallowRef<string | null>(null);
 const history = new History();
 const layersTick = ref(0);
+const rasterDirtyTick = ref(0);
 const activeLayerId = ref("");
 
 // 選區:整頁 8-bit soft mask,null = 無選區(不約束)。bounds 供蟻線/清除用。
@@ -40,9 +48,16 @@ function setSelection(mask: Uint8ClampedArray | null): void {
 
 let redrawCanvas: () => void = () => {};
 
-/** 變更通知:面板重算 + canvas 重繪。actions 的 undo/redo 閉包也走這裡。 */
-function changed(): void {
+/**
+ * 變更通知:面板重算 + canvas 重繪。actions 的 undo/redo 閉包也走這裡。
+ *
+ * opts.raster (預設 true):是否為 raster 持久化狀態的變更。
+ * - 塗抹、layer CRUD、undo/redo:預設 true → 觸發 autosave
+ * - 純 UI 刷新(如載入頁完成後叫面板重繪):傳 false → 不觸發 autosave
+ */
+function changed(opts: { raster?: boolean } = {}): void {
   layersTick.value++;
+  if (opts.raster !== false) rasterDirtyTick.value++;
   redrawCanvas();
 }
 
@@ -72,6 +87,7 @@ export function useEditor() {
     docPage,
     history,
     layersTick,
+    rasterDirtyTick,
     activeLayerId,
     layers,
     activeLayer,
