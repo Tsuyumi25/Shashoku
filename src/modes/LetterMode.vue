@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { ShashokuDoc } from "@/engine/document";
-import { createRasterLayer } from "@/engine/layer";
+import { createRasterLayer, rasterLayerFromBitmap, rasterLayerFromEntry } from "@/engine/layer";
+import type { RasterLayer } from "@/engine/types";
+import { parseManifest } from "@shared/page/schema";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
 import { timeMs } from "@/engine/perf";
@@ -276,15 +278,16 @@ function resizeCanvases(): void {
 }
 
 // ---- 載圖 ----
-async function buildDoc(bitmap: ImageBitmap): Promise<void> {
-  const d = new ShashokuDoc(bitmap.width, bitmap.height);
-  const base = d.addLayerFromBitmap("底圖", bitmap);
-  base.locked = true; // PS 慣例:背景層預設鎖定,防誤畫(面板可解鎖)
-  // 文件開場只有底圖(PS 語意):筆刷/網點畫在使用中圖層(面板自行加層),
-  // 去字層由第一次 inpaint 惰性建立。換頁少三次全幅 buffer 配置+putImageData
+/**
+ * 用一批已建立的 layers 建立新文件並掛上 canvas。
+ * loadPage(專案模式) 走 manifest → 各層獨立 PNG 重建;
+ * onPickFile(單檔模式) 只放單一底圖層。
+ */
+function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
+  const d = new ShashokuDoc(width, height);
+  for (const layer of layers) d.insertLayer(layer, d.layers.length);
   inpaintLayerId = null;
-  activeLayerId.value = base.id;
-  bitmap.close();
+  activeLayerId.value = layers[0]?.id ?? null;
 
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
@@ -306,27 +309,78 @@ async function onPickFile(e: Event): Promise<void> {
   const file = input.files?.[0];
   if (!file) return;
   loadedPage.value = null; // 單檔模式:無專案頁,OCR/標籤投影不可用
-  await buildDoc(await createImageBitmap(file));
+  const bitmap = await createImageBitmap(file);
+  const w = bitmap.width;
+  const h = bitmap.height;
+  const base = rasterLayerFromBitmap("底圖", bitmap, w, h);
+  base.locked = true;
+  bitmap.close();
+  buildDoc(w, h, [base]);
   editor.docPage.value = null;
   input.value = "";
 }
 
 // ---- 專案頁載入(專案本身由翻譯 mode 開啟,這裡只消費)----
 
-/** 切頁重建文件。POC 限制:切頁不保留該頁的筆刷/網點像素編輯。
- * isStale:呼叫端的作廢判定——IPC/解碼完成順序不保證跟請求順序一致,
- * 讀檔解碼完回來先問一聲,已作廢就丟棄,不讓舊頁覆蓋新頁。 */
+/** 切頁重建文件。isStale:呼叫端的作廢判定——IPC/解碼完成順序不保證跟請求順序
+ * 一致,讀檔解碼完回來先問一聲,已作廢就丟棄,不讓舊頁覆蓋新頁。
+ *
+ * 兩條路徑:
+ * - 首次載入(manifest.layers 空):從 raws/<n> 建底圖(單層,locked)
+ * - 已編輯過的頁(manifest.layers 有內容):從 pages/<n>/layers/*.png 逐層還原,
+ *   同步保留 opacity/blendMode/visible/locked/alphaLocked。**一旦落地過,永遠
+ *   從 layers/ 讀**——不再從 raws 兜底,避免其他層畫的東西憑空消失。
+ */
 async function loadPage(name: string, isStale: () => boolean = () => false): Promise<void> {
-  if (!projectStore.rawsDir) return;
-  const bytes = await window.api.readImage(projectStore.rawsDir, name);
-  const bitmap = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+  const rawsDir = projectStore.rawsDir;
+  const file = projectStore.fileByName(name);
+  if (!rawsDir || !file || !file.pageDir) return;
+
+  // 先讀 raws 拿 bitmap 尺寸(即使 manifest 有 layers 也要,因為需要 doc 的 w/h)
+  const rawBytes = await window.api.readImage(rawsDir, name);
+  const rawBitmap = await createImageBitmap(new Blob([rawBytes as unknown as BlobPart]));
   if (isStale()) {
-    bitmap.close();
+    rawBitmap.close();
     return;
   }
-  // 從這裡到 buildDoc 完成是同步一氣(buildDoc 體內無 await),不會再被插隊
+  const w = rawBitmap.width;
+  const h = rawBitmap.height;
+
+  // 平行讀 manifest;解 manifest 失敗(損毀 / 舊格式)不阻斷,退到底圖層
+  let manifestLayers: import("@shared/page/types").LayerEntry[] = [];
+  try {
+    const pageData = await window.api.readPage(file.pageDir);
+    if (isStale()) {
+      rawBitmap.close();
+      return;
+    }
+    manifestLayers = parseManifest(pageData.manifestRaw).layers;
+  } catch {
+    manifestLayers = [];
+  }
+
   loadedPage.value = name;
-  await buildDoc(bitmap);
+
+  if (manifestLayers.length === 0) {
+    // 首次載入:單層底圖
+    const base = rasterLayerFromBitmap("底圖", rawBitmap, w, h);
+    base.locked = true;
+    rawBitmap.close();
+    buildDoc(w, h, [base]);
+  } else {
+    // 已編輯過:整組從 layers/*.png 還原
+    rawBitmap.close();
+    const layersDir = projectStore.layersDirOf(file.pageDir);
+    const restored: RasterLayer[] = [];
+    for (const entry of manifestLayers) {
+      const layerBytes = await window.api.readImage(layersDir, entry.file);
+      if (isStale()) return;
+      const lbm = await createImageBitmap(new Blob([layerBytes as unknown as BlobPart]));
+      restored.push(rasterLayerFromEntry(entry, lbm, w, h));
+      lbm.close();
+    }
+    buildDoc(w, h, restored);
+  }
   editor.docPage.value = name; // 校對 mode 靠它判斷 doc 屬於哪一頁
 }
 

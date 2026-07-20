@@ -193,6 +193,27 @@ export class ShashokuDoc {
     this.syncLayer(layerId, r);
   }
 
+  /**
+   * 匯出單一圖層的 PNG bytes(不壓平、保留透明 alpha),供 autosave 落地至
+   * pages/<n>/layers/<file>.png 使用。與 exportPng() 的差別:那個是合成後
+   * 白底攤平(供交付),這個是各層獨立(供持久化)。
+   */
+  async exportLayerPng(layerId: string): Promise<Uint8Array> {
+    const layer = this.layers.find((l) => l.id === layerId);
+    if (!layer) throw new Error(`exportLayerPng: layer 不存在 ${layerId}`);
+    const canvas = new OffscreenCanvas(this.width, this.height);
+    const ctx = canvas.getContext("2d")!;
+    // 直接 putImageData:layer.data 已是 RGBA 直通 alpha,不經 blend/opacity(那是合成端的事)
+    const image = new ImageData(
+      layer.data as Uint8ClampedArray<ArrayBuffer>,
+      this.width,
+      this.height,
+    );
+    ctx.putImageData(image, 0, 0);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
   /** 匯出壓平成 PNG blob(白底,漫畫頁通常不要透明)。 */
   async exportPng(background = "#ffffff"): Promise<Blob> {
     const canvas = new OffscreenCanvas(this.width, this.height);
