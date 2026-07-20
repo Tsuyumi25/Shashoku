@@ -120,6 +120,41 @@ async function buildOpenResult(rootPath: string): Promise<OpenProjectResult> {
   return { projectMetaRaw, pages };
 }
 
+/** 把一張 root 原圖轉成新的一頁:copy 進 raws/ + mkdir pages/<stem>/ + 空 manifest/translation。
+ * 若 pages/<stem>/ 已存在則拒絕(避免同 stem 不同副檔名,例如 001.png + 001.jpg,
+ * 用預設值覆寫既有翻譯 + 圖層 manifest)。 */
+async function initPageEntry(
+  rootPath: string,
+  shashokuDir: string,
+  filename: string,
+): Promise<void> {
+  // filename 應為 basename,不含路徑分隔符。這是攻擊面守門。
+  if (/[\\/]/.test(filename)) {
+    throw new Error(`filename 不可含路徑分隔符:${filename}`);
+  }
+  const rawsDir = join(shashokuDir, DIR_RAWS);
+  const pagesRoot = join(shashokuDir, DIR_PAGES);
+  const stem = stemOf(filename);
+  const pageDir = join(pagesRoot, stem);
+  // 拒絕同 stem 覆寫:pages/<stem>/ 已存在代表另一個副檔名的檔案已佔用這個頁
+  if (await exists(pageDir)) {
+    throw new Error(
+      `頁面 stem 衝突:${filename} 對應的 pages/${stem}/ 已存在(可能有同 stem 不同副檔名的檔案,如 ${stem}.png 與 ${stem}.jpg)`,
+    );
+  }
+  await copyFile(join(rootPath, filename), join(rawsDir, filename));
+  await mkdir(pageDir, { recursive: true });
+  // 依「manifest 最後寫」慣例:先 translation.json 再 manifest.json
+  await writeFileAtomic(
+    join(pageDir, PAGE_TRANSLATION_FILENAME),
+    serializeTranslation(defaultTranslation()),
+  );
+  await writeFileAtomic(
+    join(pageDir, PAGE_MANIFEST_FILENAME),
+    serializeManifest(defaultManifest()),
+  );
+}
+
 export async function createProject(rootPath: string): Promise<OpenProjectResult> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
   const rawsDir = join(shashokuDir, DIR_RAWS);
@@ -137,25 +172,62 @@ export async function createProject(rootPath: string): Promise<OpenProjectResult
     serializeProjectJson(defaultProjectJson()),
   );
 
+  // 無腦全複製:root 內所有原圖進 raws/ + 各自 pages/<stem>/。
+  // pre-check:同 stem 不同副檔名(001.png + 001.jpg)會共用 pages/001/,禁止,
+  // 提前 fail 避免 partial write。
   const rootImages = await listImages(rootPath);
-  // 無腦全複製:root/*.png → raws/*.png 同檔名;為每頁建空的 pages/<stem>/
+  assertNoStemCollision(rootImages);
   for (const filename of rootImages) {
-    await copyFile(join(rootPath, filename), join(rawsDir, filename));
-    const stem = stemOf(filename);
-    const pageDir = join(pagesRoot, stem);
-    await mkdir(pageDir, { recursive: true });
-    // 依 manifest 最後寫慣例:先 translation.json 再 manifest.json
-    await writeFileAtomic(
-      join(pageDir, PAGE_TRANSLATION_FILENAME),
-      serializeTranslation(defaultTranslation()),
-    );
-    await writeFileAtomic(
-      join(pageDir, PAGE_MANIFEST_FILENAME),
-      serializeManifest(defaultManifest()),
-    );
+    await initPageEntry(rootPath, shashokuDir, filename);
   }
 
   return await buildOpenResult(rootPath);
+}
+
+/**
+ * 匯入指定的 root 原圖成為新頁(既有專案再加頁)。冪等:
+ * - 已存在 raws/ 的同名檔跳過(不覆蓋既有像素)
+ * - 同 stem 但不同副檔名的既有頁跳過(避免撞到 pages/<stem>/)
+ * - 傳入清單內部同 stem 重複只處理第一個
+ */
+export async function importPages(
+  rootPath: string,
+  filenames: string[],
+): Promise<OpenProjectResult> {
+  const shashokuDir = join(rootPath, SHASHOKU_DIR);
+  const rawsFiles = await listImages(join(shashokuDir, DIR_RAWS));
+  const rawsExisting = new Set(rawsFiles);
+  const existingStems = new Set(rawsFiles.map(stemOf));
+  const seenStems = new Set<string>();
+  for (const filename of filenames) {
+    if (rawsExisting.has(filename)) continue;
+    const stem = stemOf(filename);
+    if (existingStems.has(stem)) continue;
+    if (seenStems.has(stem)) continue;
+    seenStems.add(stem);
+    await initPageEntry(rootPath, shashokuDir, filename);
+  }
+  return await buildOpenResult(rootPath);
+}
+
+/** 掃描檔名清單,若有同 stem 不同副檔名的組合(如 001.png + 001.jpg)則拋錯。 */
+function assertNoStemCollision(filenames: string[]): void {
+  const stemToFiles = new Map<string, string[]>();
+  for (const f of filenames) {
+    const s = stemOf(f);
+    const list = stemToFiles.get(s) ?? [];
+    list.push(f);
+    stemToFiles.set(s, list);
+  }
+  const collisions: string[] = [];
+  for (const [stem, files] of stemToFiles) {
+    if (files.length > 1) collisions.push(`${stem}(${files.join(", ")})`);
+  }
+  if (collisions.length > 0) {
+    throw new Error(
+      `原圖檔名 stem 衝突,請保留單一副檔名:${collisions.join("; ")}`,
+    );
+  }
 }
 
 export async function openProject(rootPath: string): Promise<OpenProjectResult> {

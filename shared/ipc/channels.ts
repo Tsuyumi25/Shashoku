@@ -6,6 +6,7 @@ export const CHANNELS = {
   pickRoot: 'shashoku:pick-root',
   scanRoot: 'shashoku:scan-root',
   createProject: 'shashoku:create-project',
+  importPages: 'shashoku:import-pages',
   openProject: 'shashoku:open-project',
   readPage: 'shashoku:read-page',
   writePage: 'shashoku:write-page',
@@ -146,6 +147,8 @@ export interface ShashokuApi {
   scanRoot(rootPath: string): Promise<ScanRootResult>
   /** 建立新專案:mkdir shashoku/{raws,pages,fonts} + 寫 sentinel/project.json + 複製原圖到 raws/ + 每頁空 manifest+translation */
   createProject(rootPath: string): Promise<OpenProjectResult>
+  /** 匯入指定 root 原圖到既有專案(既有檔名跳過,冪等) */
+  importPages(rootPath: string, filenames: string[]): Promise<OpenProjectResult>
   /** 打開既有專案:讀 project.json 內容 + 掃 raws/pages 做 badge 對帳 */
   openProject(rootPath: string): Promise<OpenProjectResult>
   /** 讀一頁的三個 JSON 原文 */

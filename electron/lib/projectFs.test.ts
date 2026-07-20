@@ -23,6 +23,7 @@ import {
 } from "@shared/page/schema";
 import {
   createProject,
+  importPages,
   openProject,
   readPage,
   scanRoot,
@@ -284,6 +285,90 @@ describe("readPage / writePage", () => {
     await writeFile(join(pageDir, PAGE_OCR_FILENAME), '{"schemaVersion":1,"width":100,"height":100,"blocks":[]}');
     const back = await readPage(pageDir);
     expect(back.ocrRaw).toContain('"schemaVersion":1');
+  });
+});
+
+describe("importPages", () => {
+  it("既有專案:root 加入 2 張新圖 → 匯入後 raws/pages 都補齊", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    // 使用者事後在 root 加了兩張
+    await fakePng(join(workDir, "02.png"), 2);
+    await fakePng(join(workDir, "03.png"), 3);
+
+    const result = await importPages(workDir, ["02.png", "03.png"]);
+    expect(result.pages.map((p) => p.filename)).toEqual(["01.png", "02.png", "03.png"]);
+
+    const shashokuDir = join(workDir, SHASHOKU_DIR);
+    for (const name of ["01.png", "02.png", "03.png"]) {
+      expect(await exists(join(shashokuDir, DIR_RAWS, name))).toBe(true);
+    }
+    for (const stem of ["01", "02", "03"]) {
+      expect(await exists(join(shashokuDir, DIR_PAGES, stem, PAGE_MANIFEST_FILENAME))).toBe(true);
+      expect(await exists(join(shashokuDir, DIR_PAGES, stem, PAGE_TRANSLATION_FILENAME))).toBe(true);
+    }
+  });
+
+  it("冪等:既有檔名跳過,不覆蓋 raws/ 已存在的副本", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    const rawPath = join(workDir, SHASHOKU_DIR, DIR_RAWS, "01.png");
+    const beforeBytes = await readFile(rawPath);
+
+    // 使用者改了 root/01.png 的內容但只想加新頁,不覆蓋
+    await fakePng(join(workDir, "01.png"), 99);
+    await importPages(workDir, ["01.png"]);
+
+    const afterBytes = await readFile(rawPath);
+    expect(Array.from(afterBytes)).toEqual(Array.from(beforeBytes)); // 未變
+  });
+
+  it("filename 含路徑分隔符抛錯", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    await expect(importPages(workDir, ["../evil.png"])).rejects.toThrow(/路徑分隔符/);
+  });
+
+  it("匯入空清單:pages 保持原樣", async () => {
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+    const r = await importPages(workDir, []);
+    expect(r.pages.length).toBe(1);
+  });
+
+  it("同 stem 不同副檔名:既有頁不會被新匯入靜默覆寫 (finding 4)", async () => {
+    // 建專案含 01.png
+    await fakePng(join(workDir, "01.png"), 1);
+    await createProject(workDir);
+
+    // 使用者對 01.png 的翻譯 / manifest 打了內容
+    const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
+    await writeFile(
+      join(pageDir, PAGE_TRANSLATION_FILENAME),
+      '{"schemaVersion":1,"labels":[{"id":"user-label","x":0.5,"y":0.5,"category":1,"lines":["已翻譯"]}]}',
+    );
+
+    // 現在使用者又在 root 放了 01.jpg,嘗試匯入
+    await fakePng(join(workDir, "01.jpg"), 99);
+    await importPages(workDir, ["01.jpg"]);
+
+    // 既有 pages/01/translation.json 內容不應被清空
+    const back = await readFile(join(pageDir, PAGE_TRANSLATION_FILENAME), "utf8");
+    expect(back).toContain('"已翻譯"');
+    expect(back).toContain('"user-label"');
+    // raws/ 內不應多出 01.jpg(被 stem 衝突擋掉)
+    expect(await exists(join(workDir, SHASHOKU_DIR, DIR_RAWS, "01.jpg"))).toBe(false);
+  });
+});
+
+describe("createProject 對 root 檔名 stem 衝突拒絕", () => {
+  it("root 有同 stem 不同副檔名 → fail early,不寫任何 shashoku/ 內容", async () => {
+    await fakePng(join(workDir, "001.png"), 1);
+    await fakePng(join(workDir, "001.jpg"), 2);
+    await expect(createProject(workDir)).rejects.toThrow(/stem 衝突/);
+    // shashoku/ 可能 mkdir 過(pre-check 在 mkdir 之後),但 pages/ 應該全空
+    // 這裡驗最重要的:pages/001/ 不存在
+    expect(await exists(join(workDir, SHASHOKU_DIR, DIR_PAGES, "001"))).toBe(false);
   });
 });
 
