@@ -247,10 +247,13 @@ export async function readPage(pageDir: string): Promise<PageRawData> {
 export async function writePage(pageDir: string, input: WritePageInput): Promise<void> {
   // 「manifest 最後寫」pattern:
   // 1. 所有 layer PNG 先落地(每張獨立 atomic)
-  // 2. translation.json 落地
-  // 3. ocr.json 若有的話落地
+  // 2. translation.json 落地(若傳入)
+  // 3. ocr.json 落地(若傳入)
   // 4. **最後**寫 manifest.json — 這是唯一的 commit 錨點,crash 於此之前
   //    = 舊 manifest 仍指向舊完整圖層 = 頁面完整可讀,只是這次 autosave 沒生效
+  //
+  // 各 payload 獨立:autosave 只帶 manifestRaw+layerParts 更新 raster;
+  // Ctrl+S 只帶 translationRaw 更新譯文——兩條路互不覆蓋。
   await mkdir(pageDir, { recursive: true });
 
   if (input.layerParts && Object.keys(input.layerParts).length > 0) {
@@ -264,11 +267,15 @@ export async function writePage(pageDir: string, input: WritePageInput): Promise
     }
   }
 
-  await writeFileAtomic(join(pageDir, PAGE_TRANSLATION_FILENAME), input.translationRaw);
+  if (input.translationRaw !== undefined) {
+    await writeFileAtomic(join(pageDir, PAGE_TRANSLATION_FILENAME), input.translationRaw);
+  }
   if (input.ocrRaw !== undefined) {
     await writeFileAtomic(join(pageDir, PAGE_OCR_FILENAME), input.ocrRaw);
   }
-  await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), input.manifestRaw);
+  if (input.manifestRaw !== undefined) {
+    await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), input.manifestRaw);
+  }
 }
 
 export async function writeProjectMeta(

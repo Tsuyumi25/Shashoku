@@ -120,6 +120,7 @@ import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
 import { useTextBoardStyle } from '@/lib/textBoardAppearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { flushPendingRasterSave } from '@/editor/autosave'
 
 const api = window.api
 const project = useProjectStore()
@@ -202,6 +203,8 @@ function resolveSaveChoice(choice: SaveChoice) {
 
 /** dirty 時先問要不要存。回傳 true = 呼叫端可以繼續（已存或用戶選不儲存） */
 async function ensureSaved(): Promise<boolean> {
+  // Raster 若還在 debounce 窗口內,先落盤(不論使用者選存/不存,已經畫的東西不該丟)
+  await flushPendingRasterSave()
   if (!project.dirty) return true
   if (confirmSaveOpen.value) return false
   const choice = await askSaveChoice()
@@ -268,6 +271,8 @@ async function flushPendingEdit() {
 
 async function onSave() {
   await flushPendingEdit()
+  // Ctrl+S:除了 label / meta 走 store.save,raster 也一起落盤
+  await flushPendingRasterSave()
   try {
     const result = await project.save()
     if (result === 'saved') toast.success('已存檔')

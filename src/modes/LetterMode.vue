@@ -16,6 +16,7 @@ import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
 import { addLayer, duplicateLayer } from "@/editor/actions";
 import { pushPixelPatch, pushPixelPatches, type PixelPatch } from "@/editor/pixel-history";
+import { flushPendingRasterSave, scheduleRasterAutosave } from "@/editor/autosave";
 import { copyRect } from "@/engine/pixelPatch";
 import { clampRect } from "@/engine/geom";
 import {
@@ -399,6 +400,8 @@ watch(
     if (m !== "letter" || !page || page === loadedPage.value) return;
     let stale = false;
     onCleanup(() => (stale = true));
+    // 換頁前先把舊頁的 pending raster 落盤,避免 doc 被換掉後 pending 引用失效
+    await flushPendingRasterSave();
     await loadPage(page, () => stale);
   },
   { immediate: true },
@@ -406,10 +409,10 @@ watch(
 
 // ---- OCR(sidecar)----
 async function ocrOne(name: string): Promise<void> {
-  if (!projectStore.folderPath) return;
+  if (!projectStore.rawsDir) return;
   ocrState[name] = "running";
   try {
-    const res = await window.api.ocrPage(projectStore.folderPath, name);
+    const res = await window.api.ocrPage(projectStore.rawsDir, name);
     ocrData[name] = res.blocks;
     ocrState[name] = "done";
   } catch (err) {
@@ -450,7 +453,7 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
   if (targets.length === 0) return;
   inpaintBusy.value = true;
   try {
-    const res = await window.api.inpaintBlocks(projectStore.folderPath!, name, targets);
+    const res = await window.api.inpaintBlocks(projectStore.rawsDir!, name, targets);
     // 等 sidecar 的幾秒裡可能已換頁:d 指向被丟棄的舊 doc,寫進去等於
     // 資料靜默遺失,而收尾的 undo 又會塞進「新頁」的 History 變死條目
     if (doc.value !== d) return;
@@ -947,6 +950,18 @@ function onPointerUp(e: PointerEvent): void {
       }
     }
   }
+  // Raster autosave:筆刷/擦除/網點結束後排程落地(只針對專案頁)。
+  // painting.value 尚未 reset,tool 判斷確保只在有 raster 改動的路徑觸發。
+  if (
+    painting.value &&
+    (tool.value === "brush" || tool.value === "erase" || tool.value === "tone") &&
+    loadedPage.value &&
+    doc.value
+  ) {
+    const file = projectStore.fileByName(loadedPage.value);
+    if (file?.pageDir) scheduleRasterAutosave(file.pageDir, doc.value);
+  }
+
   painting.value = false;
   draggingLabelId = null;
   dragLabelFrom = null;

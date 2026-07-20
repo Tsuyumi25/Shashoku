@@ -202,14 +202,11 @@ export const useProjectStore = defineStore('project', () => {
     if (rootPath.value === null) return 'noop'
     if (!dirty.value) return 'saved'
 
-    // 存 dirty 頁的 translation
+    // 存 dirty 頁的 translation(只寫 translation.json;raster 由 autosave 獨立處理)
     for (const filename of [...dirtyFilenames.value]) {
       const file = fileByName(filename)
       if (!file) continue
-      const raw = await window.api.readPage(file.pageDir).catch(() => null)
       await window.api.writePage(file.pageDir, {
-        // manifest 保持既有內容(Stage 4 才會由 autosave 觸發 layer 落地)
-        manifestRaw: raw?.manifestRaw ?? '{"schemaVersion":1,"layers":[]}\n',
         translationRaw: serializeTranslationForFile(file),
       })
     }

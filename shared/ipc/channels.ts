@@ -75,10 +75,11 @@ export interface PageRawData {
   ocrRaw: string | null
 }
 
-/** writePage 的輸入:三個 JSON 已序列化為字串;可選的 layer PNG bytes(檔名 → 內容) */
+/** writePage 的輸入:所有 payload 都可選,只寫傳入的部分(其餘檔案不動)。
+ * autosave 只傳 manifestRaw + layerParts;Ctrl+S 只傳 translationRaw。 */
 export interface WritePageInput {
-  manifestRaw: string
-  translationRaw: string
+  manifestRaw?: string
+  translationRaw?: string
   ocrRaw?: string
   /** key = "background.png" 之類的檔名,value = PNG bytes;寫入 pages/<n>/layers/<key> */
   layerParts?: Record<string, Uint8Array>
