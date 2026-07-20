@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, nextTick } 
 import { ShashokuDoc } from "@/engine/document";
 import { createRasterLayer, rasterLayerFromBitmap, rasterLayerFromEntry } from "@/engine/layer";
 import type { RasterLayer } from "@/engine/types";
-import { parseManifest } from "@shared/page/schema";
+import { parseManifest, parseOcr, serializeOcr } from "@shared/page/schema";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
 import { timeMs } from "@/engine/perf";
@@ -349,6 +349,7 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
 
   // 平行讀 manifest;解 manifest 失敗(損毀 / 舊格式)不阻斷,退到底圖層
   let manifestLayers: import("@shared/page/types").LayerEntry[] = [];
+  let pageOcrRaw: string | null = null;
   try {
     const pageData = await window.api.readPage(file.pageDir);
     if (isStale()) {
@@ -356,8 +357,20 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
       return;
     }
     manifestLayers = parseManifest(pageData.manifestRaw).layers;
+    pageOcrRaw = pageData.ocrRaw;
   } catch {
     manifestLayers = [];
+  }
+
+  // OCR 快取還原(關 app 前跑過 OCR,重開時直接用)(gpt-9)
+  if (pageOcrRaw !== null && ocrState[name] !== "running") {
+    try {
+      const ocr = parseOcr(pageOcrRaw);
+      ocrData[name] = ocr.blocks;
+      ocrState[name] = "done";
+    } catch {
+      // ocr.json 損毀:忽略,下次跑 OCR 覆蓋
+    }
   }
 
   loadedPage.value = name;
@@ -425,6 +438,18 @@ async function ocrOne(name: string): Promise<void> {
     const res = await window.api.ocrPage(projectStore.rawsDir, name);
     ocrData[name] = res.blocks;
     ocrState[name] = "done";
+    // 落地 pages/<n>/ocr.json:關 app 後仍能還原,不必重跑 (gpt-9)
+    const file = projectStore.fileByName(name);
+    if (file?.pageDir) {
+      await window.api.writePage(file.pageDir, {
+        ocrRaw: serializeOcr({
+          schemaVersion: 1,
+          width: res.width,
+          height: res.height,
+          blocks: res.blocks,
+        }),
+      });
+    }
   } catch (err) {
     ocrState[name] = "error";
     console.error("OCR failed:", name, err);
