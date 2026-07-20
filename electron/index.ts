@@ -4,6 +4,7 @@ import { registerFontHandlers } from "./ipc/fonts";
 import { registerSskHandlers } from "./ipc/ssk";
 import { registerOcrHandlers } from "./ipc/ocr";
 import { registerProjectHandlers } from "./ipc/project";
+import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
 import { registerWindowControlHandlers } from "./ipc/windowControls";
 import { handleLocalFileProtocol, registerLocalFileScheme } from "./protocol";
 import { applyFontconfig } from "./fonts/fontconfig";
@@ -64,6 +65,7 @@ app.whenReady().then(() => {
   registerDialogHandlers();
   registerSskHandlers();
   registerProjectHandlers();
+  registerShashokuProjectHandlers();
   registerOcrHandlers();
   registerFontHandlers();
   mainWindow = createWindow("main");

@@ -3,7 +3,17 @@ import { CHANNELS, type OcrStatusEvent, type ShashokuApi } from "@shared/ipc/cha
 
 // 單一 window.api:翻譯 + 嵌字 + 字體 + 視窗控制。
 const api: ShashokuApi = {
-  // ── 專案(翻譯 mode) ──
+  // ── Shashoku 專案(新架構) ──
+  pickRoot: () => ipcRenderer.invoke(CHANNELS.pickRoot),
+  scanRoot: (rootPath) => ipcRenderer.invoke(CHANNELS.scanRoot, rootPath),
+  createProject: (rootPath) => ipcRenderer.invoke(CHANNELS.createProject, rootPath),
+  openProject: (rootPath) => ipcRenderer.invoke(CHANNELS.openProject, rootPath),
+  readPage: (pageDir) => ipcRenderer.invoke(CHANNELS.readPage, pageDir),
+  writePage: (pageDir, input) => ipcRenderer.invoke(CHANNELS.writePage, pageDir, input),
+  writeProjectMeta: (shashokuDir, metaRaw) =>
+    ipcRenderer.invoke(CHANNELS.writeProjectMeta, shashokuDir, metaRaw),
+
+  // ── (舊)專案(翻譯 mode) ──
   openProjectFolder: () => ipcRenderer.invoke(CHANNELS.openProjectFolder),
   listImages: (folderPath) => ipcRenderer.invoke(CHANNELS.listImages, folderPath),
   listSskFiles: (folderPath) => ipcRenderer.invoke(CHANNELS.listSskFiles, folderPath),

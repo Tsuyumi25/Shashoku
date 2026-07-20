@@ -2,7 +2,16 @@
 // preload(實作)、electron/ipc(handler)、src/types/ipc.ts(global 宣告)都 import 這裡。
 
 export const CHANNELS = {
-  // ── 專案:.ssk.json 工程檔(翻譯 mode) ──
+  // ── Shashoku 專案(新架構:root/ + root/shashoku/) ──
+  pickRoot: 'shashoku:pick-root',
+  scanRoot: 'shashoku:scan-root',
+  createProject: 'shashoku:create-project',
+  openProject: 'shashoku:open-project',
+  readPage: 'shashoku:read-page',
+  writePage: 'shashoku:write-page',
+  writeProjectMeta: 'shashoku:write-project-meta',
+
+  // ── (舊)專案:.ssk.json 工程檔,Stage 2 尾聲淘汰 ──
   openProjectFolder: 'dialog:open-project-folder',
   openSskFile: 'dialog:open-ssk-file',
   listImages: 'project:list-images',
@@ -36,7 +45,55 @@ export const CHANNELS = {
 
 export type WindowRole = 'main' | 'text-board'
 
-// ── 專案(.ssk.json)相關型別 ──
+// ── Shashoku 專案(新架構)相關型別 ──
+
+/** 掃 root 資料夾的結果:給 UI 判斷「這是新專案還是既有專案」 */
+export interface ScanRootResult {
+  /** root 底下的原圖檔名(自然排序 = 頁序) */
+  rootImages: string[]
+  /** shashoku/ 資料夾是否存在 */
+  hasShashokuDir: boolean
+  /** shashoku/.shashoku-project sentinel 是否存在 */
+  hasSentinel: boolean
+}
+
+/** 檔名對應的 raw ↔ page 配對狀態,可見化雲端截斷與手動變更 */
+export type PageBadge = 'ok' | 'raw-missing' | 'page-missing'
+
+/** projectStore 用的頁面條目:結合 raws/ 檔名與 pages/ 資料夾 */
+export interface PageEntry {
+  /** basename(含副檔名,例如 "001.png"),= raws/ 內的檔名 */
+  filename: string
+  /** pages/<basename-無副檔名>/ 的絕對路徑;若 badge === 'page-missing' 是預期的路徑但實際不存在 */
+  pageDir: string
+  badge: PageBadge
+}
+
+/** 打開既有專案的結果 */
+export interface OpenProjectResult {
+  /** project.json 原文(呼叫端自行 parse,方便錯誤處理集中) */
+  projectMetaRaw: string
+  pages: PageEntry[]
+}
+
+/** readPage 回傳:三個 JSON 原文;呼叫端各自 parse(對應 shared/page/schema.ts) */
+export interface PageRawData {
+  manifestRaw: string
+  translationRaw: string
+  /** 缺 ocr.json 是正常狀態(選用檔案) */
+  ocrRaw: string | null
+}
+
+/** writePage 的輸入:三個 JSON 已序列化為字串;可選的 layer PNG bytes(檔名 → 內容) */
+export interface WritePageInput {
+  manifestRaw: string
+  translationRaw: string
+  ocrRaw?: string
+  /** key = "background.png" 之類的檔名,value = PNG bytes;寫入 pages/<n>/layers/<key> */
+  layerParts?: Record<string, Uint8Array>
+}
+
+// ── (舊)專案(.ssk.json)相關型別 ──
 
 export interface SskFileEntry {
   filename: string
@@ -113,7 +170,23 @@ export interface ScannedFontFile {
 // ── renderer 側 API 介面 ──
 
 export interface ShashokuApi {
-  // 專案(翻譯 mode)
+  // Shashoku 專案(新架構)
+  /** 資料夾對話框選 root;取消回傳 null */
+  pickRoot(): Promise<string | null>
+  /** 掃 root:回傳原圖清單 + shashoku/ 現況 */
+  scanRoot(rootPath: string): Promise<ScanRootResult>
+  /** 建立新專案:mkdir shashoku/{raws,pages,fonts} + 寫 sentinel/project.json + 複製原圖到 raws/ + 每頁空 manifest+translation */
+  createProject(rootPath: string): Promise<OpenProjectResult>
+  /** 打開既有專案:讀 project.json 內容 + 掃 raws/pages 做 badge 對帳 */
+  openProject(rootPath: string): Promise<OpenProjectResult>
+  /** 讀一頁的三個 JSON 原文 */
+  readPage(pageDir: string): Promise<PageRawData>
+  /** 寫一頁:按「manifest 最後寫」順序 layers/*.png → translation.json → manifest.json */
+  writePage(pageDir: string, input: WritePageInput): Promise<void>
+  /** 更新專案 metadata */
+  writeProjectMeta(shashokuDir: string, projectMetaRaw: string): Promise<void>
+
+  // (舊)專案(翻譯 mode) — Stage 2 尾聲淘汰
   openProjectFolder(): Promise<string | null>
   listImages(folderPath: string): Promise<string[]>
   listSskFiles(folderPath: string): Promise<SskFileEntry[]>
