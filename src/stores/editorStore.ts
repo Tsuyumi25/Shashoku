@@ -129,6 +129,30 @@ export const useEditorStore = defineStore('editor', () => {
     selectedLabelId.value = label.id
   }
 
+  /**
+   * 拖曳複製結束時提交。副本可先由畫布插入並即時移動，放開後才把
+   * 「新增最終位置的副本」收成一筆 undo；一般呼叫則立即插入。
+   */
+  function cmdDuplicateLabel(
+    filename: string,
+    label: LabelItem,
+    opts?: { alreadyApplied?: boolean },
+  ) {
+    const project = useProjectStore()
+    let index: number | undefined
+    pushCommand(
+      {
+        label: `duplicate-label ${label.id}`,
+        do: () => project.addLabel(filename, label, index),
+        undo: () => {
+          index = project.deleteLabel(filename, label.id)
+        },
+      },
+      opts,
+    )
+    selectedLabelId.value = label.id
+  }
+
   function cmdDeleteLabel(filename: string, labelId: string) {
     const project = useProjectStore()
     const label = project.fileByName(filename)?.labels.find((l) => l.id === labelId)
@@ -233,6 +257,7 @@ export const useEditorStore = defineStore('editor', () => {
     redo,
     clearHistory,
     cmdAddLabel,
+    cmdDuplicateLabel,
     cmdDeleteLabel,
     cmdMoveLabel,
     cmdUpdateLabelText,

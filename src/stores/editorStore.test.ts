@@ -57,6 +57,31 @@ describe('editorStore undo/redo', () => {
     expect(project.fileByName('001.jpg')!.labels.map((l) => l.id)).toEqual(['a', 'b'])
   })
 
+  it('cmdDuplicateLabel（lazy-do）：拖曳副本只佔一筆 undo', () => {
+    const editor = useEditorStore()
+    const project = useProjectStore()
+    editor.cmdAddLabel('001.jpg', label('source', 0.1, 0.2, 2, '文字'))
+
+    const copy = label('copy', 0.8, 0.9, 2, '文字')
+    // 模擬 Alt+drag：越過門檻時先插入，拖曳中已移到最終位置。
+    project.addLabel('001.jpg', copy)
+    editor.cmdDuplicateLabel('001.jpg', copy, { alreadyApplied: true })
+
+    expect(project.fileByName('001.jpg')!.labels).toEqual([
+      label('source', 0.1, 0.2, 2, '文字'),
+      copy,
+    ])
+    expect(editor.selectedLabelId).toBe('copy')
+
+    editor.undo()
+    expect(project.fileByName('001.jpg')!.labels.map((l) => l.id)).toEqual(['source'])
+    editor.redo()
+    expect(project.fileByName('001.jpg')!.labels).toEqual([
+      label('source', 0.1, 0.2, 2, '文字'),
+      copy,
+    ])
+  })
+
   it('cmdDeleteLabel：undo 還原到原 index', () => {
     const editor = useEditorStore()
     const project = useProjectStore()

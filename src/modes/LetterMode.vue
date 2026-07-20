@@ -568,6 +568,11 @@ let strokeBefore: Uint8ClampedArray | null = null;
 let strokeUnion: Rect = EMPTY_RECT;
 let draggingLabelId: string | null = null;
 let dragLabelFrom: { x: number; y: number } | null = null; // percent(SSOT 座標)
+let dragLabelSource: LabelItem | null = null;
+let dragLabelStart: { x: number; y: number } | null = null;
+let dragLabelMoved = false;
+let dragLabelCopy = false;
+let dragLabelDuplicate: LabelItem | null = null;
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
@@ -651,6 +656,11 @@ function onPointerDown(e: PointerEvent): void {
       editorStore.selectedLabelId = hit.id;
       draggingLabelId = hit.id;
       dragLabelFrom = { x: hit.x, y: hit.y };
+      dragLabelSource = { ...hit };
+      dragLabelStart = { x: e.clientX, y: e.clientY };
+      dragLabelMoved = false;
+      dragLabelCopy = e.altKey;
+      dragLabelDuplicate = null;
     } else {
       editorStore.selectedLabelId = null;
     }
@@ -662,11 +672,21 @@ function onPointerDown(e: PointerEvent): void {
       editorStore.selectedLabelId = hit.id;
       draggingLabelId = hit.id;
       dragLabelFrom = { x: hit.x, y: hit.y };
+      dragLabelSource = { ...hit };
+      dragLabelStart = { x: e.clientX, y: e.clientY };
+      dragLabelMoved = false;
+      dragLabelCopy = e.altKey;
+      dragLabelDuplicate = null;
     } else {
       const label = makeLabel(p.x / doc.value.width, p.y / doc.value.height);
       pushLabelAdd(page, label);
       draggingLabelId = label.id;
       dragLabelFrom = { x: label.x, y: label.y };
+      dragLabelSource = null;
+      dragLabelStart = { x: e.clientX, y: e.clientY };
+      dragLabelMoved = false;
+      dragLabelCopy = false;
+      dragLabelDuplicate = null;
     }
   }
 }
@@ -740,6 +760,25 @@ function onPointerMove(e: PointerEvent): void {
       h: Math.abs(p.y - lastPt.y),
     };
   } else if (draggingLabelId && loadedPage.value) {
+    if (
+      !dragLabelMoved &&
+      dragLabelStart &&
+      Math.hypot(e.clientX - dragLabelStart.x, e.clientY - dragLabelStart.y) < 3
+    ) return;
+    dragLabelMoved = true;
+    if (dragLabelCopy && !dragLabelDuplicate && dragLabelSource) {
+      const sourceId = draggingLabelId;
+      const duplicate: LabelItem = {
+        ...dragLabelSource,
+        id: crypto.randomUUID(),
+      };
+      projectStore.addLabel(loadedPage.value, duplicate);
+      const anchor = labelAnchors.value.get(sourceId);
+      if (anchor) labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, anchor);
+      draggingLabelId = duplicate.id;
+      dragLabelDuplicate = duplicate;
+      editorStore.selectedLabelId = duplicate.id;
+    }
     // 拖曳中即時寫回 SSOT(percent);overlay 由 watch 自動重畫,翻譯視圖同步跟動
     projectStore.moveLabel(
       loadedPage.value,
@@ -816,13 +855,42 @@ function onPointerUp(e: PointerEvent): void {
     toneRect.value = null;
     editor.changed();
   }
-  if (draggingLabelId && loadedPage.value && dragLabelFrom) {
+  if (draggingLabelId && loadedPage.value && dragLabelFrom && dragLabelMoved) {
     const l = currentLabels.value.find((ll) => ll.id === draggingLabelId);
-    if (l) pushLabelMove(loadedPage.value, draggingLabelId, dragLabelFrom, { x: l.x, y: l.y });
+    if (l) {
+      if (dragLabelDuplicate) {
+        const page = loadedPage.value;
+        const duplicate = dragLabelDuplicate;
+        const anchor = labelAnchors.value.get(duplicate.id);
+        let index: number | undefined;
+        editor.history.push({
+          label: "複製文字",
+          undo: () => {
+            index = projectStore.deleteLabel(page, duplicate.id);
+            if (anchor) {
+              const next = new Map(labelAnchors.value);
+              next.delete(duplicate.id);
+              labelAnchors.value = next;
+            }
+          },
+          redo: () => {
+            projectStore.addLabel(page, duplicate, index);
+            if (anchor) labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, anchor);
+          },
+        });
+      } else {
+        pushLabelMove(loadedPage.value, draggingLabelId, dragLabelFrom, { x: l.x, y: l.y });
+      }
+    }
   }
   painting.value = false;
   draggingLabelId = null;
   dragLabelFrom = null;
+  dragLabelSource = null;
+  dragLabelStart = null;
+  dragLabelMoved = false;
+  dragLabelCopy = false;
+  dragLabelDuplicate = null;
 }
 
 // ---- 標籤投影:排版外包 Chromium(隱形節點住 canvas fallback),顯示由

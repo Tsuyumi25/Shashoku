@@ -320,12 +320,15 @@ function onBgPointerUp(e: PointerEvent) {
 let dragging: {
   id: string
   filename: string
+  source: LabelItem
   startX: number
   startY: number
   /** 拖曳起點的內容座標(px)——位移經 screenToContentPx 差分,旋轉視角下才正確 */
   startContent: { x: number; y: number }
   oldPos: { x: number; y: number }
   moved: boolean
+  copy: boolean
+  duplicate: LabelItem | null
 } | null = null
 
 function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
@@ -338,11 +341,14 @@ function onMarkerPointerDown(label: LabelItem, e: PointerEvent) {
   dragging = {
     id: label.id,
     filename: file.filename,
+    source: { ...label },
     startX: e.clientX,
     startY: e.clientY,
     startContent: screenToContentPx(e.clientX, e.clientY, rect, view),
     oldPos: { x: label.x, y: label.y },
     moved: false,
+    copy: e.altKey,
+    duplicate: null,
   }
 }
 
@@ -354,6 +360,16 @@ function onMarkerPointerMove(e: PointerEvent) {
   )
     return
   dragging.moved = true
+  if (dragging.copy && !dragging.duplicate) {
+    const duplicate: LabelItem = {
+      ...dragging.source,
+      id: crypto.randomUUID(),
+    }
+    project.addLabel(dragging.filename, duplicate)
+    dragging.id = duplicate.id
+    dragging.duplicate = duplicate
+    editor.selectedLabelId = duplicate.id
+  }
   const rect = containerRef.value.getBoundingClientRect()
   const content = screenToContentPx(e.clientX, e.clientY, rect, view)
   project.moveLabel(
@@ -369,10 +385,14 @@ function onMarkerPointerUp(e: PointerEvent) {
   if (dragging.moved) {
     const label = project.fileByName(dragging.filename)?.labels.find((l) => l.id === dragging!.id)
     if (label) {
-      editor.cmdMoveLabel(dragging.filename, dragging.id, dragging.oldPos, {
-        x: label.x,
-        y: label.y,
-      })
+      if (dragging.duplicate) {
+        editor.cmdDuplicateLabel(dragging.filename, dragging.duplicate, { alreadyApplied: true })
+      } else {
+        editor.cmdMoveLabel(dragging.filename, dragging.id, dragging.oldPos, {
+          x: label.x,
+          y: label.y,
+        })
+      }
     }
   }
   ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
@@ -445,4 +465,3 @@ const stageStyle = computed(() => ({
   transformOrigin: '0 0',
 }))
 </script>
-
