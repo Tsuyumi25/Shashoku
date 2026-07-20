@@ -1,7 +1,5 @@
 import { app, BrowserWindow, Menu } from "electron";
-import { registerDialogHandlers } from "./ipc/dialog";
 import { registerFontHandlers } from "./ipc/fonts";
-import { registerSskHandlers } from "./ipc/ssk";
 import { registerOcrHandlers } from "./ipc/ocr";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
@@ -62,8 +60,6 @@ registerLocalFileScheme();
 app.whenReady().then(() => {
   handleLocalFileProtocol();
   registerWindowControlHandlers(openTextBoard);
-  registerDialogHandlers();
-  registerSskHandlers();
   registerProjectHandlers();
   registerShashokuProjectHandlers();
   registerOcrHandlers();

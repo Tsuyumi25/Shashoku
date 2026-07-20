@@ -25,10 +25,7 @@ export const RESERVED_GROUP_NAMES = ['_Label', '_start', '_end']
 /** 開資料夾時列入清單的圖片副檔名(小寫比對) */
 export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.webp']
 
-/** 工程檔的複合副檔名。判斷一律用 endsWith(path.extname 只認最後一段) */
-export const SSK_FILE_SUFFIX = '.ssk.json'
-
-// ── 新架構(v1)專案結構常數:root/ 底下的 shashoku/ 資料夾與其內部布局 ──
+// ── 專案結構常數:root/ 底下的 shashoku/ 資料夾與其內部布局 ──
 
 /** root 底下的專案資料夾名 */
 export const SHASHOKU_DIR = 'shashoku'

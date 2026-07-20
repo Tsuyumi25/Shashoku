@@ -1,8 +1,8 @@
 // IPC channel 名稱與 renderer 側 api 介面的唯一事實來源。
-// preload(實作)、electron/ipc(handler)、src/types/ipc.ts(global 宣告)都 import 這裡。
+// preload(實作)、electron/ipc(handler)、src/types/ipc.d.ts(global 宣告)都 import 這裡。
 
 export const CHANNELS = {
-  // ── Shashoku 專案(新架構:root/ + root/shashoku/) ──
+  // ── Shashoku 專案(root/ + root/shashoku/) ──
   pickRoot: 'shashoku:pick-root',
   scanRoot: 'shashoku:scan-root',
   createProject: 'shashoku:create-project',
@@ -11,17 +11,7 @@ export const CHANNELS = {
   writePage: 'shashoku:write-page',
   writeProjectMeta: 'shashoku:write-project-meta',
 
-  // ── (舊)專案:.ssk.json 工程檔,Stage 2 尾聲淘汰 ──
-  openProjectFolder: 'dialog:open-project-folder',
-  openSskFile: 'dialog:open-ssk-file',
-  listImages: 'project:list-images',
-  listSskFiles: 'project:list-ssk-files',
-  readSskFile: 'project:read-ssk-file',
-  writeSskFile: 'project:write-ssk-file',
-  saveSskAs: 'project:save-ssk-as',
-
-  // ── 圖片 / OCR / 去字(嵌字 mode) ──
-  openImageFolder: 'project:openFolder',
+  // ── 圖片 / OCR / 去字 ──
   readImage: 'project:readImage',
   ocrPage: 'ocr:page',
   ocrStatus: 'ocr:status',
@@ -45,7 +35,7 @@ export const CHANNELS = {
 
 export type WindowRole = 'main' | 'text-board'
 
-// ── Shashoku 專案(新架構)相關型別 ──
+// ── Shashoku 專案相關型別 ──
 
 /** 掃 root 資料夾的結果:給 UI 判斷「這是新專案還是既有專案」 */
 export interface ScanRootResult {
@@ -93,28 +83,7 @@ export interface WritePageInput {
   layerParts?: Record<string, Uint8Array>
 }
 
-// ── (舊)專案(.ssk.json)相關型別 ──
-
-export interface SskFileEntry {
-  filename: string
-  /** 絕對路徑 */
-  path: string
-}
-
-export interface OpenedSskFile {
-  /** 絕對路徑 */
-  path: string
-  filename: string
-  /** 工程檔所在資料夾(= 圖片資料夾,零配置慣例) */
-  dir: string
-}
-
-// ── 圖片資料夾 / OCR / 去字相關型別 ──
-
-export interface ProjectInfo {
-  folder: string
-  images: string[] // 檔名,自然排序 = 頁序
-}
+// ── 圖片 / OCR / 去字相關型別 ──
 
 /** sidecar 回傳的一個偵測框(原圖 px)。text 只在文字類的框上有。 */
 export interface OcrBlock {
@@ -170,7 +139,7 @@ export interface ScannedFontFile {
 // ── renderer 側 API 介面 ──
 
 export interface ShashokuApi {
-  // Shashoku 專案(新架構)
+  // Shashoku 專案
   /** 資料夾對話框選 root;取消回傳 null */
   pickRoot(): Promise<string | null>
   /** 掃 root:回傳原圖清單 + shashoku/ 現況 */
@@ -186,17 +155,7 @@ export interface ShashokuApi {
   /** 更新專案 metadata */
   writeProjectMeta(shashokuDir: string, projectMetaRaw: string): Promise<void>
 
-  // (舊)專案(翻譯 mode) — Stage 2 尾聲淘汰
-  openProjectFolder(): Promise<string | null>
-  listImages(folderPath: string): Promise<string[]>
-  listSskFiles(folderPath: string): Promise<SskFileEntry[]>
-  readSskFile(sskPath: string): Promise<string>
-  writeSskFile(sskPath: string, content: string): Promise<void>
-  saveSskAs(defaultDir: string, suggestedName: string, content: string): Promise<string | null>
-  openSskFile(): Promise<OpenedSskFile | null>
-
-  // 圖片 / OCR / 去字(嵌字 mode)
-  openImageFolder(): Promise<ProjectInfo | null>
+  // 圖片 / OCR / 去字
   readImage(folder: string, name: string): Promise<Uint8Array>
   ocrPage(folder: string, name: string): Promise<OcrPageResult>
   inpaintBlocks(folder: string, name: string, blocks: OcrBlock[]): Promise<InpaintResult>

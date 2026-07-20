@@ -1,24 +1,8 @@
-// .ssk.json 工程檔 schema v1 的型別定義。
-// 這個檔案同時被 app(現代 TS)與 Photoshop 匯出腳本(ES3/noLib tsconfig)消費,
-// 只允許純資料形狀:string/number/boolean/null/array/字面量聯合,禁止引用任何標準庫型別。
-
-export const SSK_VERSION = 1
-
-export interface SskProject {
-  version: typeof SSK_VERSION
-  /** index 0 = category 1;上限 MAX_GROUPS;禁止保留字(RESERVED_GROUP_NAMES) */
-  groups: string[]
-  comment: string
-  /** 陣列順序 = 頁序 = 匯出順序 */
-  images: SskImage[]
-  exportConfig: SskExportConfig
-}
-
-export interface SskImage {
-  /** basename;圖源資料夾 = .ssk.json 所在資料夾(零配置慣例) */
-  filename: string
-  labels: SskLabel[]
-}
+// 專案級型別:label 資料模型 + 匯出設定。
+// 新架構下:SskLabel 被 shared/page/schema 的 TranslationJson 引用;
+// SskExportConfig 被 shared/project/schema 的 ProjectJson 引用。
+// 檔案內只允許純資料形狀:string/number/boolean/null/array/字面量聯合,禁止引用任何標準庫型別
+// (因為 Photoshop 匯出腳本使用 ES3 tsconfig 消費相同型別)。
 
 export interface SskLabel {
   /** 前端追蹤用 UUID;jsx 端不使用 */

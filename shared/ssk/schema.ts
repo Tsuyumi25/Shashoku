@@ -1,16 +1,14 @@
-// .ssk.json 的解析/序列化/驗證。在 app 端(node/瀏覽器)使用;
-// Photoshop 匯出腳本端(ES3)有自己的最小解析器,兩端行為以本檔的 fixtures 對齊。
+// exportConfig 的解析/序列化/驗證邏輯。被 shared/project/schema.ts 引用
+// (project.json 的 exportConfig 欄位)。
+//
+// 舊架構的 parseSskProject / serializeSskProject / SskImage 等全書 JSON 邏輯
+// 已於 Stage 2 尾聲砍除。歷史請看 git log。
 import type {
   DocTemplateMode,
   SskExportConfig,
-  SskImage,
-  SskLabel,
-  SskProject,
   OutputFormat,
   TextDirectionMode,
 } from './types'
-import { SSK_VERSION } from './types'
-import { MAX_GROUPS, RESERVED_GROUP_NAMES } from './constants'
 
 const DOC_TEMPLATE_MODES: DocTemplateMode[] = ['auto', 'none', 'custom']
 const TEXT_DIRECTION_MODES: TextDirectionMode[] = ['keep', 'horizontal', 'vertical']
@@ -35,80 +33,15 @@ export function defaultExportConfig(): SskExportConfig {
   }
 }
 
-export function defaultSskProject(imageFilenames: string[]): SskProject {
-  return {
-    version: SSK_VERSION,
-    groups: ['框内', '框外'],
-    comment: '',
-    images: imageFilenames.map((filename) => ({ filename, labels: [] })),
-    exportConfig: defaultExportConfig(),
-  }
-}
-
 /** 解析失敗時拋出,message 是給用戶看的人話 */
-export class SskParseError extends Error {}
+export class ExportConfigParseError extends Error {}
 
 function fail(message: string): never {
-  throw new SskParseError(message)
+  throw new ExportConfigParseError(message)
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function generateId(): string {
-  const c = globalThis.crypto
-  if (c?.randomUUID) return c.randomUUID()
-  // 測試/舊環境 fallback:碰撞機率對單一工程檔規模可忽略
-  return `lbl-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-function parseGroups(v: unknown): string[] {
-  if (!Array.isArray(v) || v.length === 0) fail('groups 必須是至少一個分組名的陣列')
-  if (v.length > MAX_GROUPS) fail(`分組數量上限為 ${MAX_GROUPS},檔案內有 ${v.length} 個`)
-  const groups = v.map((g, i) => {
-    if (typeof g !== 'string' || g.length === 0) fail(`groups[${i}] 必須是非空字串`)
-    if (RESERVED_GROUP_NAMES.includes(g)) fail(`分組名「${g}」是保留字(${RESERVED_GROUP_NAMES.join('、')}),請改名`)
-    return g
-  })
-  if (new Set(groups).size !== groups.length) fail('分組名不可重複')
-  return groups
-}
-
-function parseLabel(v: unknown, imageIndex: number, labelIndex: number, groupCount: number): SskLabel {
-  const at = `images[${imageIndex}].labels[${labelIndex}]`
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { x, y, category, lines } = v
-  if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
-  if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
-  if (typeof category !== 'number' || !Number.isInteger(category) || category < 1 || category > groupCount)
-    fail(`${at}.category 必須是 1~${groupCount} 的整數(對應 groups)`)
-  if (!Array.isArray(lines)) fail(`${at}.lines 必須是字串陣列`)
-  const parsedLines = lines.map((line, i) => {
-    if (typeof line !== 'string') fail(`${at}.lines[${i}] 必須是字串`)
-    if (/[\r\n]/.test(line)) fail(`${at}.lines[${i}] 不可內嵌換行——斷行請用陣列元素表達`)
-    return line
-  })
-  const id = typeof v.id === 'string' && v.id.length > 0 ? v.id : generateId()
-  return { id, x, y, category, lines: parsedLines }
-}
-
-function parseImages(v: unknown, groupCount: number): SskImage[] {
-  if (!Array.isArray(v)) fail('images 必須是陣列')
-  const images = v.map((img, i) => {
-    if (!isRecord(img)) fail(`images[${i}] 必須是物件`)
-    if (typeof img.filename !== 'string' || img.filename.length === 0) fail(`images[${i}].filename 必須是非空字串`)
-    // 工程檔在團隊間互傳:filename 會拼進 local-file:// URL,必須是純檔名——
-    // 含路徑分隔符即可指向專案資料夾外(../../…),是任意檔案讀取鏈的入口
-    if (/[\\/]/.test(img.filename)) fail(`images[${i}].filename 只能是檔名,不可含路徑`)
-    const labels = Array.isArray(img.labels)
-      ? img.labels.map((l, j) => parseLabel(l, i, j, groupCount))
-      : fail(`images[${i}].labels 必須是陣列`)
-    return { filename: img.filename, labels }
-  })
-  const names = images.map((img) => img.filename)
-  if (new Set(names).size !== names.length) fail('images 內有重複的圖片檔名')
-  return images
 }
 
 function oneOf<T extends string>(v: unknown, allowed: T[], at: string): T {
@@ -142,7 +75,7 @@ function bool(v: unknown, at: string, fallback: boolean): boolean {
   return v
 }
 
-/** 缺欄位補預設值(v2 升級路徑);存在但值非法則拋錯(手改檔案的錯字要大聲失敗)。
+/** 缺欄位補預設值(升級路徑);存在但值非法則拋錯(手改檔案的錯字要大聲失敗)。
  * export 給 shared/project/schema.ts 共用(全書 exportConfig 邏輯一致)。 */
 export function parseExportConfigStrict(v: unknown, groups: string[]): SskExportConfig {
   const d = defaultExportConfig()
@@ -150,7 +83,9 @@ export function parseExportConfigStrict(v: unknown, groups: string[]): SskExport
   if (!isRecord(v)) fail('exportConfig 必須是物件')
 
   const docTemplate =
-    v.docTemplate === undefined ? d.docTemplate : oneOf(v.docTemplate, DOC_TEMPLATE_MODES, 'exportConfig.docTemplate')
+    v.docTemplate === undefined
+      ? d.docTemplate
+      : oneOf(v.docTemplate, DOC_TEMPLATE_MODES, 'exportConfig.docTemplate')
   const docTemplateFilename = nullableString(v.docTemplateFilename, 'exportConfig.docTemplateFilename')
   if (docTemplateFilename !== null && /[\\/]/.test(docTemplateFilename))
     fail('exportConfig.docTemplateFilename 只能是檔名,不可含路徑(工程檔要可攜)')
@@ -180,7 +115,9 @@ export function parseExportConfigStrict(v: unknown, groups: string[]): SskExport
     docTemplate,
     docTemplateFilename,
     outputFormat:
-      v.outputFormat === undefined ? d.outputFormat : oneOf(v.outputFormat, OUTPUT_FORMATS, 'exportConfig.outputFormat'),
+      v.outputFormat === undefined
+        ? d.outputFormat
+        : oneOf(v.outputFormat, OUTPUT_FORMATS, 'exportConfig.outputFormat'),
     ignoreNoLabelImages: bool(v.ignoreNoLabelImages, 'exportConfig.ignoreNoLabelImages', d.ignoreNoLabelImages),
     createLayerGroups: bool(v.createLayerGroups, 'exportConfig.createLayerGroups', d.createLayerGroups),
     font: nullableString(v.font, 'exportConfig.font'),
@@ -196,71 +133,4 @@ export function parseExportConfigStrict(v: unknown, groups: string[]): SskExport
     outputFolderName,
     exportGroups,
   }
-}
-
-export function parseSskProject(raw: string): SskProject {
-  // Windows 編輯器常存出 UTF-8 BOM,JSON.parse 會炸——先剝掉
-  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
-
-  let data: unknown
-  try {
-    data = JSON.parse(text)
-  } catch (err) {
-    fail(`不是合法的 JSON:${err instanceof Error ? err.message : String(err)}`)
-  }
-  if (!isRecord(data)) fail('工程檔頂層必須是物件')
-
-  if (data.version !== SSK_VERSION) {
-    if (typeof data.version === 'number' && data.version > SSK_VERSION)
-      fail(`此工程檔由較新版本建立(version ${data.version}),請更新軟體`)
-    fail(`不支援的工程檔版本:${JSON.stringify(data.version)}`)
-  }
-
-  const groups = parseGroups(data.groups)
-  const comment = data.comment === undefined ? '' : data.comment
-  if (typeof comment !== 'string') fail('comment 必須是字串')
-
-  return {
-    version: SSK_VERSION,
-    groups,
-    comment,
-    images: parseImages(data.images, groups.length),
-    exportConfig: parseExportConfigStrict(data.exportConfig, groups),
-  }
-}
-
-/** 固定 key 順序建構(不依賴輸入物件的插入順序),縮排 2、結尾換行,git diff 友善 */
-export function serializeSskProject(project: SskProject): string {
-  const out = {
-    version: project.version,
-    groups: project.groups,
-    comment: project.comment,
-    exportConfig: {
-      docTemplate: project.exportConfig.docTemplate,
-      docTemplateFilename: project.exportConfig.docTemplateFilename,
-      outputFormat: project.exportConfig.outputFormat,
-      ignoreNoLabelImages: project.exportConfig.ignoreNoLabelImages,
-      createLayerGroups: project.exportConfig.createLayerGroups,
-      font: project.exportConfig.font,
-      fontSizePx: project.exportConfig.fontSizePx,
-      textColor: project.exportConfig.textColor,
-      textLeadingPercent: project.exportConfig.textLeadingPercent,
-      textDirection: project.exportConfig.textDirection,
-      outputLabelIndex: project.exportConfig.outputLabelIndex,
-      actionSetName: project.exportConfig.actionSetName,
-      outputFolderName: project.exportConfig.outputFolderName,
-      exportGroups: project.exportConfig.exportGroups,
-    },
-    images: project.images.map((img) => ({
-      filename: img.filename,
-      labels: img.labels.map((l) => ({
-        id: l.id,
-        x: l.x,
-        y: l.y,
-        category: l.category,
-        lines: l.lines,
-      })),
-    })),
-  }
-  return `${JSON.stringify(out, null, 2)}\n`
 }

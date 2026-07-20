@@ -3,7 +3,7 @@ import { CHANNELS, type OcrStatusEvent, type ShashokuApi } from "@shared/ipc/cha
 
 // 單一 window.api:翻譯 + 嵌字 + 字體 + 視窗控制。
 const api: ShashokuApi = {
-  // ── Shashoku 專案(新架構) ──
+  // ── Shashoku 專案 ──
   pickRoot: () => ipcRenderer.invoke(CHANNELS.pickRoot),
   scanRoot: (rootPath) => ipcRenderer.invoke(CHANNELS.scanRoot, rootPath),
   createProject: (rootPath) => ipcRenderer.invoke(CHANNELS.createProject, rootPath),
@@ -13,18 +13,7 @@ const api: ShashokuApi = {
   writeProjectMeta: (shashokuDir, metaRaw) =>
     ipcRenderer.invoke(CHANNELS.writeProjectMeta, shashokuDir, metaRaw),
 
-  // ── (舊)專案(翻譯 mode) ──
-  openProjectFolder: () => ipcRenderer.invoke(CHANNELS.openProjectFolder),
-  listImages: (folderPath) => ipcRenderer.invoke(CHANNELS.listImages, folderPath),
-  listSskFiles: (folderPath) => ipcRenderer.invoke(CHANNELS.listSskFiles, folderPath),
-  readSskFile: (sskPath) => ipcRenderer.invoke(CHANNELS.readSskFile, sskPath),
-  writeSskFile: (sskPath, content) => ipcRenderer.invoke(CHANNELS.writeSskFile, sskPath, content),
-  saveSskAs: (defaultDir, suggestedName, content) =>
-    ipcRenderer.invoke(CHANNELS.saveSskAs, defaultDir, suggestedName, content),
-  openSskFile: () => ipcRenderer.invoke(CHANNELS.openSskFile),
-
-  // ── 圖片 / OCR / 去字(嵌字 mode) ──
-  openImageFolder: () => ipcRenderer.invoke(CHANNELS.openImageFolder),
+  // ── 圖片 / OCR / 去字 ──
   readImage: (folder, name) => ipcRenderer.invoke(CHANNELS.readImage, folder, name),
   ocrPage: (folder, name) => ipcRenderer.invoke(CHANNELS.ocrPage, folder, name),
   inpaintBlocks: (folder, name, blocks) =>
