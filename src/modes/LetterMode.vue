@@ -51,7 +51,7 @@ type Tool = "move" | "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 // ---- 狀態 ----
 // doc / activeLayerId / undo 歷史活在 useEditor 單例,LayerPanel 共用同一份。
 const editor = useEditor();
-const { doc, activeLayerId } = editor;
+const { doc, activeLayerId, layersTick } = editor;
 const containerEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 const selCanvasEl = ref<HTMLCanvasElement | null>(null); // 選區蟻線 overlay(doc 空間)
@@ -406,6 +406,16 @@ watch(
   },
   { immediate: true },
 );
+
+// 統一 raster dirty hook:任何路徑呼叫 editor.changed() 都會 tick,涵蓋
+// inpaint / 圖層 CRUD / undo redo / merge down 等 mutation(gpt-7)。
+// onPointerUp 的手工 schedule 保留是防止 layersTick 沒 tick 的邊際場景;
+// 兩者互為 safety net(autosave pending Map 會 dedupe 同頁重複排程)。
+watch(layersTick, () => {
+  if (!loadedPage.value || !doc.value) return;
+  const file = projectStore.fileByName(loadedPage.value);
+  if (file?.pageDir) scheduleRasterAutosave(file.pageDir, doc.value);
+});
 
 // ---- OCR(sidecar)----
 async function ocrOne(name: string): Promise<void> {
