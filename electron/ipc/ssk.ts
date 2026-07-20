@@ -1,8 +1,9 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { CHANNELS, type SskFileEntry } from "@shared/ipc/channels";
 import { IMAGE_EXTENSIONS, SSK_FILE_SUFFIX } from "@shared/ssk/constants";
+import { writeFileAtomic } from "../lib/atomicFile";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -23,13 +24,6 @@ async function listSskFiles(folderPath: string): Promise<string[]> {
     .sort(collator.compare);
 }
 
-// 翻譯資料珍貴:先寫 temp 再 rename,寫壞時不毀原檔
-async function writeSskAtomic(sskPath: string, content: string): Promise<void> {
-  const tmpPath = `${sskPath}.tmp-${process.pid}`;
-  await writeFile(tmpPath, Buffer.from(content, "utf8"));
-  await rename(tmpPath, sskPath);
-}
-
 export function registerSskHandlers(): void {
   ipcMain.handle(CHANNELS.listImages, (_e, folderPath: string) =>
     listByExtensions(folderPath, IMAGE_EXTENSIONS),
@@ -43,7 +37,7 @@ export function registerSskHandlers(): void {
   ipcMain.handle(CHANNELS.readSskFile, (_e, sskPath: string) => readFile(sskPath, "utf8"));
 
   ipcMain.handle(CHANNELS.writeSskFile, (_e, sskPath: string, content: string) =>
-    writeSskAtomic(sskPath, content),
+    writeFileAtomic(sskPath, content),
   );
 
   ipcMain.handle(
@@ -63,7 +57,7 @@ export function registerSskHandlers(): void {
         filters: [{ name: "Shashoku 工程檔", extensions: ["json"] }],
       });
       if (result.canceled || !result.filePath) return null;
-      await writeSskAtomic(result.filePath, content);
+      await writeFileAtomic(result.filePath, content);
       return result.filePath;
     },
   );
