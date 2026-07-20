@@ -142,8 +142,9 @@ function bool(v: unknown, at: string, fallback: boolean): boolean {
   return v
 }
 
-/** 缺欄位補預設值(v2 升級路徑);存在但值非法則拋錯(手改檔案的錯字要大聲失敗) */
-function parseExportConfig(v: unknown, groups: string[]): SskExportConfig {
+/** 缺欄位補預設值(v2 升級路徑);存在但值非法則拋錯(手改檔案的錯字要大聲失敗)。
+ * export 給 shared/project/schema.ts 共用(全書 exportConfig 邏輯一致)。 */
+export function parseExportConfigStrict(v: unknown, groups: string[]): SskExportConfig {
   const d = defaultExportConfig()
   if (v === undefined || v === null) return d
   if (!isRecord(v)) fail('exportConfig 必須是物件')
@@ -224,7 +225,7 @@ export function parseSskProject(raw: string): SskProject {
     groups,
     comment,
     images: parseImages(data.images, groups.length),
-    exportConfig: parseExportConfig(data.exportConfig, groups),
+    exportConfig: parseExportConfigStrict(data.exportConfig, groups),
   }
 }
 
