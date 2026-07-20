@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { CHANNELS, type ScannedFontFile } from "../../shared/ipc";
+import { CHANNELS, type ScannedFontFile } from "@shared/ipc/channels";
 import { loadFontFolders, saveFontFolders } from "../fonts/fontconfig";
 import { readFontNames } from "../fonts/sfntName";
 

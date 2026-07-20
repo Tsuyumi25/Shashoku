@@ -41,7 +41,7 @@ import { CATEGORY_COLORS } from "@shared/ssk/constants";
 import type { LabelItem } from "@/types/project";
 import { useEditorStore } from "@/stores/editorStore";
 import { useProjectStore } from "@/stores/projectStore";
-import type { OcrBlock } from "../../shared/ipc";
+import type { OcrBlock } from "@shared/ipc/channels";
 
 type Tool = "move" | "hand" | "brush" | "erase" | "tone" | "text" | "marquee";
 

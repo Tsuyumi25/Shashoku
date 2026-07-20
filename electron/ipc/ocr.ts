@@ -8,7 +8,7 @@ import {
   type OcrBlock,
   type OcrPageResult,
   type OcrStatusEvent,
-} from "../../shared/ipc";
+} from "@shared/ipc/channels";
 
 interface Pending {
   resolve: (v: never) => void;

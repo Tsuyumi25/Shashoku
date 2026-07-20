@@ -3,7 +3,7 @@
 // CJK 字體動輒 10MB+,掃整個資料夾不該搬那麼多位元組)。
 // woff/woff2(表被壓縮)與 .fon(古董點陣)不支援,回傳空陣列。
 import { open, type FileHandle } from "node:fs/promises";
-import type { FontFaceName } from "../../shared/ipc";
+import type { FontFaceName } from "@shared/ipc/channels";
 
 const TAG_TTCF = 0x74746366; // 'ttcf'
 const TAG_OTTO = 0x4f54544f; // 'OTTO'(CFF)

@@ -1,7 +1,7 @@
 import { dialog, ipcMain } from "electron";
 import { readdir, readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { CHANNELS, type ProjectInfo } from "../../shared/ipc";
+import { CHANNELS, type ProjectInfo } from "@shared/ipc/channels";
 
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp"]);
 
