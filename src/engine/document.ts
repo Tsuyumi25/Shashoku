@@ -1,4 +1,6 @@
 import type { RasterLayer, Rect } from "./types";
+import type { Layer } from "./layer-tree";
+import { isRasterLayer } from "./layer-tree";
 import { toCompositeOp } from "./blend";
 import { createRasterLayer, rasterLayerFromBitmap } from "./layer";
 
@@ -10,15 +12,20 @@ interface LayerCache {
 }
 
 /**
- * 文件模型:一疊 raster 圖層(每層 buffer 是真相,外加一個 canvas 快取供 drawImage
- * 合成)。像素編輯寫 buffer 的 dirty-rect,再 putImageData 那一小塊到 layer canvas;
- * 顯示與匯出都靠 drawImage 疊 layer canvas(對齊 BitMappery/zcanvas)。
- * 文字不在這層——標籤是 projectStore 的 SSOT,由 mode 層畫進合成(見 compositeInto)。
+ * 文件模型:一棵圖層樹(C1 現況:root 全部是 raster leaf,沒有真正巢狀
+ * 或 text / group 節點——那些留給 C2 起串接)。每個 raster 有自己的 buffer
+ * 是真相,外加一個 canvas 快取供 drawImage 合成:像素編輯寫 buffer 的
+ * dirty-rect,再 putImageData 那一小塊到 layer canvas;顯示與匯出都靠
+ * drawImage 疊 layer canvas(對齊 BitMappery/zcanvas)。
+ *
+ * 文字不在這層——標籤是 projectStore 的 SSOT,由 mode 層畫進合成
+ * (見 compositeInto 的 interleave hook)。C2 之後 text 才會作為 tree
+ * 節點站進 z-order。
  */
 export class ShashokuDoc {
   readonly width: number;
   readonly height: number;
-  layers: RasterLayer[] = [];
+  layers: Layer[] = [];
 
   private cache = new Map<string, LayerCache>();
 
@@ -56,15 +63,22 @@ export class ShashokuDoc {
 
   // ---- 結構操作(供 editor actions 呼叫;各自是可逆的最小步) ----
 
-  /** 在 index 插入既有 layer 物件(bottom→top 序)。undo 重插同一物件即可。 */
-  insertLayer(layer: RasterLayer, index: number): void {
+  /**
+   * C1 現況:內部 API 保留扁平 root 語意——所有 insert / remove / move 只
+   * 動 `this.layers` 陣列頭,不遞迴走 nested group。C2 才會做 tree walk。
+   */
+
+  /** 在 index 插入既有 layer 節點(bottom→top 序)。undo 重插同一物件即可。
+   * text / group 節點不會有 canvas cache——那些是 z-order 位置持有者,合成
+   * 時另外處理。 */
+  insertLayer(layer: Layer, index: number): void {
     const i = Math.max(0, Math.min(index, this.layers.length));
     this.layers.splice(i, 0, layer);
-    if (!this.cache.has(layer.id)) this.initCache(layer);
+    if (isRasterLayer(layer) && !this.cache.has(layer.id)) this.initCache(layer);
   }
 
   /** 移除並回傳 {layer, index};找不到回 null。cache 一併釋放(重插會重建)。 */
-  removeLayer(layerId: string): { layer: RasterLayer; index: number } | null {
+  removeLayer(layerId: string): { layer: Layer; index: number } | null {
     const index = this.layers.findIndex((l) => l.id === layerId);
     if (index < 0) return null;
     const [layer] = this.layers.splice(index, 1);
@@ -82,6 +96,17 @@ export class ShashokuDoc {
     return this.layers.findIndex((l) => l.id === layerId);
   }
 
+  /** 找節點(C1 只走 root;C2 起會遞迴 tree walk)。 */
+  findLayer(layerId: string): Layer | undefined {
+    return this.layers.find((l) => l.id === layerId);
+  }
+
+  /** 找 raster leaf 節點——非 raster 或找不到都回 undefined。 */
+  findRasterLayer(layerId: string): RasterLayer | undefined {
+    const l = this.findLayer(layerId);
+    return l && isRasterLayer(l) ? l : undefined;
+  }
+
   /**
    * Merge down(PS 語意):把該層以自己的 opacity/blendMode 合成進正下方那層,
    * 然後移除自己。下方層的 buffer 被覆寫——呼叫端(action)負責先備份以供 undo。
@@ -91,6 +116,9 @@ export class ShashokuDoc {
     if (index <= 0) return false; // 最底層沒有「下方」
     const top = this.layers[index];
     const below = this.layers[index - 1];
+    // C1:只 raster 之間能合(text/group 進 tree 後 merge 語意另議);非 raster
+    // 拒絕合併。
+    if (!isRasterLayer(top) || !isRasterLayer(below)) return false;
 
     const c = new OffscreenCanvas(this.width, this.height);
     const ctx = c.getContext("2d")!;
@@ -109,9 +137,10 @@ export class ShashokuDoc {
     return true;
   }
 
-  /** 抽出某層的 alpha channel(w*h bytes)——Ctrl+click 縮圖載入選區的原語。 */
+  /** 抽出某層的 alpha channel(w*h bytes)——Ctrl+click 縮圖載入選區的原語。
+   * 非 raster 節點(text / group)不參與 alpha 選區,回 null。 */
   extractAlpha(layerId: string): Uint8ClampedArray | null {
-    const layer = this.layers.find((l) => l.id === layerId);
+    const layer = this.findRasterLayer(layerId);
     if (!layer) return null;
     const n = this.width * this.height;
     const out = new Uint8ClampedArray(n);
@@ -150,6 +179,9 @@ export class ShashokuDoc {
       interleave?.(ctx, i);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
+      // C1:root 只有 raster leaf,非 raster 直接跳過(C2 才實作 text /
+      // group 遞迴合成);invisible / opacity=0 也跳過。
+      if (!isRasterLayer(layer)) continue;
       if (!layer.visible || layer.opacity === 0) continue;
       const canvas = this.cache.get(layer.id)?.canvas;
       if (!canvas) continue;
@@ -168,7 +200,7 @@ export class ShashokuDoc {
    * alpha 是 0/255 二值:有值處直接覆蓋(最新去字結果為準),其餘不動。
    */
   async blitPngPatch(layerId: string, r: Rect, pngBase64: string): Promise<void> {
-    const layer = this.layers.find((l) => l.id === layerId);
+    const layer = this.findRasterLayer(layerId);
     if (!layer || r.w <= 0 || r.h <= 0) return;
 
     const bytes = Uint8Array.from(atob(pngBase64), (c) => c.charCodeAt(0));
@@ -199,8 +231,8 @@ export class ShashokuDoc {
    * 白底攤平(供交付),這個是各層獨立(供持久化)。
    */
   async exportLayerPng(layerId: string): Promise<Uint8Array> {
-    const layer = this.layers.find((l) => l.id === layerId);
-    if (!layer) throw new Error(`exportLayerPng: layer 不存在 ${layerId}`);
+    const layer = this.findRasterLayer(layerId);
+    if (!layer) throw new Error(`exportLayerPng: raster layer 不存在 ${layerId}`);
     const canvas = new OffscreenCanvas(this.width, this.height);
     const ctx = canvas.getContext("2d")!;
     // 直接 putImageData:layer.data 已是 RGBA 直通 alpha,不經 blend/opacity(那是合成端的事)

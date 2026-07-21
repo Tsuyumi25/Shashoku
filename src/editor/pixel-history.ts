@@ -21,12 +21,12 @@ export function pushPixelPatch(
   label: string,
 ): void {
   const { doc, history } = ctx;
-  const layer = doc.layers.find((l) => l.id === layerId);
+  const layer = doc.findRasterLayer(layerId);
   if (!layer || rect.w <= 0 || rect.h <= 0) return;
   const after = copyRect(layer.data, doc.width, rect);
 
   const apply = (patch: Uint8ClampedArray) => {
-    const target = doc.layers.find((l) => l.id === layerId);
+    const target = doc.findRasterLayer(layerId);
     if (!target) return; // 層已被刪(跨步驟互動),安全跳過
     writeRect(target.data, doc.width, rect, patch);
     doc.syncLayer(layerId, rect);
@@ -52,7 +52,7 @@ export function pushPixelPatches(
   if (valid.length === 0) return;
 
   const apply = (side: "before" | "after") => {
-    const target = doc.layers.find((l) => l.id === layerId);
+    const target = doc.findRasterLayer(layerId);
     if (!target) return;
     for (const p of valid) {
       writeRect(target.data, doc.width, p.rect, p[side]);

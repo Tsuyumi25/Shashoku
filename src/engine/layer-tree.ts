@@ -1,12 +1,12 @@
 // 圖層樹的 runtime 型別:Layer discriminated union + type guards。
 //
-// 現況(Stage A):純型別 placeholder,`ShashokuDoc.layers` 仍是扁平
-// `RasterLayer[]`;Stage C1 才把 doc.layers 升成 `Layer[]`,
-// Stage C2 才讓 text/group node 真正進 tree。
+// 現況(Stage C1):`ShashokuDoc.layers: Layer[]`(tree 型別已就位),但
+// runtime 內容仍是「全部 raster 都在 root、沒有真正巢狀」;Stage C2 才會
+//讓 text / group node 進 tree、compositeInto 走遞迴。
 //
 // 資料模型分工:
-// - RasterLayer 已存於 engine/types.ts,這裡用交集加 `kind` discriminator
-//   升等成 RasterLayerNode(現有物件補 `kind: 'raster'` 即可 assignable)。
+// - RasterLayer 本身帶 `kind: 'raster'` discriminator(engine/types.ts),
+//   所以直接是 Layer union 的一員;RasterLayerNode 是可讀的別名。
 // - TextLayerNode 只是「z-order 位置持有者」;文字內容仍在 pinia label
 //   SSOT,node 持有 labelId ref。
 // - GroupLayerNode 有 children 陣列(遞迴 nest);`styleBinding` 有 = 樣式
@@ -24,8 +24,8 @@ export interface LayerNodeBase {
   locked: boolean
 }
 
-/** Raster 圖層節點:現有 RasterLayer + kind discriminator。 */
-export type RasterLayerNode = RasterLayer & { kind: 'raster' }
+/** Raster 圖層節點的別名(與 engine/types.ts 的 RasterLayer 完全等價)。 */
+export type RasterLayerNode = RasterLayer
 
 /**
  * 文字圖層節點:實體存在圖層樹中(可調 z-order、放進 group folder),

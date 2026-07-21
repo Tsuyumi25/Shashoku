@@ -10,6 +10,7 @@ function nextId(prefix: string): string {
 
 export function createRasterLayer(name: string, w: number, h: number): RasterLayer {
   return {
+    kind: "raster",
     id: nextId("layer"),
     name,
     visible: true,
@@ -33,6 +34,7 @@ export function rasterLayerFromBitmap(
   ctx.drawImage(bitmap, 0, 0, w, h);
   const img = ctx.getImageData(0, 0, w, h);
   return {
+    kind: "raster",
     id: nextId("layer"),
     name,
     visible: true,
@@ -60,6 +62,7 @@ export function rasterLayerFromEntry(
   ctx.drawImage(bitmap, 0, 0, w, h);
   const img = ctx.getImageData(0, 0, w, h);
   return {
+    kind: "raster",
     id: entry.id,
     name: entry.name,
     visible: entry.visible,

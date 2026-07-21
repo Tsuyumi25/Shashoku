@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { layerNames, makeCtx } from "../test-utils";
+import { layerNames, makeCtx, rasterAt } from "../test-utils";
 import { duplicateLayer } from "./layer-duplicate";
 
 describe("duplicateLayer", () => {
   it("拷貝 buffer 與屬性,插在來源正上方;undo/redo 正確", () => {
     const { ctx, doc, history } = makeCtx(["底圖", "筆刷"]);
-    const src = doc.layers[0];
+    const src = rasterAt(doc, 0);
     src.data[0] = 200; // 標記像素
     src.opacity = 0.5;
     src.blendMode = "multiply";

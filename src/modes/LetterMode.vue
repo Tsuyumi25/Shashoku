@@ -519,7 +519,7 @@ async function runInpaint(blocks: OcrBlock[]): Promise<void> {
     if (doc.value !== d) return;
     // 惰性取得/建立去字層:機器輸出有自己的層(可切作用層擦回),插在
     // 底圖正上方維持 z 語意。用戶從面板刪掉的話,下次去字重建
-    let layer = d.layers.find((l) => l.id === inpaintLayerId);
+    let layer = inpaintLayerId !== null ? d.findRasterLayer(inpaintLayerId) : undefined;
     if (!layer) {
       layer = createRasterLayer("去字", d.width, d.height);
       d.insertLayer(layer, 1);
@@ -703,7 +703,7 @@ let dragLabelDuplicate: LabelItem | null = null;
 
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
-  const layer = d.layers.find((l) => l.id === activeLayerId.value);
+  const layer = d.findRasterLayer(activeLayerId.value);
   if (!layer || layer.locked) return; // 鎖定守門在工具層,引擎保持純粹
   const r = stampBrush(
     layer,
@@ -762,7 +762,7 @@ function onPointerDown(e: PointerEvent): void {
   const p = toDoc(e);
 
   if (tool.value === "brush" || tool.value === "erase") {
-    const layer = doc.value.layers.find((l) => l.id === activeLayerId.value);
+    const layer = doc.value.findRasterLayer(activeLayerId.value);
     if (!layer || layer.locked) return; // 鎖定層不起筆
     painting.value = true;
     strokeDirty = EMPTY_RECT;
@@ -957,7 +957,7 @@ function onPointerUp(e: PointerEvent): void {
   if (painting.value && tool.value === "tone" && toneRect.value) {
     const d = doc.value!;
     // 網點與筆刷同語義:畫在使用中圖層,鎖定守門(底圖鎖定時 no-op)
-    const layer = d.layers.find((l) => l.id === activeLayerId.value);
+    const layer = d.findRasterLayer(activeLayerId.value);
     const r = clampRect(toneRect.value, d.width, d.height);
     if (layer && !layer.locked && r.w > 0 && r.h > 0) {
       const before = copyRect(layer.data, d.width, r);
@@ -1486,7 +1486,7 @@ function onKeyDown(e: KeyboardEvent): void {
     const sel = editor.selection.value;
     const b = editor.selectionBounds.value;
     if (d && sel && b) {
-      const layer = d.layers.find((l) => l.id === activeLayerId.value);
+      const layer = d.findRasterLayer(activeLayerId.value);
       if (layer && !layer.locked) {
         const before = copyRect(layer.data, d.width, b);
         clearSelected(layer, d.width, sel, b);

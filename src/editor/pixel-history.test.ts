@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { copyRect } from "@/engine/pixelPatch";
-import { makeCtx } from "./test-utils";
+import { makeCtx, rasterAt } from "./test-utils";
 import { pushPixelPatch } from "./pixel-history";
 
 describe("pushPixelPatch(筆劃級 undo)", () => {
   it("undo 寫回 before、redo 寫回 after,rect 外不動", () => {
     const { ctx, doc, history } = makeCtx(["畫"], 4, 4);
-    const layer = doc.layers[0];
+    const layer = rasterAt(doc, 0);
     const r = { x: 1, y: 1, w: 2, h: 2 };
 
     const before = copyRect(layer.data, doc.width, r); // 全 0
@@ -28,7 +28,7 @@ describe("pushPixelPatch(筆劃級 undo)", () => {
 
   it("零面積 rect 不記歷史", () => {
     const { ctx, doc, history } = makeCtx(["畫"], 4, 4);
-    pushPixelPatch(ctx, doc.layers[0].id, { x: 0, y: 0, w: 0, h: 0 }, new Uint8ClampedArray(0), "x");
+    pushPixelPatch(ctx, rasterAt(doc, 0).id, { x: 0, y: 0, w: 0, h: 0 }, new Uint8ClampedArray(0), "x");
     expect(history.canUndo).toBe(false);
   });
 });

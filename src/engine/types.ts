@@ -15,8 +15,12 @@ export interface Rect {
  * 一個 raster 圖層。POC 用「整張文件大小的 buffer」最簡單直白，
  * 代價是每層 w*h*4 bytes（1500×2100 ≈ 12.6MB）。生產版會換成 tile，
  * 但 dirty-rect 合成的成本模型跟儲存方式無關，POC 先驗合成這一半。
+ *
+ * `kind: 'raster'` discriminator：讓 RasterLayer 直接是 Layer union 的
+ * 一員（見 engine/layer-tree.ts），不需要再做 & { kind } 交集。
  */
 export interface RasterLayer {
+  kind: "raster";
   id: string;
   name: string;
   visible: boolean;

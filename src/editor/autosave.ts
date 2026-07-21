@@ -20,6 +20,7 @@
 import { parseManifest, serializeManifest } from '@shared/page/schema'
 import { MANIFEST_SCHEMA_VERSION, type LayerEntry, type ManifestJson } from '@shared/page/types'
 import type { ShashokuDoc } from '@/engine/document'
+import type { Layer } from '@/engine/layer-tree'
 
 const DEBOUNCE_MS = 800
 const MAX_WAIT_MS = 5000
@@ -49,6 +50,11 @@ function clearTimers(): void {
  * 舊 rev 檔仍在磁碟上不被覆寫。這保證 crash 於「寫 layers 中間、manifest
  * 未更新」時,舊 manifest 指向的舊 rev PNG 完全沒動,是**真正的完整 snapshot**,
  * 不是「舊 metadata + 新舊混合的檔案」。清理由 openProject 的 GC 負責。
+ *
+ * C1 現況:doc.layers 已升 Layer[] 樹型別,但 root 只有 raster leaf——
+ * 遞迴 walk 是為 C2 之後 text / group 節點進 tree 做準備。text / group
+ * 節點只寫 metadata 進 manifest,不落地 PNG(text 的內容在 translation.json
+ * 的 label SSOT,group 是純 z-order 容器)。
  */
 async function snapshotDoc(
   doc: ShashokuDoc,
@@ -57,26 +63,54 @@ async function snapshotDoc(
   manifest: ManifestJson
   layerParts: Record<string, Uint8Array>
 }> {
-  // C1 現況:doc.layers 仍是扁平 RasterLayer[](型別升級留 C1.2),寫出的
-  // manifest 全部節點 kind='raster';C2 之後才會出現 text / group。
-  const entries: LayerEntry[] = []
   const layerParts: Record<string, Uint8Array> = {}
-  for (const layer of doc.layers) {
-    // 檔名帶 revision:舊 rev 保留,crash 復原用
-    const file = `${layer.id}.rev${revision}.png`
-    layerParts[file] = await doc.exportLayerPng(layer.id)
-    entries.push({
-      kind: 'raster',
-      id: layer.id,
-      file,
-      name: layer.name,
-      visible: layer.visible,
-      opacity: layer.opacity,
-      blendMode: layer.blendMode,
-      locked: layer.locked,
-      alphaLocked: layer.alphaLocked,
-    })
+
+  async function walk(nodes: readonly Layer[]): Promise<LayerEntry[]> {
+    const out: LayerEntry[] = []
+    for (const layer of nodes) {
+      if (layer.kind === 'raster') {
+        // 檔名帶 revision:舊 rev 保留,crash 復原用
+        const file = `${layer.id}.rev${revision}.png`
+        layerParts[file] = await doc.exportLayerPng(layer.id)
+        out.push({
+          kind: 'raster',
+          id: layer.id,
+          file,
+          name: layer.name,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          blendMode: layer.blendMode,
+          locked: layer.locked,
+          alphaLocked: layer.alphaLocked,
+        })
+      } else if (layer.kind === 'text') {
+        out.push({
+          kind: 'text',
+          id: layer.id,
+          name: layer.name,
+          visible: layer.visible,
+          locked: layer.locked,
+          labelId: layer.labelId,
+        })
+      } else {
+        const children = await walk(layer.children)
+        const entry: LayerEntry = {
+          kind: 'group',
+          id: layer.id,
+          name: layer.name,
+          visible: layer.visible,
+          locked: layer.locked,
+          children,
+        }
+        if (layer.styleBinding !== undefined)
+          entry.styleBinding = { labelGroupId: layer.styleBinding.labelGroupId }
+        out.push(entry)
+      }
+    }
+    return out
   }
+
+  const entries = await walk(doc.layers)
   return {
     manifest: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, layers: entries },
     layerParts,

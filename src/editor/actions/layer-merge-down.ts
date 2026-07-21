@@ -12,6 +12,8 @@ export function mergeLayerDown(ctx: EditorCtx, layerId: string): boolean {
 
   const top = doc.layers[index];
   const below = doc.layers[index - 1];
+  // C1:merge down 只作用在 raster 之間;text / group 節點的合併語意留給 C2+。
+  if (top.kind !== "raster" || below.kind !== "raster") return false;
   const belowBackup = below.data.slice();
   const fullRect = { x: 0, y: 0, w: doc.width, h: doc.height };
 

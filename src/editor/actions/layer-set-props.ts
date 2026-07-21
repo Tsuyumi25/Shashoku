@@ -19,7 +19,9 @@ const LABELS: Record<keyof LayerPropPatch, string> = {
  */
 export function setLayerProps(ctx: EditorCtx, layerId: string, patch: LayerPropPatch): boolean {
   const { doc, history } = ctx;
-  const layer = doc.layers.find((l) => l.id === layerId);
+  // opacity / blendMode / alphaLocked 是 raster-only 屬性;非 raster 節點
+  // 的顯示屬性(visible / locked) 走 C3 的 LayerPanel actions,不走這裡。
+  const layer = doc.findRasterLayer(layerId);
   if (!layer) return false;
 
   const keys = (Object.keys(patch) as (keyof LayerPropPatch)[]).filter(

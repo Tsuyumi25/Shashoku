@@ -61,14 +61,17 @@ function changed(opts: { raster?: boolean } = {}): void {
   redrawCanvas();
 }
 
+// C1:doc.layers 已升 Layer[] tree,但 useEditor 對外只暴露 raster leaf
+// ——LayerPanel 等 UI 目前僅懂 raster;text / group 節點的呈現留 C3。
 const layers = computed<RasterLayer[]>(() => {
   void layersTick.value;
-  return doc.value ? [...doc.value.layers] : [];
+  if (!doc.value) return [];
+  return doc.value.layers.filter((l): l is RasterLayer => l.kind === "raster");
 });
 
 const activeLayer = computed<RasterLayer | null>(() => {
   void layersTick.value;
-  return doc.value?.layers.find((l) => l.id === activeLayerId.value) ?? null;
+  return doc.value?.findRasterLayer(activeLayerId.value) ?? null;
 });
 
 const canUndo = computed(() => {
