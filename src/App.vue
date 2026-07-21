@@ -116,7 +116,6 @@ import {
 } from '@/components/ui/dialog'
 import { appMode, type AppMode } from '@/lib/appMode'
 import { initImportedFonts } from '@/lib/importedFonts'
-import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
 import { useTextBoardStyle } from '@/lib/textBoardAppearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -126,14 +125,15 @@ const api = window.api
 const project = useProjectStore()
 const editor = useEditorStore()
 
-// 草稿紙是獨立 renderer，但文字仍要跟主視窗的全域排版設定同步。
+// 草稿紙是獨立 renderer,無 per-label context,同步 defaultStyle 當代表值
+// (per-label 樣式繼承鍊只在主視窗渲染時解析)
 const textBoardStyle = useTextBoardStyle()
 watch(
-  () => labelTextStyleFromExportConfig(project.exportConfig),
+  () => project.header.defaultStyle,
   (style) => {
-    textBoardStyle.value = style
+    textBoardStyle.value = { ...style }
   },
-  { immediate: true },
+  { immediate: true, deep: true },
 )
 
 // 匯入字體資料夾清單開機即載入(含 v1 localStorage 遷移)。渲染本身

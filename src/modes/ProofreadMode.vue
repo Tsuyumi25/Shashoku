@@ -63,7 +63,7 @@
                 v-for="l in textLabels"
                 :key="l.id"
                 :ref="(el) => setTextEl(l.id, el)"
-                :style="textCss"
+                :style="cssForLabel(l)"
               >{{ l.text }}</div>
             </canvas>
             <span class="pane-tag">成品</span>
@@ -97,7 +97,7 @@ import { useZoomPan } from '@/composables/useZoomPan'
 import { useEditor } from '@/editor/useEditor'
 import { appMode } from '@/lib/appMode'
 import { drawLabelElement } from '@/lib/labelPaint'
-import { labelTextCss, labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
+import { effectiveStyleForLabel, labelTextCss } from '@/lib/labelTextStyle'
 import type { LabelItem } from '@/types/project'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -115,7 +115,9 @@ const currentLabels = computed<LabelItem[]>(() =>
   currentPage.value ? (project.fileByName(currentPage.value)?.labels ?? []) : [],
 )
 const textLabels = computed(() => currentLabels.value.filter((l) => l.text !== ''))
-const textCss = computed(() => labelTextCss(labelTextStyleFromExportConfig(project.exportConfig)))
+function cssForLabel(label: LabelItem): Record<string, string> {
+  return labelTextCss(effectiveStyleForLabel(label, project.header))
+}
 
 const paneEl = useTemplateRef('paneEl')
 const imgRef = useTemplateRef('imgRef')
@@ -276,9 +278,11 @@ watch(appMode, (m) => {
   }
 })
 watch(view, scheduleRedraw)
-// 標籤/樣式變更:先畫(位置即時),再等兩幀補新 paint record
+// 標籤/樣式變更:先畫(位置即時),再等兩幀補新 paint record。
+// header deep watch 涵蓋 groups[].style 與 defaultStyle 變動;per-label
+// effective style 只在渲染時解析,不需再獨立 computed
 watch(
-  [currentLabels, textCss],
+  [currentLabels, () => project.header],
   () => {
     scheduleRedraw()
     retryRedraw()

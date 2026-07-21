@@ -9,7 +9,6 @@
 import type { LabelItem, ProjectHeader } from '@/types/project'
 import type { TextStyle } from '@shared/text-style/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import type { SskExportConfig } from '@shared/ssk/types'
 
 /** @deprecated 用 TextStyle;此 alias 是 Stage B 過渡期給既有呼叫端的名稱橋。 */
 export type LabelTextStyle = TextStyle
@@ -35,21 +34,6 @@ export function effectiveStyleForLabel(
     ...header.defaultStyle,
     ...(groupStyle ?? {}),
     ...(label.styleOverride ?? {}),
-  }
-}
-
-/** @deprecated 渲染樣式已離開 SskExportConfig;Stage B 之後應改讀 header.defaultStyle
- * 或 effectiveStyleForLabel。此函式保留讓 Stage B commit 逐步切換,Stage B 結束前刪除。 */
-export function labelTextStyleFromExportConfig(config: SskExportConfig): TextStyle {
-  return {
-    fontFamily: config.font ?? DEFAULT_TEXT_STYLE.fontFamily,
-    fontSizePx: config.fontSizePx ?? DEFAULT_TEXT_STYLE.fontSizePx,
-    direction: config.textDirection === 'vertical' ? 'vertical' : 'horizontal',
-    color: config.textColor,
-    leadingPercent:
-      typeof config.textLeadingPercent === 'number' && config.textLeadingPercent > 0
-        ? config.textLeadingPercent
-        : DEFAULT_TEXT_STYLE.leadingPercent,
   }
 }
 

@@ -3,10 +3,8 @@ import {
   DEFAULT_LABEL_TEXT_STYLE,
   effectiveStyleForLabel,
   labelTextCss,
-  labelTextStyleFromExportConfig,
   type LabelTextStyle,
 } from './labelTextStyle'
-import { defaultExportConfig } from '@shared/ssk/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { StyleGroup } from '@shared/project/types'
 
@@ -21,25 +19,6 @@ const group = (id: string, patch: Partial<StyleGroup['style']> = {}): StyleGroup
   name: id,
   color: '#000000',
   style: { ...DEFAULT_TEXT_STYLE, ...patch },
-})
-
-describe('labelTextStyleFromExportConfig', () => {
-  it('把工程匯出設定解析為標籤文字樣式', () => {
-    const config = defaultExportConfig()
-    config.font = 'SourceHanSansTC-Regular'
-    config.fontSizePx = 32
-    config.textDirection = 'vertical'
-    config.textColor = '#123456'
-    config.textLeadingPercent = 150
-
-    expect(labelTextStyleFromExportConfig(config)).toEqual({
-      fontFamily: 'SourceHanSansTC-Regular',
-      fontSizePx: 32,
-      direction: 'vertical',
-      color: '#123456',
-      leadingPercent: 150,
-    })
-  })
 })
 
 describe('effectiveStyleForLabel', () => {

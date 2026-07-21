@@ -29,7 +29,7 @@
               :width="natural.w"
               :height="natural.h"
               :labels="currentFile.labels"
-              :text-style="textPreviewStyle"
+              :header="project.header"
               :interactive="!spaceDown"
               :hidden-label-id="hiddenNativeMoveId"
               :native-draggable="!spaceDown"
@@ -92,7 +92,7 @@ import type { LabelItem } from '@/types/project'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import LabelTextOverlay from '@/components/LabelTextOverlay.vue'
 import LabelMarker from '@/components/LabelMarker.vue'
-import { labelTextStyleFromExportConfig } from '@/lib/labelTextStyle'
+import { effectiveStyleForLabel } from '@/lib/labelTextStyle'
 import { useZoomPan } from '@/composables/useZoomPan'
 import { appMode } from '@/lib/appMode'
 import { clamp, contentToScreenPx, screenToContentPx } from '@/lib/coords'
@@ -111,9 +111,6 @@ import {
 
 const project = useProjectStore()
 const editor = useEditorStore()
-const textPreviewStyle = computed(() =>
-  labelTextStyleFromExportConfig(project.exportConfig),
-)
 
 /** label 綁的 group name(未綁時空字串);marker overlay + drag payload 共用 */
 function groupNameOf(label: LabelItem): string {
@@ -415,13 +412,18 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent) {
     oldPos: { x: label.x, y: label.y },
     localCommitted: false,
   }
-  const preview = setLabelDragPreview(e.dataTransfer, label, textPreviewStyle.value, {
+  const preview = setLabelDragPreview(
+    e.dataTransfer,
+    label,
+    effectiveStyleForLabel(label, project.header),
+    {
     scale: view.scale,
     rotation: view.rotate,
     sourceRect: rect,
     hotspot: payload.grabOffset,
     emptyDotColor: groupColorOf(label),
-  })
+    },
+  )
   payload.grabOffset = preview.grabOffset
   e.dataTransfer.clearData()
   e.dataTransfer.setData(LABEL_DRAG_TYPE, serializeLabelDrag(payload))

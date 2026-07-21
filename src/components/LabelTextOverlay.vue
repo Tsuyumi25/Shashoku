@@ -4,7 +4,9 @@
        不進像素合成;stage 的 CSS transform 縮放下向量銳利。空標籤由
        LabelMarker 顯示,這裡只畫有字的。
        文字本體是點擊目標(interactive 時):單擊選取、雙擊編輯——文字是
-       畫面上最大的視覺物,點它不該穿透到背景變成誤增標籤。 -->
+       畫面上最大的視覺物,點它不該穿透到背景變成誤增標籤。
+       樣式解析走繼承鍊 `defaultStyle → groupStyle → label.styleOverride`,
+       所以 css 是 per-label 計算(不再是共享一份)。 -->
   <div class="pointer-events-none absolute top-0 left-0">
     <div
       v-for="l in textLabels"
@@ -16,7 +18,7 @@
       ]"
       :draggable="nativeDraggable"
       :style="{
-        ...css,
+        ...cssForLabel(l),
         left: `${l.x * width}px`,
         top: `${l.y * height}px`,
         transform: 'translate(-50%, -50%)',
@@ -33,14 +35,15 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { LabelItem } from '@/types/project'
-import { labelTextCss, type LabelTextStyle } from '@/lib/labelTextStyle'
+import type { LabelItem, ProjectHeader } from '@/types/project'
+import { effectiveStyleForLabel, labelTextCss } from '@/lib/labelTextStyle'
 
 const props = defineProps<{
   width: number
   height: number
   labels: LabelItem[]
-  textStyle: LabelTextStyle
+  /** 樣式繼承鍊來源(groups + defaultStyle);label.styleOverride 走 label 自己 */
+  header: Pick<ProjectHeader, 'groups' | 'defaultStyle'>
   /** 文字可點選(翻譯 mode);校對等純顯示場景不傳 = 穿透 */
   interactive?: boolean
   nativeDraggable?: boolean
@@ -57,6 +60,8 @@ const emit = defineEmits<{
   labelDragend: [e: DragEvent]
 }>()
 
-const css = computed(() => labelTextCss(props.textStyle))
+function cssForLabel(label: LabelItem): Record<string, string> {
+  return labelTextCss(effectiveStyleForLabel(label, props.header))
+}
 const textLabels = computed(() => props.labels.filter((l) => l.text !== ''))
 </script>

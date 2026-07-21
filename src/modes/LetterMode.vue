@@ -30,7 +30,7 @@ import CanvasBottomBar from "@/components/CanvasBottomBar.vue";
 import LayerPanel from "@/components/LayerPanel.vue";
 import ModeSwitcher from "@/components/ModeSwitcher.vue";
 import { appMode } from "@/lib/appMode";
-import { labelTextCss, labelTextStyleFromExportConfig } from "@/lib/labelTextStyle";
+import { effectiveStyleForLabel, labelTextCss } from "@/lib/labelTextStyle";
 import { drawLabelElement } from "@/lib/labelPaint";
 import { setLabelDragPreview } from "@/lib/labelDragPreview";
 import {
@@ -81,12 +81,11 @@ const currentLabels = computed<LabelItem[]>(() =>
 const selectedLabel = computed<LabelItem | null>(
   () => currentLabels.value.find((l) => l.id === editorStore.selectedLabelId) ?? null,
 );
-// 文字渲染樣式:exportConfig(全域)→ labelTextStyle,與翻譯 mode 同一份
-// CSS = 同一個 Chromium 排版,座標與樣式跨 mode 一致
-const textPreviewStyle = computed(() =>
-  labelTextStyleFromExportConfig(projectStore.exportConfig),
-);
-const textCss = computed(() => labelTextCss(textPreviewStyle.value));
+// 文字渲染樣式:走 header 三層繼承鍊 → labelTextCss,per-label 解析,與翻譯
+// mode 同一份 CSS = 同一個 Chromium 排版,座標與樣式跨 mode 一致
+function cssForLabel(label: LabelItem): Record<string, string> {
+  return labelTextCss(effectiveStyleForLabel(label, projectStore.header));
+}
 
 // ---- OCR 狀態 ----
 const ocrData = reactive<Record<string, OcrBlock[]>>({});
@@ -1110,13 +1109,18 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
     oldPos: { x: label.x, y: label.y },
     localCommitted: false,
   };
-  const preview = setLabelDragPreview(e.dataTransfer, label, textPreviewStyle.value, {
-    scale: view.scale,
-    rotation: view.rotate,
-    sourceRect: rect,
-    hotspot: payload.grabOffset,
-    emptyDotColor: groupColorOfLabel(label),
-  });
+  const preview = setLabelDragPreview(
+    e.dataTransfer,
+    label,
+    effectiveStyleForLabel(label, projectStore.header),
+    {
+      scale: view.scale,
+      rotation: view.rotate,
+      sourceRect: rect,
+      hotspot: payload.grabOffset,
+      emptyDotColor: groupColorOfLabel(label),
+    },
+  );
   payload.grabOffset = preview.grabOffset;
   e.dataTransfer.clearData();
   e.dataTransfer.setData(LABEL_DRAG_TYPE, serializeLabelDrag(payload));
@@ -1302,9 +1306,11 @@ function setLabelAnchor(labelId: string, layerId: string | null): void {
 }
 
 // 標籤/錨定/樣式變更 → 重合成:立即排一次(位置變更用既有 paint record
-// 就正確,拖曳手感不等幀),再等兩幀補一次(內容/樣式變更的新 record)
+// 就正確,拖曳手感不等幀),再等兩幀補一次(內容/樣式變更的新 record)。
+// header deep watch 涵蓋 groups[].style 與 defaultStyle 變動(per-label
+// effective style 只在渲染時解析,不需再獨立 computed)。
 watch(
-  [currentLabels, labelAnchors, textPreviewStyle],
+  [currentLabels, labelAnchors, () => projectStore.header],
   () => {
     scheduleRedraw();
     retryRedraw();
@@ -1823,7 +1829,7 @@ const TOOL_KEYS: Record<string, Tool> = {
             v-for="l in currentLabels"
             :key="l.id"
             :ref="(el) => setTextEl(l.id, el)"
-            :style="textCss"
+            :style="cssForLabel(l)"
           >{{ l.text }}</div>
         </canvas>
         <!-- 選區蟻線(螢幕空間 canvas,ctx 內套同一 view transform) -->
