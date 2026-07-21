@@ -34,7 +34,7 @@ export interface StyleGroup {
 /** shashoku/project.json 的完整結構。 */
 export interface ProjectJson {
   schemaVersion: typeof PROJECT_SCHEMA_VERSION
-  /** 樣式群組陣列(有序,index 對應顯示順序);上限 MAX_GROUPS;name 禁保留字 */
+  /** 樣式群組陣列(有序,index 對應顯示順序);無數量上限;name 禁保留字 */
   groups: StyleGroup[]
   /** 樣式繼承鍊終極 fallback:label 無 groupId 且無 override 時使用 */
   defaultStyle: TextStyle

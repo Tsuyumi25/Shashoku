@@ -1,7 +1,7 @@
 /** 預設分組(沿襲原版 LabelPlus 慣例,老用戶零學習成本) */
 export const DEFAULT_GROUPS = ['框内', '框外']
 
-/** category 1~9 的顯示顏色,index = category - 1 */
+/** 新群組的預設色循環種子;超過長度回頭再取,不限總數 */
 export const CATEGORY_COLORS = [
   'rgb(255, 0, 0)',
   'rgb(0, 0, 255)',
@@ -13,8 +13,6 @@ export const CATEGORY_COLORS = [
   'rgb(255, 69, 0)',
   'rgb(148, 0, 211)',
 ] as const
-
-export const MAX_GROUPS = 9
 
 /**
  * PS 腳本端的保留名:_Label 是標號圖層的 LayerSet 名,

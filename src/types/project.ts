@@ -31,7 +31,7 @@ export interface ProjectFile {
 }
 
 export interface ProjectHeader {
-  /** 樣式群組陣列(有序);上限 MAX_GROUPS */
+  /** 樣式群組陣列(有序);無數量上限,用戶自定義 */
   groups: StyleGroup[]
   /** 樣式繼承鍊終極 fallback:label 無 groupId 且無 override 時使用 */
   defaultStyle: TextStyle

@@ -12,8 +12,8 @@ import {
 import { TRANSLATION_SCHEMA_VERSION } from '@shared/page/types'
 import { parseTranslation, serializeTranslation } from '@shared/page/schema'
 import { previewImport, type ImportDiff } from '@shared/project/import'
-import { DIR_LAYERS, DIR_RAWS, MAX_GROUPS, SHASHOKU_DIR } from '@shared/ssk/constants'
-import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { DIR_LAYERS, DIR_RAWS, SHASHOKU_DIR } from '@shared/ssk/constants'
+import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 
 function generateGroupId(): string {
   const c = globalThis.crypto
@@ -312,13 +312,12 @@ export const useProjectStore = defineStore('project', () => {
   // ── group(專案級 metadata,標 metaDirty)──
 
   /**
-   * 新增樣式群組;name 唯一(重名回 null),達 MAX_GROUPS 回 null。
+   * 新增樣式群組;name 唯一(重名回 null),無數量上限。
    * color / style 帶預設(從 CATEGORY_COLORS 循環取色 + DEFAULT_TEXT_STYLE);
    * undo 端可用回傳的 group 引用做精準還原(比只給 name 好)。
    */
   function addGroup(name: string): StyleGroup | null {
     const groups = projectMeta.value.groups
-    if (groups.length >= MAX_GROUPS) return null
     if (groups.some((g) => g.name === name)) return null
     const group: StyleGroup = {
       id: generateGroupId(),
@@ -335,6 +334,20 @@ export const useProjectStore = defineStore('project', () => {
     const groups = projectMeta.value.groups
     if (index < 0 || index >= groups.length) return
     groups[index].name = name
+    metaDirty.value = true
+  }
+
+  /** 更新樣式群組的 style(patch merge 進 group.style);繼承鍊中間層 */
+  function updateGroupStyle(index: number, patch: Partial<TextStyle>) {
+    const groups = projectMeta.value.groups
+    if (index < 0 || index >= groups.length) return
+    groups[index].style = { ...groups[index].style, ...patch }
+    metaDirty.value = true
+  }
+
+  /** 更新專案級 defaultStyle(繼承鍊 fallback);label 無 groupId 且無 override 時使用 */
+  function updateDefaultStyle(patch: Partial<TextStyle>) {
+    projectMeta.value.defaultStyle = { ...projectMeta.value.defaultStyle, ...patch }
     metaDirty.value = true
   }
 
@@ -399,6 +412,8 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelAnchor,
     addGroup,
     renameGroup,
+    updateGroupStyle,
+    updateDefaultStyle,
     removeLastGroup,
     restoreLastGroup,
     updateComment,

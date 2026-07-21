@@ -14,18 +14,16 @@
       <DialogHeader>
         <DialogTitle>檔案設定</DialogTitle>
         <DialogDescription>
-          分組編號是 .txt 格式的位置索引（1~9），僅支援改名與新增
+          快速改名 / 新增群組與編輯工程注釋。詳細樣式編輯在「群組」mode
         </DialogDescription>
       </DialogHeader>
 
       <ul class="flex flex-col gap-1.5">
         <li v-for="(group, i) in project.header.groups" :key="group.id" class="flex items-center gap-2">
           <span
-            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            class="h-3 w-3 shrink-0 rounded-full"
             :style="{ backgroundColor: group.color }"
-          >
-            {{ i + 1 }}
-          </span>
+          />
           <input
             class="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-sm"
             :value="group.name"
@@ -33,10 +31,10 @@
             @blur="onRename(i, $event)"
           />
         </li>
-        <li v-if="project.header.groups.length < MAX_GROUPS">
+        <li>
           <Button variant="outline" size="sm" class="w-full" @click="onAddGroup">
             <Plus :size="14" />
-            新增分組
+            新增群組
           </Button>
         </li>
       </ul>
@@ -58,7 +56,7 @@
 import { ref } from 'vue'
 import { Plus, Settings2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { MAX_GROUPS, RESERVED_GROUP_NAMES } from '@shared/ssk/constants'
+import { RESERVED_GROUP_NAMES } from '@shared/ssk/constants'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -90,7 +88,7 @@ function onRename(index: number, e: Event) {
 }
 
 function onAddGroup() {
-  editor.cmdAddGroup(`分組${project.header.groups.length + 1}`)
+  editor.cmdAddGroup(`群組${project.header.groups.length + 1}`)
 }
 
 function onCommentBlur(e: Event) {

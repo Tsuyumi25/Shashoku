@@ -5,7 +5,7 @@ import { PROJECT_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { defaultExportConfig, parseExportConfigStrict } from '../ssk/schema'
-import { CATEGORY_COLORS, DEFAULT_GROUPS, MAX_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
+import { CATEGORY_COLORS, DEFAULT_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
 
 export class ProjectParseError extends Error {}
 
@@ -38,7 +38,6 @@ function parseStyleGroup(v: unknown, i: number): StyleGroup {
 
 function parseGroups(v: unknown): StyleGroup[] {
   if (!Array.isArray(v) || v.length === 0) fail('groups 必須是至少一個 StyleGroup 的陣列')
-  if (v.length > MAX_GROUPS) fail(`分組數量上限為 ${MAX_GROUPS},檔案內有 ${v.length} 個`)
   const groups = v.map((g, i) => parseStyleGroup(g, i))
   const names = groups.map((g) => g.name)
   if (new Set(names).size !== names.length) fail('分組 name 不可重複')

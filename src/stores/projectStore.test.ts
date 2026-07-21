@@ -76,17 +76,47 @@ describe('projectStore', () => {
     expect(project.metaDirty).toBe(true)
   })
 
-  it('addGroup 超過上限(9)回傳 null;重名回 null', () => {
+  it('addGroup 無數量上限;重名回 null', () => {
     const project = useProjectStore()
     project.newProject([])
-    for (let i = project.header.groups.length; i < 9; i++)
+    // 加到 20 組都成功(過去限制 9,現已放開)
+    for (let i = 0; i < 20; i++)
       expect(project.addGroup(`g${i}`)).not.toBeNull()
-    expect(project.addGroup('第十組')).toBeNull()
-    expect(project.header.groups).toHaveLength(9)
+    expect(project.header.groups.length).toBe(2 + 20) // 預設 2 組 + 新增 20
     // 重名 fail
     project.reset()
     project.newProject([])
     expect(project.addGroup('框内')).toBeNull()
+  })
+
+  it('updateGroupStyle:patch merge 進 group.style,標 metaDirty', () => {
+    const project = useProjectStore()
+    project.newProject([])
+    project.updateGroupStyle(0, { fontSizePx: 42, color: '#ff00ff' })
+    const g = project.header.groups[0]
+    expect(g.style.fontSizePx).toBe(42)
+    expect(g.style.color).toBe('#ff00ff')
+    // 沒 patch 的欄位仍走原值
+    expect(g.style.fontFamily).toBeTruthy()
+    expect(project.metaDirty).toBe(true)
+  })
+
+  it('updateGroupStyle:index 越界 no-op', () => {
+    const project = useProjectStore()
+    project.newProject([])
+    const before = project.header.groups.map((g) => ({ ...g.style }))
+    project.updateGroupStyle(99, { fontSizePx: 42 })
+    expect(project.header.groups.map((g) => ({ ...g.style }))).toEqual(before)
+  })
+
+  it('updateDefaultStyle:patch merge 進 defaultStyle,標 metaDirty', () => {
+    const project = useProjectStore()
+    project.newProject([])
+    project.updateDefaultStyle({ leadingPercent: 200 })
+    expect(project.projectMeta.defaultStyle.leadingPercent).toBe(200)
+    // 其他欄位保留
+    expect(project.projectMeta.defaultStyle.fontFamily).toBeTruthy()
+    expect(project.metaDirty).toBe(true)
   })
 
   it('updateComment 標 metaDirty', () => {

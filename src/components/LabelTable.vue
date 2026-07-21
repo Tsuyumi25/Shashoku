@@ -24,7 +24,7 @@
         <thead class="sticky top-0 bg-card text-xs text-muted-foreground">
           <tr class="border-b border-border text-left">
             <th class="w-10 px-2 py-1 font-normal">ID</th>
-            <th class="w-12 px-1 py-1 font-normal">分組</th>
+            <th class="w-28 px-2 py-1 font-normal">分組</th>
             <th class="px-2 py-1 font-normal">文字</th>
           </tr>
         </thead>
@@ -39,13 +39,19 @@
                 @dblclick="onRowDblclick(label)"
               >
                 <td class="px-2 py-1 tabular-nums">{{ i + 1 }}</td>
-                <td class="px-1 py-1">
+                <td class="px-2 py-1">
                   <span
-                    class="inline-block h-3.5 w-3.5 rounded-full align-middle text-center text-[10px] leading-3.5 font-bold text-white"
-                    :style="{ backgroundColor: groupColorOf(label) }"
+                    class="inline-flex max-w-full items-center gap-1.5 align-middle"
                     :title="groupNameOf(label)"
                   >
-                    {{ groupIndexOf(label) }}
+                    <span
+                      class="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      :style="{ backgroundColor: groupColorOf(label) }"
+                    />
+                    <span
+                      class="min-w-0 truncate text-xs"
+                      :class="label.groupId === null ? 'text-muted-foreground' : ''"
+                    >{{ groupNameOf(label) }}</span>
                   </span>
                 </td>
                 <td class="h-7 max-w-0 truncate px-2 py-1">
@@ -146,12 +152,6 @@ function groupColorOf(label: LabelItem): string {
 function groupNameOf(label: LabelItem): string {
   return groupOf(label)?.name ?? '未分組'
 }
-/** 分組序號(1-based);未分組回空字串。原版標號的視覺對應。 */
-function groupIndexOf(label: LabelItem): string {
-  const i = project.header.groups.findIndex((g) => g.id === label.groupId)
-  return i === -1 ? '' : String(i + 1)
-}
-
 function onDelete(label: LabelItem) {
   if (!editor.currentFilename) return
   editor.cmdDeleteLabel(editor.currentFilename, label.id)
