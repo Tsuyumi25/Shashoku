@@ -48,39 +48,6 @@ export function invertMask(mask: Uint8ClampedArray): Uint8ClampedArray {
 }
 
 /**
- * 選區邊界像素(選中且 4-鄰有未選中/出界)在 bounds 內的索引清單。
- * 行進蟻線用:邊界像素配 (x+y+phase)%8 棋盤紋就有「爬行」效果,
- * 不需要向量路徑排序(marching squares 留給之後)。
- */
-export function boundaryIndices(
-  mask: Uint8ClampedArray,
-  w: number,
-  h: number,
-  bounds: Rect,
-): Uint32Array {
-  const out: number[] = [];
-  const x1 = bounds.x + bounds.w;
-  const y1 = bounds.y + bounds.h;
-  for (let y = bounds.y; y < y1; y++) {
-    for (let x = bounds.x; x < x1; x++) {
-      const i = y * w + x;
-      if (mask[i] === 0) continue;
-      const edge =
-        x === 0 ||
-        y === 0 ||
-        x === w - 1 ||
-        y === h - 1 ||
-        mask[i - 1] === 0 ||
-        mask[i + 1] === 0 ||
-        mask[i - w] === 0 ||
-        mask[i + w] === 0;
-      if (edge) out.push(i);
-    }
-  }
-  return Uint32Array.from(out);
-}
-
-/**
  * 清除選區內容(PS 的 Delete):選中處 alpha 依 mask 強度削掉。
  * 回傳實際影響的 bounds(呼叫端拿去記 pixel-history 與 dirty sync)。
  */

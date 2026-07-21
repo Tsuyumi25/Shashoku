@@ -21,13 +21,8 @@ import { normalize } from "@/editor/layerTree/normalize";
 import { flushPendingRasterSave, scheduleRasterAutosave } from "@/editor/autosave";
 import { copyRect } from "@/engine/pixelPatch";
 import { clampRect } from "@/engine/geom";
-import {
-  boundaryIndices,
-  clearSelected,
-  fullMask,
-  invertMask,
-  rectMask,
-} from "@/engine/selection";
+import { clearSelected, fullMask, invertMask, rectMask } from "@/engine/selection";
+import { traceMaskOutlines, type Point } from "@/engine/marchingSquares";
 import CanvasBottomBar from "@/components/CanvasBottomBar.vue";
 import LayerPanel from "@/components/LayerPanel.vue";
 import ModeSwitcher from "@/components/ModeSwitcher.vue";
@@ -686,15 +681,19 @@ function blockToLabel(b: OcrBlock): void {
   tool.value = "text";
 }
 
-// ---- 選區蟻線:邊界像素 + (x+y+phase) 棋盤紋 = 免路徑排序的爬行效果 ----
-// 蟻線 canvas 也是視口尺寸(doc 尺寸的蟻線 buffer 在大頁是數百 MB 級),
-// 畫的時候套同一個 view transform,doc 空間的邊界像素直接落到正確螢幕位置。
+// ---- 選區蟻線:marching squares 產 outline path + setLineDash + lineDashOffset ----
+// mask → outline paths 只在 selection 變動時算一次;每幀只更新 phase 一個數字。
+// 座標手動算成 device pixel + Math.round + 0.5,identity transform 畫——避開
+// canvas 2D 的 view scale 帶進次像素造成 anti-alias 模糊。
+// 黑實線底 + 白虛線疊上,不管背景色都看得到(BitMappery / PS 慣例)。
 let antsRaf = 0;
 let antsPhase = 0;
 let antsLast = 0;
-let antsBoundary: Uint32Array | null = null;
-// 邊界像素過多(如 Ctrl+click 網點層 alpha,每顆點都是邊)時只畫靜態,不動畫
-const ANTS_STATIC_LIMIT = 200_000;
+let antsOutlines: Point[][] | null = null;
+
+const ANTS_DASH_SIZE = 6; // device pixel 級 dash 長度
+// outline 頂點總數過多(極端複雜選區)時只畫靜態,不動畫
+const ANTS_STATIC_LIMIT = 50_000;
 
 function stopAnts(): void {
   if (antsRaf) cancelAnimationFrame(antsRaf);
@@ -703,45 +702,61 @@ function stopAnts(): void {
 
 function drawAnts(): void {
   const el = selCanvasEl.value;
-  const d = doc.value;
   if (!el) return;
   const c = el.getContext("2d");
   if (!c) return;
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, el.width, el.height);
-  if (!antsBoundary || !d) return;
-  applyViewTransform(c);
-  const w = d.width;
-  for (let pass = 0; pass < 2; pass++) {
-    c.fillStyle = pass === 0 ? "#000" : "#fff";
-    for (let i = 0; i < antsBoundary.length; i++) {
-      const idx = antsBoundary[i];
-      const x = idx % w;
-      const y = (idx - x) / w;
-      if ((((x + y + antsPhase) >> 2) & 1) === pass) c.fillRect(x, y, 1, 1);
+  if (!antsOutlines || antsOutlines.length === 0) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  // 建 Path2D:每個 doc 座標點 → device pixel + round + 0.5,確保 1px stroke 落在
+  // 整數 device pixel 上(不被 canvas anti-alias 抹開)
+  const path = new Path2D();
+  for (const loop of antsOutlines) {
+    for (let i = 0; i < loop.length; i++) {
+      const p = loop[i];
+      const sx = Math.round((view.tx + p.x * view.scale) * dpr) + 0.5;
+      const sy = Math.round((view.ty + p.y * view.scale) * dpr) + 0.5;
+      if (i === 0) path.moveTo(sx, sy);
+      else path.lineTo(sx, sy);
     }
+    path.closePath();
   }
+
+  c.lineWidth = 1;
+  // 黑實線底
+  c.strokeStyle = "#000";
+  c.setLineDash([]);
+  c.stroke(path);
+  // 白虛線疊上,lineDashOffset 每幀改一個數字就是爬行動畫
+  c.strokeStyle = "#fff";
+  c.setLineDash([ANTS_DASH_SIZE, ANTS_DASH_SIZE]);
+  c.lineDashOffset = -antsPhase;
+  c.stroke(path);
 }
 
 function antsFrame(now: number): void {
   antsRaf = requestAnimationFrame(antsFrame);
   if (now - antsLast < 80) return; // ~12fps 的爬行就夠
   antsLast = now;
-  antsPhase = (antsPhase + 1) % 8;
+  // 每幀 offset 位移 1 device pixel;dash cycle 是 dash*2 = 12 px,滿一圈就 wrap
+  antsPhase = (antsPhase + 1) % (ANTS_DASH_SIZE * 2);
   drawAnts();
 }
 
 function rebuildAnts(): void {
   stopAnts();
-  antsBoundary = null;
+  antsOutlines = null;
   const sel = editor.selection.value;
   const b = editor.selectionBounds.value;
   const d = doc.value;
   if (sel && b && d) {
-    antsBoundary = boundaryIndices(sel, d.width, d.height, b);
+    antsOutlines = traceMaskOutlines(sel, d.width, d.height, b);
   }
   drawAnts();
-  if (antsBoundary && antsBoundary.length <= ANTS_STATIC_LIMIT) {
+  const totalPts = antsOutlines?.reduce((s, l) => s + l.length, 0) ?? 0;
+  if (antsOutlines && totalPts > 0 && totalPts <= ANTS_STATIC_LIMIT) {
     antsRaf = requestAnimationFrame(antsFrame);
   }
 }

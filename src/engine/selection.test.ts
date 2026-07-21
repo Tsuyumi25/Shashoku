@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRasterLayer } from "./layer";
-import {
-  boundaryIndices,
-  boundsOfMask,
-  clearSelected,
-  fullMask,
-  invertMask,
-  rectMask,
-} from "./selection";
+import { boundsOfMask, clearSelected, fullMask, invertMask, rectMask } from "./selection";
 
 describe("selection(soft mask 原語)", () => {
   it("rectMask + boundsOfMask round-trip", () => {
@@ -25,23 +18,6 @@ describe("selection(soft mask 原語)", () => {
     expect(inv[0]).toBe(155);
     expect(inv[1]).toBe(0);
     expect(boundsOfMask(invertMask(fullMask(4, 4)), 4, 4)).toBeNull();
-  });
-
-  it("boundaryIndices:實心矩形只有外圈是邊界", () => {
-    const w = 8;
-    const mask = rectMask(w, 8, { x: 2, y: 2, w: 4, h: 4 });
-    const edge = new Set(boundaryIndices(mask, w, 8, { x: 2, y: 2, w: 4, h: 4 }));
-    expect(edge.has(2 * w + 2)).toBe(true); // 角
-    expect(edge.has(2 * w + 3)).toBe(true); // 上緣
-    expect(edge.has(3 * w + 3)).toBe(false); // 內部不是邊界
-    expect(edge.size).toBe(12); // 4x4 實心外圈 = 12 px
-  });
-
-  it("貼著畫布邊的選區,畫布邊也算邊界", () => {
-    const mask = rectMask(4, 4, { x: 0, y: 0, w: 2, h: 2 });
-    const edge = new Set(boundaryIndices(mask, 4, 4, { x: 0, y: 0, w: 2, h: 2 }));
-    expect(edge.has(0)).toBe(true); // (0,0) 靠畫布角
-    expect(edge.size).toBe(4); // 2x2 全是邊界
   });
 
   it("clearSelected:選中處 alpha 依強度削,選外不動", () => {
