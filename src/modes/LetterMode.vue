@@ -16,6 +16,7 @@ import { useZoomPan } from "@/composables/useZoomPan";
 import { useEditor } from "@/editor/useEditor";
 import { addLayer, duplicateLayer } from "@/editor/actions";
 import { pushPixelPatch, pushPixelPatches, type PixelPatch } from "@/editor/pixel-history";
+import { normalize } from "@/editor/layerTree/normalize";
 import { flushPendingRasterSave, scheduleRasterAutosave } from "@/editor/autosave";
 import { copyRect } from "@/engine/pixelPatch";
 import { clampRect } from "@/engine/geom";
@@ -318,7 +319,7 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
-  syncTextNodes(); // 現有 labels 立即在 tree 頂端建對應 text node
+  applyNormalize(); // 樣式群組 folders + text nodes 依當前 label/group 現況建
   perf.imageSize = `${d.width}×${d.height}`;
 
   // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
@@ -332,42 +333,25 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
 }
 
 /**
- * label ↔ text layer node 同步器(store→doc 耦合的入口)。冪等:
+ * label ↔ tree 冪等同步器(store→doc 耦合的入口)。走 normalize() 純函式:
+ * - 依 projectGroups 順序建/保留樣式群組 folder 在 root 頂
+ * - label.groupId 對應的 text node 落進對應樣式群組 folder
+ * - label.groupId=null 的 text node 落到 root 頂(或保留在用戶手動放的
+ *   一般 group 內)
+ * - orphan text / orphan 樣式群組 folder 清理
  *
- * - 每個 label 至少要有一個對應的 text node;缺就補一個在 root 頂端
- * - 每個 text node 都要有匹配的 label;找不到就刪(orphan 清理)
- *
- * 觸發點:buildDoc(載入頁)、watch(currentLabels)(add/delete/reload)。
- * 位置僅為 root 頂端——真正的樣式群組 folder auto-populate 是 C3 的
- * normalize 函式;C2 這階段只保證「有 z-order 位置可畫」。
+ * 觸發點:buildDoc(載入頁)、watch([currentLabels, header])(add/delete/
+ * updateLabelGroupId / addGroup / removeLastGroup 都由 header 深觀察涵蓋)。
  */
-function syncTextNodes(): void {
+function applyNormalize(): void {
   const d = doc.value;
   if (!d) return;
-  const labelIds = new Set(currentLabels.value.map((l) => l.id));
-  const boundLabelIds = new Set<string>();
-  // 逆序遍歷:remove 用 splice-safe 走法(但這裡走 findLayer 更簡單)
-  const toRemove: string[] = [];
-  for (const layer of d.layers) {
-    if (layer.kind !== "text") continue;
-    if (!labelIds.has(layer.labelId)) toRemove.push(layer.id);
-    else boundLabelIds.add(layer.labelId);
-  }
-  for (const id of toRemove) d.removeLayer(id);
-  for (const label of currentLabels.value) {
-    if (boundLabelIds.has(label.id)) continue;
-    d.insertLayer(
-      {
-        kind: "text",
-        id: crypto.randomUUID(),
-        name: "文字",
-        visible: true,
-        locked: false,
-        labelId: label.id,
-      },
-      d.layers.length,
-    );
-  }
+  d.layers = normalize(
+    d.layers,
+    currentLabels.value.map((l) => ({ id: l.id, groupId: l.groupId })),
+    projectStore.header.groups.map((g) => ({ id: g.id, name: g.name })),
+    () => crypto.randomUUID(),
+  );
 }
 
 async function onPickFile(e: Event): Promise<void> {
@@ -1311,7 +1295,7 @@ function hitLabel(e: PointerEvent): LabelItem | null {
 watch(
   [currentLabels, () => projectStore.header],
   () => {
-    syncTextNodes();
+    applyNormalize();
     scheduleRedraw();
     retryRedraw();
   },
