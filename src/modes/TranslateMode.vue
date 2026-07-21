@@ -59,9 +59,7 @@ import {
 } from '@/components/ui/dialog'
 import { appMode } from '@/lib/appMode'
 import { useEditorStore } from '@/stores/editorStore'
-import { useProjectStore } from '@/stores/projectStore'
 
-const project = useProjectStore()
 const editor = useEditorStore()
 
 // ── ? 快捷鍵說明 ──
@@ -75,7 +73,6 @@ const HELP_SECTIONS: { title: string; rows: [string, string][] }[] = [
       ['i · Enter', '編輯譯文(進輸入層)'],
       ['dd · Delete', '刪除選中標籤'],
       ['Ctrl+Enter(+Shift)', '下(上)一個標籤並編輯'],
-      ['1-9', '選擇新增用的分組'],
       ['Ctrl+Z', '復原'],
       ['Ctrl+Shift+Z · Ctrl+Y', '重做'],
       ['?', '本說明'],
@@ -192,12 +189,6 @@ useEventListener(window, 'keydown', (e) => {
   }
   if (key === '?') {
     helpOpen.value = !helpOpen.value
-    return
-  }
-  // 1-9 切分組(新增 label 用的預設分組;n 對應 groups[n-1].id)
-  if (/^[1-9]$/.test(key)) {
-    const n = Number(key)
-    if (n <= project.header.groups.length) editor.activeGroupId = project.header.groups[n - 1].id
     return
   }
   if (key === 'Delete') {

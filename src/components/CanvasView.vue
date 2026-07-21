@@ -527,8 +527,8 @@ function onMarkerContextMenu(label: LabelItem, e: MouseEvent) {
 }
 
 // 畫布快捷鍵（輸入框聚焦時不攔）：0 適應視窗、←/→/Tab 換頁、
-// V/T 切工具、Shift+T 輪換分組、Space 按住 pan、
-// R 按住旋轉、Esc 連按重置視角(同嵌字 mode)
+// V/T 切工具、Space 按住 pan、R 按住旋轉、Esc 連按重置視角(同嵌字 mode)。
+// 分組切換只走左側 TranslateSidebar 點選,不提供鍵盤快捷
 useEventListener(window, 'keydown', (e) => {
   if (appMode.value !== 'translate') return
   const el = document.activeElement
@@ -544,17 +544,8 @@ useEventListener(window, 'keydown', (e) => {
     editor.pageBy(1)
   } else if (e.key.toLowerCase() === 'v') {
     tool.value = 'move'
-  } else if (e.key.toLowerCase() === 't') {
-    if (e.shiftKey) {
-      // Shift+T:輪換標號的作用分組(1-9 直選的循環版)
-      const groups = project.header.groups
-      if (groups.length > 0) {
-        const cur = groups.findIndex((g) => g.id === editor.activeGroupId)
-        editor.activeGroupId = groups[(cur + 1) % groups.length].id
-      }
-    } else {
-      tool.value = 'label'
-    }
+  } else if (e.key.toLowerCase() === 't' && !e.shiftKey) {
+    tool.value = 'label'
   } else if (e.code === 'Space') {
     spaceDown.value = true
     e.preventDefault()
