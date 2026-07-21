@@ -5,8 +5,13 @@
 
     <!-- 主區：畫布（含底部換頁列）｜右欄（標籤表格 + 翻譯編輯框） -->
     <main class="flex min-h-0 min-w-0 flex-1">
-      <section class="min-w-0 flex-1 border-r border-border">
+      <section class="relative min-w-0 flex-1 border-r border-border">
         <CanvasView />
+        <!-- 字型 picker overlay:sidebar 內 StyleEditor 按字型按鈕觸發,
+             absolute 覆蓋畫布區域(不擴到右欄的 LabelTable/TranslateEditor) -->
+        <div v-if="fontPicker.isOpen.value" class="absolute inset-0 z-20 bg-background">
+          <FontPickerOverlay />
+        </div>
       </section>
       <aside class="flex shrink-0 flex-col bg-card" style="width: var(--layout-panel-w)">
         <div class="h-[45%] min-h-0">
@@ -47,6 +52,7 @@
 import { ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import CanvasView from '@/components/CanvasView.vue'
+import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import LabelTable from '@/components/LabelTable.vue'
 import TranslateEditor from '@/components/TranslateEditor.vue'
 import TranslateSidebar from '@/components/TranslateSidebar.vue'
@@ -57,10 +63,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useFontPicker } from '@/composables/useFontPicker'
 import { appMode } from '@/lib/appMode'
 import { useEditorStore } from '@/stores/editorStore'
 
 const editor = useEditorStore()
+const fontPicker = useFontPicker()
 
 // ── ? 快捷鍵說明 ──
 const helpOpen = ref(false)

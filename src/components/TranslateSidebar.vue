@@ -82,7 +82,11 @@
         @focus="nameBeforeEdit = project.header.groups[activeGroupIndex].name"
         @blur="onRename($event)"
       />
-      <StyleEditor :value="activeStyle" @patch="onStylePatch" />
+      <StyleEditor
+        :value="activeStyle"
+        @patch="onStylePatch"
+        @open-font-picker="onOpenFontPicker"
+      />
     </div>
 
     <ModeSwitcher class="mt-auto pt-2" />
@@ -97,6 +101,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import { RESERVED_GROUP_NAMES } from '@shared/ssk/constants'
 import ModeSwitcher from '@/components/ModeSwitcher.vue'
 import StyleEditor from '@/components/StyleEditor.vue'
+import { useFontPicker } from '@/composables/useFontPicker'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -136,6 +141,13 @@ const boundLabelCount = computed(() => {
 function onStylePatch(patch: Partial<TextStyle>) {
   if (activeGroupIndex.value === -1) project.updateDefaultStyle(patch)
   else project.updateGroupStyle(activeGroupIndex.value, patch)
+}
+
+/** 打開字型 picker,選中結果套進當前 activeStyle 的 patch 通道 */
+async function onOpenFontPicker() {
+  const picker = useFontPicker()
+  const name = await picker.open(activeStyle.value.fontFamily)
+  if (name !== null) onStylePatch({ fontFamily: name })
 }
 
 function onAddGroup() {

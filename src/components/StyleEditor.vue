@@ -5,12 +5,15 @@
        避免每 keystroke 進 metaDirty),select/color 用 @change(即時 preview)。 -->
   <div class="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
     <label class="text-muted-foreground">字型</label>
-    <input
-      type="text"
-      class="h-6 w-full min-w-0 rounded border border-input bg-background px-1.5"
-      :value="value.fontFamily"
-      @change="onFontFamily($event)"
-    />
+    <button
+      type="button"
+      class="flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded border border-input bg-background px-1.5 text-left hover:border-primary"
+      :title="value.fontFamily || '選擇字型'"
+      @click="emit('openFontPicker')"
+    >
+      <span class="min-w-0 truncate">{{ value.fontFamily || '選擇字型' }}</span>
+      <ChevronDown :size="12" class="shrink-0 text-muted-foreground" />
+    </button>
 
     <label class="text-muted-foreground">字級</label>
     <div class="flex items-center gap-1">
@@ -65,6 +68,7 @@
 // prop 名叫 value 不叫 style:Vue 3 對 class / style 兩個名字有 fallthrough
 // 特殊處理,即使 defineProps 宣告過也會被 merge 到 root element,寫成 value
 // 避開這個坑,並跟未來可能的 v-model 對齊
+import { ChevronDown } from '@lucide/vue'
 import type { TextStyle } from '@shared/text-style/types'
 
 const props = defineProps<{
@@ -73,13 +77,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   patch: [patch: Partial<TextStyle>]
+  /** 字型欄位按鈕點擊:交給呼叫端開啟字型 picker(視覺覆蓋畫布) */
+  openFontPicker: []
 }>()
-
-function onFontFamily(e: Event) {
-  const v = (e.target as HTMLInputElement).value.trim()
-  if (v === '' || v === props.value.fontFamily) return
-  emit('patch', { fontFamily: v })
-}
 
 function onNumber(key: 'fontSizePx' | 'leadingPercent', e: Event) {
   const raw = (e.target as HTMLInputElement).valueAsNumber
