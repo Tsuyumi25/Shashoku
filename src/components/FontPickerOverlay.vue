@@ -126,13 +126,24 @@
               :style="{ fontFamily: `'${f.replaceAll(`'`, '')}'` }"
               >{{ sample }}</span
             >
-            <button
-              type="button"
-              class="absolute bottom-1.5 right-1.5 rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 group-hover/cell:opacity-100"
-              @click="picker.select(f)"
-            >
-              選擇
-            </button>
+            <div class="absolute bottom-1.5 right-1.5 flex gap-1 opacity-0 transition-opacity group-hover/cell:opacity-100">
+              <button
+                type="button"
+                class="rounded border border-border bg-background/90 px-2 py-0.5 text-[11px] font-medium text-foreground shadow-sm hover:border-primary hover:bg-secondary"
+                title="hover 期間:把畫布上該群組的文字暫時套此字型預覽"
+                @mouseenter="picker.startPreview(f)"
+                @mouseleave="picker.endPreview()"
+              >
+                預覽
+              </button>
+              <button
+                type="button"
+                class="rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+                @click="picker.select(f)"
+              >
+                選擇
+              </button>
+            </div>
           </div>
         </div>
       </div>

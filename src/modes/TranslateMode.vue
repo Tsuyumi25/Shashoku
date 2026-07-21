@@ -8,8 +8,14 @@
       <section class="relative min-w-0 flex-1 border-r border-border">
         <CanvasView />
         <!-- 字型 picker overlay:sidebar 內 StyleEditor 按字型按鈕觸發,
-             absolute 覆蓋畫布區域(不擴到右欄的 LabelTable/TranslateEditor) -->
-        <div v-if="fontPicker.isOpen.value" class="absolute inset-0 z-20 bg-background">
+             absolute 覆蓋畫布區域(不擴到右欄的 LabelTable/TranslateEditor)。
+             hover cell 的「預覽」按鈕時 overlay 淡出讓底下畫布可見(不加
+             pointer-events-none,避免 mouseleave 誤觸發後 opacity 反覆閃) -->
+        <div
+          v-if="fontPicker.isOpen.value"
+          class="absolute inset-0 z-20 bg-background transition-opacity duration-150"
+          :class="fontPicker.previewFont.value !== null ? 'opacity-0' : ''"
+        >
           <FontPickerOverlay />
         </div>
       </section>

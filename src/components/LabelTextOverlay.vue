@@ -37,6 +37,7 @@
 import { computed } from 'vue'
 import type { LabelItem, ProjectHeader } from '@/types/project'
 import { effectiveStyleForLabel, labelTextCss } from '@/lib/labelTextStyle'
+import { useFontPicker } from '@/composables/useFontPicker'
 
 const props = defineProps<{
   width: number
@@ -60,8 +61,18 @@ const emit = defineEmits<{
   labelDragend: [e: DragEvent]
 }>()
 
+const fontPicker = useFontPicker()
+
 function cssForLabel(label: LabelItem): Record<string, string> {
-  return labelTextCss(effectiveStyleForLabel(label, props.header))
+  const base = effectiveStyleForLabel(label, props.header)
+  // Preview override:hover picker 的「預覽」按鈕時,把目標群組的 label
+  // 臨時套上預覽字型;放開 hover 就恢復(不動 store)。target 語意和
+  // label.groupId 一致(null = 未分組 = 預設樣式群)。
+  const preview = fontPicker.previewFont.value
+  if (preview !== null && label.groupId === fontPicker.targetGroupId.value) {
+    return labelTextCss({ ...base, fontFamily: preview })
+  }
+  return labelTextCss(base)
 }
 const textLabels = computed(() => props.labels.filter((l) => l.text !== ''))
 </script>

@@ -143,10 +143,15 @@ function onStylePatch(patch: Partial<TextStyle>) {
   else project.updateGroupStyle(activeGroupIndex.value, patch)
 }
 
-/** 打開字型 picker,選中結果套進當前 activeStyle 的 patch 通道 */
+/** 打開字型 picker,選中結果套進當前 activeStyle 的 patch 通道。
+ * targetGroupId 傳給 picker preview 判斷影響哪些 label(null = 預設樣式) */
 async function onOpenFontPicker() {
   const picker = useFontPicker()
-  const name = await picker.open(activeStyle.value.fontFamily)
+  const target =
+    activeGroupIndex.value === -1
+      ? null
+      : project.header.groups[activeGroupIndex.value].id
+  const name = await picker.open(activeStyle.value.fontFamily, target)
   if (name !== null) onStylePatch({ fontFamily: name })
 }
 
