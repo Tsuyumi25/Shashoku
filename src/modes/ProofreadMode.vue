@@ -228,15 +228,28 @@ function redraw(): void {
   const rg = preparePane(rc)
   if (rg) {
     const d = docUsable.value ? engine.doc.value : null
-    if (d) d.compositeInto(rg)
-    else rg.drawImage(img, 0, 0)
-    // 文字一律畫最上層。已知限制:錨定夾層(labelAnchors)是嵌字 mode 的
-    // runtime 私有狀態,校對側看不到「文字被上層圖層蓋住」——等 D7
-    // (圖層/錨定入 SSOT)落地後接上
-    for (const l of textLabels.value) {
-      const el = textEls.get(l.id)
-      if (!el) continue
-      if (!drawLabelElement(rg, el, l.x * natural.value.w, l.y * natural.value.h)) retryRedraw()
+    if (d) {
+      // 嵌字 mode 已把 text 進 tree,z-order 由樹的位置決定;校對側複用同
+      // 一份 compositeInto,只要餵 drawText hook 就能拿到與嵌字 mode 一致
+      // 的疊字結果(不再需要 ProofreadMode 自己另外走 text 迴圈)。
+      d.compositeInto(rg, {
+        drawText: (ctx, labelId) => {
+          const label = textLabels.value.find((l) => l.id === labelId)
+          if (!label) return
+          const el = textEls.get(labelId)
+          if (!el) return
+          if (!drawLabelElement(ctx, el, label.x * natural.value.w, label.y * natural.value.h))
+            retryRedraw()
+        },
+      })
+    } else {
+      rg.drawImage(img, 0, 0)
+      // 尚未載入 doc(頁不匹配 / 剛切換):退回單張投影,文字直接畫最上層
+      for (const l of textLabels.value) {
+        const el = textEls.get(l.id)
+        if (!el) continue
+        if (!drawLabelElement(rg, el, l.x * natural.value.w, l.y * natural.value.h)) retryRedraw()
+      }
     }
   }
 }

@@ -26,15 +26,6 @@ export interface SskLabel {
    * group style 是預設繼承,不是強制套用——支援用戶顆粒度差異。
    */
   styleOverride?: Partial<TextStyle>
-  /**
-   * z-order 錨定:label 渲染在此 layer 之上、下一 layer 之下(scene 疊層)。
-   * undefined = 未錨定(繪製在所有 layer 上方,即傳統 label overlay 位置)。
-   * layerId 對應 ManifestJson.layers[].id;若對應 layer 消失,渲染時視為未錨定。
-   *
-   * **過渡欄位**:Stage C2 隨 text layer 進圖層樹一併退役(z-order 由 tree
-   * 位置驅動),屆時從 schema 全砍。目前 Stage A/B 保留維持既有錨定行為。
-   */
-  anchorLayerId?: string
 }
 
 export type DocTemplateMode = 'auto' | 'none' | 'custom'

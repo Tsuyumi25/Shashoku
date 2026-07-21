@@ -225,10 +225,8 @@ function parseLabelForTranslation(v: unknown, i: number, validGroupIds: readonly
   if (v.styleOverride !== undefined) {
     label.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
   }
-  // anchorLayerId 選用(Stage A 過渡,Stage C2 砍):字串則保留;未設或非字串則不帶
-  if (typeof v.anchorLayerId === 'string' && v.anchorLayerId.length > 0) {
-    label.anchorLayerId = v.anchorLayerId
-  }
+  // 舊 v2 檔案的 anchorLayerId 欄位(C2 前的過渡遺留):silently ignore,
+  // 由 LetterMode 依 label 現況重建 text layer 樹位置。
   return label
 }
 
@@ -274,7 +272,6 @@ export function serializeTranslation(t: TranslationJson): string {
       }
       if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
         entry.styleOverride = serializePartialTextStyle(l.styleOverride)
-      if (l.anchorLayerId !== undefined) entry.anchorLayerId = l.anchorLayerId
       return entry
     }),
   }

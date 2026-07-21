@@ -408,24 +408,15 @@ describe('translation.json', () => {
     expect(parsed.labels[0].id).toBeTruthy()
   })
 
-  it('anchorLayerId 過渡欄位 roundtrip:Stage C2 才砍', () => {
-    const t: TranslationJson = {
+  it('舊 anchorLayerId 欄位被忽略(C2 退役,由 LetterMode 依 label 現況重建 tree 位置)', () => {
+    const raw = JSON.stringify({
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
-      labels: [
-        { id: 'a', x: 0.1, y: 0.2, groupId: null, lines: ['浮動,無錨'] },
-        {
-          id: 'b',
-          x: 0.3,
-          y: 0.4,
-          groupId: null,
-          lines: ['錨到底圖上方'],
-          anchorLayerId: 'layer-bg',
-        },
-      ],
-    }
-    const back = parseTranslation(serializeTranslation(t))
-    expect(back.labels[0].anchorLayerId).toBeUndefined()
-    expect(back.labels[1].anchorLayerId).toBe('layer-bg')
+      labels: [{ id: 'a', x: 0.1, y: 0.2, groupId: null, lines: ['x'], anchorLayerId: 'legacy' }],
+    })
+    const back = parseTranslation(raw)
+    expect(back.labels[0]).not.toHaveProperty('anchorLayerId')
+    // serialize 也不會把它帶回去
+    expect(serializeTranslation(back)).not.toContain('anchorLayerId')
   })
 
   it('styleOverride:空物件不序列化(避免噪音)', () => {

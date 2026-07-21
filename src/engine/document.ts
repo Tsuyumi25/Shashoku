@@ -161,38 +161,60 @@ export class ShashokuDoc {
   }
 
   /**
-   * 顯示合成:清空 target,由下往上 drawImage 每個可見圖層(帶 opacity 與
-   * blend mode)。Tier 2 邊界:blend 全走 canvas 原生運算子,無巢狀群組
-   * → 不需要離屏遞迴。
+   * 顯示合成:遞迴 walk tree,由下往上疊像素。
    *
-   * interleave:畫第 index 層之前的插畫 hook(不可見層也會呼叫,錨定語義
-   * 以堆疊位置為準)。mode 層用它把「錨進堆疊的標籤文字」drawElementImage
-   * 進正確的 z 位置——engine 只知道「有東西要插在層與層之間」,不知道文字。
+   * - raster leaf:drawImage 該層的 canvas 快取(帶 opacity 與 blend mode)
+   * - text node:呼叫 opts.drawText hook,把 labelId 交給外面畫——engine
+   *   完全不認識 label 內容(text / x / y / 樣式仍在 pinia SSOT),只知道
+   *   「這個 z 位置有一段文字要畫」
+   * - group node:遞迴 children(Tier 2 邊界:不做離屏合成,一般 group
+   *   是純 z-order 容器)
+   *
+   * Tier 2 邊界:blend 全走 canvas 原生運算子,無巢狀離屏合成——group
+   * 的 opacity/blendMode 對 children 不做整組 blend,只是視覺分組。
    */
   compositeInto(
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-    interleave?: (ctx2: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, beforeLayerIndex: number) => void,
+    opts: {
+      drawText?: (
+        ctx2: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+        labelId: string,
+      ) => void;
+    } = {},
   ): void {
     ctx.clearRect(0, 0, this.width, this.height);
-    for (let i = 0; i < this.layers.length; i++) {
-      const layer = this.layers[i];
-      interleave?.(ctx, i);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
-      // C1:root 只有 raster leaf,非 raster 直接跳過(C2 才實作 text /
-      // group 遞迴合成);invisible / opacity=0 也跳過。
-      if (!isRasterLayer(layer)) continue;
-      if (!layer.visible || layer.opacity === 0) continue;
-      const canvas = this.cache.get(layer.id)?.canvas;
-      if (!canvas) continue;
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = toCompositeOp(layer.blendMode);
-      ctx.drawImage(canvas, 0, 0);
-    }
+    this.compositeWalk(ctx, this.layers, opts);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    // 文字由 mode 層畫:錨定的走 interleave hook 插層間,浮動的在本函式
-    // 返回後畫最上層(drawFloatingTop)——engine 只管像素。
+  }
+
+  private compositeWalk(
+    ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+    nodes: readonly Layer[],
+    opts: {
+      drawText?: (
+        ctx2: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+        labelId: string,
+      ) => void;
+    },
+  ): void {
+    for (const layer of nodes) {
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+      if (!layer.visible) continue;
+      if (layer.kind === "raster") {
+        if (layer.opacity === 0) continue;
+        const canvas = this.cache.get(layer.id)?.canvas;
+        if (!canvas) continue;
+        ctx.globalAlpha = layer.opacity;
+        ctx.globalCompositeOperation = toCompositeOp(layer.blendMode);
+        ctx.drawImage(canvas, 0, 0);
+      } else if (layer.kind === "text") {
+        opts.drawText?.(ctx, layer.labelId);
+      } else {
+        this.compositeWalk(ctx, layer.children, opts);
+      }
+    }
   }
 
   /**

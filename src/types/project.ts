@@ -16,9 +16,6 @@ export interface LabelItem {
   text: string
   /** 個別樣式覆寫(diff 存法);詳見 shared/ssk/types.ts SskLabel.styleOverride */
   styleOverride?: Partial<TextStyle>
-  /** z-order 錨定:label 疊在此 layer 之上;undefined = 未錨定(最頂層)。
-   * Stage C2 隨 text layer 進圖層樹退役。 */
-  anchorLayerId?: string
 }
 
 export interface ProjectFile {

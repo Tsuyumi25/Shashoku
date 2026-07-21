@@ -183,47 +183,70 @@ function retryRedraw(): void {
   );
 }
 
-/** interleave hook:畫第 index 層之前,把錨定在該層之下的標籤畫進去。 */
-function drawAnchoredBefore(
+/** engine 合成 hook:遇 text layer 節點就叫這個畫 label。z-order 由 tree
+ * 位置決定,不再有 anchor / floating 兩種分類——text 節點在哪個 z 位就在
+ * 那畫,現況全部在 root 頂端(C3 才會有樣式群組 folder 讓 text 進去)。 */
+function drawTextNode(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  beforeLayerIndex: number,
+  labelId: string,
 ): void {
   const d = doc.value;
   if (!d) return;
-  const layerId = d.layers[beforeLayerIndex]?.id;
-  if (!layerId) return;
-  for (const l of anchoredLabels.value) {
-    if (l.id === hiddenNativeMoveId.value) continue;
-    if (labelAnchors.value.get(l.id) !== layerId || l.text === "") continue;
-    const el = textEls.get(l.id);
-    if (!el) continue;
-    if (!drawLabelElement(ctx, el, l.x * d.width, l.y * d.height)) retryRedraw();
-  }
-}
-
-/** 浮動標籤 = 合成序列的最上層(在所有圖層之後畫)。 */
-function drawFloatingTop(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D): void {
-  const d = doc.value;
-  if (!d) return;
-  for (const l of floatingLabels.value) {
-    if (l.id === hiddenNativeMoveId.value) continue;
-    if (l.text === "") continue;
-    const el = textEls.get(l.id);
-    if (!el) continue;
-    if (!drawLabelElement(ctx, el, l.x * d.width, l.y * d.height)) retryRedraw();
-  }
+  if (labelId === hiddenNativeMoveId.value) return;
+  const l = currentLabels.value.find((x) => x.id === labelId);
+  if (!l || l.text === "") return;
+  const el = textEls.get(labelId);
+  if (!el) return;
+  if (!drawLabelElement(ctx, el, l.x * d.width, l.y * d.height)) retryRedraw();
 }
 
 // 高倍 zoom 關閉平滑採樣(看得到像素格,PS 慣例);低倍平滑
 const SMOOTH_OFF_ZOOM = 3;
 
 /** 把 view transform(含 dpr)套上 ctx——顯示合成與蟻線共用同一個變換。 */
-function applyViewTransform(c: CanvasRenderingContext2D): void {
+function applyViewTransform(
+  c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+): void {
   const dpr = window.devicePixelRatio || 1;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.translate(view.tx, view.ty);
   c.scale(view.scale, view.scale);
   c.rotate(view.rotate);
+}
+
+/**
+ * 共用合成路徑:redraw()(視口顯示)與 onExport()(匯出)都經過這裡,
+ * 保證兩者的像素結果一致。engine 的 compositeInto 遞迴 walk tree,遇 text
+ * 節點就呼叫 drawTextNode——所有 label 都是 tree 節點,z-order 由 tree
+ * 位置決定,沒有「錨定 vs 浮動」的分類。
+ *
+ * opts:
+ * - applyTransform:讓 caller 決定要不要套 view transform / dpr;engine
+ *   端保持只認識像素堆疊(見設計 tradeoff:LetterMode 側收斂 presentation
+ *   關切,engine 保持 pure)。省略 = 不動 ctx transform(等同 identity)
+ * - smoothing:PS 慣例——高倍 zoom 關 imageSmoothing;省略 = 不動
+ * - background:destination-over 墊底色(匯出白底用);省略 = 保留透明
+ */
+function composite(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  opts: {
+    applyTransform?: (c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => void;
+    smoothing?: boolean;
+    background?: string;
+  } = {},
+): void {
+  const d = doc.value;
+  if (!d) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  opts.applyTransform?.(ctx);
+  if (opts.smoothing !== undefined) ctx.imageSmoothingEnabled = opts.smoothing;
+  d.compositeInto(ctx, { drawText: drawTextNode });
+  if (opts.background !== undefined) {
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = opts.background;
+    ctx.fillRect(0, 0, d.width, d.height);
+    ctx.globalCompositeOperation = "source-over";
+  }
 }
 
 function redraw(): void {
@@ -235,13 +258,16 @@ function redraw(): void {
   if (!d || !displayCtx || !cv || redrawSuspended) return;
   const c = displayCtx;
   perf.lastDraw = timeMs(() => {
+    // viewport clear 是 LetterMode 專屬:canvas backing store 大於 doc 尺寸
+    // (dpr × 容器尺寸),doc 外的舊像素得先清乾淨。matched pair 也是唯一
+    // 需要 setTransform 到 identity 的地方——之後 composite() 內自己 reset
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, cv.width, cv.height);
-    applyViewTransform(c);
-    c.imageSmoothingEnabled = view.scale < SMOOTH_OFF_ZOOM;
-    d.compositeInto(c, drawAnchoredBefore);
-    drawFloatingTop(c);
-    // 文件邊界(1 螢幕 px,取代舊 CSS box-shadow)
+    composite(c, {
+      applyTransform: applyViewTransform,
+      smoothing: view.scale < SMOOTH_OFF_ZOOM,
+    });
+    // 文件邊界(1 螢幕 px,取代舊 CSS box-shadow)——view transform 仍在
     c.lineWidth = 1 / view.scale;
     c.strokeStyle = "rgba(128,128,128,0.6)";
     c.strokeRect(0, 0, d.width, d.height);
@@ -292,13 +318,7 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
   editor.setSelection(null);
-  // 從 store 內 labels.anchorLayerId 還原錨定 Map;單檔模式無專案頁 → 空
-  const currentFile = loadedPage.value ? projectStore.fileByName(loadedPage.value) : null;
-  const anchors: Array<[string, string]> = [];
-  for (const l of currentFile?.labels ?? []) {
-    if (l.anchorLayerId) anchors.push([l.id, l.anchorLayerId]);
-  }
-  labelAnchors.value = new Map(anchors);
+  syncTextNodes(); // 現有 labels 立即在 tree 頂端建對應 text node
   perf.imageSize = `${d.width}×${d.height}`;
 
   // 顯示 canvas 是視口尺寸(mount 起固定),與文件尺寸脫鉤——大頁不再撐大 buffer
@@ -309,6 +329,45 @@ function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
   if ((pageKey === null || viewFit.page !== pageKey) && fitToView()) viewFit.page = pageKey;
   // raster:false —— 純載入,disk 狀態沒變,不該觸發 autosave 重寫 revision
   editor.changed({ raster: false });
+}
+
+/**
+ * label ↔ text layer node 同步器(store→doc 耦合的入口)。冪等:
+ *
+ * - 每個 label 至少要有一個對應的 text node;缺就補一個在 root 頂端
+ * - 每個 text node 都要有匹配的 label;找不到就刪(orphan 清理)
+ *
+ * 觸發點:buildDoc(載入頁)、watch(currentLabels)(add/delete/reload)。
+ * 位置僅為 root 頂端——真正的樣式群組 folder auto-populate 是 C3 的
+ * normalize 函式;C2 這階段只保證「有 z-order 位置可畫」。
+ */
+function syncTextNodes(): void {
+  const d = doc.value;
+  if (!d) return;
+  const labelIds = new Set(currentLabels.value.map((l) => l.id));
+  const boundLabelIds = new Set<string>();
+  // 逆序遍歷:remove 用 splice-safe 走法(但這裡走 findLayer 更簡單)
+  const toRemove: string[] = [];
+  for (const layer of d.layers) {
+    if (layer.kind !== "text") continue;
+    if (!labelIds.has(layer.labelId)) toRemove.push(layer.id);
+    else boundLabelIds.add(layer.labelId);
+  }
+  for (const id of toRemove) d.removeLayer(id);
+  for (const label of currentLabels.value) {
+    if (boundLabelIds.has(label.id)) continue;
+    d.insertLayer(
+      {
+        kind: "text",
+        id: crypto.randomUUID(),
+        name: "文字",
+        visible: true,
+        locked: false,
+        labelId: label.id,
+      },
+      d.layers.length,
+    );
+  }
 }
 
 async function onPickFile(e: Event): Promise<void> {
@@ -894,14 +953,11 @@ function onPointerMove(e: PointerEvent): void {
     ) return;
     dragLabelMoved = true;
     if (dragLabelCopy && !dragLabelDuplicate && dragLabelSource) {
-      const sourceId = draggingLabelId;
       const duplicate: LabelItem = {
         ...dragLabelSource,
         id: crypto.randomUUID(),
       };
       projectStore.addLabel(loadedPage.value, duplicate);
-      const anchor = labelAnchors.value.get(sourceId);
-      if (anchor) labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, anchor);
       draggingLabelId = duplicate.id;
       dragLabelDuplicate = duplicate;
       editorStore.selectedLabelId = duplicate.id;
@@ -988,21 +1044,14 @@ function onPointerUp(e: PointerEvent): void {
       if (dragLabelDuplicate) {
         const page = loadedPage.value;
         const duplicate = dragLabelDuplicate;
-        const anchor = labelAnchors.value.get(duplicate.id);
         let index: number | undefined;
         editor.history.push({
           label: "複製文字",
           undo: () => {
             index = projectStore.deleteLabel(page, duplicate.id);
-            if (anchor) {
-              const next = new Map(labelAnchors.value);
-              next.delete(duplicate.id);
-              labelAnchors.value = next;
-            }
           },
           redo: () => {
             projectStore.addLabel(page, duplicate, index);
-            if (anchor) labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, anchor);
           },
         });
       } else {
@@ -1038,7 +1087,6 @@ interface ActiveNativeDrag {
   payload: LabelDragPayload;
   page: string;
   source: LabelItem;
-  sourceAnchor: string | null;
   startDoc: { x: number; y: number };
   oldPos: { x: number; y: number };
   localCommitted: boolean;
@@ -1106,7 +1154,6 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
     payload,
     page,
     source,
-    sourceAnchor: labelAnchors.value.get(label.id) ?? null,
     startDoc,
     oldPos: { x: label.x, y: label.y },
     localCommitted: false,
@@ -1135,28 +1182,14 @@ function onNativeLabelDragStart(label: LabelItem, e: DragEvent): void {
 
 function commitNativeDuplicate(active: ActiveNativeDrag, duplicate: LabelItem): void {
   projectStore.addLabel(active.page, duplicate);
-  if (active.sourceAnchor) {
-    labelAnchors.value = new Map(labelAnchors.value).set(duplicate.id, active.sourceAnchor);
-  }
   let index: number | undefined;
   editor.history.push({
     label: "複製文字",
     undo: () => {
       index = projectStore.deleteLabel(active.page, duplicate.id);
-      if (active.sourceAnchor) {
-        const next = new Map(labelAnchors.value);
-        next.delete(duplicate.id);
-        labelAnchors.value = next;
-      }
     },
     redo: () => {
       projectStore.addLabel(active.page, duplicate, index);
-      if (active.sourceAnchor) {
-        labelAnchors.value = new Map(labelAnchors.value).set(
-          duplicate.id,
-          active.sourceAnchor,
-        );
-      }
     },
   });
 }
@@ -1245,23 +1278,6 @@ function setTextEl(id: string, el: unknown): void {
   else textEls.delete(id);
 }
 
-// ---- 圖層錨定(夾層):labelId → 「畫在該圖層之下」的 layerId ----
-// runtime 暫態:圖層本身尚未落地(D7),layerId 換頁即重生,現在寫進
-// .ssk.json 只會存斷裂引用——落地跟 D7 一起。
-const labelAnchors = ref(new Map<string, string>());
-/** 錨定且錨定圖層仍存在的標籤(圖層被刪自動回浮動)。 */
-const anchoredLabels = computed<LabelItem[]>(() => {
-  const d = doc.value;
-  if (!d) return [];
-  return currentLabels.value.filter((l) => {
-    const layerId = labelAnchors.value.get(l.id);
-    return layerId !== undefined && d.layers.some((ly) => ly.id === layerId);
-  });
-});
-const floatingLabels = computed<LabelItem[]>(() =>
-  currentLabels.value.filter((l) => !anchoredLabels.value.includes(l)),
-);
-
 /** 命中測試:全幾何(中心 ± 排版尺寸;空標籤用色點直徑)。節點躺在
  * canvas fallback 裡,DOM rect 不在畫布位置,量不得。 */
 const DOT_SIZE = 18; // 空標籤色點直徑(doc px)
@@ -1287,33 +1303,15 @@ function hitLabel(e: PointerEvent): LabelItem | null {
   return null;
 }
 
-/** 設定/解除標籤的圖層錨定(null = 回浮動),入嵌字 History,並同步至 store 持久化。 */
-function setLabelAnchor(labelId: string, layerId: string | null): void {
-  const prev = labelAnchors.value.get(labelId) ?? null;
-  if (prev === layerId) return;
-  const apply = (v: string | null) => {
-    const next = new Map(labelAnchors.value);
-    if (v === null) next.delete(labelId);
-    else next.set(labelId, v);
-    labelAnchors.value = next; // 換新 Map:讓 computed/watch 確定看見變更
-    // 同步 store:進 translation.json 的 anchorLayerId 欄位,Ctrl+S 落地
-    if (loadedPage.value) projectStore.updateLabelAnchor(loadedPage.value, labelId, v);
-  };
-  apply(layerId);
-  editor.history.push({
-    label: layerId === null ? "文字回到最上層" : "文字錨入圖層",
-    undo: () => apply(prev),
-    redo: () => apply(layerId),
-  });
-}
-
-// 標籤/錨定/樣式變更 → 重合成:立即排一次(位置變更用既有 paint record
-// 就正確,拖曳手感不等幀),再等兩幀補一次(內容/樣式變更的新 record)。
-// header deep watch 涵蓋 groups[].style 與 defaultStyle 變動(per-label
-// effective style 只在渲染時解析,不需再獨立 computed)。
+// 標籤/樣式變更 → 同步 text node tree(add/delete)+ 重合成:立即排一次
+// (位置變更用既有 paint record 就正確,拖曳手感不等幀),再等兩幀補一次
+// (內容/樣式變更的新 record)。header deep watch 涵蓋 groups[].style 與
+// defaultStyle 變動(per-label effective style 只在渲染時解析,不需獨立
+// computed)。
 watch(
-  [currentLabels, labelAnchors, () => projectStore.header],
+  [currentLabels, () => projectStore.header],
   () => {
+    syncTextNodes();
     scheduleRedraw();
     retryRedraw();
   },
@@ -1527,13 +1525,6 @@ function onLabelTextInput(e: Event): void {
   });
 }
 
-function onAnchorChange(e: Event): void {
-  const l = selectedLabel.value;
-  if (!l) return;
-  const v = (e.target as HTMLSelectElement).value;
-  setLabelAnchor(l.id, v === "" ? null : v);
-}
-
 function onLabelGroupChange(e: Event): void {
   const page = loadedPage.value;
   const l = selectedLabel.value;
@@ -1579,13 +1570,7 @@ async function onExport(): Promise<void> {
     cv.height = d.height;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    d.compositeInto(c, drawAnchoredBefore);
-    drawFloatingTop(c);
-    c.globalCompositeOperation = "destination-over"; // 白底墊在最下
-    c.fillStyle = "#ffffff";
-    c.fillRect(0, 0, d.width, d.height);
-    c.globalCompositeOperation = "source-over";
+    composite(c, { background: "#ffffff" });
     const blob = await new Promise<Blob>((resolve, reject) =>
       cv.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png"),
     );
@@ -1976,23 +1961,6 @@ const TOOL_KEYS: Record<string, Tool> = {
               <option value="">未分組</option>
               <option v-for="(g, i) in projectStore.header.groups" :key="g.id" :value="g.id">
                 {{ i + 1 }} · {{ g.name }}
-              </option>
-            </select>
-          </label>
-          <label class="mt-1 block">圖層位置
-            <select
-              class="w-full rounded px-1 py-0.5"
-              style="background: var(--accent); color: var(--foreground)"
-              :value="labelAnchors.get(selectedLabel.id) ?? ''"
-              @change="onAnchorChange"
-            >
-              <option value="">最上層（浮動，放大銳利）</option>
-              <option
-                v-for="ly in [...(doc?.layers ?? [])].reverse()"
-                :key="ly.id"
-                :value="ly.id"
-              >
-                壓在「{{ ly.name }}」之下
               </option>
             </select>
           </label>
