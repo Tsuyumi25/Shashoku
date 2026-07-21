@@ -163,7 +163,7 @@ function onRootChange(evt: DragEvt): void {
     if (el.kind === "text") updateLabelGroupIdWithUndo(el.labelId, null);
   }
   syncDocLayers();
-  editor.changed({ raster: false });
+  editor.changed();
 }
 
 /** LayerRow 的 folder body 變更冒上來——ctx 標 folder 種類。 */

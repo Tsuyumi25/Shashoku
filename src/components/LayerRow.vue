@@ -125,7 +125,7 @@ function onFolderBodyChange(evt: unknown): void {
   if (props.node.kind !== "group") return;
   // vuedraggable 已就地 splice localChildren;反轉寫回 composite 序
   props.node.children = [...localChildren.value].reverse();
-  editor.changed({ raster: false });
+  editor.changed();
   // 讓 parent 處理 SSOT 翻譯(text 進 folder → updateLabelGroupId)
   props.onFolderChange(props.node, evt);
 }
