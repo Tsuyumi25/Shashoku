@@ -76,6 +76,7 @@ export const useProjectStore = defineStore('project', () => {
   const folderPath = computed(() => rootPath.value)
   const header = computed<ProjectHeader>(() => ({
     groups: projectMeta.value.groups,
+    defaultStyle: projectMeta.value.defaultStyle,
     comment: projectMeta.value.comment,
   }))
   const exportConfig = computed<SskExportConfig>(() => projectMeta.value.exportConfig)
