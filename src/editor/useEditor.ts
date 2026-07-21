@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from "vue";
 import type { ShashokuDoc } from "@/engine/document";
+import type { Layer } from "@/engine/layer-tree";
 import { boundsOfMask } from "@/engine/selection";
 import type { RasterLayer, Rect } from "@/engine/types";
 import { History } from "./history";
@@ -22,7 +23,11 @@ const docPage = shallowRef<string | null>(null);
 const history = new History();
 const layersTick = ref(0);
 const rasterDirtyTick = ref(0);
-const activeLayerId = ref("");
+// 多選:圖層面板可以 Ctrl / Shift 選一坨。activeLayerId 是「主要」 = 最後
+// 加入 Set 的 id,供既有 single-target 呼叫端(painting / merge-down / duplicate
+// 這些)向下相容。整個 useEditor 對外 API 沒變,但 API 呼叫 activeLayerId = X
+// 會變成「單選 X」(清空 Set 再加 X)。
+const activeLayerIds = ref<Set<string>>(new Set());
 
 // 選區:整頁 8-bit soft mask,null = 無選區(不約束)。bounds 供蟻線/清除用。
 const selection = shallowRef<Uint8ClampedArray | null>(null);
@@ -61,17 +66,63 @@ function changed(opts: { raster?: boolean } = {}): void {
   redrawCanvas();
 }
 
-// C1:doc.layers 已升 Layer[] tree,但 useEditor 對外只暴露 raster leaf
-// ——LayerPanel 等 UI 目前僅懂 raster;text / group 節點的呈現留 C3。
+// `layers`(raster-only 扁平):給既有 raster CRUD action / thumb / blend
+// 面板用——它們對 text / group 節點無語意。
+// `tree`(union 遞迴):給 LayerPanel 的 nested 呈現用(C3 起)。
 const layers = computed<RasterLayer[]>(() => {
   void layersTick.value;
   if (!doc.value) return [];
   return doc.value.layers.filter((l): l is RasterLayer => l.kind === "raster");
 });
 
+const tree = computed<Layer[]>(() => {
+  void layersTick.value;
+  return doc.value?.layers ?? [];
+});
+
+/** 主要選中 layer id(= Set 最後加入的);空字串 = 沒選 */
+const activeLayerId = computed<string>({
+  get: () => {
+    let last = "";
+    for (const id of activeLayerIds.value) last = id;
+    return last;
+  },
+  set: (id: string) => {
+    // 單選語意:清空 + 只留這個(向下相容既有呼叫)
+    activeLayerIds.value = new Set(id ? [id] : []);
+  },
+});
+
+/** 把 id toggle 進 / 出 selection Set(Ctrl+click 用)。 */
+function toggleActiveLayer(id: string): void {
+  const next = new Set(activeLayerIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  activeLayerIds.value = next;
+}
+
+/** 一次設多個(Shift+click 範圍選 / 拖曳完畢維持選中 用)。 */
+function setActiveLayers(ids: readonly string[]): void {
+  activeLayerIds.value = new Set(ids);
+}
+
 const activeLayer = computed<RasterLayer | null>(() => {
   void layersTick.value;
   return doc.value?.findRasterLayer(activeLayerId.value) ?? null;
+});
+
+/** 選中的 raster layers(text/group 節點過濾掉——非 raster 沒有 blend/opacity 這些屬性)。
+ *  header controls 用這個來判斷 mixed。 */
+const activeRasterLayers = computed<RasterLayer[]>(() => {
+  void layersTick.value;
+  const d = doc.value;
+  if (!d) return [];
+  const out: RasterLayer[] = [];
+  for (const id of activeLayerIds.value) {
+    const l = d.findRasterLayer(id);
+    if (l) out.push(l);
+  }
+  return out;
 });
 
 const canUndo = computed(() => {
@@ -92,8 +143,13 @@ export function useEditor() {
     layersTick,
     rasterDirtyTick,
     activeLayerId,
+    activeLayerIds,
+    toggleActiveLayer,
+    setActiveLayers,
     layers,
+    tree,
     activeLayer,
+    activeRasterLayers,
     canUndo,
     canRedo,
     selection,

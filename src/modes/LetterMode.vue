@@ -1296,7 +1296,10 @@ watch(
   [currentLabels, () => projectStore.header],
   () => {
     applyNormalize();
-    scheduleRedraw();
+    // 通知 UI 重新讀 tree(LayerPanel 的 uiTree computed 依 layersTick)。
+    // raster:false 因為 tree 結構變不影響像素 buffer;raster autosave 走
+    // scheduleRasterAutosave 那條線,不由這裡觸發。
+    editor.changed({ raster: false });
     retryRedraw();
   },
   { deep: true, flush: "post" },
