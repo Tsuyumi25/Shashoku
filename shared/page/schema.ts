@@ -150,9 +150,11 @@ export function parseManifest(raw: string): ManifestJson {
   if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
       fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
-    fail(
-      `不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}(v2 以下的舊格式需以新版重建專案)`,
-    )
+    // v1 entries 都是 raster 且欄位對齊 v2 RasterLayerEntry,只差一個 kind;
+    // silent upgrade,下次 autosave 會寫回 v2。原本計畫 POC 硬斷但實務上
+    // dev 期既有專案要保命,加這層 tolerance 比逼手動重建現實。
+    if (data.schemaVersion !== 1)
+      fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
   }
 
   // revision:非負整數,缺失視為 0(下次 autosave 會遞增)
@@ -166,7 +168,14 @@ export function parseManifest(raw: string): ManifestJson {
 
   const layersRaw = data.layers
   if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`))
+  const layers = layersRaw.map((l, i) => {
+    // v1→v2 upgrade:補 kind='raster' 給沒有 kind 欄位的舊 entry
+    const patched =
+      data.schemaVersion === 1 && isRecord(l) && l.kind === undefined
+        ? { ...l, kind: 'raster' }
+        : l
+    return parseLayerEntry(patched, `layers[${i}]`)
+  })
 
   const files: string[] = []
   collectRasterFiles(layers, files)

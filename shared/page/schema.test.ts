@@ -211,12 +211,19 @@ describe('manifest.json', () => {
     expect(() => parseManifest('{"schemaVersion":999,"layers":[]}')).toThrow(/請更新軟體/)
   })
 
-  it('v1 manifest 讀不進來(POC 硬斷)', () => {
+  it('v1 manifest 自動 upgrade:entry 補 kind:raster,schemaVersion 拉到 v2', () => {
     const v1 = JSON.stringify({
       schemaVersion: 1,
       layers: [{ id: 'a', file: 'x.png', name: '', visible: true, opacity: 1, blendMode: 'normal', locked: false, alphaLocked: false }],
     })
-    expect(() => parseManifest(v1)).toThrow(/v2 以下/)
+    const parsed = parseManifest(v1)
+    expect(parsed.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(parsed.layers[0]).toMatchObject({ kind: 'raster', id: 'a', file: 'x.png' })
+  })
+
+  it('未知 schemaVersion(不是 1 也不是 v2)抛錯', () => {
+    expect(() => parseManifest('{"schemaVersion":"foo","layers":[]}')).toThrow(/不支援/)
+    expect(() => parseManifest('{"schemaVersion":0,"layers":[]}')).toThrow(/不支援/)
   })
 
   it('缺 revision 欄位視為 0', () => {
