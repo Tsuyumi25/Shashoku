@@ -15,8 +15,11 @@ import {
   MANIFEST_SCHEMA_VERSION,
   OCR_SCHEMA_VERSION,
   TRANSLATION_SCHEMA_VERSION,
+  type GroupLayerEntry,
   type ManifestJson,
   type OcrJson,
+  type RasterLayerEntry,
+  type TextLayerEntry,
   type TranslationJson,
 } from './types'
 
@@ -35,29 +38,49 @@ describe('manifest.json', () => {
     })
   })
 
-  it('roundtrip: 含多層', () => {
+  it('roundtrip: 混合 raster / text / group(nested)', () => {
     const m: ManifestJson = {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 7,
       layers: [
         {
+          kind: 'raster',
           id: 'l1',
           file: 'background.png',
           name: '底圖',
           visible: true,
+          locked: false,
           opacity: 1,
           blendMode: 'normal',
-          locked: false,
           alphaLocked: false,
         },
         {
+          kind: 'group',
+          id: 'g-dialog',
+          name: '対白',
+          visible: true,
+          locked: false,
+          styleBinding: { labelGroupId: 'grp-dialog' },
+          children: [
+            {
+              kind: 'text',
+              id: 't-1',
+              name: '',
+              visible: true,
+              locked: false,
+              labelId: 'label-a',
+            },
+          ],
+        },
+        {
+          kind: 'raster',
           id: 'l2',
           file: 'redraw.png',
           name: '清稿',
           visible: true,
+          locked: false,
           opacity: 0.75,
           blendMode: 'multiply',
-          locked: false,
           alphaLocked: true,
         },
       ],
@@ -67,22 +90,36 @@ describe('manifest.json', () => {
 
   it('layers 必須是陣列', () => {
     expect(() =>
-      parseManifest(JSON.stringify({ schemaVersion: 1, layers: {} })),
+      parseManifest(JSON.stringify({ schemaVersion: MANIFEST_SCHEMA_VERSION, layers: {} })),
     ).toThrow(/必須是陣列/)
   })
 
-  it('layer.file 不可含路徑分隔符', () => {
+  it('缺 kind 或未知 kind 抛錯', () => {
+    const noKind = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [{ id: 'x', name: '', visible: true, locked: false, file: 'a.png', opacity: 1, blendMode: 'normal', alphaLocked: false }],
+    }
+    expect(() => parseManifest(JSON.stringify(noKind))).toThrow(/kind/)
+    const bogus = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [{ kind: 'bogus', id: 'x', name: '', visible: true, locked: false }],
+    }
+    expect(() => parseManifest(JSON.stringify(bogus))).toThrow(/kind/)
+  })
+
+  it('raster.file 不可含路徑分隔符', () => {
     const bad = {
-      schemaVersion: 1,
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       layers: [
         {
+          kind: 'raster',
           id: 'x',
           file: '../evil.png',
           name: '',
           visible: true,
+          locked: false,
           opacity: 1,
           blendMode: 'normal',
-          locked: false,
           alphaLocked: false,
         },
       ],
@@ -90,29 +127,40 @@ describe('manifest.json', () => {
     expect(() => parseManifest(JSON.stringify(bad))).toThrow(/不可含路徑/)
   })
 
-  it('layer.file 重複抛錯', () => {
+  it('raster.file 重複抛錯(包含 nested group 內的 raster)', () => {
     const bad = {
-      schemaVersion: 1,
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       layers: [
         {
+          kind: 'raster',
           id: 'a',
           file: 'x.png',
           name: '',
           visible: true,
+          locked: false,
           opacity: 1,
           blendMode: 'normal',
-          locked: false,
           alphaLocked: false,
         },
         {
-          id: 'b',
-          file: 'x.png',
+          kind: 'group',
+          id: 'g',
           name: '',
           visible: true,
-          opacity: 1,
-          blendMode: 'normal',
           locked: false,
-          alphaLocked: false,
+          children: [
+            {
+              kind: 'raster',
+              id: 'b',
+              file: 'x.png',
+              name: '',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              blendMode: 'normal',
+              alphaLocked: false,
+            },
+          ],
         },
       ],
     }
@@ -121,16 +169,17 @@ describe('manifest.json', () => {
 
   it('未知 blendMode 抛錯', () => {
     const bad = {
-      schemaVersion: 1,
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       layers: [
         {
+          kind: 'raster',
           id: 'a',
           file: 'x.png',
           name: '',
           visible: true,
+          locked: false,
           opacity: 1,
           blendMode: 'divine-light',
-          locked: false,
           alphaLocked: false,
         },
       ],
@@ -140,16 +189,17 @@ describe('manifest.json', () => {
 
   it('opacity 超出 [0,1] 抛錯', () => {
     const bad = {
-      schemaVersion: 1,
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       layers: [
         {
+          kind: 'raster',
           id: 'a',
           file: 'x.png',
           name: '',
           visible: true,
+          locked: false,
           opacity: 1.5,
           blendMode: 'normal',
-          locked: false,
           alphaLocked: false,
         },
       ],
@@ -161,30 +211,39 @@ describe('manifest.json', () => {
     expect(() => parseManifest('{"schemaVersion":999,"layers":[]}')).toThrow(/請更新軟體/)
   })
 
-  it('缺 revision 欄位視為 0(向前相容舊 manifest)', () => {
-    const legacy = JSON.stringify({ schemaVersion: 1, layers: [] })
+  it('v1 manifest 讀不進來(POC 硬斷)', () => {
+    const v1 = JSON.stringify({
+      schemaVersion: 1,
+      layers: [{ id: 'a', file: 'x.png', name: '', visible: true, opacity: 1, blendMode: 'normal', locked: false, alphaLocked: false }],
+    })
+    expect(() => parseManifest(v1)).toThrow(/v2 以下/)
+  })
+
+  it('缺 revision 欄位視為 0', () => {
+    const legacy = JSON.stringify({ schemaVersion: MANIFEST_SCHEMA_VERSION, layers: [] })
     const parsed = parseManifest(legacy)
     expect(parsed.revision).toBe(0)
   })
 
   it('revision 負數或非整數抛錯', () => {
-    const bad1 = JSON.stringify({ schemaVersion: 1, revision: -1, layers: [] })
+    const bad1 = JSON.stringify({ schemaVersion: MANIFEST_SCHEMA_VERSION, revision: -1, layers: [] })
     expect(() => parseManifest(bad1)).toThrow(/revision/)
-    const bad2 = JSON.stringify({ schemaVersion: 1, revision: 1.5, layers: [] })
+    const bad2 = JSON.stringify({ schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 1.5, layers: [] })
     expect(() => parseManifest(bad2)).toThrow(/revision/)
   })
 
   it('缺 id 會補一個(向前相容手寫檔案)', () => {
     const noId = {
-      schemaVersion: 1,
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       layers: [
         {
+          kind: 'raster',
           file: 'x.png',
           name: '',
           visible: true,
+          locked: false,
           opacity: 1,
           blendMode: 'normal',
-          locked: false,
           alphaLocked: false,
         },
       ],
@@ -192,6 +251,105 @@ describe('manifest.json', () => {
     const parsed = parseManifest(JSON.stringify(noId))
     expect(parsed.layers[0].id).toBeTruthy()
     expect(parsed.layers[0].id.length).toBeGreaterThan(0)
+  })
+
+  it('text layer 需要 labelId', () => {
+    const noLabel = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [{ kind: 'text', id: 't', name: '', visible: true, locked: false }],
+    }
+    expect(() => parseManifest(JSON.stringify(noLabel))).toThrow(/labelId/)
+
+    const emptyLabel = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [{ kind: 'text', id: 't', name: '', visible: true, locked: false, labelId: '' }],
+    }
+    expect(() => parseManifest(JSON.stringify(emptyLabel))).toThrow(/labelId/)
+  })
+
+  it('group.styleBinding 選用;缺失也能 roundtrip(一般 group)', () => {
+    const plainGroup: GroupLayerEntry = {
+      kind: 'group',
+      id: 'g',
+      name: '自由群組',
+      visible: true,
+      locked: false,
+      children: [],
+    }
+    const m: ManifestJson = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      layers: [plainGroup],
+    }
+    const parsed = parseManifest(serializeManifest(m))
+    expect(parsed.layers[0]).toEqual(plainGroup)
+    // 缺 styleBinding 的 group 不會在 serialized JSON 生出 styleBinding 欄位
+    expect(serializeManifest(m)).not.toContain('styleBinding')
+  })
+
+  it('group.styleBinding.labelGroupId 非空字串限制', () => {
+    const bad = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [
+        {
+          kind: 'group',
+          id: 'g',
+          name: '',
+          visible: true,
+          locked: false,
+          children: [],
+          styleBinding: { labelGroupId: '' },
+        },
+      ],
+    }
+    expect(() => parseManifest(JSON.stringify(bad))).toThrow(/labelGroupId/)
+  })
+
+  it('nested group children 遞迴驗證(子節點的 blendMode 錯抛在 children 路徑)', () => {
+    const bad = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      layers: [
+        {
+          kind: 'group',
+          id: 'g',
+          name: '',
+          visible: true,
+          locked: false,
+          children: [
+            {
+              kind: 'raster',
+              id: 'r',
+              file: 'x.png',
+              name: '',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              blendMode: 'divine-light',
+              alphaLocked: false,
+            },
+          ],
+        },
+      ],
+    }
+    expect(() => parseManifest(JSON.stringify(bad))).toThrow(/layers\[0\]\.children\[0\]\.blendMode/)
+  })
+
+  it('三種 kind 型別 alias 都可獨立構造', () => {
+    const r: RasterLayerEntry = {
+      kind: 'raster',
+      id: 'r',
+      name: '',
+      visible: true,
+      locked: false,
+      file: 'x.png',
+      opacity: 1,
+      blendMode: 'normal',
+      alphaLocked: false,
+    }
+    const t: TextLayerEntry = { kind: 'text', id: 't', name: '', visible: true, locked: false, labelId: 'a' }
+    const g: GroupLayerEntry = { kind: 'group', id: 'g', name: '', visible: true, locked: false, children: [r, t] }
+    const m: ManifestJson = { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, layers: [g] }
+    expect(parseManifest(serializeManifest(m))).toEqual(m)
   })
 })
 

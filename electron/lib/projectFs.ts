@@ -274,7 +274,17 @@ async function gcOrphanLayers(pageDir: string): Promise<void> {
   let referenced: Set<string>;
   try {
     const manifestRaw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
-    referenced = new Set(parseManifest(manifestRaw).layers.map((l) => l.file));
+    // 遞迴收集所有 raster leaf 的檔名(nested group 也要走進去);text / group
+    // 節點本身無 file,不參與 GC 判斷。
+    const files: string[] = [];
+    const collect = (entries: import("@shared/page/types").LayerEntry[]): void => {
+      for (const e of entries) {
+        if (e.kind === "raster") files.push(e.file);
+        else if (e.kind === "group") collect(e.children);
+      }
+    };
+    collect(parseManifest(manifestRaw).layers);
+    referenced = new Set(files);
   } catch {
     // manifest 損毀或不存在:不 GC,避免誤刪救援資料
     return;

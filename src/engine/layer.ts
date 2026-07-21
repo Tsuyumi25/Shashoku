@@ -1,4 +1,4 @@
-import type { LayerEntry } from "@shared/page/types";
+import type { RasterLayerEntry } from "@shared/page/types";
 import type { BlendMode } from "./blend";
 import type { RasterLayer } from "./types";
 
@@ -45,12 +45,12 @@ export function rasterLayerFromBitmap(
 }
 
 /**
- * 從 manifest.json 的 LayerEntry + 對應 PNG bitmap 還原一個 RasterLayer。
+ * 從 manifest.json 的 RasterLayerEntry + 對應 PNG bitmap 還原一個 RasterLayer。
  * id 沿用 manifest 的 UUID(不再 generate),讓下次 write 出去的 manifest 對齊。
- * 這是 autosave load 路徑的入口。
+ * 這是 autosave load 路徑的入口;呼叫端負責先過濾 kind==='raster'。
  */
 export function rasterLayerFromEntry(
-  entry: LayerEntry,
+  entry: RasterLayerEntry,
   bitmap: ImageBitmap,
   w: number,
   h: number,

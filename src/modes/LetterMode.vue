@@ -402,11 +402,13 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
     rawBitmap.close();
     buildDoc(w, h, [base]);
   } else {
-    // 已編輯過:整組從 layers/*.png 還原
+    // 已編輯過:整組從 layers/*.png 還原。C1 現況:manifest v2 允許 text /
+    // group 節點,但這層只吃 raster——樹狀 walk 與 text layer 落地留 C2。
     rawBitmap.close();
     const layersDir = projectStore.layersDirOf(file.pageDir);
     const restored: RasterLayer[] = [];
     for (const entry of manifestLayers) {
+      if (entry.kind !== "raster") continue;
       const layerBytes = await window.api.readImage(layersDir, entry.file);
       if (isStale()) return;
       const lbm = await createImageBitmap(new Blob([layerBytes as unknown as BlobPart]));

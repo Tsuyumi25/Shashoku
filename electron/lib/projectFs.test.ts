@@ -25,8 +25,8 @@ import {
   serializeManifest,
   serializeTranslation,
 } from "@shared/page/schema";
-import type { TranslationJson } from "@shared/page/types";
-import { TRANSLATION_SCHEMA_VERSION } from "@shared/page/types";
+import type { ManifestJson, TranslationJson } from "@shared/page/types";
+import { MANIFEST_SCHEMA_VERSION, TRANSLATION_SCHEMA_VERSION } from "@shared/page/types";
 import {
   createProject,
   importPages,
@@ -216,11 +216,12 @@ describe("readPage / writePage", () => {
       schemaVersion: TRANSLATION_SCHEMA_VERSION,
       labels: [{ id: "l1", x: 0.5, y: 0.5, groupId: null, lines: ["hi"] }],
     };
-    const m = {
-      schemaVersion: 1 as const,
+    const m: ManifestJson = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
       layers: [
         {
+          kind: "raster" as const,
           id: "bg",
           file: "background.png",
           name: "底圖",
@@ -251,7 +252,7 @@ describe("readPage / writePage", () => {
     const bgBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
     const rdBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 8, 7]);
     await writePage(pageDir, {
-      manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
+      manifestRaw: serializeManifest({ schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, layers: [] }),
       translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
       layerParts: { "background.png": bgBytes, "redraw.png": rdBytes },
     });
@@ -269,7 +270,7 @@ describe("readPage / writePage", () => {
     const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
     await expect(
       writePage(pageDir, {
-        manifestRaw: serializeManifest({ schemaVersion: 1, revision: 0, layers: [] }),
+        manifestRaw: serializeManifest({ schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, layers: [] }),
         translationRaw: serializeTranslation({ schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }),
         layerParts: { "../evil.png": new Uint8Array([1]) },
       }),
@@ -282,11 +283,12 @@ describe("readPage / writePage", () => {
     const pageDir = join(workDir, SHASHOKU_DIR, DIR_PAGES, "01");
 
     // 第二次寫入
-    const m2 = {
-      schemaVersion: 1 as const,
+    const m2: ManifestJson = {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
       layers: [
         {
+          kind: "raster" as const,
           id: "x",
           file: "x.png",
           name: "x",
@@ -412,10 +414,11 @@ describe("openProject GC(生成式檔名的孤兒清理)", () => {
     await writeFile(
       join(pageDir, PAGE_MANIFEST_FILENAME),
       serializeManifest({
-        schemaVersion: 1,
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 2,
         layers: [
           {
+            kind: "raster",
             id: "bg",
             file: "bg.rev2.png",
             name: "",
@@ -486,10 +489,11 @@ describe("寫入順序:「manifest 最後寫」 pattern", () => {
 
     await writePage(pageDir, {
       manifestRaw: serializeManifest({
-        schemaVersion: 1,
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         layers: [
           {
+            kind: "raster",
             id: "bg",
             file: "bg.png",
             name: "",

@@ -18,7 +18,7 @@
 // - flushPendingRasterSave 語意:「處理完當下 inflight + pending 內所有頁」
 
 import { parseManifest, serializeManifest } from '@shared/page/schema'
-import type { LayerEntry, ManifestJson } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION, type LayerEntry, type ManifestJson } from '@shared/page/types'
 import type { ShashokuDoc } from '@/engine/document'
 
 const DEBOUNCE_MS = 800
@@ -57,6 +57,8 @@ async function snapshotDoc(
   manifest: ManifestJson
   layerParts: Record<string, Uint8Array>
 }> {
+  // C1 現況:doc.layers 仍是扁平 RasterLayer[](型別升級留 C1.2),寫出的
+  // manifest 全部節點 kind='raster';C2 之後才會出現 text / group。
   const entries: LayerEntry[] = []
   const layerParts: Record<string, Uint8Array> = {}
   for (const layer of doc.layers) {
@@ -64,6 +66,7 @@ async function snapshotDoc(
     const file = `${layer.id}.rev${revision}.png`
     layerParts[file] = await doc.exportLayerPng(layer.id)
     entries.push({
+      kind: 'raster',
       id: layer.id,
       file,
       name: layer.name,
@@ -75,7 +78,7 @@ async function snapshotDoc(
     })
   }
   return {
-    manifest: { schemaVersion: 1, revision, layers: entries },
+    manifest: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, layers: entries },
     layerParts,
   }
 }

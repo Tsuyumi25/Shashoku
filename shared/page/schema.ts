@@ -3,11 +3,14 @@
 // pages/<basename>/{manifest.json, translation.json, ocr.json}。
 import type { SskLabel } from '../ssk/types'
 import type {
+  GroupLayerEntry,
   LayerEntry,
   ManifestJson,
   OcrBlockLabel,
   OcrBlockPersisted,
   OcrJson,
+  RasterLayerEntry,
+  TextLayerEntry,
   TranslationJson,
 } from './types'
 import {
@@ -69,33 +72,71 @@ function generateId(): string {
 
 // ── manifest.json ──
 
-function parseLayerEntry(v: unknown, index: number): LayerEntry {
-  const at = `layers[${index}]`
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const {
-    id,
-    file,
-    name,
-    visible,
-    opacity,
-    blendMode,
-    locked,
-    alphaLocked,
-  } = v
-
-  if (typeof file !== 'string' || file.length === 0) fail(`${at}.file 必須是非空字串`)
-  if (/[\\/]/.test(file)) fail(`${at}.file 只能是檔名,不可含路徑(避免逃逸出 pages/<n>/layers/)`)
+function parseLayerBase(v: Record<string, unknown>, at: string): {
+  id: string
+  name: string
+  visible: boolean
+  locked: boolean
+} {
+  const { id, name, visible, locked } = v
   if (typeof name !== 'string') fail(`${at}.name 必須是字串`)
   if (typeof visible !== 'boolean') fail(`${at}.visible 必須是布林`)
+  if (typeof locked !== 'boolean') fail(`${at}.locked 必須是布林`)
+  const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
+  return { id: finalId, name, visible, locked }
+}
+
+function parseRasterEntry(v: Record<string, unknown>, at: string): RasterLayerEntry {
+  const base = parseLayerBase(v, at)
+  const { file, opacity, blendMode, alphaLocked } = v
+  if (typeof file !== 'string' || file.length === 0) fail(`${at}.file 必須是非空字串`)
+  if (/[\\/]/.test(file)) fail(`${at}.file 只能是檔名,不可含路徑(避免逃逸出 pages/<n>/layers/)`)
   if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
     fail(`${at}.opacity 必須是 [0,1] 的數字`)
   if (typeof blendMode !== 'string' || !(BLEND_MODE_ALLOWLIST as readonly string[]).includes(blendMode))
     fail(`${at}.blendMode 必須是 ${BLEND_MODE_ALLOWLIST.join(' | ')} 之一`)
-  if (typeof locked !== 'boolean') fail(`${at}.locked 必須是布林`)
   if (typeof alphaLocked !== 'boolean') fail(`${at}.alphaLocked 必須是布林`)
+  return { kind: 'raster', ...base, file, opacity, blendMode, alphaLocked }
+}
 
-  const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
-  return { id: finalId, file, name, visible, opacity, blendMode, locked, alphaLocked }
+function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry {
+  const base = parseLayerBase(v, at)
+  const { labelId } = v
+  if (typeof labelId !== 'string' || labelId.length === 0) fail(`${at}.labelId 必須是非空字串`)
+  return { kind: 'text', ...base, labelId }
+}
+
+function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
+  const base = parseLayerBase(v, at)
+  const { children, styleBinding } = v
+  if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
+  const parsedChildren = children.map((c, i) => parseLayerEntry(c, `${at}.children[${i}]`))
+  const out: GroupLayerEntry = { kind: 'group', ...base, children: parsedChildren }
+  if (styleBinding !== undefined) {
+    if (!isRecord(styleBinding)) fail(`${at}.styleBinding 必須是物件`)
+    const { labelGroupId } = styleBinding
+    if (typeof labelGroupId !== 'string' || labelGroupId.length === 0)
+      fail(`${at}.styleBinding.labelGroupId 必須是非空字串`)
+    out.styleBinding = { labelGroupId }
+  }
+  return out
+}
+
+function parseLayerEntry(v: unknown, at: string): LayerEntry {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const kind = v.kind
+  if (kind === 'raster') return parseRasterEntry(v, at)
+  if (kind === 'text') return parseTextEntry(v, at)
+  if (kind === 'group') return parseGroupEntry(v, at)
+  fail(`${at}.kind 必須是 raster | text | group 之一(取得 ${JSON.stringify(kind)})`)
+}
+
+/** 遞迴走 tree,收集所有 raster leaf 的檔名(用於重複檢查)。 */
+function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void {
+  for (const e of entries) {
+    if (e.kind === 'raster') out.push(e.file)
+    else if (e.kind === 'group') collectRasterFiles(e.children, out)
+  }
 }
 
 export function defaultManifest(): ManifestJson {
@@ -109,10 +150,12 @@ export function parseManifest(raw: string): ManifestJson {
   if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
       fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
-    fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
+    fail(
+      `不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}(v2 以下的舊格式需以新版重建專案)`,
+    )
   }
 
-  // revision:向後相容 — 舊 manifest 沒這欄位視為 0(下次 autosave 會遞增)
+  // revision:非負整數,缺失視為 0(下次 autosave 會遞增)
   const revisionRaw = data.revision
   let revision = 0
   if (revisionRaw !== undefined) {
@@ -123,28 +166,38 @@ export function parseManifest(raw: string): ManifestJson {
 
   const layersRaw = data.layers
   if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => parseLayerEntry(l, i))
+  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`))
 
-  const files = layers.map((l) => l.file)
+  const files: string[] = []
+  collectRasterFiles(layers, files)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
   return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, layers }
+}
+
+function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
+  const base = { kind: l.kind, id: l.id, name: l.name, visible: l.visible, locked: l.locked }
+  if (l.kind === 'raster') {
+    return {
+      ...base,
+      file: l.file,
+      opacity: l.opacity,
+      blendMode: l.blendMode,
+      alphaLocked: l.alphaLocked,
+    }
+  }
+  if (l.kind === 'text') return { ...base, labelId: l.labelId }
+  // group
+  const out: Record<string, unknown> = { ...base, children: l.children.map(serializeLayerEntry) }
+  if (l.styleBinding !== undefined) out.styleBinding = { labelGroupId: l.styleBinding.labelGroupId }
+  return out
 }
 
 export function serializeManifest(m: ManifestJson): string {
   const out = {
     schemaVersion: m.schemaVersion,
     revision: m.revision,
-    layers: m.layers.map((l) => ({
-      id: l.id,
-      file: l.file,
-      name: l.name,
-      visible: l.visible,
-      opacity: l.opacity,
-      blendMode: l.blendMode,
-      locked: l.locked,
-      alphaLocked: l.alphaLocked,
-    })),
+    layers: m.layers.map(serializeLayerEntry),
   }
   return `${JSON.stringify(out, null, 2)}\n`
 }
