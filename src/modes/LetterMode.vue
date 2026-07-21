@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, nextTick } 
 import { ShashokuDoc } from "@/engine/document";
 import { createRasterLayer, rasterLayerFromBitmap, rasterLayerFromEntry } from "@/engine/layer";
 import type { RasterLayer } from "@/engine/types";
+import type { Layer } from "@/engine/layer-tree";
 import { parseManifest, parseOcr, serializeOcr } from "@shared/page/schema";
 import { stampBrush } from "@/engine/brush";
 import { fillScreentoneRect } from "@/engine/screentone";
@@ -310,11 +311,12 @@ function resizeCanvases(): void {
  * loadPage(專案模式) 走 manifest → 各層獨立 PNG 重建;
  * onPickFile(單檔模式) 只放單一底圖層。
  */
-function buildDoc(width: number, height: number, layers: RasterLayer[]): void {
+function buildDoc(width: number, height: number, layers: Layer[]): void {
   const d = new ShashokuDoc(width, height);
   for (const layer of layers) d.insertLayer(layer, d.layers.length);
   inpaintLayerId = null;
-  activeLayerId.value = layers[0]?.id ?? null;
+  const firstRaster = layers.find((l): l is RasterLayer => l.kind === "raster");
+  activeLayerId.value = firstRaster?.id ?? null;
 
   doc.value = d;
   editor.history.clear(); // 換頁 = 新文件,舊 undo 閉包指向舊 doc,必清
@@ -445,18 +447,52 @@ async function loadPage(name: string, isStale: () => boolean = () => false): Pro
     rawBitmap.close();
     buildDoc(w, h, [base]);
   } else {
-    // 已編輯過:整組從 layers/*.png 還原。C1 現況:manifest v2 允許 text /
-    // group 節點,但這層只吃 raster——樹狀 walk 與 text layer 落地留 C2。
+    // 已編輯過:遞迴 walk manifest 還原完整 tree,text/group 節點的位置
+    // 由用戶拖曳決定,是 SSOT——不能丟給 applyNormalize 重建
     rawBitmap.close();
     const layersDir = projectStore.layersDirOf(file.pageDir);
-    const restored: RasterLayer[] = [];
+    const restoreEntry = async (
+      entry: import("@shared/page/types").LayerEntry,
+    ): Promise<Layer | null> => {
+      if (entry.kind === "raster") {
+        const layerBytes = await window.api.readImage(layersDir, entry.file);
+        if (isStale()) return null;
+        const lbm = await createImageBitmap(new Blob([layerBytes as unknown as BlobPart]));
+        const layer = rasterLayerFromEntry(entry, lbm, w, h);
+        lbm.close();
+        return layer;
+      }
+      if (entry.kind === "text") {
+        return {
+          kind: "text",
+          id: entry.id,
+          name: entry.name,
+          visible: entry.visible,
+          locked: entry.locked,
+          labelId: entry.labelId,
+        };
+      }
+      const children: Layer[] = [];
+      for (const child of entry.children) {
+        const restored = await restoreEntry(child);
+        if (restored === null) return null;
+        children.push(restored);
+      }
+      return {
+        kind: "group",
+        id: entry.id,
+        name: entry.name,
+        visible: entry.visible,
+        locked: entry.locked,
+        children,
+        ...(entry.styleBinding ? { styleBinding: entry.styleBinding } : {}),
+      };
+    };
+    const restored: Layer[] = [];
     for (const entry of manifestLayers) {
-      if (entry.kind !== "raster") continue;
-      const layerBytes = await window.api.readImage(layersDir, entry.file);
-      if (isStale()) return;
-      const lbm = await createImageBitmap(new Blob([layerBytes as unknown as BlobPart]));
-      restored.push(rasterLayerFromEntry(entry, lbm, w, h));
-      lbm.close();
+      const layer = await restoreEntry(entry);
+      if (layer === null) return;
+      restored.push(layer);
     }
     buildDoc(w, h, restored);
   }
