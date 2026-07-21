@@ -51,8 +51,13 @@ export function labelTextCss(style: TextStyle): Record<string, string> {
     Number.isFinite(style.leadingPercent) && style.leadingPercent > 0
       ? style.leadingPercent
       : DEFAULT_TEXT_STYLE.leadingPercent
+  // 字型名可能含 [ ] 空格中日文等非 CSS ident 字元(尤其匯入字型),
+  // 直接塞進 CSS font-family 會被當 identifier 解析失敗 fallback。
+  // 用單引號包起來,去掉字串內的單引號(防注入)
+  const rawFamily = style.fontFamily.trim() || DEFAULT_TEXT_STYLE.fontFamily
+  const fontFamily = `'${rawFamily.replaceAll("'", '')}'`
   return {
-    fontFamily: style.fontFamily.trim() || DEFAULT_TEXT_STYLE.fontFamily,
+    fontFamily,
     fontSize: `${fontSizePx}px`,
     lineHeight: String(leadingPercent / 100),
     color: style.color,

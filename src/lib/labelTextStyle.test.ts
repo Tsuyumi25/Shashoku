@@ -72,8 +72,18 @@ describe('labelTextCss', () => {
     expect(css.whiteSpace).toBe('pre')
   })
 
-  it('空字型名退回 sans-serif', () => {
-    expect(labelTextCss(style({ fontFamily: '  ' })).fontFamily).toBe('sans-serif')
+  it('空字型名退回 sans-serif(用單引號 quote,含特殊字元的匯入字型也 work)', () => {
+    expect(labelTextCss(style({ fontFamily: '  ' })).fontFamily).toBe("'sans-serif'")
+  })
+
+  it('字型名含 [] 特殊字元也被 quote(匯入字型)', () => {
+    expect(labelTextCss(style({ fontFamily: '[工具箱]拙黑体-简体' })).fontFamily).toBe(
+      "'[工具箱]拙黑体-简体'",
+    )
+  })
+
+  it('字型名內的單引號被剝除(避免 CSS 注入)', () => {
+    expect(labelTextCss(style({ fontFamily: "a'b" })).fontFamily).toBe("'ab'")
   })
 
   it('輸入框暫時為空或非正數時退回預設字級', () => {
