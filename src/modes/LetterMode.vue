@@ -115,6 +115,7 @@ const perf = reactive({
 });
 
 const spaceDown = ref(false);
+const altDown = ref(false); // Alt hold:brush/erase 期間暫時吸管(PS Alt-click 慣例)
 const toneRect = ref<Rect | null>(null); // 網點/選取拖曳中的預覽(doc 座標)
 
 // R+drag 旋轉視角(PS Rotate View):繞視窗中心,Shift 吸附 15°,Esc 回正
@@ -795,6 +796,23 @@ let dragLabelMoved = false;
 let dragLabelCopy = false;
 let dragLabelDuplicate: LabelItem | null = null;
 
+/** 從 doc 座標 (x, y) sample 合成後的 raster 顏色,回 #rrggbb。
+ *  用 1x1 offscreen 跑 compositeInto(不傳 drawText → text 節點自動 skip),
+ *  只 sample raster 層(對翻譯場景合理:吸原稿顏色,不吸自己打的譯文顏色)。 */
+function pickColorAtDoc(x: number, y: number): string | null {
+  const d = doc.value;
+  if (!d) return null;
+  const cv = document.createElement("canvas");
+  cv.width = 1;
+  cv.height = 1;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.translate(-Math.floor(x), -Math.floor(y));
+  d.compositeInto(ctx);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
 function stampAt(x: number, y: number): void {
   const d = doc.value!;
   const layer = d.findRasterLayer(activeLayerId.value);
@@ -856,6 +874,12 @@ function onPointerDown(e: PointerEvent): void {
   const p = toDoc(e);
 
   if (tool.value === "brush" || tool.value === "erase") {
+    // Alt+左鍵 = 吸管(PS 慣例):sample 合成後的 raster 顏色到 brush.color,不起筆
+    if (altDown.value) {
+      const c = pickColorAtDoc(p.x, p.y);
+      if (c) brush.color = c;
+      return;
+    }
     const layer = doc.value.findRasterLayer(activeLayerId.value);
     if (!layer || layer.locked) return; // 鎖定層不起筆
     painting.value = true;
@@ -1508,6 +1532,7 @@ function onKeyDown(e: KeyboardEvent): void {
     spaceDown.value = true;
     e.preventDefault();
   }
+  if (e.key === "Alt" && !isTyping(e)) altDown.value = true;
   if ((e.key === "Delete" || e.key === "Backspace") && !isTyping(e)) {
     if (
       editorStore.selectedLabelId &&
@@ -1536,7 +1561,13 @@ function onKeyUp(e: KeyboardEvent): void {
   // 不 guard mode:切走前按住的鍵(Space/R)要能歸零
   capsLock.value = e.getModifierState("CapsLock"); // keydown/keyup 都同步,吃掉平台時序差
   if (e.code === "Space") spaceDown.value = false;
+  if (e.key === "Alt") altDown.value = false;
   if (e.key.toLowerCase() === "r") rDown.value = false;
+}
+// Alt+Tab 切走時 keyup 可能不 fire,失焦強制清 altDown 避免鎖死吸管態
+function onWindowBlur(): void {
+  altDown.value = false;
+  spaceDown.value = false;
 }
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement;
@@ -1630,6 +1661,7 @@ onMounted(() => {
   editor.setRedraw(scheduleRedraw);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onWindowBlur);
   window.api?.onOcrStatus((e) => {
     sidecarStatus.value =
       e.state === "starting"
@@ -1654,6 +1686,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeyDown);
   window.removeEventListener("keyup", onKeyUp);
+  window.removeEventListener("blur", onWindowBlur);
   ro?.disconnect();
   stopAnts();
 });
@@ -1693,7 +1726,8 @@ const showBrushCursor = computed(
     !brushHud.value &&
     !rotating.value &&
     !rDown.value &&
-    !spaceDown.value,
+    !spaceDown.value &&
+    !altDown.value, // Alt 期間走吸管,不顯示筆刷圓
 );
 const brushCursorStyle = computed(() => {
   const p = cursorPos.value;
@@ -1716,6 +1750,8 @@ const cursorClass = computed(() => {
   if (spaceDown.value || panning || tool.value === "hand") return "cursor-grab";
   if (tool.value === "move") return "cursor-default";
   if (tool.value === "text") return "cursor-text";
+  if ((tool.value === "brush" || tool.value === "erase") && altDown.value)
+    return "cursor-crosshair"; // 吸管暫態:crosshair(Tailwind 沒 eyedropper cursor)
   if (showBrushCursor.value) return "cursor-none"; // 圓圈輪廓即游標
   return "cursor-crosshair";
 });
