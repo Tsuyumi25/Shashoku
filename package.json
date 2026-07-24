@@ -1,0 +1,24 @@
+{
+  "name": "shashoku",
+  "version": "0.0.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "main": "out/main/index.js",
+  "description": "Shashoku — a manga translation and typesetting tool",
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.11",
+    "electron": "~43.1",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.8",
+    "vite": "^7"
+  }
+}

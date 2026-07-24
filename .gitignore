@@ -1,0 +1,12 @@
+node_modules/
+out/
+dist/
+.tsbuild/
+*.log
+target/
+crates/*/target/
+crates/*/index.js
+crates/*/index.d.ts
+crates/*/*.node
+.env
+.env.local
