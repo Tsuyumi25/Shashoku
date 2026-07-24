@@ -1,5 +1,8 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { createWindow } from "./window";
+import { registerProjectHandlers } from "./ipc/project";
+import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
+import { registerWindowHandlers } from "./ipc/window";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -17,6 +20,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  registerProjectHandlers();
+  registerShashokuProjectHandlers();
+  registerWindowHandlers();
   mainWindow = createWindow();
   mainWindow.once("closed", () => {
     mainWindow = null;
