@@ -4,11 +4,6 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --layout-sidebar-w: 11rem;
-  --layout-panel-w: 20rem;
-}
-
-:root {
   --background: oklch(0.9818 0.0054 95.0986);
   --foreground: oklch(0.3438 0.0269 95.7226);
   --card: oklch(0.9665 0.0067 97.3521);

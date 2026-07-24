@@ -1,29 +1,103 @@
 <template>
-  <div class="flex h-full">
-    <TranslateSidebar />
-
-    <main class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <section class="relative min-h-0 min-w-0 flex-1 border-r border-border">
-        <CanvasView />
+  <SplitterGroup direction="horizontal" class="h-full">
+    <SplitterPanel :order="1" :default-size="50" :min-size="25" class="flex min-w-0 flex-col">
+      <section class="relative min-h-0 flex-1">
+        <CanvasView v-show="ui.view === 'translate'" />
+        <div v-show="ui.view === 'project-manager'" class="absolute inset-0">
+          <ProjectManagerMode />
+        </div>
       </section>
       <CanvasBottomBar />
-    </main>
+    </SplitterPanel>
 
-    <aside class="flex shrink-0 flex-col bg-card" style="width: var(--layout-panel-w)">
-      <div class="h-[45%] min-h-0">
-        <LabelTable />
+    <ResizeHandle />
+
+    <SplitterPanel
+      :order="2"
+      :default-size="25"
+      :min-size="12"
+      class="flex min-w-0 flex-col bg-card"
+    >
+      <div class="flex h-7 shrink-0 items-center border-b border-border px-2 select-none">
+        <span class="text-xs font-medium text-muted-foreground">標籤</span>
+        <span class="ml-auto text-xs text-muted-foreground">{{ labelCount }} 條</span>
       </div>
-      <div class="min-h-0 flex-1">
-        <TranslateEditor />
+      <SplitterGroup direction="vertical" class="min-h-0 flex-1">
+        <SplitterPanel :order="1" :default-size="60" :min-size="20" class="min-h-0">
+          <LabelTable />
+        </SplitterPanel>
+        <ResizeHandle vertical />
+        <SplitterPanel :order="2" :default-size="40" :min-size="20" class="min-h-0">
+          <TranslateEditor />
+        </SplitterPanel>
+      </SplitterGroup>
+    </SplitterPanel>
+
+    <ResizeHandle />
+
+    <SplitterPanel
+      :order="3"
+      :default-size="25"
+      :min-size="12"
+      class="flex min-w-0 flex-col bg-card"
+    >
+      <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-2 select-none">
+        <span class="text-xs font-medium text-muted-foreground">分組</span>
+        <button
+          type="button"
+          class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="新增群組"
+          :disabled="!project.isOpen"
+          @click="onAddGroup"
+        >
+          <Plus :size="14" />
+        </button>
       </div>
-    </aside>
-  </div>
+      <SplitterGroup direction="vertical" class="min-h-0 flex-1">
+        <SplitterPanel :order="1" :default-size="45" :min-size="20" class="min-h-0">
+          <GroupList />
+        </SplitterPanel>
+        <ResizeHandle vertical />
+        <SplitterPanel :order="2" :default-size="55" :min-size="20" class="min-h-0">
+          <StylePanel />
+        </SplitterPanel>
+      </SplitterGroup>
+    </SplitterPanel>
+  </SplitterGroup>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { Plus } from '@lucide/vue'
+import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
+import GroupList from '@/components/GroupList.vue'
 import LabelTable from '@/components/LabelTable.vue'
+import ResizeHandle from '@/components/ResizeHandle.vue'
+import StylePanel from '@/components/StylePanel.vue'
 import TranslateEditor from '@/components/TranslateEditor.vue'
-import TranslateSidebar from '@/components/TranslateSidebar.vue'
+import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
+import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
+
+const ui = useUiStore()
+const project = useProjectStore()
+const editor = useEditorStore()
+
+const labelCount = computed(() =>
+  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels.length ?? 0) : 0,
+)
+
+function onAddGroup() {
+  const taken = new Set(project.header.groups.map((g) => g.name))
+  let n = project.header.groups.length + 1
+  while (taken.has(`群組${n}`)) n++
+
+  const before = project.header.groups.length
+  if (!editor.cmdAddGroup(`群組${n}`)) return
+  const added = project.header.groups[before]
+  if (added) editor.activeGroupId = added.id
+}
 </script>

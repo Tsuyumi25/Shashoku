@@ -1,52 +1,66 @@
 <template>
-  <div class="flex h-full flex-col">
-    <Titlebar
-      :is-dark="isDark"
-      @toggle-theme="toggleTheme"
-    />
-    <main class="min-h-0 flex-1">
-      <TranslateMode />
-    </main>
+  <div class="relative h-full">
+    <SplitterGroup direction="horizontal" class="h-full">
+      <SplitterPanel
+        :order="1"
+        :default-size="20"
+        :min-size="10"
+        class="flex min-w-0 flex-col border-r border-border bg-card"
+      >
+        <SidebarHeader />
+        <div class="min-h-0 flex-1 overflow-y-auto p-2">
+          <div class="px-1 text-xs text-muted-foreground">Sidebar</div>
+        </div>
+      </SplitterPanel>
+
+      <ResizeHandle />
+
+      <SplitterPanel :order="2" :default-size="80" :min-size="40" class="flex min-w-0 flex-col">
+        <div
+          class="flex h-9 shrink-0 items-center justify-end border-b border-border select-none"
+          style="-webkit-app-region: drag"
+        >
+          <ThemeToggle />
+          <WindowControls />
+        </div>
+
+        <div class="min-h-0 flex-1">
+          <TranslateMode />
+        </div>
+      </SplitterPanel>
+    </SplitterGroup>
+
+    <div
+      class="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-9 items-center justify-center px-3"
+    >
+      <span class="truncate text-sm text-muted-foreground">{{ title }}</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick } from 'vue'
-import { useDark } from '@vueuse/core'
-import Titlebar from '@/components/Titlebar.vue'
+import { computed } from 'vue'
+import { useEventListener } from '@vueuse/core'
+import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import ResizeHandle from '@/components/ResizeHandle.vue'
+import SidebarHeader from '@/components/SidebarHeader.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import WindowControls from '@/components/WindowControls.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
+import { useProjectStore } from '@/stores/projectStore'
 
-const isDark = useDark({ initialValue: 'light' })
+const project = useProjectStore()
 
-function toggleTheme(e: MouseEvent) {
-  if (!document.startViewTransition) {
-    isDark.value = !isDark.value
-    return
+const title = computed(() => {
+  if (!project.isOpen) return 'Shashoku 写植'
+  const dir = project.folderPath?.split('/').pop() ?? ''
+  return `${project.dirty ? '● ' : ''}${dir}`
+})
+
+useEventListener(window, 'keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (project.isOpen) void project.save().catch((err) => console.error(err))
   }
-  const x = e.clientX
-  const y = e.clientY
-  const endRadius = Math.hypot(
-    Math.max(x, window.innerWidth - x),
-    Math.max(y, window.innerHeight - y),
-  )
-  const transition = document.startViewTransition(async () => {
-    isDark.value = !isDark.value
-    await nextTick()
-  })
-  transition.ready.then(() => {
-    document.documentElement.animate(
-      {
-        clipPath: [
-          `circle(0px at ${x}px ${y}px)`,
-          `circle(${endRadius}px at ${x}px ${y}px)`,
-        ],
-      },
-      {
-        duration: 450,
-        easing: 'ease-in-out',
-        pseudoElement: '::view-transition-new(root)',
-      },
-    )
-  })
-}
+})
 </script>

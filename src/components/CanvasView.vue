@@ -1,32 +1,88 @@
 <template>
-  <div class="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-muted">
-    <div class="relative aspect-[2/3] h-[92%] max-w-[92%] bg-white shadow-md ring-1 ring-black/10">
-      <div class="pointer-events-none absolute inset-0 flex flex-col text-[10px] tracking-widest text-neutral-400 select-none">
-        <div class="flex flex-1 items-start justify-center pt-6">page 001</div>
+  <div
+    class="canvas-area relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-muted"
+  >
+    <template v-if="currentFile">
+      <div v-if="src" class="relative">
+        <img :src="src" class="canvas-image pointer-events-none block" alt="" />
+
+        <LabelMarker
+          v-for="(label, i) in currentFile.labels"
+          :key="label.id"
+          :index="i + 1"
+          :x="label.x"
+          :y="label.y"
+          :color="colorOf(label.groupId)"
+          :selected="label.id === editor.selectedLabelId"
+          @select="editor.selectedLabelId = label.id"
+        />
       </div>
 
-      <LabelMarker
-        v-for="m in markers"
-        :key="m.index"
-        :index="m.index"
-        :x="m.x"
-        :y="m.y"
-        :color="m.color"
-        :selected="m.index === 2"
-      />
-    </div>
+      <div v-else class="text-xs text-muted-foreground select-none">
+        {{ currentFile.badge === 'ok' ? '載入中…' : `圖檔不存在：${currentFile.filename}` }}
+      </div>
+    </template>
+
+    <div v-else class="text-sm text-muted-foreground select-none">開啟一個資料夾開始工作</div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import LabelMarker from '@/components/LabelMarker.vue'
+import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
 
-const markers = [
-  { index: 1, x: 22, y: 14, color: '#e26a3b' },
-  { index: 2, x: 68, y: 22, color: '#3b7fe2' },
-  { index: 3, x: 34, y: 42, color: '#e26a3b' },
-  { index: 4, x: 72, y: 56, color: '#3b7fe2' },
-  { index: 5, x: 40, y: 74, color: '#7a7a7a' },
-  { index: 6, x: 60, y: 86, color: '#e26a3b' },
-]
+const project = useProjectStore()
+const editor = useEditorStore()
+
+const currentFile = computed(() =>
+  editor.currentFilename ? (project.fileByName(editor.currentFilename) ?? null) : null,
+)
+
+function colorOf(groupId: string | null): string {
+  if (!groupId) return 'rgb(128, 128, 128)'
+  const g = project.header.groups.find((gg) => gg.id === groupId)
+  return g?.color ?? 'rgb(128, 128, 128)'
+}
+
+const src = ref<string | null>(null)
+let currentUrl: string | null = null
+
+function revoke() {
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl)
+    currentUrl = null
+  }
+}
+
+watch(
+  () => [project.rawsDir, editor.currentFilename, currentFile.value?.badge] as const,
+  async ([rawsDir, filename, badge]) => {
+    revoke()
+    src.value = null
+    if (!rawsDir || !filename || badge !== 'ok') return
+    try {
+      const bytes = await window.api.readImage(rawsDir, filename)
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
+      currentUrl = url
+      src.value = url
+    } catch (err) {
+      console.error(err)
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(revoke)
 </script>
+
+<style scoped>
+.canvas-area {
+  container-type: size;
+}
+.canvas-image {
+  max-height: 92cqh;
+  max-width: 92cqw;
+}
+</style>

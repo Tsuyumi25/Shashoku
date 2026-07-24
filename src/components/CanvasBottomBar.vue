@@ -13,15 +13,21 @@
 
     <div class="flex-1" />
 
-    <select class="h-5 max-w-64 min-w-0 rounded border border-input bg-background px-1 text-xs">
-      <option>001.png（6）</option>
-      <option>002.png</option>
-      <option>003.png</option>
+    <select
+      class="h-5 max-w-64 min-w-0 rounded border border-input bg-background px-1 text-xs disabled:opacity-50"
+      :value="editor.currentFilename ?? ''"
+      :disabled="!project.isOpen"
+      @change="onSelect"
+    >
+      <option v-if="!project.isOpen" value="">未開啟專案</option>
+      <option v-for="f in project.files" :key="f.filename" :value="f.filename">
+        {{ f.filename }}{{ f.labels.length > 0 ? `（${f.labels.length}）` : '' }}
+      </option>
     </select>
-    <button class="page-btn" title="上一頁">
+    <button class="page-btn" title="上一頁" @click="editor.pageBy(-1)">
       <ChevronLeft :size="15" />
     </button>
-    <button class="page-btn" title="下一頁">
+    <button class="page-btn" title="下一頁" @click="editor.pageBy(1)">
       <ChevronRight :size="15" />
     </button>
   </div>
@@ -29,6 +35,15 @@
 
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, Maximize, ZoomIn, ZoomOut } from '@lucide/vue'
+import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
+
+const project = useProjectStore()
+const editor = useEditorStore()
+
+function onSelect(e: Event) {
+  editor.selectFile((e.target as HTMLSelectElement).value)
+}
 </script>
 
 <style scoped>

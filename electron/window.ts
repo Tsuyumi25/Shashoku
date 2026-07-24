@@ -7,6 +7,7 @@ export function createWindow(): BrowserWindow {
     height: 900,
     title: "Shashoku",
     backgroundColor: "#262624",
+    frame: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,

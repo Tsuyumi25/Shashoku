@@ -1,10 +1,5 @@
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2 select-none">
-      <span class="text-xs text-muted-foreground">標籤</span>
-      <span class="ml-auto text-xs text-muted-foreground">{{ rows.length }} 條</span>
-    </div>
-
     <div class="min-h-0 flex-1 overflow-y-auto select-none">
       <table class="w-full border-collapse">
         <thead class="sticky top-0 bg-card text-xs text-muted-foreground">
@@ -16,22 +11,33 @@
         </thead>
         <tbody>
           <tr
-            v-for="(row, i) in rows"
-            :key="row.id"
+            v-for="(label, i) in labels"
+            :key="label.id"
             class="cursor-default border-b border-border/40 hover:bg-secondary/40"
-            :class="[i === 1 && 'bg-accent/50']"
+            :class="[label.id === editor.selectedLabelId && 'bg-accent/50']"
+            @click="editor.selectedLabelId = label.id"
           >
-            <td class="px-2 py-1 tabular-nums">{{ row.id }}</td>
+            <td class="px-2 py-1 tabular-nums">{{ i + 1 }}</td>
             <td class="px-2 py-1">
-              <span class="inline-flex items-center gap-1.5">
+              <span class="inline-flex max-w-full items-center gap-1.5 align-middle">
                 <span
-                  class="inline-block h-2.5 w-2.5 rounded-full"
-                  :style="{ backgroundColor: row.color }"
+                  class="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                  :style="{ backgroundColor: colorOf(label.groupId) }"
                 />
-                <span class="text-xs">{{ row.group }}</span>
+                <span
+                  class="min-w-0 truncate text-xs"
+                  :class="label.groupId === null ? 'text-muted-foreground' : ''"
+                >{{ nameOf(label.groupId) }}</span>
               </span>
             </td>
-            <td class="h-7 max-w-0 truncate px-2 py-1 text-sm">{{ row.text }}</td>
+            <td class="h-7 max-w-0 truncate px-2 py-1 text-sm">
+              {{ label.text.split('\n')[0] || '(未翻譯)' }}
+            </td>
+          </tr>
+          <tr v-if="labels.length === 0">
+            <td colspan="3" class="px-2 py-4 text-center text-xs text-muted-foreground">
+              {{ project.isOpen ? '本頁無標籤' : '尚未開啟專案' }}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -40,12 +46,24 @@
 </template>
 
 <script setup lang="ts">
-const rows = [
-  { id: 1, group: '對白', color: '#e26a3b', text: 'そんな…！' },
-  { id: 2, group: '對白', color: '#3b7fe2', text: 'なにを言ってるんだ、お前は。' },
-  { id: 3, group: '對白', color: '#e26a3b', text: 'だって、これは——' },
-  { id: 4, group: '對白', color: '#3b7fe2', text: 'もういい。次に行こう。' },
-  { id: 5, group: '音效', color: '#7a7a7a', text: 'ガタン' },
-  { id: 6, group: '對白', color: '#e26a3b', text: 'ま、待って！' },
-]
+import { computed } from 'vue'
+import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
+
+const project = useProjectStore()
+const editor = useEditorStore()
+
+const labels = computed(() =>
+  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels ?? []) : [],
+)
+
+function colorOf(groupId: string | null): string {
+  if (!groupId) return 'rgb(128, 128, 128)'
+  return project.header.groups.find((g) => g.id === groupId)?.color ?? 'rgb(128, 128, 128)'
+}
+
+function nameOf(groupId: string | null): string {
+  if (!groupId) return '未分組'
+  return project.header.groups.find((g) => g.id === groupId)?.name ?? '未分組'
+}
 </script>
