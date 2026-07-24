@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "composite": true,
-    "outDir": ".tsbuild/node",
-    "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo",
+    "outDir": ".tsbuild/renderer",
+    "tsBuildInfoFile": ".tsbuild/renderer.tsbuildinfo",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -14,15 +14,18 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node"],
+    "jsx": "preserve",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
     "noEmit": true,
     "paths": {
+      "@/*": ["./src/*"],
       "@shared/*": ["./shared/*"]
     }
   },
   "include": [
-    "electron/**/*",
-    "shared/**/*",
-    "electron.vite.config.ts"
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue"
   ]
 }
