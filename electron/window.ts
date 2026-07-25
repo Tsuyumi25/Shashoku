@@ -12,6 +12,11 @@ export function createWindow(): BrowserWindow {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      // The default sandbox restricts preload's require() to a whitelist
+      // (electron/events/timers/url), which cannot reach the engine addon.
+      // contextIsolation stays on, so the renderer still has no Node access —
+      // this only gives preload back a full require() to load the .node.
+      sandbox: false,
     },
   });
 

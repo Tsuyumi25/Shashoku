@@ -1,10 +1,18 @@
 <template>
-  <SplitterGroup direction="horizontal" class="h-full">
+  <SplitterGroup
+    direction="horizontal"
+    class="h-full"
+    auto-save-id="translate:columns"
+    :storage="preferences.panelStorage"
+  >
     <SplitterPanel :order="1" :default-size="50" :min-size="25" class="flex min-w-0 flex-col">
       <section class="relative min-h-0 flex-1">
         <CanvasView v-show="ui.view === 'translate'" />
         <div v-show="ui.view === 'project-manager'" class="absolute inset-0">
           <ProjectManagerMode />
+        </div>
+        <div v-show="fontPicker.isOpen.value" class="absolute inset-0 z-10">
+          <FontPickerOverlay />
         </div>
       </section>
       <CanvasBottomBar />
@@ -22,7 +30,12 @@
         <span class="text-xs font-medium text-muted-foreground">標籤</span>
         <span class="ml-auto text-xs text-muted-foreground">{{ labelCount }} 條</span>
       </div>
-      <SplitterGroup direction="vertical" class="min-h-0 flex-1">
+      <SplitterGroup
+        direction="vertical"
+        class="min-h-0 flex-1"
+        auto-save-id="translate:labels"
+        :storage="preferences.panelStorage"
+      >
         <SplitterPanel :order="1" :default-size="60" :min-size="20" class="min-h-0">
           <LabelTable />
         </SplitterPanel>
@@ -53,7 +66,12 @@
           <Plus :size="14" />
         </button>
       </div>
-      <SplitterGroup direction="vertical" class="min-h-0 flex-1">
+      <SplitterGroup
+        direction="vertical"
+        class="min-h-0 flex-1"
+        auto-save-id="translate:groups"
+        :storage="preferences.panelStorage"
+      >
         <SplitterPanel :order="1" :default-size="45" :min-size="20" class="min-h-0">
           <GroupList />
         </SplitterPanel>
@@ -72,19 +90,24 @@ import { Plus } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
+import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import GroupList from '@/components/GroupList.vue'
 import LabelTable from '@/components/LabelTable.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
 import TranslateEditor from '@/components/TranslateEditor.vue'
+import { useFontPicker } from '@/composables/useFontPicker'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const ui = useUiStore()
 const project = useProjectStore()
 const editor = useEditorStore()
+const preferences = usePreferencesStore()
+const fontPicker = useFontPicker()
 
 const labelCount = computed(() =>
   editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels.length ?? 0) : 0,

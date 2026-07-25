@@ -8,6 +8,8 @@ export const CHANNELS = {
   writePage: "shashoku:write-page",
   writeProjectMeta: "shashoku:write-project-meta",
   readImage: "project:readImage",
+  readPreferences: "preferences:read",
+  writePreferences: "preferences:write",
   windowMinimize: "window:minimize",
   windowMaximize: "window:maximize",
   windowClose: "window:close",
@@ -55,6 +57,9 @@ export interface ShashokuApi {
   writePage(pageDir: string, input: WritePageInput): Promise<void>;
   writeProjectMeta(shashokuDir: string, projectMetaRaw: string): Promise<void>;
   readImage(folder: string, name: string): Promise<Uint8Array>;
+  /** Raw preferences.json contents; "" on first run. */
+  readPreferences(): Promise<string>;
+  writePreferences(raw: string): Promise<void>;
   windowMinimize(): void;
   windowMaximize(): void;
   windowClose(): void;

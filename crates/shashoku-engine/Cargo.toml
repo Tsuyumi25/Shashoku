@@ -1,0 +1,22 @@
+[package]
+name = "shashoku-engine"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Shashoku manga typesetting text engine (native Node addon)"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi9"] }
+napi-derive = "3"
+
+memmap2 = "0.9"
+skrifa = "0.45"
+harfrust = "0.12"
+tiny-skia = "0.12"
+
+[build-dependencies]
+napi-build = "2"

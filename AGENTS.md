@@ -31,6 +31,7 @@ this repository.
 
 ```
 pnpm install
+pnpm engine:build
 pnpm dev
 ```
 
@@ -38,10 +39,18 @@ pnpm dev
 Electron 42+ removed its own postinstall hook, so downstream repositories
 have to install the binary explicitly.
 
+`pnpm engine:build` compiles the native addon and is a separate step on
+purpose: a cold Rust build takes minutes and should not be charged to
+everyone who installs. Working on the repository therefore needs a Rust
+toolchain (the flake's devShell provides one); people running a packaged
+build do not, since the `.node` ships inside it.
+
 ## Architecture
 
 Layout as of this commit — modules land incrementally:
 
 - `electron/` — main + preload
-- (planned: `shared/` data model + IPC channels, `crates/` Rust engine,
-  `src/` Vue renderer)
+- `shared/` — data model, IPC channels, engine surface
+- `crates/shashoku-engine` — Rust text engine, a native Node addon that
+  preload requires directly rather than reaching over IPC
+- `src/` — Vue renderer

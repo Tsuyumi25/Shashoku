@@ -12,9 +12,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "vue-tsc -b"
+    "typecheck": "vue-tsc -b",
+    "engine:build": "pnpm --filter @shashoku/engine build",
+    "engine:build:debug": "pnpm --filter @shashoku/engine build:debug"
   },
   "devDependencies": {
+    "@napi-rs/cli": "^3.7.4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.19.11",
     "@vitejs/plugin-vue": "^6.0.8",
@@ -28,6 +31,8 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.26.0",
+    "@shashoku/engine": "workspace:*",
+    "@tanstack/vue-virtual": "^3.13.34",
     "@vueuse/core": "^14.3.0",
     "clsx": "^2.1.1",
     "pinia": "^4.0.2",

@@ -45,6 +45,8 @@
         packages = with pkgs; [
           nodejs_22
           pnpm_10
+          cargo
+          rustc
         ];
         shellHook = ''
           export NIX_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath electronLibs}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"

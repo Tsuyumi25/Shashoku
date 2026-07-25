@@ -1,18 +1,7 @@
 <template>
   <div class="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
     <label class="text-muted-foreground">字型</label>
-    <input
-      v-if="fontEditing"
-      ref="fontInput"
-      class="h-6 w-full rounded border border-primary bg-background px-1.5"
-      :value="value.fontFamily"
-      placeholder="輸入字型名稱"
-      @keydown.esc="fontEditing = false"
-      @keydown.enter="commitFont($event)"
-      @blur="commitFont($event)"
-    />
     <button
-      v-else
       type="button"
       class="flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded border border-input bg-background px-1.5 text-left hover:border-primary"
       :title="value.fontFamily || '選擇字型'"
@@ -145,10 +134,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from 'vue'
+import { computed } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import type { StrokeEffect, StrokePosition, TextStyle } from '@shared/text-style/types'
+import { useFontPicker } from '@/composables/useFontPicker'
 
 const props = defineProps<{
   value: TextStyle
@@ -158,22 +148,23 @@ const emit = defineEmits<{
   patch: [patch: Partial<TextStyle>]
 }>()
 
-const fontEditing = ref(false)
-const fontInput = useTemplateRef<HTMLInputElement>('fontInput')
+const picker = useFontPicker()
 
 async function openFont() {
-  fontEditing.value = true
-  await nextTick()
-  fontInput.value?.focus()
-  fontInput.value?.select()
-}
-
-function commitFont(e: Event) {
-  if (!fontEditing.value) return
-  fontEditing.value = false
-  const name = (e.target as HTMLInputElement).value.trim()
-  if (name === '' || name === props.value.fontFamily) return
-  emit('patch', { fontFamily: name })
+  const chosen = await picker.open({
+    current: props.value.fontFamily,
+    fillColor: props.value.color,
+    stroke:
+      stroke.value === null
+        ? undefined
+        : {
+            width: stroke.value.width,
+            color: stroke.value.color,
+            position: stroke.value.position,
+          },
+  })
+  if (chosen === null || chosen === props.value.fontFamily) return
+  emit('patch', { fontFamily: chosen })
 }
 
 const stroke = computed<StrokeEffect | null>(

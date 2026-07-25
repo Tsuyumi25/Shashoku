@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { createWindow } from "./window";
+import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
 import { registerWindowHandlers } from "./ipc/window";
@@ -20,6 +21,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  registerPreferencesHandlers();
   registerProjectHandlers();
   registerShashokuProjectHandlers();
   registerWindowHandlers();
