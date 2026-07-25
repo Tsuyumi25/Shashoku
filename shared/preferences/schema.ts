@@ -27,7 +27,15 @@ export function parsePreferences(raw: string): Preferences {
   }
   if (!isRecord(parsed)) return prefs;
 
-  const { fontFavorites, fontSamplePx, panelLayout } = parsed;
+  const {
+    fontFavorites,
+    fontSamplePx,
+    fontSampleText,
+    missingGlyphMode,
+    markMissingGlyphs,
+    fontFallbackFamily,
+    panelLayout,
+  } = parsed;
 
   if (Array.isArray(fontFavorites)) {
     prefs.fontFavorites = fontFavorites.filter(
@@ -39,6 +47,22 @@ export function parsePreferences(raw: string): Preferences {
       MAX_FONT_SAMPLE_PX,
       Math.max(MIN_FONT_SAMPLE_PX, Math.round(fontSamplePx)),
     );
+  }
+  if (typeof fontSampleText === "string") {
+    prefs.fontSampleText = fontSampleText;
+  }
+  if (
+    missingGlyphMode === "hide" ||
+    missingGlyphMode === "substitute" ||
+    missingGlyphMode === "tofu"
+  ) {
+    prefs.missingGlyphMode = missingGlyphMode;
+  }
+  if (typeof markMissingGlyphs === "boolean") {
+    prefs.markMissingGlyphs = markMissingGlyphs;
+  }
+  if (typeof fontFallbackFamily === "string") {
+    prefs.fontFallbackFamily = fontFallbackFamily;
   }
   if (isRecord(panelLayout)) {
     for (const [key, value] of Object.entries(panelLayout)) {
@@ -53,6 +77,10 @@ export function serializePreferences(prefs: Preferences): string {
     {
       fontFavorites: prefs.fontFavorites,
       fontSamplePx: prefs.fontSamplePx,
+      fontSampleText: prefs.fontSampleText,
+      missingGlyphMode: prefs.missingGlyphMode,
+      markMissingGlyphs: prefs.markMissingGlyphs,
+      fontFallbackFamily: prefs.fontFallbackFamily,
       panelLayout: prefs.panelLayout,
     },
     null,

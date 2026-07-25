@@ -2,47 +2,36 @@ import type { EngineFontSource } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 
 /**
- * Representative face per family, held as Local Font Access handles rather
- * than bytes: a handle is cheap, the bytes behind it run to tens of megabytes
- * for a CJK family and are only worth fetching when something rasterizes.
+ * Languages a family name is preferred in, most wanted first. Matches the
+ * application locale; a font with no name in any of them falls back to English.
  */
-const systemFaces = new Map<string, FontData>()
+const LOCALE_PREFERENCE = ['zh-Hant', 'zh', 'en']
 
-let scanned = false
+let catalog: FontEntry[] | null = null
 
 export async function loadFontCatalog(): Promise<FontEntry[]> {
-  if (!scanned) {
-    for (const face of await queryLocalFonts()) {
-      const held = systemFaces.get(face.family)
-      // Prefer the upright face, otherwise the sample shows whichever weight
-      // the platform happened to enumerate first.
-      if (!held || (held.style !== 'Regular' && face.style === 'Regular')) {
-        systemFaces.set(face.family, face)
-      }
-    }
-    scanned = true
+  if (catalog) return catalog
+
+  const byFamily = new Map<string, FontEntry>()
+  for (const face of await window.engine.listFonts(undefined, LOCALE_PREFERENCE)) {
+    const held = byFamily.get(face.family)
+    // One row per family, drawn by its upright face — otherwise the grid shows
+    // whichever weight the directory walk happened to reach first.
+    if (held && !(held.style !== 'Regular' && face.style === 'Regular')) continue
+    byFamily.set(face.family, {
+      family: face.family,
+      displayName: face.displayName || face.family,
+      style: face.style,
+      origin: { kind: 'system', path: face.path, faceIndex: face.faceIndex },
+    })
   }
 
-  return [...systemFaces.entries()]
-    .map(([family, face]) => ({
-      family,
-      origin: { kind: 'system' as const, postscriptName: face.postscriptName },
-    }))
-    .sort((a, b) => a.family.localeCompare(b.family, 'zh-Hant'))
+  catalog = [...byFamily.values()].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName, 'zh-Hant'),
+  )
+  return catalog
 }
 
-export async function engineSourceFor(entry: FontEntry): Promise<EngineFontSource> {
-  if (entry.origin.kind === 'imported') {
-    return { path: entry.origin.path, faceIndex: entry.origin.faceIndex }
-  }
-
-  const face = systemFaces.get(entry.family)
-  if (!face) throw new Error(`no system face enumerated for ${entry.family}`)
-
-  // Measured on Electron 43: blob() on a member of a .ttc hands back the
-  // entire collection, byte-identical to the file on disk. The face therefore
-  // has to be named, or the engine would rasterize whichever member happens to
-  // sit at index 0.
-  const bytes = new Uint8Array(await (await face.blob()).arrayBuffer())
-  return { bytes, postscriptName: entry.origin.postscriptName }
+export function engineSourceFor(entry: FontEntry): EngineFontSource {
+  return { path: entry.origin.path, faceIndex: entry.origin.faceIndex }
 }

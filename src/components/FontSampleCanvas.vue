@@ -21,7 +21,7 @@
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
-import { cachedSample, loadSample, type SampleRequest } from '@/lib/fontSampleCache'
+import { sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
 
 const props = defineProps<{
   entry: FontEntry
@@ -29,9 +29,19 @@ const props = defineProps<{
   sizePx: number
   fillColor: string
   stroke?: EngineStrokeSpec
+  /** Stands in for characters this family cannot draw; omit to leave tofu. */
+  fallback?: FontEntry
+  /** Outline the characters this family has no glyph for. */
+  mark?: boolean
   /** While the grid is flying past, hold off on rasterizing anything new. */
   deferred?: boolean
 }>()
+
+/**
+ * Literal rather than a theme token: canvas fill styles cannot read CSS custom
+ * properties, and the highlight has to stay legible under both themes anyway.
+ */
+const MARK_COLOR = 'rgba(239, 68, 68, 0.28)'
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 const drawn = ref(false)
@@ -48,16 +58,35 @@ const request = computed<SampleRequest>(() => ({
   sizePx: Math.round(props.sizePx * dpr),
   fillColor: props.fillColor,
   stroke: props.stroke,
+  fallback: props.fallback,
 }))
 
-function draw(data: ImageData) {
+function draw(sample: Sample) {
   const el = canvasEl.value
   if (!el) return
-  el.width = data.width
-  el.height = data.height
-  el.style.width = `${data.width / dpr}px`
-  el.style.height = `${data.height / dpr}px`
-  el.getContext('2d')?.putImageData(data, 0, 0)
+  const { image, marks } = sample
+  el.width = image.width
+  el.height = image.height
+  el.style.width = `${image.width / dpr}px`
+  el.style.height = `${image.height / dpr}px`
+
+  const ctx = el.getContext('2d')
+  if (!ctx) return
+
+  if (props.mark && marks.length > 0) {
+    for (const rect of marks) {
+      ctx.fillStyle = MARK_COLOR
+      ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+    }
+    // putImageData replaces pixels instead of compositing, which would wipe
+    // the highlights; going through drawImage keeps them behind the glyphs.
+    const glyphs = new OffscreenCanvas(image.width, image.height)
+    glyphs.getContext('2d')?.putImageData(image, 0, 0)
+    ctx.drawImage(glyphs, 0, 0)
+  } else {
+    ctx.putImageData(image, 0, 0)
+  }
+
   drawn.value = true
 }
 
@@ -71,37 +100,28 @@ function clear() {
   drawn.value = false
 }
 
-let generation = 0
-
-async function render() {
-  const mine = ++generation
+function render() {
   failed.value = false
 
-  const hit = cachedSample(request.value)
-  if (hit) {
-    draw(hit)
+  if (props.deferred) {
+    clear()
     return
   }
 
-  clear()
-  if (props.deferred) return
-
-  let data: ImageData
   try {
-    data = await loadSample(request.value)
+    draw(sampleFor(request.value))
   } catch (err) {
-    if (mine !== generation) return
+    clear()
     failure.value = err instanceof Error ? err.message : String(err)
     failed.value = true
     console.error(`font sample failed: ${props.entry.family}`, err)
-    return
   }
-  if (mine === generation) draw(data)
 }
 
 // The first pass waits for mount rather than riding on the watcher's immediate
-// run: that fires during setup, when there is no canvas yet, and a cached
-// sample would be dropped on the floor with nothing left to re-trigger it.
+// run: that fires during setup, when there is no canvas to draw on yet.
 onMounted(render)
-watch([request, () => props.deferred], render, { flush: 'post' })
+// props.mark is not part of the cache key — toggling it only changes how an
+// already-rasterized sample is painted.
+watch([request, () => props.deferred, () => props.mark], render, { flush: 'post' })
 </script>

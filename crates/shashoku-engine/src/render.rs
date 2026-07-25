@@ -18,6 +18,9 @@ pub struct TextBitmap {
     /// Distance from top of bitmap (Y=0) to baseline (horizontal) or column
     /// center X (vertical), in pixels. Useful for stacking multiple runs.
     pub baseline: f32,
+    /// Where each cluster of the input string landed, for callers that need to
+    /// point at individual characters after the fact.
+    pub clusters: Vec<ClusterRect>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -54,23 +57,102 @@ pub enum StrokeJoin {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Coverage check — cheap cmap lookup, no shaping / rasterization.
-// Returns false as soon as any char in `text` maps to .notdef (gid 0).
+// Coverage — shaping only, no rasterization.
 
-pub fn font_covers(font_bytes: &[u8], text: &str, face_index: u32) -> Result<bool, String> {
-    let font = FontRef::from_index(font_bytes, face_index)
-        .map_err(|e| format!("font parse (index {face_index}): {e:?}"))?;
-    let charmap = font.charmap();
-    for ch in text.chars() {
-        // Whitespace needs no real glyph — layout only uses its advance.
-        if ch.is_whitespace() {
-            continue;
-        }
-        if charmap.map(ch).is_none() {
-            return Ok(false);
+/// What the shaper reports for a character it found no glyph for.
+const NOTDEF: u32 = 0;
+
+/// Nominal size for a coverage pass. Which glyph a character maps to does not
+/// depend on it, and the advances that would are discarded.
+const COVERAGE_SIZE_PX: f32 = 16.0;
+
+/// The offsets worth reporting out of those shaping flagged: in text order,
+/// without repeats, and never whitespace — layout only needs a space's advance,
+/// so a face lacking the glyph is not thereby unable to draw the text.
+fn reportable_offsets(text: &str, flagged: &mut Vec<u32>) -> Vec<u32> {
+    flagged.sort_unstable();
+    flagged.dedup();
+    flagged
+        .iter()
+        .copied()
+        .filter(|at| {
+            text.get(*at as usize..)
+                .and_then(|rest| rest.chars().next())
+                .is_some_and(|ch| !ch.is_whitespace())
+        })
+        .collect()
+}
+
+/// Reports whether an outline emitted anything at all, without building it.
+struct InkProbe {
+    inked: bool,
+}
+
+impl OutlinePen for InkProbe {
+    fn move_to(&mut self, _x: f32, _y: f32) {
+        self.inked = true;
+    }
+    fn line_to(&mut self, _x: f32, _y: f32) {
+        self.inked = true;
+    }
+    fn quad_to(&mut self, _cx: f32, _cy: f32, _x: f32, _y: f32) {
+        self.inked = true;
+    }
+    fn curve_to(&mut self, _cx0: f32, _cy0: f32, _cx1: f32, _cy1: f32, _x: f32, _y: f32) {
+        self.inked = true;
+    }
+    fn close(&mut self) {}
+}
+
+/// Byte offsets of the characters this face cannot draw, keyed the same way as
+/// the cluster rects a render reports so callers can line the two up.
+///
+/// Both halves of this are here because the cmap cannot answer it. A legacy face
+/// may carry no Unicode cmap at all — only Big5 and Mac Roman subtables — so a
+/// cmap read finds nothing and calls every character missing, including the
+/// ASCII the shaper goes on to draw correctly through the Mac Roman table.
+///
+/// Asking the shaper is necessary but not sufficient, because a Big5 subtable
+/// read as though it were Unicode still answers: a CJK codepoint lands inside
+/// some mapped range and comes back as a glyph that belongs to another character
+/// entirely, usually a blank one. So the question is not whether the shaper
+/// found a glyph but whether that glyph draws anything.
+pub fn uncovered_clusters(
+    font_bytes: &[u8],
+    text: &str,
+    face_index: u32,
+) -> Result<Vec<u32>, String> {
+    let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
+        .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
+    let sk_font = FontRef::from_index(font_bytes, face_index)
+        .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
+
+    let outlines = sk_font.outline_glyphs();
+    let size = Size::new(COVERAGE_SIZE_PX);
+    let loc = LocationRef::default();
+
+    // Shaped horizontally whichever way the caller will draw: a vertical
+    // substitution needs a base glyph to replace, so it cannot turn a covered
+    // character into a missing one.
+    let mut flagged = Vec::new();
+    for (line_offset, glyphs) in shaped_lines(&hr_font, text, COVERAGE_SIZE_PX, 1.0, false) {
+        for glyph in glyphs {
+            let blank = match outlines.get(GlyphId::new(glyph.gid)) {
+                None => true,
+                Some(outline) => {
+                    let mut probe = InkProbe { inked: false };
+                    outline
+                        .draw(DrawSettings::unhinted(size, loc), &mut probe)
+                        .is_err()
+                        || !probe.inked
+                }
+            };
+            if glyph.gid == NOTDEF || blank {
+                flagged.push(line_offset + glyph.cluster);
+            }
         }
     }
-    Ok(true)
+    Ok(reportable_offsets(text, &mut flagged))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -114,11 +196,51 @@ struct BuiltRun {
     width: u32,
     height: u32,
     baseline: f32,
+    clusters: Vec<ClusterRect>,
+}
+
+/// Where one cluster of the input string landed on the bitmap.
+///
+/// Keyed by byte offset rather than by glyph index because shaping breaks the
+/// one-to-one correspondence between characters and glyphs: a character can
+/// become several glyphs, and a ligature turns several characters into one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClusterRect {
+    pub cluster: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Unions the boxes of every glyph belonging to the same cluster, keeping the
+/// order in which clusters first appear — which is visual order, not string
+/// order, once a run is right-to-left.
+fn merge_cluster_rects(rects: &[ClusterRect]) -> Vec<ClusterRect> {
+    let mut merged: Vec<ClusterRect> = Vec::with_capacity(rects.len());
+    for rect in rects {
+        match merged.iter_mut().find(|held| held.cluster == rect.cluster) {
+            None => merged.push(*rect),
+            Some(held) => {
+                let min_x = held.x.min(rect.x);
+                let min_y = held.y.min(rect.y);
+                let max_x = (held.x + held.width).max(rect.x + rect.width);
+                let max_y = (held.y + held.height).max(rect.y + rect.height);
+                held.x = min_x;
+                held.y = min_y;
+                held.width = max_x - min_x;
+                held.height = max_y - min_y;
+            }
+        }
+    }
+    merged
 }
 
 /// Shaped glyph, detached from the lifetime of harfrust's GlyphBuffer.
 struct ShapedGlyph {
     gid: u32,
+    /// Byte offset into the shaped line of the character this glyph came from.
+    cluster: u32,
     x_advance: f32,
     y_advance: f32,
     x_offset: f32,
@@ -164,12 +286,30 @@ fn shape_line(
         .zip(positions.iter())
         .map(|(info, pos)| ShapedGlyph {
             gid: info.glyph_id,
+            cluster: info.cluster,
             x_advance: (pos.x_advance as f32) * scale,
             y_advance: (pos.y_advance as f32) * scale,
             x_offset: (pos.x_offset as f32) * scale,
             y_offset: (pos.y_offset as f32) * scale,
         })
         .collect()
+}
+
+/// Shapes each \n-separated line, pairing it with its byte offset in `text`.
+fn shaped_lines(
+    hr_font: &harfrust::FontRef,
+    text: &str,
+    size_px: f32,
+    scale: f32,
+    vertical: bool,
+) -> Vec<(u32, Vec<ShapedGlyph>)> {
+    let mut offset = 0u32;
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        out.push((offset, shape_line(hr_font, line, size_px, scale, vertical)));
+        offset += line.len() as u32 + 1;
+    }
+    out
 }
 
 fn build_horizontal_path(
@@ -196,14 +336,14 @@ fn build_horizontal_path(
     let line_height = (ascent + descent + leading).max(size_px);
 
     // Empty lines are kept: each one still occupies a full line_height.
-    let lines: Vec<Vec<ShapedGlyph>> = text
-        .split('\n')
-        .map(|line| shape_line(&hr_font, line, size_px, scale, false))
-        .collect();
+    // Each line is shaped on its own, so harfrust's cluster offsets are
+    // line-relative and need the line's own offset added back to point into
+    // the whole string.
+    let lines: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, false);
 
     let max_width: f32 = lines
         .iter()
-        .map(|glyphs| glyphs.iter().map(|g| g.x_advance).sum::<f32>())
+        .map(|(_, glyphs)| glyphs.iter().map(|g| g.x_advance).sum::<f32>())
         .fold(0.0, f32::max);
     let n_lines = lines.len();
 
@@ -214,7 +354,9 @@ fn build_horizontal_path(
     let outlines = sk_font.outline_glyphs();
     let mut builder = PathBuilder::new();
 
-    for (line_idx, glyphs) in lines.iter().enumerate() {
+    let mut clusters: Vec<ClusterRect> = Vec::new();
+
+    for (line_idx, (line_offset, glyphs)) in lines.iter().enumerate() {
         let baseline_y = padding as f32 + ascent + line_idx as f32 * line_height;
         let mut pen_x = padding as f32;
         for g in glyphs {
@@ -229,6 +371,13 @@ fn build_horizontal_path(
                     .draw(DrawSettings::unhinted(size, loc), &mut pen)
                     .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
             }
+            clusters.push(ClusterRect {
+                cluster: line_offset + g.cluster,
+                x: pen_x,
+                y: baseline_y - ascent,
+                width: g.x_advance,
+                height: line_height,
+            });
             pen_x += g.x_advance;
         }
     }
@@ -238,6 +387,7 @@ fn build_horizontal_path(
         width: w,
         height: h,
         baseline: padding as f32 + ascent,
+        clusters: merge_cluster_rects(&clusters),
     })
 }
 
@@ -261,15 +411,12 @@ fn build_vertical_path(
 
     // One \n-separated segment per column. CJK vertical convention runs
     // columns right to left.
-    let columns: Vec<Vec<ShapedGlyph>> = text
-        .split('\n')
-        .map(|line| shape_line(&hr_font, line, size_px, scale, true))
-        .collect();
+    let columns: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, true);
 
     let column_width = size_px * 1.2;
     let max_height: f32 = columns
         .iter()
-        .map(|glyphs| glyphs.iter().map(|g| -g.y_advance).sum::<f32>())
+        .map(|(_, glyphs)| glyphs.iter().map(|g| -g.y_advance).sum::<f32>())
         .fold(0.0, f32::max);
     let n_cols = columns.len();
 
@@ -281,7 +428,9 @@ fn build_vertical_path(
     let mut builder = PathBuilder::new();
     let origin_y = padding as f32;
 
-    for (col_idx, glyphs) in columns.iter().enumerate() {
+    let mut clusters: Vec<ClusterRect> = Vec::new();
+
+    for (col_idx, (col_offset, glyphs)) in columns.iter().enumerate() {
         // Column 0 sits at the right edge, later columns walk leftward.
         let col_center_x = (w as f32) - padding as f32 - column_width * 0.5
             - (col_idx as f32) * column_width;
@@ -302,6 +451,13 @@ fn build_vertical_path(
                     .draw(DrawSettings::unhinted(size, loc), &mut pen)
                     .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
             }
+            clusters.push(ClusterRect {
+                cluster: col_offset + g.cluster,
+                x: col_center_x - column_width * 0.5,
+                y: origin_y + pen_y,
+                width: column_width,
+                height: -g.y_advance,
+            });
             pen_x += g.x_advance;
             pen_y -= g.y_advance;
         }
@@ -311,6 +467,7 @@ fn build_vertical_path(
         path: builder.finish(),
         width: w,
         height: h,
+        clusters: merge_cluster_rects(&clusters),
         baseline: (w as f32) - padding as f32 - column_width * 0.5,
     })
 }
@@ -344,6 +501,7 @@ fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<Te
                 height: run.height,
                 rgba: pixmap.data().to_vec(),
                 baseline: run.baseline,
+                clusters: run.clusters,
             });
         }
     };
@@ -466,6 +624,7 @@ fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<Te
         height: run.height,
         rgba: pixmap.data().to_vec(),
         baseline: run.baseline,
+        clusters: run.clusters,
     })
 }
 
@@ -539,5 +698,96 @@ impl<'a> OutlinePen for BaselinePen<'a> {
     }
     fn close(&mut self) {
         self.builder.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(cluster: u32, x: f32, y: f32, width: f32, height: f32) -> ClusterRect {
+        ClusterRect {
+            cluster,
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn one_glyph_per_cluster_passes_through() {
+        let input = [rect(0, 0.0, 0.0, 10.0, 20.0), rect(3, 10.0, 0.0, 10.0, 20.0)];
+        assert_eq!(merge_cluster_rects(&input), input.to_vec());
+    }
+
+    #[test]
+    fn glyphs_sharing_a_cluster_merge_into_their_union() {
+        // A base glyph plus a mark drawn above it: one character, two glyphs.
+        let input = [
+            rect(0, 10.0, 5.0, 10.0, 20.0),
+            rect(0, 12.0, 0.0, 6.0, 8.0),
+        ];
+        assert_eq!(merge_cluster_rects(&input), vec![rect(0, 10.0, 0.0, 10.0, 25.0)]);
+    }
+
+    #[test]
+    fn a_ligature_keeps_the_cluster_of_its_first_character() {
+        // Shaping merges clusters, so both characters report the lower offset.
+        let input = [rect(0, 0.0, 0.0, 18.0, 20.0)];
+        assert_eq!(merge_cluster_rects(&input), vec![rect(0, 0.0, 0.0, 18.0, 20.0)]);
+    }
+
+    #[test]
+    fn output_follows_first_appearance_not_cluster_order() {
+        // Right-to-left runs place later clusters first.
+        let input = [
+            rect(6, 0.0, 0.0, 10.0, 20.0),
+            rect(3, 10.0, 0.0, 10.0, 20.0),
+            rect(6, 5.0, 0.0, 10.0, 20.0),
+        ];
+        let merged = merge_cluster_rects(&input);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0], rect(6, 0.0, 0.0, 15.0, 20.0));
+        assert_eq!(merged[1], rect(3, 10.0, 0.0, 10.0, 20.0));
+    }
+
+    #[test]
+    fn empty_input_gives_no_rects() {
+        assert!(merge_cluster_rects(&[]).is_empty());
+    }
+
+    #[test]
+    fn nothing_is_uncovered_when_shaping_flagged_nothing() {
+        assert!(reportable_offsets("abc", &mut vec![]).is_empty());
+    }
+
+    #[test]
+    fn a_flagged_cluster_reports_its_byte_offset() {
+        assert_eq!(reportable_offsets("abc", &mut vec![1]), vec![1]);
+    }
+
+    #[test]
+    fn offsets_are_bytes_not_characters() {
+        // Each CJK character is three bytes in UTF-8, so the missing 'x' sits
+        // at byte 6 even though it is the third character.
+        assert_eq!(reportable_offsets("永字x", &mut vec![6]), vec![6]);
+    }
+
+    #[test]
+    fn whitespace_is_never_reported_as_uncovered() {
+        // Layout only needs whitespace advances, so a font lacking a space
+        // glyph is not thereby unable to draw the text.
+        assert!(reportable_offsets(" \n\t", &mut vec![0, 1, 2]).is_empty());
+    }
+
+    #[test]
+    fn every_flagged_cluster_is_reported_once_in_text_order() {
+        // Several glyphs can share a cluster, and shaping visits runs in its own
+        // order, so the same offset can arrive more than once and out of order.
+        assert_eq!(
+            reportable_offsets("永a字b", &mut vec![7, 3, 7]),
+            vec![3, 7]
+        );
     }
 }

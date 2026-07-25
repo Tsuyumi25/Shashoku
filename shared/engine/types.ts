@@ -42,6 +42,16 @@ export interface EngineStrokeSpec {
   join?: "round" | "miter" | "bevel";
 }
 
+/** Where one cluster of the input string landed on a rendered bitmap. */
+export interface EngineClusterRect {
+  /** Byte offset of the cluster's first character in the input string. */
+  cluster: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface EngineBitmap {
   width: number;
   height: number;
@@ -52,12 +62,44 @@ export interface EngineBitmap {
   baseline: number;
   /** RGBA bytes, length = width * height * 4. */
   rgba: Uint8Array;
+  /**
+   * Position of every cluster. Shaping breaks the one-to-one match between
+   * characters and glyphs, so these are keyed by byte offset rather than by
+   * index — which is also what makes them line up with uncoveredClusters().
+   */
+  clusters: EngineClusterRect[];
+}
+
+/** One face of one font file, as found on disk. */
+export interface EngineFaceInfo {
+  /**
+   * Locale-independent family name. This is the identity a project file
+   * stores, so it must not follow whoever happens to be reading.
+   */
+  family: string;
+  /** Same family in the reader's language when the font carries one. */
+  displayName: string;
+  style: string;
+  postscriptName: string;
+  path: string;
+  faceIndex: number;
 }
 
 export interface ShashokuEngineApi {
   version(): string;
-  /** cmap-only coverage check — no shaping, no rasterization. */
-  fontCovers(font: EngineFontSource, text: string): boolean;
+  /**
+   * Every face under `dirs`, or under the platform's font directories when
+   * omitted. `locales` orders the languages a display name is preferred in.
+   *
+   * The one asynchronous call on this surface: opening a thousand font files
+   * belongs off the JavaScript thread.
+   */
+  listFonts(dirs?: string[], locales?: string[]): Promise<EngineFaceInfo[]>;
+  /**
+   * Byte offsets of the characters this face has no glyph for; empty means it
+   * can draw the whole string. cmap lookups only — no shaping, no raster.
+   */
+  uncoveredClusters(font: EngineFontSource, text: string): number[];
   renderText(
     font: EngineFontSource,
     text: string,

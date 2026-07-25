@@ -6,6 +6,7 @@ import {
   MAX_FONT_SAMPLE_PX,
   MIN_FONT_SAMPLE_PX,
   defaultPreferences,
+  type MissingGlyphMode,
 } from '@shared/preferences/types'
 
 const PERSIST_DEBOUNCE_MS = 250
@@ -75,6 +76,22 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.fontSamplePx = Math.min(MAX_FONT_SAMPLE_PX, Math.max(MIN_FONT_SAMPLE_PX, Math.round(px)))
   }
 
+  function setFontSampleText(text: string) {
+    prefs.fontSampleText = text
+  }
+
+  function setMissingGlyphMode(mode: MissingGlyphMode) {
+    prefs.missingGlyphMode = mode
+  }
+
+  function setMarkMissingGlyphs(on: boolean) {
+    prefs.markMissingGlyphs = on
+  }
+
+  function setFontFallbackFamily(family: string) {
+    prefs.fontFallbackFamily = family
+  }
+
   return {
     prefs,
     hydrate,
@@ -83,5 +100,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     isFavorite,
     toggleFavorite,
     setFontSamplePx,
+    setFontSampleText,
+    setMissingGlyphMode,
+    setMarkMissingGlyphs,
+    setFontFallbackFamily,
   }
 })

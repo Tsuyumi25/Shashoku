@@ -1,10 +1,13 @@
 use std::fs::File;
+use std::path::PathBuf;
 
 use memmap2::Mmap;
-use napi::bindgen_prelude::Buffer;
+use napi::bindgen_prelude::{AsyncTask, Buffer};
+use napi::{Env, Task};
 use napi_derive::napi;
 use skrifa::{FontRef, MetadataProvider, string::StringId};
 
+mod enumerate;
 mod render;
 
 use render::{BLACK, StrokeJoin, StrokePosition, StrokeSpec, parse_hex_rgba};
@@ -120,6 +123,17 @@ fn open_font_data(path: Option<String>, bytes: Option<Buffer>) -> napi::Result<F
 // ────────────────────────────────────────────────────────────────────────────
 // Output shapes
 
+/// Where one cluster of the input string landed on the bitmap.
+#[napi(object)]
+pub struct ClusterRect {
+    /// Byte offset of the cluster's first character in the input string.
+    pub cluster: u32,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 #[napi(object)]
 pub struct TextBitmap {
     pub width: u32,
@@ -128,6 +142,22 @@ pub struct TextBitmap {
     /// Vertical:   distance from left to column center X.
     pub baseline: f64,
     pub rgba: Buffer,
+    /// Position of every cluster, for callers that need to point at individual
+    /// characters once the text is a bitmap.
+    pub clusters: Vec<ClusterRect>,
+}
+
+fn to_cluster_rects(rects: Vec<render::ClusterRect>) -> Vec<ClusterRect> {
+    rects
+        .into_iter()
+        .map(|r| ClusterRect {
+            cluster: r.cluster,
+            x: r.x as f64,
+            y: r.y as f64,
+            width: r.width as f64,
+            height: r.height as f64,
+        })
+        .collect()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -184,12 +214,76 @@ fn fill_from_opt(fill: Option<String>) -> napi::Result<render::Rgba> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Enumeration
+
+/// One face of one font file, as found on disk.
+#[napi(object)]
+pub struct FaceInfo {
+    /// Locale-independent family name. This is the identity a project file
+    /// stores, so it must not follow whoever happens to be reading.
+    pub family: String,
+    /// Same family in the reader's language when the font carries one.
+    pub display_name: String,
+    pub style: String,
+    pub postscript_name: String,
+    pub path: String,
+    pub face_index: u32,
+}
+
+pub struct ScanFonts {
+    dirs: Vec<PathBuf>,
+    locales: Vec<String>,
+}
+
+impl Task for ScanFonts {
+    type Output = Vec<enumerate::FaceInfo>;
+    type JsValue = Vec<FaceInfo>;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        Ok(enumerate::scan(&self.dirs, &self.locales))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(output
+            .into_iter()
+            .map(|face| FaceInfo {
+                family: face.family,
+                display_name: face.display_name,
+                style: face.style,
+                postscript_name: face.postscript_name,
+                path: face.path,
+                face_index: face.face_index,
+            })
+            .collect())
+    }
+}
+
+/// Every face found under `dirs`, or under the platform's font directories
+/// when `dirs` is omitted. `locales` orders the languages a display name is
+/// preferred in, most wanted first.
+///
+/// Runs off the JavaScript thread: opening a thousand font files is far too
+/// much to do between frames.
+#[napi(ts_return_type = "Promise<FaceInfo[]>")]
+pub fn list_fonts(dirs: Option<Vec<String>>, locales: Option<Vec<String>>) -> AsyncTask<ScanFonts> {
+    AsyncTask::new(ScanFonts {
+        dirs: match dirs {
+            Some(dirs) => dirs.into_iter().map(PathBuf::from).collect(),
+            None => enumerate::default_dirs(),
+        },
+        locales: locales.unwrap_or_default(),
+    })
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Public functions
 
+/// Byte offsets of the characters this face has no glyph for. Empty means the
+/// face can draw the whole string; whitespace never counts as missing.
 #[napi]
-pub fn font_covers(font: FontSource, text: String) -> napi::Result<bool> {
+pub fn uncovered_clusters(font: FontSource, text: String) -> napi::Result<Vec<u32>> {
     let (data, face_index) = resolve_font(font)?;
-    render::font_covers(data.as_slice(), &text, face_index).map_err(napi::Error::from_reason)
+    render::uncovered_clusters(data.as_slice(), &text, face_index).map_err(napi::Error::from_reason)
 }
 
 #[napi]
@@ -219,6 +313,7 @@ pub fn render_text(
         height: bmp.height,
         baseline: bmp.baseline as f64,
         rgba: bmp.rgba.into(),
+        clusters: to_cluster_rects(bmp.clusters),
     })
 }
 
@@ -249,5 +344,6 @@ pub fn render_vertical(
         height: bmp.height,
         baseline: bmp.baseline as f64,
         rgba: bmp.rgba.into(),
+        clusters: to_cluster_rects(bmp.clusters),
     })
 }

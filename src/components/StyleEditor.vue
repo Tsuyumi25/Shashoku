@@ -27,7 +27,7 @@
     <label class="text-muted-foreground">方向</label>
     <ToggleGroupRoot
       type="single"
-      class="seg"
+      class="seg w-full"
       :model-value="value.direction"
       @update:model-value="onDirection"
     >
@@ -121,7 +121,7 @@
       <label class="pl-3 text-muted-foreground">└ 位置</label>
       <ToggleGroupRoot
         type="single"
-        class="seg"
+        class="seg w-full"
         :model-value="stroke.position"
         @update:model-value="onStrokePosition"
       >
@@ -230,36 +230,3 @@ function onStrokePosition(v: unknown) {
   commitStroke({ ...stroke.value, position: v as StrokePosition })
 }
 </script>
-
-<style scoped>
-.seg {
-  display: flex;
-  height: 1.5rem;
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--input);
-  border-radius: 0.25rem;
-  background: var(--background);
-}
-.seg-item {
-  flex: 1 1 0;
-  min-width: 0;
-  color: var(--muted-foreground);
-  outline: none;
-  border-left: 1px solid var(--input);
-}
-.seg-item:first-child {
-  border-left: none;
-}
-.seg-item:hover {
-  color: var(--foreground);
-}
-.seg-item[data-state='on'] {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.seg-item:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-</style>

@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-full w-full flex-col bg-background text-sm">
     <div
-      class="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-1.5 text-xs text-muted-foreground"
+      class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-card px-3 py-1.5 text-xs text-muted-foreground"
     >
       <input
         v-model="search"
@@ -47,6 +47,64 @@
       >
         取消
       </button>
+
+      <span class="shrink-0">缺字的字體</span>
+      <ToggleGroupRoot
+        type="single"
+        class="seg shrink-0"
+        :model-value="preferences.prefs.missingGlyphMode"
+        @update:model-value="onMissingGlyphMode"
+      >
+        <ToggleGroupItem
+          value="hide"
+          class="seg-item"
+          title="畫不出當前樣本文字的字體，不列在清單裡"
+        >
+          不顯示
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value="substitute"
+          class="seg-item"
+          title="畫不出來的字，改用指定的字體畫"
+        >
+          換字體
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value="tofu"
+          class="seg-item"
+          title="畫不出來的字顯示成空方框，不替換"
+        >
+          顯示方框
+        </ToggleGroupItem>
+      </ToggleGroupRoot>
+
+      <template v-if="preferences.prefs.missingGlyphMode === 'substitute'">
+        <span class="shrink-0">換成</span>
+        <select
+          class="h-6 max-w-44 min-w-0 shrink rounded border border-input bg-background px-1 text-foreground"
+          :value="preferences.prefs.fontFallbackFamily"
+          @change="onFallbackFamily($event)"
+        >
+          <option value="">未指定</option>
+          <option v-for="entry in catalog" :key="entry.family" :value="entry.family">
+            {{ entry.displayName }}
+          </option>
+        </select>
+      </template>
+
+      <label
+        v-if="preferences.prefs.missingGlyphMode !== 'hide'"
+        class="flex shrink-0 items-center gap-1.5"
+        title="把畫不出來的那幾個字框起來"
+      >
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-primary"
+          :checked="preferences.prefs.markMissingGlyphs"
+          @change="onMarkMissing($event)"
+        />
+        標記缺字
+      </label>
     </div>
 
     <div
@@ -58,16 +116,22 @@
         type="button"
         class="shrink-0 rounded px-2 py-0.5"
         :class="
-          sample === p.text
+          sampleDraft === p.text
             ? 'bg-primary text-primary-foreground'
             : 'bg-accent text-accent-foreground hover:bg-secondary'
         "
         :title="p.text"
-        @click="sample = p.text"
+        @click="sampleDraft = p.text"
       >
         {{ p.label }}
       </button>
-      <span class="min-w-0 truncate pl-1 text-muted-foreground/60">{{ sample }}</span>
+      <input
+        v-model="sampleDraft"
+        spellcheck="false"
+        placeholder="樣本文字"
+        title="換行請用 \n"
+        class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-0.5 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
+      />
     </div>
 
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
@@ -90,7 +154,7 @@
           <div v-for="entry in rows[vrow.index]" :key="entry.family" class="font-cell group/cell">
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
-                <span class="truncate text-[11px] text-muted-foreground">{{ entry.family }}</span>
+                <span class="truncate text-[11px] text-muted-foreground">{{ entry.displayName }}</span>
                 <span
                   v-if="entry.family === currentFamily"
                   class="shrink-0 rounded-sm bg-primary/20 px-1 text-[10px] text-primary"
@@ -122,6 +186,8 @@
                 :size-px="appliedSize"
                 :fill-color="fillColor"
                 :stroke="stroke"
+                :fallback="fallbackEntry"
+                :mark="markMissing"
                 :deferred="fastScroll"
               />
             </div>
@@ -145,11 +211,13 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { refDebounced, useElementSize, useEventListener } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Star } from '@lucide/vue'
+import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { loadFontCatalog } from '@/lib/fontCatalog'
+import { coverageFor } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const picker = useFontPicker()
@@ -158,14 +226,21 @@ const preferences = usePreferencesStore()
 type Group = 'all' | 'fav'
 const group = ref<Group>('all')
 
+// Presets and the input share one escaped form: a single-line field silently
+// drops real newlines, so line breaks are spelled \n and decoded before the
+// text reaches the engine.
 const SAMPLE_PRESETS = [
-  { label: '對白', text: '等一下……你是說真的嗎!?\n等一下……你是说真的吗!?' },
+  { label: '對白', text: '等一下……你是說真的嗎!?\\n等一下……你是说真的吗!?' },
   { label: '喊叫', text: '哇啊啊啊——不要過來啊!!' },
   { label: '日文', text: 'わかっているのか? 撃っていいのは、撃たれる覚悟のある奴だけだ!' },
-  { label: '檢字', text: '永字八法 體鬱龍書\n哎呀啊喔 体郁龙书\nあアぐグ Ag123 0O1Il' },
+  { label: '檢字', text: '永字八法 體鬱龍書\\n哎呀啊喔 体郁龙书\\nあアぐグ Ag123 0O1Il' },
 ] as const
 
-const sample = ref<string>(SAMPLE_PRESETS[0].text)
+const sampleDraft = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
+const sampleApplied = refDebounced(sampleDraft, 250)
+const sample = computed(() => sampleApplied.value.replaceAll('\\n', '\n'))
+
+watch(sampleApplied, (text) => preferences.setFontSampleText(text))
 
 const appliedSize = refDebounced(
   computed(() => preferences.prefs.fontSamplePx),
@@ -176,6 +251,28 @@ const minCellWidth = computed(() => Math.round(appliedSize.value * 13))
 function onSampleSize(e: Event) {
   preferences.setFontSamplePx((e.target as HTMLInputElement).valueAsNumber)
 }
+
+function onMissingGlyphMode(v: unknown) {
+  if (v === 'hide' || v === 'substitute' || v === 'tofu') preferences.setMissingGlyphMode(v)
+}
+
+function onFallbackFamily(e: Event) {
+  preferences.setFontFallbackFamily((e.target as HTMLSelectElement).value)
+}
+
+function onMarkMissing(e: Event) {
+  preferences.setMarkMissingGlyphs((e.target as HTMLInputElement).checked)
+}
+
+const fallbackEntry = computed(() => {
+  if (preferences.prefs.missingGlyphMode !== 'substitute') return undefined
+  const family = preferences.prefs.fontFallbackFamily
+  return family ? catalog.value.find((e) => e.family === family) : undefined
+})
+
+const markMissing = computed(
+  () => preferences.prefs.markMissingGlyphs && preferences.prefs.missingGlyphMode !== 'hide',
+)
 
 const currentFamily = computed(() => picker.request.value.current)
 const fillColor = computed(() => picker.request.value.fillColor)
@@ -193,9 +290,29 @@ const appliedSearch = refDebounced(search, 200)
 const displayed = computed(() => {
   let list = catalog.value
   if (group.value === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
+  if (preferences.prefs.missingGlyphMode === 'hide') {
+    // Checking the whole catalogue costs a few milliseconds now that coverage
+    // is a cmap read on a mapped file, so there is nothing to schedule.
+    list = list.filter((e) => coverageOf(e).length === 0)
+  }
   const q = appliedSearch.value.trim().toLowerCase()
-  return q ? list.filter((e) => e.family.toLowerCase().includes(q)) : list
+  return q
+    ? list.filter(
+        (e) =>
+          e.displayName.toLowerCase().includes(q) || e.family.toLowerCase().includes(q),
+      )
+    : list
 })
+
+function coverageOf(entry: FontEntry): number[] {
+  try {
+    return coverageFor(entry, sample.value)
+  } catch {
+    // An unreadable face keeps its place in the list rather than vanishing for
+    // a reason the user cannot see.
+    return []
+  }
+}
 
 const groupTabs = computed(() => [
   { id: 'all' as Group, label: 'All', count: catalog.value.length },

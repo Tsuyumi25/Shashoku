@@ -7,7 +7,9 @@ description = "Shashoku manga typesetting text engine (native Node addon)"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+# rlib alongside cdylib so `cargo test` has a target to link the unit tests
+# against; the addon itself is still the cdylib.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi9"] }

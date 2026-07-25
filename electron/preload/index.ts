@@ -33,7 +33,8 @@ const api: ShashokuApi = {
 
 const engineApi: ShashokuEngineApi = {
   version: () => engine.engineVersion(),
-  fontCovers: (font, text) => engine.fontCovers(font, text),
+  listFonts: (dirs, locales) => engine.listFonts(dirs, locales),
+  uncoveredClusters: (font, text) => engine.uncoveredClusters(font, text),
   renderText: (font, text, sizePx, padding, fillColor, stroke) =>
     engine.renderText(font, text, sizePx, padding, fillColor, stroke),
   renderVertical: (font, text, sizePx, padding, fillColor, stroke) =>
