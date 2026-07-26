@@ -9,8 +9,9 @@ use skrifa::{FontRef, MetadataProvider, string::StringId};
 
 mod enumerate;
 mod render;
+mod stroke;
 
-use render::{BLACK, StrokeJoin, StrokePosition, StrokeSpec, parse_hex_rgba};
+use render::{BLACK, StrokePosition, StrokeSpec, parse_hex_rgba};
 
 #[napi]
 pub fn engine_version() -> String {
@@ -171,8 +172,6 @@ pub struct StrokeInput {
     pub color: String,
     /// "outside" (default) | "center" | "inside".
     pub position: Option<String>,
-    /// "round" (default) | "miter" | "bevel".
-    pub join: Option<String>,
 }
 
 fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<StrokeSpec>> {
@@ -188,21 +187,10 @@ fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<Strok
             )));
         }
     };
-    let join = match input.join.as_deref().unwrap_or("round") {
-        "round" => StrokeJoin::Round,
-        "miter" => StrokeJoin::Miter,
-        "bevel" => StrokeJoin::Bevel,
-        other => {
-            return Err(napi::Error::from_reason(format!(
-                "stroke.join must be round|miter|bevel, got {other:?}"
-            )));
-        }
-    };
     Ok(Some(StrokeSpec {
         width: input.width as f32,
         color,
         position,
-        join,
     }))
 }
 

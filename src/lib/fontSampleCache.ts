@@ -86,7 +86,6 @@ function rasterize(req: SampleRequest): Sample {
         width: req.stroke.width,
         color: req.stroke.color,
         position: req.stroke.position,
-        join: req.stroke.join,
       }
     : undefined
 

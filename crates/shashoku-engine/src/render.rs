@@ -4,9 +4,9 @@ use skrifa::{
     instance::{LocationRef, Size},
     outline::{DrawSettings, OutlinePen},
 };
-use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Mask, Paint, Path, PathBuilder, Pixmap, Stroke, Transform,
-};
+use tiny_skia::{Color, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Transform};
+
+use crate::stroke::{coverage_at, signed_distance_field};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -28,12 +28,14 @@ pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
 pub const BLACK: Rgba = Rgba(0, 0, 0, 255);
 
+/// No join or cap: the band is grown from the filled shape rather than swept
+/// along its outline, so every corner it turns is round by construction — the
+/// same reason a Photoshop layer-style stroke offers neither.
 #[derive(Copy, Clone, Debug)]
 pub struct StrokeSpec {
     pub width: f32,
     pub color: Rgba,
     pub position: StrokePosition,
-    pub join: StrokeJoin,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -44,16 +46,6 @@ pub enum StrokePosition {
     Center,
     /// Stroke sits entirely INSIDE the glyph outline.
     Inside,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum StrokeJoin {
-    /// Round corners — safest, no spikes on complex outlines.
-    Round,
-    /// Sharp mitered corners — PS default; can spike on acute angles.
-    Miter,
-    /// Chamfered (beveled) corners.
-    Bevel,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -475,18 +467,77 @@ fn build_vertical_path(
 // ────────────────────────────────────────────────────────────────────────────
 // Paint pipeline — turns a built path + fill + optional stroke into pixels.
 //
-// PS-style stroke has three positions, each with a different draw order:
-//
-//   Outside  → stroke(width = 2W) THEN fill.  Fill covers inner half of the
-//              2W band, leaving W outside the edge visible.
-//   Center   → fill THEN stroke(width = W).   Stroke sits centered on the
-//              edge, half outside + half inside; fill under is overwritten.
-//   Inside   → fill THEN stroke(width = 2W, clipped to fill mask).
-//              Only the inner half of the 2W band survives the clip.
-//
-// Reference: mayocream/koharu uses the Outside pattern (2W stroke + fill on
-// top) — this is the standard technique when the raster library lacks
-// boolean path ops (tiny-skia doesn't have Skia's Path::op).
+// The stroke is a band on the distance field of the filled coverage, not an
+// offset of the outline. See the stroke module for why.
+
+/// The two boundaries a stroke position asks for, as signed distances from the
+/// shape's own edge, negative inward: the outer edge of the stroke, and the
+/// edge past which the fill takes over again.
+fn band_offsets(position: StrokePosition, width: f32) -> (f32, f32) {
+    match position {
+        StrokePosition::Outside => (width, 0.0),
+        StrokePosition::Center => (width * 0.5, -width * 0.5),
+        StrokePosition::Inside => (0.0, -width),
+    }
+}
+
+fn unit(c: Rgba) -> (f32, f32, f32, f32) {
+    (
+        c.0 as f32 / 255.0,
+        c.1 as f32 / 255.0,
+        c.2 as f32 / 255.0,
+        c.3 as f32 / 255.0,
+    )
+}
+
+fn to_u8(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
+
+/// Fill and stroke as two flat colours, each bounded by its own offset of the
+/// same edge, composited fill over stroke.
+fn paint_banded(pixmap: &mut Pixmap, path: &Path, fill: Rgba, spec: StrokeSpec) -> Result<(), String> {
+    let (width, height) = (pixmap.width(), pixmap.height());
+
+    let mut mask = Mask::new(width, height).ok_or_else(|| "mask alloc failed".to_string())?;
+    mask.fill_path(path, FillRule::Winding, true, Transform::identity());
+    let coverage: Vec<f32> = mask.data().iter().map(|&v| v as f32 / 255.0).collect();
+
+    let field = signed_distance_field(&coverage, width as usize, height as usize);
+    let (outer, inner) = band_offsets(spec.position, spec.width);
+
+    // The rasterizer's own coverage beats anything read back off the distance
+    // field, so it stands wherever the boundary asked for is the shape's own.
+    let layer = |offset: f32, i: usize| {
+        if offset == 0.0 {
+            coverage[i]
+        } else {
+            coverage_at(field[i], offset)
+        }
+    };
+
+    let (fr, fg, fb, fa) = unit(fill);
+    let (sr, sg, sb, sa) = unit(spec.color);
+
+    let data = pixmap.data_mut();
+    for i in 0..(width as usize * height as usize) {
+        let s = layer(outer, i) * sa;
+        let f = layer(inner, i) * fa;
+        let alpha = f + s * (1.0 - f);
+        if alpha <= 0.0 {
+            continue;
+        }
+        let a8 = to_u8(alpha);
+        // Premultiplied, and never above the alpha it is multiplied by —
+        // rounding the two independently can otherwise break that invariant
+        // by one and hand tiny-skia a pixel it considers malformed.
+        data[i * 4] = to_u8(fr * f + sr * s * (1.0 - f)).min(a8);
+        data[i * 4 + 1] = to_u8(fg * f + sg * s * (1.0 - f)).min(a8);
+        data[i * 4 + 2] = to_u8(fb * f + sb * s * (1.0 - f)).min(a8);
+        data[i * 4 + 3] = a8;
+    }
+    Ok(())
+}
 
 fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<TextBitmap, String> {
     let mut pixmap =
@@ -506,12 +557,14 @@ fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<Te
         }
     };
 
-    let mut fill_paint = Paint::default();
-    fill_paint.set_color(rgba_to_color(fill));
-    fill_paint.anti_alias = true;
-
     match stroke {
-        None => {
+        Some(spec) if spec.width > 0.0 && spec.color.3 != 0 => {
+            paint_banded(&mut pixmap, &path, fill, spec)?;
+        }
+        _ => {
+            let mut fill_paint = Paint::default();
+            fill_paint.set_color(rgba_to_color(fill));
+            fill_paint.anti_alias = true;
             pixmap.fill_path(
                 &path,
                 &fill_paint,
@@ -519,103 +572,6 @@ fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<Te
                 Transform::identity(),
                 None,
             );
-        }
-        Some(spec) if spec.width <= 0.0 || spec.color.3 == 0 => {
-            pixmap.fill_path(
-                &path,
-                &fill_paint,
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-        }
-        Some(spec) => {
-            let mut stroke_paint = Paint::default();
-            stroke_paint.set_color(rgba_to_color(spec.color));
-            stroke_paint.anti_alias = true;
-
-            let join = match spec.join {
-                StrokeJoin::Round => LineJoin::Round,
-                StrokeJoin::Miter => LineJoin::Miter,
-                StrokeJoin::Bevel => LineJoin::Bevel,
-            };
-
-            match spec.position {
-                StrokePosition::Outside => {
-                    let stroke_style = Stroke {
-                        width: spec.width * 2.0,
-                        line_cap: LineCap::Round,
-                        line_join: join,
-                        miter_limit: 4.0,
-                        dash: None,
-                    };
-                    pixmap.stroke_path(
-                        &path,
-                        &stroke_paint,
-                        &stroke_style,
-                        Transform::identity(),
-                        None,
-                    );
-                    pixmap.fill_path(
-                        &path,
-                        &fill_paint,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        None,
-                    );
-                }
-                StrokePosition::Center => {
-                    pixmap.fill_path(
-                        &path,
-                        &fill_paint,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        None,
-                    );
-                    let stroke_style = Stroke {
-                        width: spec.width,
-                        line_cap: LineCap::Round,
-                        line_join: join,
-                        miter_limit: 4.0,
-                        dash: None,
-                    };
-                    pixmap.stroke_path(
-                        &path,
-                        &stroke_paint,
-                        &stroke_style,
-                        Transform::identity(),
-                        None,
-                    );
-                }
-                StrokePosition::Inside => {
-                    pixmap.fill_path(
-                        &path,
-                        &fill_paint,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        None,
-                    );
-                    // Clip mask = interior of the glyph. Stroke will only be
-                    // visible where the mask is set → inner half of 2W band.
-                    let mut mask = Mask::new(run.width, run.height)
-                        .ok_or_else(|| "mask alloc failed".to_string())?;
-                    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
-                    let stroke_style = Stroke {
-                        width: spec.width * 2.0,
-                        line_cap: LineCap::Round,
-                        line_join: join,
-                        miter_limit: 4.0,
-                        dash: None,
-                    };
-                    pixmap.stroke_path(
-                        &path,
-                        &stroke_paint,
-                        &stroke_style,
-                        Transform::identity(),
-                        Some(&mask),
-                    );
-                }
-            }
         }
     }
 
@@ -698,6 +654,174 @@ impl<'a> OutlinePen for BaselinePen<'a> {
     }
     fn close(&mut self) {
         self.builder.close();
+    }
+}
+
+#[cfg(test)]
+mod stroke_tests {
+    use super::*;
+    use tiny_skia::Rect;
+
+    const SIZE: u32 = 160;
+    const CENTRE: f32 = 80.0;
+    const FILL: Rgba = Rgba(0, 0, 0, 255);
+    const INK: Rgba = Rgba(255, 0, 0, 255);
+
+    fn disc_run(radius: f32) -> BuiltRun {
+        let mut pb = PathBuilder::new();
+        pb.push_circle(CENTRE, CENTRE, radius);
+        BuiltRun {
+            path: pb.finish(),
+            width: SIZE,
+            height: SIZE,
+            baseline: 0.0,
+            clusters: Vec::new(),
+        }
+    }
+
+    fn spec(width: f32, position: StrokePosition) -> StrokeSpec {
+        StrokeSpec {
+            width,
+            color: INK,
+            position,
+        }
+    }
+
+    /// Alpha, and whether the pixel is stroke coloured, at a point `distance`
+    /// from the disc's centre along a given angle.
+    fn probe(bmp: &TextBitmap, distance: f32, degrees: f32) -> (u8, bool) {
+        let radians = degrees.to_radians();
+        let x = (CENTRE + distance * radians.cos()) as usize;
+        let y = (CENTRE + distance * radians.sin()) as usize;
+        let at = (y * bmp.width as usize + x) * 4;
+        (bmp.rgba[at + 3], bmp.rgba[at] > 128)
+    }
+
+    /// Angles chosen to hit axes, diagonals and directions in between, which
+    /// is where a distance transform is least accurate.
+    const ANGLES: [f32; 8] = [0.0, 23.0, 45.0, 67.0, 90.0, 141.0, 200.0, 314.0];
+
+    #[test]
+    fn a_pen_wider_than_the_shape_still_fills_solid() {
+        // The case the path stroker cannot do: the pen reaches past the far
+        // side of the contour, so its inner offset inverts on itself.
+        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside))).unwrap();
+        for step in 0..10 {
+            for angle in ANGLES {
+                let (alpha, _) = probe(&bmp, step as f32, angle);
+                assert_eq!(alpha, 255, "hole at {step}px, {angle}deg");
+            }
+        }
+    }
+
+    #[test]
+    fn an_outside_stroke_reaches_exactly_the_pen_width() {
+        let (radius, pen) = (40.0f32, 6.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            Some(spec(pen, StrokePosition::Outside)),
+        )
+        .unwrap();
+        for angle in ANGLES {
+            let (inner_alpha, inner_is_ink) = probe(&bmp, radius - 2.0, angle);
+            assert_eq!(inner_alpha, 255);
+            assert!(!inner_is_ink, "fill was overpainted at {angle}deg");
+
+            let (band_alpha, band_is_ink) = probe(&bmp, radius + pen / 2.0, angle);
+            assert_eq!(band_alpha, 255, "gap in the band at {angle}deg");
+            assert!(band_is_ink, "band is not stroke coloured at {angle}deg");
+
+            let (past_alpha, _) = probe(&bmp, radius + pen + 2.0, angle);
+            assert_eq!(past_alpha, 0, "ink past the pen width at {angle}deg");
+        }
+    }
+
+    #[test]
+    fn an_inside_stroke_never_leaves_the_shape() {
+        let (radius, pen) = (40.0f32, 6.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            Some(spec(pen, StrokePosition::Inside)),
+        )
+        .unwrap();
+        for angle in ANGLES {
+            let (past_alpha, _) = probe(&bmp, radius + 2.0, angle);
+            assert_eq!(past_alpha, 0, "ink outside the shape at {angle}deg");
+
+            let (band_alpha, band_is_ink) = probe(&bmp, radius - pen / 2.0, angle);
+            assert_eq!(band_alpha, 255);
+            assert!(band_is_ink, "band is not stroke coloured at {angle}deg");
+
+            let (_, core_is_ink) = probe(&bmp, radius - pen - 3.0, angle);
+            assert!(!core_is_ink, "stroke ate the fill at {angle}deg");
+        }
+    }
+
+    #[test]
+    fn a_centre_stroke_straddles_the_edge() {
+        let (radius, pen) = (40.0f32, 8.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            Some(spec(pen, StrokePosition::Center)),
+        )
+        .unwrap();
+        for angle in ANGLES {
+            let (outer_alpha, outer_is_ink) = probe(&bmp, radius + pen / 4.0, angle);
+            assert_eq!(outer_alpha, 255, "gap outside the edge at {angle}deg");
+            assert!(outer_is_ink);
+
+            let (_, inner_is_ink) = probe(&bmp, radius - pen / 4.0, angle);
+            assert!(inner_is_ink, "band does not reach inside at {angle}deg");
+
+            let (past_alpha, _) = probe(&bmp, radius + pen / 2.0 + 2.0, angle);
+            assert_eq!(past_alpha, 0, "ink past half the pen at {angle}deg");
+        }
+    }
+
+    #[test]
+    fn a_counter_narrower_than_the_pen_closes_up() {
+        // A hole smaller than the pen fills solid with stroke, the way growing
+        // the shape inward from every side would.
+        let mut pb = PathBuilder::new();
+        pb.push_rect(Rect::from_ltrb(40.0, 40.0, 120.0, 120.0).unwrap());
+        // Wound against the outer rectangle, or non-zero winding would treat
+        // it as more of the same shape rather than as a hole in it.
+        let (lo, hi) = (CENTRE - 4.0, CENTRE + 4.0);
+        pb.move_to(lo, lo);
+        pb.line_to(lo, hi);
+        pb.line_to(hi, hi);
+        pb.line_to(hi, lo);
+        pb.close();
+        let run = BuiltRun {
+            path: pb.finish(),
+            width: SIZE,
+            height: SIZE,
+            baseline: 0.0,
+            clusters: Vec::new(),
+        };
+
+        let bmp = paint_run(run, FILL, Some(spec(10.0, StrokePosition::Outside))).unwrap();
+        for step in 0..4 {
+            for angle in ANGLES {
+                let (alpha, is_ink) = probe(&bmp, step as f32, angle);
+                assert_eq!(alpha, 255, "hole in the counter at {step}px, {angle}deg");
+                assert!(is_ink, "counter is not stroke coloured at {step}px");
+            }
+        }
+    }
+
+    #[test]
+    fn a_stroke_of_no_width_is_just_the_fill() {
+        let bmp = paint_run(disc_run(20.0), FILL, Some(spec(0.0, StrokePosition::Outside))).unwrap();
+        for angle in ANGLES {
+            let (_, is_ink) = probe(&bmp, 10.0, angle);
+            assert!(!is_ink);
+            let (alpha, _) = probe(&bmp, 24.0, angle);
+            assert_eq!(alpha, 0);
+        }
     }
 }
 

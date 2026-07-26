@@ -36,6 +36,11 @@ export interface EngineFontSource {
   postscriptName?: string;
 }
 
+/**
+ * No join or cap. The band is grown from the filled shape rather than swept
+ * along its outline, so every corner it turns is round by construction — the
+ * same reason a Photoshop layer-style stroke offers neither.
+ */
 export interface EngineStrokeSpec {
   /** Total stroke thickness in pixels, following the Photoshop convention. */
   width: number;
@@ -43,8 +48,6 @@ export interface EngineStrokeSpec {
   color: string;
   /** Defaults to "outside". */
   position?: StrokePosition;
-  /** Defaults to "round". */
-  join?: "round" | "miter" | "bevel";
 }
 
 /** Where one cluster of the input string landed on a rendered bitmap. */
