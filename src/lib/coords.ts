@@ -1,0 +1,58 @@
+/**
+ * The one place screen ↔ content px conversion lives. The view transform is
+ * `translate(tx,ty) ∘ scale(s) ∘ rotate(θ)` with a `0 0` origin, matching the
+ * CSS `translate() scale() rotate()` chain term for term. Anything that hand
+ * rolls `tx + x * scale` breaks the moment the view is rotated.
+ */
+export interface ViewTransform {
+  scale: number
+  tx: number
+  ty: number
+  /** View rotation in radians. 0 means upright. */
+  rotate: number
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+export function screenToContentPx(
+  clientX: number,
+  clientY: number,
+  containerRect: { left: number; top: number },
+  view: ViewTransform,
+): { x: number; y: number } {
+  const ix = (clientX - containerRect.left - view.tx) / view.scale
+  const iy = (clientY - containerRect.top - view.ty) / view.scale
+  if (view.rotate === 0) return { x: ix, y: iy }
+  const cos = Math.cos(view.rotate)
+  const sin = Math.sin(view.rotate)
+  return { x: ix * cos + iy * sin, y: -ix * sin + iy * cos }
+}
+
+export function contentToScreenPx(
+  x: number,
+  y: number,
+  view: ViewTransform,
+): { x: number; y: number } {
+  const cos = Math.cos(view.rotate)
+  const sin = Math.sin(view.rotate)
+  return {
+    x: view.tx + view.scale * (x * cos - y * sin),
+    y: view.ty + view.scale * (x * sin + y * cos),
+  }
+}
+
+/**
+ * Labels are stored as a fraction of the raw image so a project survives the
+ * same page being re-scanned at another resolution. Markers live inside the
+ * transformed stage, so placing one needs no view.
+ */
+export function percentToContentPx(
+  xPercent: number,
+  yPercent: number,
+  naturalWidth: number,
+  naturalHeight: number,
+): { x: number; y: number } {
+  return { x: xPercent * naturalWidth, y: yPercent * naturalHeight }
+}

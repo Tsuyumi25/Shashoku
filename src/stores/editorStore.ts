@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import type { LabelItem } from '@/types/project'
+import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface Command {
@@ -26,6 +27,20 @@ export const useEditorStore = defineStore('editor', () => {
   function adjustFontSize(delta: number) {
     fontSize.value = Math.min(24, Math.max(10, fontSize.value + delta))
   }
+
+  /**
+   * The view transform lives here rather than in the canvas because the bottom
+   * bar is the canvas's sibling, and because whether a page change keeps the
+   * current view is the same kind of question as which page is open.
+   */
+  const viewContainerSize = ref<Size>({ w: 0, h: 0 })
+  const viewContentSize = ref<Size>({ w: 0, h: 0 })
+  const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(
+    viewContainerSize,
+    viewContentSize,
+  )
+  /** The page the view was last fitted to, so re-decoding one does not refit. */
+  const viewFittedPage = ref<string | null>(null)
 
   const undoStack = shallowRef<Command[]>([])
   const redoStack = shallowRef<Command[]>([])
@@ -240,6 +255,15 @@ export const useEditorStore = defineStore('editor', () => {
     focusEditorRequest,
     fontSize,
     adjustFontSize,
+    view,
+    viewContainerSize,
+    viewContentSize,
+    viewFittedPage,
+    fitToView,
+    wheelZoom,
+    zoomBy,
+    panBy,
+    rotateTo,
     canUndo,
     canRedo,
     selectFile,

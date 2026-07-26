@@ -1,13 +1,15 @@
 <template>
   <div class="flex h-7 shrink-0 items-center gap-1 border-t border-border bg-card px-1 select-none">
-    <button class="page-btn" title="縮小">
+    <button class="page-btn" title="縮小" :disabled="!project.isOpen" @click="editor.zoomBy(1 / 1.25)">
       <ZoomOut :size="14" />
     </button>
-    <button class="page-btn" title="放大">
+    <button class="page-btn" title="放大" :disabled="!project.isOpen" @click="editor.zoomBy(1.25)">
       <ZoomIn :size="14" />
     </button>
-    <span class="px-1 text-xs text-muted-foreground tabular-nums">100%</span>
-    <button class="page-btn" title="適應視窗">
+    <span class="px-1 text-xs text-muted-foreground tabular-nums">
+      {{ scalePercent }}
+    </span>
+    <button class="page-btn" title="適應視窗" :disabled="!project.isOpen" @click="editor.fitToView()">
       <Maximize :size="13" />
     </button>
 
@@ -34,12 +36,19 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ChevronLeft, ChevronRight, Maximize, ZoomIn, ZoomOut } from '@lucide/vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+
+const percentFormat = new Intl.NumberFormat(undefined, {
+  style: 'percent',
+  maximumFractionDigits: 0,
+})
+const scalePercent = computed(() => percentFormat.format(editor.view.scale))
 
 function onSelect(e: Event) {
   editor.selectFile((e.target as HTMLSelectElement).value)
@@ -56,8 +65,11 @@ function onSelect(e: Event) {
   border-radius: 0.25rem;
   color: var(--muted-foreground);
 }
-.page-btn:hover {
+.page-btn:hover:not(:disabled) {
   background: var(--secondary);
   color: var(--foreground);
+}
+.page-btn:disabled {
+  opacity: 0.5;
 }
 </style>
