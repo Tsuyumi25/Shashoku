@@ -1,7 +1,7 @@
 <template>
   <div
     ref="containerRef"
-    class="relative h-full min-h-0 w-full touch-none overflow-hidden bg-muted"
+    class="relative h-full min-h-0 w-full touch-none overflow-hidden bg-muted select-none"
     :class="[canvasCursor]"
     @wheel.prevent="onWheel"
     @pointerdown="onPointerDown"

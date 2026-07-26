@@ -3,14 +3,14 @@
     v-if="sample"
     ref="canvasEl"
     v-bind="$attrs"
-    class="absolute cursor-pointer"
+    class="absolute cursor-pointer select-none"
     :style="boxStyle"
     @click.stop="emit('select')"
   />
   <span
     v-else-if="failure"
     v-bind="$attrs"
-    class="absolute cursor-pointer rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40"
+    class="absolute cursor-pointer rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
     :style="chipStyle"
     :title="failure"
     @click.stop="emit('select')"
