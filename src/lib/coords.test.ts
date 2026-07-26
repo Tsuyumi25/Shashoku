@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { contentToScreenPx, screenToContentPx, type ViewTransform } from './coords'
+import {
+  centeredBoxOnScreen,
+  contentToScreenPx,
+  screenToContentPx,
+  type ViewTransform,
+} from './coords'
 
 const ORIGIN = { left: 0, top: 0 }
 
@@ -24,5 +29,22 @@ describe('coords with view rotation', () => {
     const s = contentToScreenPx(10, 0, view)
     expect(s.x).toBeCloseTo(0, 6)
     expect(s.y).toBeCloseTo(10, 6)
+  })
+})
+
+describe('centeredBoxOnScreen', () => {
+  it('puts the centre where the view puts the anchor and scales the box with it', () => {
+    const view: ViewTransform = { scale: 2, tx: 10, ty: 20, rotate: 0 }
+    const box = centeredBoxOnScreen({ x: 100, y: 50 }, { w: 40, h: 20 }, view)
+    expect(box).toEqual({ centerX: 210, centerY: 120, width: 80, height: 40 })
+  })
+
+  it('keeps the box axis aligned under rotation, moving only its centre', () => {
+    const view: ViewTransform = { scale: 3, tx: 0, ty: 0, rotate: Math.PI / 2 }
+    const box = centeredBoxOnScreen({ x: 10, y: 0 }, { w: 8, h: 4 }, view)
+    expect(box.centerX).toBeCloseTo(0, 6)
+    expect(box.centerY).toBeCloseTo(30, 6)
+    expect(box.width).toBe(24)
+    expect(box.height).toBe(12)
   })
 })

@@ -248,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { refDebounced, useElementSize, useEventListener } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Star, X } from '@lucide/vue'
@@ -258,7 +258,7 @@ import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { canEditInCell } from '@/lib/editContext'
-import { loadFontCatalog } from '@/lib/fontCatalog'
+import { catalog, loadFontCatalog } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
@@ -420,9 +420,6 @@ const currentFamily = computed(() => picker.request.value.current)
 const fillColor = computed(() => picker.request.value.fillColor)
 const stroke = computed(() => picker.request.value.stroke)
 
-// Shallow: entries are never mutated, and proxying a thousand of them would
-// both cost for nothing and risk handing a Proxy to the engine bridge.
-const catalog = shallowRef<FontEntry[]>([])
 const enumerating = ref(false)
 const error = ref<string | null>(null)
 
@@ -524,7 +521,7 @@ let enumerated = false
 async function refreshCatalog() {
   enumerating.value = true
   try {
-    catalog.value = await loadFontCatalog(preferences.prefs.fontFolders)
+    await loadFontCatalog(preferences.prefs.fontFolders)
     enumerated = true
     error.value = null
   } catch (err) {

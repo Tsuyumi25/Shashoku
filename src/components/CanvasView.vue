@@ -14,6 +14,27 @@
       <img ref="imgRef" :src="src" class="hidden" alt="" @load="onImageLoad" />
       <canvas ref="baseCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
+      <!--
+        Outside the transformed stage on purpose, and under the markers: these
+        carry their own pixels and place themselves in screen coordinates.
+        The layer itself is transparent to the pointer so a drag on bare page
+        still reaches the canvas gestures.
+      -->
+      <div v-if="imageReady" class="pointer-events-none absolute inset-0">
+        <LabelText
+          v-for="entry in textLabels"
+          :key="entry.id"
+          :class="[!gestureArmed && 'pointer-events-auto']"
+          :text="entry.text"
+          :text-style="entry.style"
+          :x="entry.x"
+          :y="entry.y"
+          :natural="editor.viewContentSize"
+          :view="view"
+          @select="editor.selectedLabelId = entry.id"
+        />
+      </div>
+
       <div v-if="imageReady" class="absolute top-0 left-0" :style="stageStyle">
         <LabelMarker
           v-for="(label, i) in currentFile.labels"
@@ -42,22 +63,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelMarker from '@/components/LabelMarker.vue'
+import LabelText from '@/components/LabelText.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
   resetRotationDirection,
   trackRotationDirection,
 } from '@/lib/rotateDirection'
+import { resolveTextStyle } from '@/lib/textStyle'
 import { useEditorStore } from '@/stores/editorStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
 const ui = useUiStore()
+const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 
 const view = editor.view
@@ -65,6 +91,31 @@ const view = editor.view
 const currentFile = computed(() =>
   editor.currentFilename ? (project.fileByName(editor.currentFilename) ?? null) : null,
 )
+
+/**
+ * Resolved here rather than in the template so that panning, which re-renders
+ * this component on every frame, does not hand each label a new style object
+ * and make it look like the text changed.
+ */
+const textLabels = computed(() =>
+  (currentFile.value?.labels ?? [])
+    .filter((label) => label.text.length > 0)
+    .map((label) => ({
+      id: label.id,
+      text: label.text,
+      x: label.x,
+      y: label.y,
+      style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
+    })),
+)
+
+// The picker enumerates on its first opening, which is too late for text that
+// is on screen before anyone asks to change a font.
+onMounted(() => {
+  loadFontCatalog(preferences.prefs.fontFolders).catch((err: unknown) => {
+    console.error('font enumeration failed', err)
+  })
+})
 
 function colorOf(groupId: string | null): string {
   if (!groupId) return 'rgb(128, 128, 128)'

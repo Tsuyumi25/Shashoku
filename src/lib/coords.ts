@@ -44,6 +44,26 @@ export function contentToScreenPx(
 }
 
 /**
+ * Screen placement of a content-sized box centred on a content point, for the
+ * elements that live outside the transformed stage and carry their own pixels.
+ * The box stays axis aligned: a rotated view moves its centre but never its
+ * width or height, so whoever draws into it decides what to do about rotation.
+ */
+export function centeredBoxOnScreen(
+  center: { x: number; y: number },
+  size: { w: number; h: number },
+  view: ViewTransform,
+): { centerX: number; centerY: number; width: number; height: number } {
+  const p = contentToScreenPx(center.x, center.y, view)
+  return {
+    centerX: p.x,
+    centerY: p.y,
+    width: size.w * view.scale,
+    height: size.h * view.scale,
+  }
+}
+
+/**
  * Labels are stored as a fraction of the raw image so a project survives the
  * same page being re-scanned at another resolution. Markers live inside the
  * transformed stage, so placing one needs no view.

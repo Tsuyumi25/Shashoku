@@ -103,6 +103,26 @@ function rasterize(req: SampleRequest): Sample {
   }
 }
 
+const sources = new WeakMap<Sample, OffscreenCanvas>()
+
+/**
+ * The sample as something drawImage can scale. putImageData ignores the
+ * context transform and only ever blits one for one, so a sample that has to
+ * land at any size but its own goes through a canvas first. Held against the
+ * sample because zooming repaints far more often than it re-rasterizes.
+ */
+export function sampleSource(sample: Sample): OffscreenCanvas {
+  const held = sources.get(sample)
+  if (held) return held
+
+  const off = new OffscreenCanvas(sample.image.width, sample.image.height)
+  const ctx = off.getContext('2d')
+  if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
+  ctx.putImageData(sample.image, 0, 0)
+  sources.set(sample, off)
+  return off
+}
+
 export function sampleFor(req: SampleRequest): Sample {
   const key = keyOf(req)
 

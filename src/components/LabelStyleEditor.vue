@@ -27,6 +27,7 @@
 import { computed } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
 import StyleEditor from '@/components/StyleEditor.vue'
+import { resolveTextStyle } from '@/lib/textStyle'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -51,10 +52,13 @@ const baseGroup = computed(() => {
 
 const baseName = computed(() => baseGroup.value?.name ?? '預設樣式')
 
-const effectiveStyle = computed<TextStyle>(() => ({
-  ...(baseGroup.value?.style ?? project.header.defaultStyle),
-  ...(selectedLabel.value?.styleOverride ?? {}),
-}))
+const effectiveStyle = computed<TextStyle>(() =>
+  resolveTextStyle(
+    selectedLabel.value ?? { groupId: null },
+    project.header.groups,
+    project.header.defaultStyle,
+  ),
+)
 
 const hasOverride = computed(
   () => Object.keys(selectedLabel.value?.styleOverride ?? {}).length > 0,
