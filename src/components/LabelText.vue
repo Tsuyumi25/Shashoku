@@ -3,17 +3,25 @@
     v-if="sample"
     ref="canvasEl"
     v-bind="$attrs"
-    class="absolute cursor-pointer select-none"
+    class="absolute select-none"
+    :class="drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab'"
     :style="boxStyle"
-    @click.stop="emit('select')"
+    @pointerdown.stop="drag.onPointerDown"
+    @pointermove="drag.onPointerMove"
+    @pointerup="drag.onPointerUp"
+    @pointercancel="drag.onPointerUp"
   />
   <span
     v-else-if="failure"
     v-bind="$attrs"
-    class="absolute cursor-pointer rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
+    class="absolute rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
+    :class="drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab'"
     :style="chipStyle"
     :title="failure"
-    @click.stop="emit('select')"
+    @pointerdown.stop="drag.onPointerDown"
+    @pointermove="drag.onPointerMove"
+    @pointerup="drag.onPointerUp"
+    @pointercancel="drag.onPointerUp"
   >
     無法繪製
   </span>
@@ -22,6 +30,7 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
+import { useLabelDrag, type Anchor } from '@/composables/useLabelDrag'
 import { centeredBoxOnScreen, percentToContentPx, type ViewTransform } from '@/lib/coords'
 import { catalogByFamily, catalogLoaded } from '@/lib/fontCatalog'
 import { sampleFor, sampleSource, type Sample } from '@/lib/fontSampleCache'
@@ -49,7 +58,20 @@ const props = defineProps<{
   view: ViewTransform
 }>()
 
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{
+  select: []
+  move: [to: Anchor]
+  moveEnd: [from: Anchor, to: Anchor]
+}>()
+
+const drag = useLabelDrag({
+  anchor: () => ({ x: props.x, y: props.y }),
+  natural: () => props.natural,
+  view: () => props.view,
+  onSelect: () => emit('select'),
+  onMove: (to) => emit('move', to),
+  onCommit: (from, to) => emit('moveEnd', from, to),
+})
 
 const dpr = window.devicePixelRatio || 1
 

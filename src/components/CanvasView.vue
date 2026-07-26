@@ -32,6 +32,8 @@
           :natural="editor.viewContentSize"
           :view="view"
           @select="editor.selectedLabelId = entry.id"
+          @move="moveLabelTo(entry.id, $event)"
+          @move-end="(from, to) => commitLabelMove(entry.id, from, to)"
         />
       </div>
 
@@ -45,10 +47,11 @@
           :y="label.y"
           :color="colorOf(label.groupId)"
           :natural="editor.viewContentSize"
-          :scale="view.scale"
-          :rotate="view.rotate"
+          :view="view"
           :selected="label.id === editor.selectedLabelId"
           @select="editor.selectedLabelId = label.id"
+          @move="moveLabelTo(label.id, $event)"
+          @move-end="(from, to) => commitLabelMove(label.id, from, to)"
         />
       </div>
     </template>
@@ -68,6 +71,7 @@ import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelMarker from '@/components/LabelMarker.vue'
 import LabelText from '@/components/LabelText.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import type { Anchor } from '@/composables/useLabelDrag'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -116,6 +120,21 @@ onMounted(() => {
     console.error('font enumeration failed', err)
   })
 })
+
+/**
+ * A drag writes straight through so the page keeps up with the pointer, and
+ * only the release enters the undo stack — otherwise one drag would leave a
+ * frame's worth of entries to undo one at a time.
+ */
+function moveLabelTo(labelId: string, to: Anchor) {
+  if (!editor.currentFilename) return
+  project.moveLabel(editor.currentFilename, labelId, to.x, to.y)
+}
+
+function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
+  if (!editor.currentFilename) return
+  editor.cmdMoveLabel(editor.currentFilename, labelId, from, to)
+}
 
 function colorOf(groupId: string | null): string {
   if (!groupId) return 'rgb(128, 128, 128)'

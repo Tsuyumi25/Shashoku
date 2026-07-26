@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   centeredBoxOnScreen,
   contentToScreenPx,
+  screenDeltaToContentPx,
   screenToContentPx,
   type ViewTransform,
 } from './coords'
@@ -29,6 +30,31 @@ describe('coords with view rotation', () => {
     const s = contentToScreenPx(10, 0, view)
     expect(s.x).toBeCloseTo(0, 6)
     expect(s.y).toBeCloseTo(10, 6)
+  })
+})
+
+describe('screenDeltaToContentPx', () => {
+  it('divides by the scale and ignores the translation', () => {
+    const view: ViewTransform = { scale: 2, tx: 999, ty: -999, rotate: 0 }
+    expect(screenDeltaToContentPx(10, 20, view)).toEqual({ x: 5, y: 10 })
+  })
+
+  it('turns a downward drag into content +x at 90 degrees', () => {
+    const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: Math.PI / 2 }
+    const d = screenDeltaToContentPx(0, 10, view)
+    expect(d.x).toBeCloseTo(10, 6)
+    expect(d.y).toBeCloseTo(0, 6)
+  })
+
+  it('agrees with the difference of two mapped points', () => {
+    const view: ViewTransform = { scale: 1.7, tx: 120, ty: -40, rotate: Math.PI / 7 }
+    const at = { x: 300, y: 200 }
+    const drag = { x: 37, y: -22 }
+    const before = screenToContentPx(at.x, at.y, ORIGIN, view)
+    const after = screenToContentPx(at.x + drag.x, at.y + drag.y, ORIGIN, view)
+    const d = screenDeltaToContentPx(drag.x, drag.y, view)
+    expect(d.x).toBeCloseTo(after.x - before.x, 6)
+    expect(d.y).toBeCloseTo(after.y - before.y, 6)
   })
 })
 

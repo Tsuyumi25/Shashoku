@@ -44,6 +44,25 @@ export function contentToScreenPx(
 }
 
 /**
+ * A screen-space movement in content px. A displacement carries no origin, so
+ * the translation drops out and only the scale and the rotation are undone —
+ * which is what a drag needs, and why it cannot reuse the container rect that
+ * screenToContentPx demands.
+ */
+export function screenDeltaToContentPx(
+  dx: number,
+  dy: number,
+  view: ViewTransform,
+): { x: number; y: number } {
+  const ix = dx / view.scale
+  const iy = dy / view.scale
+  if (view.rotate === 0) return { x: ix, y: iy }
+  const cos = Math.cos(view.rotate)
+  const sin = Math.sin(view.rotate)
+  return { x: ix * cos + iy * sin, y: -ix * sin + iy * cos }
+}
+
+/**
  * Screen placement of a content-sized box centred on a content point, for the
  * elements that live outside the transformed stage and carry their own pixels.
  * The box stays axis aligned: a rotated view moves its centre but never its
