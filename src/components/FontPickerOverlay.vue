@@ -26,6 +26,16 @@
           {{ g.label }}({{ g.count }})
         </button>
       </div>
+      <ToggleGroupRoot
+        type="single"
+        class="seg shrink-0"
+        :model-value="vertical ? 'vertical' : 'horizontal'"
+        @update:model-value="onDirection"
+      >
+        <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
+        <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
+      </ToggleGroupRoot>
+
       <span class="shrink-0">字級</span>
       <input
         type="range"
@@ -42,65 +52,47 @@
       <button
         type="button"
         class="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-secondary"
+        :class="showFolders ? 'border-primary text-primary' : ''"
+        @click="showFolders = !showFolders"
+      >
+        字體資料夾{{ preferences.prefs.fontFolders.length ? `(${preferences.prefs.fontFolders.length})` : '' }}
+      </button>
+      <button
+        type="button"
+        class="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-secondary"
         title="Esc"
         @click="picker.cancel()"
       >
         取消
       </button>
 
-      <span class="shrink-0">缺字的字體</span>
-      <ToggleGroupRoot
-        type="single"
-        class="seg shrink-0"
-        :model-value="preferences.prefs.missingGlyphMode"
-        @update:model-value="onMissingGlyphMode"
+      <label
+        class="flex shrink-0 items-center gap-1.5"
+        title="畫不出當前樣本文字的字體，不列在清單裡"
       >
-        <ToggleGroupItem
-          value="hide"
-          class="seg-item"
-          title="畫不出當前樣本文字的字體，不列在清單裡"
-        >
-          不顯示
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          value="substitute"
-          class="seg-item"
-          title="畫不出來的字，改用指定的字體畫"
-        >
-          換字體
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          value="tofu"
-          class="seg-item"
-          title="畫不出來的字顯示成空方框，不替換"
-        >
-          顯示方框
-        </ToggleGroupItem>
-      </ToggleGroupRoot>
-
-      <template v-if="preferences.prefs.missingGlyphMode === 'substitute'">
-        <span class="shrink-0">換成</span>
-        <select
-          class="h-6 max-w-44 min-w-0 shrink rounded border border-input bg-background px-1 text-foreground"
-          :value="preferences.prefs.fontFallbackFamily"
-          @change="onFallbackFamily($event)"
-        >
-          <option value="">未指定</option>
-          <option v-for="entry in catalog" :key="entry.family" :value="entry.family">
-            {{ entry.displayName }}
-          </option>
-        </select>
-      </template>
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-primary"
+          :checked="hidingUndrawable"
+          @change="onHideUndrawable($event)"
+        />
+        隱藏缺字的字體
+      </label>
 
       <label
-        v-if="preferences.prefs.missingGlyphMode !== 'hide'"
         class="flex shrink-0 items-center gap-1.5"
-        title="把畫不出來的那幾個字框起來"
+        :class="hidingUndrawable ? 'cursor-not-allowed opacity-40' : ''"
+        :title="
+          hidingUndrawable
+            ? '清單裡沒有缺字的字體了，沒有東西可以標記'
+            : '把畫不出來的那幾個字框起來'
+        "
       >
         <input
           type="checkbox"
           class="h-3.5 w-3.5 accent-primary"
           :checked="preferences.prefs.markMissingGlyphs"
+          :disabled="hidingUndrawable"
           @change="onMarkMissing($event)"
         />
         標記缺字
@@ -132,6 +124,43 @@
         title="換行請用 \n"
         class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-0.5 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
       />
+    </div>
+
+    <div
+      v-if="showFolders"
+      class="flex shrink-0 gap-4 border-b border-border bg-card px-3 py-2 text-xs"
+    >
+      <div class="min-w-0 flex-1">
+        <ul v-if="preferences.prefs.fontFolders.length" class="mb-1.5 flex flex-col gap-1">
+          <li
+            v-for="folder in preferences.prefs.fontFolders"
+            :key="folder"
+            class="flex items-center gap-2"
+          >
+            <span class="min-w-0 flex-1 truncate font-mono" :title="folder">{{ folder }}</span>
+            <button
+              type="button"
+              class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              title="從清單移除，不會刪除任何檔案"
+              @click="removeFolder(folder)"
+            >
+              <X :size="12" />
+            </button>
+          </li>
+        </ul>
+        <p v-else class="mb-1.5 text-muted-foreground">尚未加入資料夾。</p>
+        <button
+          type="button"
+          class="rounded border border-border bg-background px-2 py-0.5 hover:bg-secondary"
+          @click="addFolder()"
+        >
+          新增資料夾…
+        </button>
+      </div>
+      <p class="max-w-80 shrink-0 leading-relaxed text-muted-foreground">
+        這些資料夾裡的字體檔會留在原處，Shashoku 直接讀取，不會複製一份。放在機械硬碟上，樣張會慢一些；放在外接裝置上，裝置沒接上時這些字體不會出現在清單裡。內接
+        SSD 不會有這兩種情況。
+      </p>
     </div>
 
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
@@ -179,16 +208,28 @@
               </button>
             </span>
 
-            <div class="cell-sample">
+            <div
+              class="cell-sample"
+              :class="[canEditInCell ? 'cursor-text' : '', vertical ? 'vertical' : '']"
+              :title="
+                canEditInCell
+                  ? '點一下可以直接改樣本文字'
+                  : '這個環境不支援在格子裡編輯，請用上方的樣本文字欄'
+              "
+              @mousedown="startEditing(entry, $event)"
+            >
               <FontSampleCanvas
                 :entry="entry"
                 :text="sample"
                 :size-px="appliedSize"
                 :fill-color="fillColor"
                 :stroke="stroke"
-                :fallback="fallbackEntry"
+                :vertical="vertical"
                 :mark="markMissing"
-                :deferred="fastScroll"
+                :editing="editingFamily === entry.family"
+                :start-at="editingFamily === entry.family ? editingAt : undefined"
+                @update:text="onEditorText"
+                @close="stopEditing(entry.family)"
               />
             </div>
 
@@ -210,14 +251,15 @@
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { refDebounced, useElementSize, useEventListener } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Star } from '@lucide/vue'
+import { Star, X } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { canEditInCell } from '@/lib/editContext'
 import { loadFontCatalog } from '@/lib/fontCatalog'
-import { coverageFor } from '@/lib/fontSampleCache'
+import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const picker = useFontPicker()
@@ -226,52 +268,152 @@ const preferences = usePreferencesStore()
 type Group = 'all' | 'fav'
 const group = ref<Group>('all')
 
+const showFolders = ref(false)
+
 // Presets and the input share one escaped form: a single-line field silently
 // drops real newlines, so line breaks are spelled \n and decoded before the
 // text reaches the engine.
 const SAMPLE_PRESETS = [
-  { label: '對白', text: '等一下……你是說真的嗎!?\\n等一下……你是说真的吗!?' },
-  { label: '喊叫', text: '哇啊啊啊——不要過來啊!!' },
-  { label: '日文', text: 'わかっているのか? 撃っていいのは、撃たれる覚悟のある奴だけだ!' },
+  { label: '對白', text: '等一下……你是說真的嗎！？\\n等一下……你是说真的吗！？' },
+  { label: '喊叫', text: '哇啊啊啊——不要過來啊！！' },
+  { label: '日文', text: 'わかっているのか？ 撃っていいのは、撃たれる覚悟のある奴だけだ！' },
   { label: '檢字', text: '永字八法 體鬱龍書\\n哎呀啊喔 体郁龙书\\nあアぐグ Ag123 0O1Il' },
 ] as const
 
 const sampleDraft = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
-const sampleApplied = refDebounced(sampleDraft, 250)
-const sample = computed(() => sampleApplied.value.replaceAll('\\n', '\n'))
+const sample = computed(() => sampleDraft.value.replaceAll('\\n', '\n'))
 
-watch(sampleApplied, (text) => preferences.setFontSampleText(text))
+watch(sampleDraft, (text) => preferences.setFontSampleText(text))
 
-const appliedSize = refDebounced(
-  computed(() => preferences.prefs.fontSamplePx),
-  150,
+/**
+ * One editor for the whole grid. HTMLElement.editContext binds one to one, and
+ * spreadsheets settle the same way — Handsontable keeps a single editor per
+ * table, AG Grid a single editable cell.
+ */
+const editingFamily = ref<string | null>(null)
+/** Where the click that opened the editor landed, so the caret starts there. */
+const editingAt = ref<{ clientX: number; clientY: number } | null>(null)
+
+function startEditing(entry: FontEntry, e: MouseEvent) {
+  if (!canEditInCell || editingFamily.value === entry.family) return
+  // A cell is not focusable, so letting the press run its course would clear
+  // focus the moment the editor took it — the editor opened and shut again
+  // within the same click.
+  e.preventDefault()
+  editingAt.value = { clientX: e.clientX, clientY: e.clientY }
+  editingScrollTop = scrollEl.value?.scrollTop ?? 0
+  editingFamily.value = entry.family
+}
+
+/**
+ * Named rather than unconditional: pressing on another cell moves the caret
+ * there before the old editor is told it lost focus, and an anonymous close
+ * would then shut the one that just opened.
+ */
+function stopEditing(family: string) {
+  if (editingFamily.value === family) editingFamily.value = null
+}
+
+// The editor is a view of the shared sample string, not its owner, so what it
+// types goes back through the same field the input above the grid writes to.
+function onEditorText(next: string) {
+  sampleDraft.value = next.replaceAll('\n', '\\n')
+}
+
+const appliedSize = computed(() => preferences.prefs.fontSamplePx)
+
+/**
+ * Direction is a property of the style being previewed, so it is re-read every
+ * time the picker opens; toggling it here only lasts as long as this opening.
+ * With no style behind the request, the last choice is remembered instead.
+ */
+const vertical = ref(preferences.prefs.fontSampleVertical)
+
+function onDirection(v: unknown) {
+  if (v !== 'horizontal' && v !== 'vertical') return
+  vertical.value = v === 'vertical'
+  if (picker.request.value.vertical === undefined) {
+    preferences.setFontSampleVertical(vertical.value)
+  }
+}
+
+const sampleLines = computed(() => sample.value.split('\n'))
+const longestLine = computed(() =>
+  sampleLines.value.reduce((most, line) => Math.max(most, line.length), 1),
 )
-const minCellWidth = computed(() => Math.round(appliedSize.value * 13))
+
+/** Matches the column advance the engine uses for vertical runs. */
+const VERTICAL_COLUMN_EM = 1.2
+/**
+ * Widest a character that is not full-width comes out across this font library.
+ * Only horizontal needs guessing: a vertical column advances by a constant the
+ * engine sets, the same for every face.
+ */
+const NARROW_ADVANCE_EM = 0.62
+/** Left and right padding of a cell. */
+const CELL_SIDE_PADDING_PX = 24
+
+function advanceEm(line: string): number {
+  let em = 0
+  for (const ch of line) {
+    // Everything from Hangul Jamo upward is either full-width or ambiguous
+    // punctuation that a CJK face draws full-width; guessing wide only costs
+    // space, guessing narrow costs the end of the line.
+    em += (ch.codePointAt(0) ?? 0) >= 0x1100 ? 1 : NARROW_ADVANCE_EM
+  }
+  return em
+}
+
+/**
+ * Wide enough to hold the sample, because the cell clips what does not fit and
+ * a vertical run starts at its right edge — a cell one column short hides the
+ * first column, not the last.
+ */
+const minCellWidth = computed(() => {
+  const size = appliedSize.value
+  // Ceiling because the engine rounds its bitmap up to whole pixels, and a cell
+  // short by that one pixel clips a whole column's worth of edge.
+  const body = vertical.value
+    ? Math.ceil(size * VERTICAL_COLUMN_EM * sampleLines.value.length)
+    : size * sampleLines.value.reduce((most, line) => Math.max(most, advanceEm(line)), 1)
+  return Math.ceil(body + samplePadding(stroke.value) * 2 + CELL_SIDE_PADDING_PX)
+})
+
+/**
+ * Label, padding and gap around the sample. Only an estimate is needed: every
+ * row is measured for real once it exists, and the closer this starts the less
+ * the list has to correct afterwards.
+ */
+const CELL_CHROME_PX = 40
+/** A line box runs a little taller than the em; measured across this library. */
+const LINE_HEIGHT_RATIO = 1.35
+
+const estimatedRowHeight = computed(() => {
+  const size = appliedSize.value
+  const body = vertical.value
+    ? size * longestLine.value * 1.05
+    : size * LINE_HEIGHT_RATIO * sampleLines.value.length
+  return Math.round(body + CELL_CHROME_PX)
+})
 
 function onSampleSize(e: Event) {
   preferences.setFontSamplePx((e.target as HTMLInputElement).valueAsNumber)
 }
 
-function onMissingGlyphMode(v: unknown) {
-  if (v === 'hide' || v === 'substitute' || v === 'tofu') preferences.setMissingGlyphMode(v)
-}
+const hidingUndrawable = computed(() => preferences.prefs.missingGlyphMode === 'hide')
 
-function onFallbackFamily(e: Event) {
-  preferences.setFontFallbackFamily((e.target as HTMLSelectElement).value)
+function onHideUndrawable(e: Event) {
+  preferences.setMissingGlyphMode((e.target as HTMLInputElement).checked ? 'hide' : 'tofu')
 }
 
 function onMarkMissing(e: Event) {
   preferences.setMarkMissingGlyphs((e.target as HTMLInputElement).checked)
 }
 
-const fallbackEntry = computed(() => {
-  if (preferences.prefs.missingGlyphMode !== 'substitute') return undefined
-  const family = preferences.prefs.fontFallbackFamily
-  return family ? catalog.value.find((e) => e.family === family) : undefined
-})
-
+// The preference keeps its value while the control is disabled, so unhiding puts
+// the marks back the way they were rather than at a default.
 const markMissing = computed(
-  () => preferences.prefs.markMissingGlyphs && preferences.prefs.missingGlyphMode !== 'hide',
+  () => preferences.prefs.markMissingGlyphs && !hidingUndrawable.value,
 )
 
 const currentFamily = computed(() => picker.request.value.current)
@@ -290,7 +432,7 @@ const appliedSearch = refDebounced(search, 200)
 const displayed = computed(() => {
   let list = catalog.value
   if (group.value === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
-  if (preferences.prefs.missingGlyphMode === 'hide') {
+  if (hidingUndrawable.value) {
     // Checking the whole catalogue costs a few milliseconds now that coverage
     // is a cmap read on a mapped file, so there is nothing to schedule.
     list = list.filter((e) => coverageOf(e).length === 0)
@@ -342,7 +484,7 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: rows.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => Math.round(appliedSize.value * 1.5 + 40),
+    estimateSize: () => estimatedRowHeight.value,
     overscan: 6,
   })),
 )
@@ -352,63 +494,70 @@ const totalSize = computed(() => virtualizer.value.getTotalSize())
 function measureRow(el: unknown) {
   if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
 }
-watch([appliedSize, columns, displayed], () => virtualizer.value.measure())
+watch([appliedSize, columns, displayed, vertical], () => virtualizer.value.measure())
 
-// Flinging the scrollbar would otherwise queue a rasterize for every row it
-// passes, none of which the user is going to look at.
-const fastScroll = ref(false)
-const FAST_PX_PER_FRAME = 360
-const SETTLE_MS = 150
-let previousTop = 0
-let scrollFrame = 0
-let settleTimer: ReturnType<typeof setTimeout> | undefined
+/** Where the list stood when editing began, to tell a real scroll from a nudge. */
+let editingScrollTop = 0
+const SCROLL_SLACK_PX = 2
 
 useEventListener(
   scrollEl,
   'scroll',
   () => {
-    if (scrollFrame) return
-    scrollFrame = requestAnimationFrame(() => {
-      scrollFrame = 0
-      const el = scrollEl.value
-      if (!el) return
-      if (Math.abs(el.scrollTop - previousTop) > FAST_PX_PER_FRAME) fastScroll.value = true
-      previousTop = el.scrollTop
-      clearTimeout(settleTimer)
-      settleTimer = setTimeout(() => {
-        fastScroll.value = false
-      }, SETTLE_MS)
-    })
+    // Virtual rows recycle and shift under a scroll, so an editor riding along
+    // would have to stay in step with the list. Spreadsheets commit on scroll
+    // for the same reason. Measured against where editing started rather than
+    // fired on any scroll event, because focusing a partly visible cell scrolls
+    // it into view and would otherwise close the editor that just opened.
+    const top = scrollEl.value?.scrollTop ?? 0
+    if (editingFamily.value && Math.abs(top - editingScrollTop) > SCROLL_SLACK_PX) {
+      editingFamily.value = null
+    }
   },
   { passive: true },
 )
 
-// Enumerating on open rather than at startup, and only once — the list does
-// not change while the app runs.
+// Enumerating on open rather than at startup. The platform's own list does not
+// change while the app runs, so this only repeats when a folder is added.
 let enumerated = false
+
+async function refreshCatalog() {
+  enumerating.value = true
+  try {
+    catalog.value = await loadFontCatalog(preferences.prefs.fontFolders)
+    enumerated = true
+    error.value = null
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+    console.error('font enumeration failed', err)
+    enumerated = false
+  } finally {
+    enumerating.value = false
+  }
+}
+
+async function addFolder() {
+  const chosen = await window.api.pickFontFolder()
+  if (chosen === null) return
+  if (preferences.addFontFolder(chosen)) await refreshCatalog()
+}
+
+async function removeFolder(path: string) {
+  preferences.removeFontFolder(path)
+  await refreshCatalog()
+}
 
 watch(
   () => picker.isOpen.value,
   async (open) => {
     if (!open) return
-    if (!enumerated) {
-      enumerated = true
-      enumerating.value = true
-      try {
-        catalog.value = await loadFontCatalog()
-      } catch (err) {
-        error.value = err instanceof Error ? err.message : String(err)
-        console.error('font enumeration failed', err)
-        enumerated = false
-      } finally {
-        enumerating.value = false
-      }
-    }
+    if (!enumerated) await refreshCatalog()
     // Scroll the current family into view instead of typing it into the search
     // box: filtering down to the one font already in use hides exactly what the
     // picker was opened to compare it against.
     search.value = ''
-    previousTop = 0
+    editingFamily.value = null
+    vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical
     await nextTick()
     requestAnimationFrame(revealCurrentFamily)
   },
@@ -454,7 +603,16 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   background: var(--card);
 }
 .cell-sample {
+  display: flex;
   min-width: 0;
   overflow: hidden;
+}
+/*
+ * A vertical run reads right to left, so its first column sits against the
+ * right edge. Anchoring there means a sample too wide for its cell loses its
+ * tail rather than its opening, which is where a horizontal run already loses.
+ */
+.cell-sample.vertical {
+  justify-content: flex-end;
 }
 </style>

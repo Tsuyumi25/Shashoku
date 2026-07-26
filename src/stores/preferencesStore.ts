@@ -80,16 +80,27 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.fontSampleText = text
   }
 
+  function addFontFolder(path: string): boolean {
+    if (!path || prefs.fontFolders.includes(path)) return false
+    prefs.fontFolders.push(path)
+    return true
+  }
+
+  function removeFontFolder(path: string) {
+    const at = prefs.fontFolders.indexOf(path)
+    if (at !== -1) prefs.fontFolders.splice(at, 1)
+  }
+
+  function setFontSampleVertical(vertical: boolean) {
+    prefs.fontSampleVertical = vertical
+  }
+
   function setMissingGlyphMode(mode: MissingGlyphMode) {
     prefs.missingGlyphMode = mode
   }
 
   function setMarkMissingGlyphs(on: boolean) {
     prefs.markMissingGlyphs = on
-  }
-
-  function setFontFallbackFamily(family: string) {
-    prefs.fontFallbackFamily = family
   }
 
   return {
@@ -101,8 +112,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     toggleFavorite,
     setFontSamplePx,
     setFontSampleText,
+    setFontSampleVertical,
+    addFontFolder,
+    removeFontFolder,
     setMissingGlyphMode,
     setMarkMissingGlyphs,
-    setFontFallbackFamily,
   }
 })

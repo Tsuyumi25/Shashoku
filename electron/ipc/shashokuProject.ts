@@ -23,10 +23,24 @@ async function pickRoot(win: BrowserWindow | null): Promise<string | null> {
   return result.filePaths[0];
 }
 
+async function pickFontFolder(win: BrowserWindow | null): Promise<string | null> {
+  if (!win) return null;
+  const result = await dialog.showOpenDialog(win, {
+    title: "選擇字體資料夾",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+}
+
 export function registerShashokuProjectHandlers(): void {
   ipcMain.handle(CHANNELS.pickRoot, (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     return pickRoot(win);
+  });
+  ipcMain.handle(CHANNELS.pickFontFolder, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    return pickFontFolder(win);
   });
   ipcMain.handle(CHANNELS.scanRoot, (_e, rootPath: string) => scanRoot(rootPath));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));

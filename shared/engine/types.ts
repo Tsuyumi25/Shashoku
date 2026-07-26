@@ -8,6 +8,11 @@ import type { StrokePosition } from "../text-style/types";
  * Byte arrays are declared as Uint8Array rather than Buffer on purpose — the
  * addon hands back a Buffer, but contextBridge structured-clones it and the
  * renderer only ever sees a plain Uint8Array.
+ *
+ * Every argument has to be a plain value for the same reason. A reactive object
+ * or array from a Vue store is a Proxy, which structured clone refuses, and the
+ * only thing said about it is "An object could not be cloned" — no argument
+ * name, no type. Copy at the call site.
  */
 
 export interface EngineFontSource {

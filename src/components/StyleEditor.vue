@@ -154,6 +154,7 @@ async function openFont() {
   const chosen = await picker.open({
     current: props.value.fontFamily,
     fillColor: props.value.color,
+    vertical: props.value.direction === 'vertical',
     stroke:
       stroke.value === null
         ? undefined

@@ -10,6 +10,12 @@ export interface FontPickerRequest {
    */
   fillColor: string
   stroke?: EngineStrokeSpec
+  /**
+   * Writing direction of the style being edited. Omitted when there is no style
+   * behind the request — the font manager — in which case the picker falls back
+   * to whatever direction was left selected last time.
+   */
+  vertical?: boolean
 }
 
 const isOpen = ref(false)

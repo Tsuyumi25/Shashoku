@@ -29,16 +29,22 @@ export function parsePreferences(raw: string): Preferences {
 
   const {
     fontFavorites,
+    fontFolders,
     fontSamplePx,
     fontSampleText,
+    fontSampleVertical,
     missingGlyphMode,
     markMissingGlyphs,
-    fontFallbackFamily,
     panelLayout,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
     prefs.fontFavorites = fontFavorites.filter(
+      (f): f is string => typeof f === "string" && f.length > 0,
+    );
+  }
+  if (Array.isArray(fontFolders)) {
+    prefs.fontFolders = fontFolders.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
     );
   }
@@ -51,18 +57,16 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof fontSampleText === "string") {
     prefs.fontSampleText = fontSampleText;
   }
-  if (
-    missingGlyphMode === "hide" ||
-    missingGlyphMode === "substitute" ||
-    missingGlyphMode === "tofu"
-  ) {
+  if (typeof fontSampleVertical === "boolean") {
+    prefs.fontSampleVertical = fontSampleVertical;
+  }
+  // A file written before substitute mode was dropped names it here; it fails
+  // this check like any other unknown value and falls back to the default.
+  if (missingGlyphMode === "hide" || missingGlyphMode === "tofu") {
     prefs.missingGlyphMode = missingGlyphMode;
   }
   if (typeof markMissingGlyphs === "boolean") {
     prefs.markMissingGlyphs = markMissingGlyphs;
-  }
-  if (typeof fontFallbackFamily === "string") {
-    prefs.fontFallbackFamily = fontFallbackFamily;
   }
   if (isRecord(panelLayout)) {
     for (const [key, value] of Object.entries(panelLayout)) {
@@ -76,11 +80,12 @@ export function serializePreferences(prefs: Preferences): string {
   return JSON.stringify(
     {
       fontFavorites: prefs.fontFavorites,
+      fontFolders: prefs.fontFolders,
       fontSamplePx: prefs.fontSamplePx,
       fontSampleText: prefs.fontSampleText,
+      fontSampleVertical: prefs.fontSampleVertical,
       missingGlyphMode: prefs.missingGlyphMode,
       markMissingGlyphs: prefs.markMissingGlyphs,
-      fontFallbackFamily: prefs.fontFallbackFamily,
       panelLayout: prefs.panelLayout,
     },
     null,

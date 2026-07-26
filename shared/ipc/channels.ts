@@ -1,5 +1,6 @@
 export const CHANNELS = {
   pickRoot: "shashoku:pick-root",
+  pickFontFolder: "fonts:pick-folder",
   scanRoot: "shashoku:scan-root",
   createProject: "shashoku:create-project",
   importPages: "shashoku:import-pages",
@@ -49,6 +50,7 @@ export interface WritePageInput {
 
 export interface ShashokuApi {
   pickRoot(): Promise<string | null>;
+  pickFontFolder(): Promise<string | null>;
   scanRoot(rootPath: string): Promise<ScanRootResult>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   importPages(rootPath: string, filenames: string[]): Promise<OpenProjectResult>;

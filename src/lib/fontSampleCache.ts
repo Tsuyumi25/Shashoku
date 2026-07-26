@@ -9,24 +9,34 @@ export interface SampleRequest {
   sizePx: number
   fillColor: string
   stroke?: EngineStrokeSpec
-  /**
-   * Family to draw with when `entry` cannot cover the text. Swapping the whole
-   * run rather than the missing characters alone keeps shaping intact, at the
-   * cost of hiding what a nearly-complete family actually looks like.
-   */
-  fallback?: FontEntry
+  /** Columns running right to left instead of rows. */
+  vertical?: boolean
 }
 
 export interface Sample {
   image: ImageData
   /** Boxes around the characters `entry` has no glyph for, in bitmap pixels. */
   marks: EngineClusterRect[]
-  /** Whether the bitmap was drawn by the fallback family instead of `entry`. */
-  substituted: boolean
+  /**
+   * Where every cluster landed. The editor overlay answers three questions from
+   * this one table: which character a click hit, where to draw the caret, and
+   * where the IME should put its candidate window.
+   */
+  clusters: EngineClusterRect[]
+  /** Blank margin the bitmap was drawn with, in bitmap pixels. */
+  padding: number
 }
 
 /** Roughly 17KB per bitmap at the default sample size. */
 const CACHE_LIMIT = 240
+
+/**
+ * Blank margin around a sample. An outside stroke grows the glyph past its
+ * advance box; without room for it the sample comes back clipped.
+ */
+export function samplePadding(stroke?: EngineStrokeSpec): number {
+  return 4 + Math.ceil(stroke?.width ?? 0)
+}
 
 const cache = new Map<string, Sample>()
 const coverage = new Map<string, number[]>()
@@ -44,7 +54,7 @@ function keyOf(req: SampleRequest): string {
     req.sizePx,
     req.fillColor,
     stroke,
-    req.fallback?.family ?? '-',
+    req.vertical ? 'v' : 'h',
     req.text,
   ].join('|')
 }
@@ -65,12 +75,9 @@ export function coverageFor(entry: FontEntry, text: string): number[] {
 
 function rasterize(req: SampleRequest): Sample {
   const uncovered = coverageFor(req.entry, req.text)
-  const substituted = uncovered.length > 0 && req.fallback !== undefined
-  const drawWith = engineSourceFor(substituted ? req.fallback! : req.entry)
+  const drawWith = engineSourceFor(req.entry)
 
-  // An outside stroke grows the glyph past its advance box; without room for
-  // it the sample comes back clipped.
-  const padding = 4 + Math.ceil(req.stroke?.width ?? 0)
+  const padding = samplePadding(req.stroke)
   // Everything crossing contextBridge has to be structured-cloneable, and a
   // Vue reactive proxy is not — hence the explicit plain copy rather than
   // trusting every caller to hand over raw objects.
@@ -83,23 +90,16 @@ function rasterize(req: SampleRequest): Sample {
       }
     : undefined
 
-  const bmp = window.engine.renderText(
-    drawWith,
-    req.text,
-    req.sizePx,
-    padding,
-    req.fillColor,
-    stroke,
-  )
+  const bmp = req.vertical
+    ? window.engine.renderVertical(drawWith, req.text, req.sizePx, padding, req.fillColor, stroke)
+    : window.engine.renderText(drawWith, req.text, req.sizePx, padding, req.fillColor, stroke)
 
-  // Coverage was measured against the requested family while the clusters come
-  // from whichever family drew — both index the same string, so the marks still
-  // land on the characters that were missing.
   const missing = new Set(uncovered)
   return {
     image: new ImageData(new Uint8ClampedArray(bmp.rgba), bmp.width, bmp.height),
     marks: bmp.clusters.filter((rect) => missing.has(rect.cluster)),
-    substituted,
+    clusters: bmp.clusters,
+    padding,
   }
 }
 
