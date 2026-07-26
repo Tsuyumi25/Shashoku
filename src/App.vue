@@ -47,9 +47,13 @@ import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
+import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
+const editor = useEditorStore()
+const ui = useUiStore()
 
 const title = computed(() => {
   if (!project.isOpen) return 'Shashoku 写植'
@@ -63,4 +67,24 @@ useEventListener(window, 'keydown', (e) => {
     if (project.isOpen) void project.save().catch((err) => console.error(err))
   }
 })
+
+// A dev build opens the project named in .env, so restarting costs no trip
+// through the picker. Both failures report to the console rather than the
+// screen: nothing here is reachable in a packaged build, and whoever set the
+// variable is the person watching devtools. See .env.example.
+const devProject = import.meta.env.DEV ? import.meta.env.RENDERER_VITE_DEV_PROJECT : undefined
+if (devProject) {
+  void project
+    .openByPath(devProject)
+    .then((opened) => {
+      if (opened === null) {
+        console.error(`RENDERER_VITE_DEV_PROJECT is not a Shashoku project: ${devProject}`)
+        return
+      }
+      editor.clearHistory()
+      editor.selectFile(project.files[0]?.filename ?? null)
+      ui.setView('translate')
+    })
+    .catch((err) => console.error('RENDERER_VITE_DEV_PROJECT failed to open', err))
+}
 </script>
