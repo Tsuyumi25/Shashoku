@@ -42,10 +42,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelMarker from '@/components/LabelMarker.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import {
+  beginRotationDirection,
+  resetRotationDirection,
+  trackRotationDirection,
+} from '@/lib/rotateDirection'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -188,13 +193,19 @@ let rotateStartTheta = 0
 let panLast = { x: 0, y: 0 }
 let lastEscapeAt = 0
 
+/** Which way the drag is currently turning, which is the cursor the R gesture shows. */
+const rotateDirection = reactive(beginRotationDirection(1, 0))
+
 // While a gesture is armed the markers let the pointer through, so a drag that
 // starts on one still pans or rotates the page under it.
 const gestureArmed = computed(() => spaceDown.value || rDown.value)
 
 const canvasCursor = computed(() => {
   if (panning.value) return 'cursor-grabbing'
-  if (rotating.value || rDown.value || spaceDown.value) return 'cursor-grab'
+  if (rotating.value || rDown.value) {
+    return rotateDirection.sign === 1 ? 'cursor-rotate-cw' : 'cursor-rotate-ccw'
+  }
+  if (spaceDown.value) return 'cursor-grab'
   return 'cursor-default'
 })
 
@@ -216,6 +227,7 @@ function onPointerDown(e: PointerEvent) {
       e.clientX - rect.left - rotatePivot.x,
     )
     rotateStartTheta = view.rotate
+    resetRotationDirection(rotateDirection, rotateStartAngle)
     return
   }
   if (e.button !== 0 || !spaceDown.value) return
@@ -233,6 +245,7 @@ function onPointerMove(e: PointerEvent) {
       e.clientY - rect.top - rotatePivot.y,
       e.clientX - rect.left - rotatePivot.x,
     )
+    trackRotationDirection(rotateDirection, angle)
     let theta = rotateStartTheta + (angle - rotateStartAngle)
     if (e.shiftKey) theta = Math.round(theta / ROTATE_SNAP) * ROTATE_SNAP
     editor.rotateTo(theta, rotatePivot.x, rotatePivot.y)
@@ -299,3 +312,25 @@ const stageStyle = computed(() => ({
   transformOrigin: '0 0',
 }))
 </script>
+
+<style scoped>
+/*
+ * CSS has no rotate keyword, so these are lucide's redo and undo arcs. An arc
+ * is used rather than a full circle because a ring reads the same whichever
+ * way it turns, while the arc's silhouette states a direction on sight. Each
+ * is stroked twice, a white halo under black, so it survives both a white page
+ * and the dark gutter around it.
+ */
+.cursor-rotate-cw {
+  cursor:
+    url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'%3e%3cg stroke='white' stroke-width='5'%3e%3cpath d='M21 7v6h-6'/%3e%3cpath d='M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7'/%3e%3c/g%3e%3cg stroke='black' stroke-width='2'%3e%3cpath d='M21 7v6h-6'/%3e%3cpath d='M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7'/%3e%3c/g%3e%3c/svg%3e")
+      14 14,
+    grab;
+}
+.cursor-rotate-ccw {
+  cursor:
+    url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'%3e%3cg stroke='white' stroke-width='5'%3e%3cpath d='M3 7v6h6'/%3e%3cpath d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/%3e%3c/g%3e%3cg stroke='black' stroke-width='2'%3e%3cpath d='M3 7v6h6'/%3e%3cpath d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/%3e%3c/g%3e%3c/svg%3e")
+      14 14,
+    grab;
+}
+</style>
