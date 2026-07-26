@@ -4,7 +4,7 @@ use skrifa::{
     instance::{LocationRef, Size},
     outline::{DrawSettings, OutlinePen},
 };
-use tiny_skia::{Color, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Transform};
+use tiny_skia::{FillRule, Mask, Path, PathBuilder, Transform};
 
 use crate::stroke::{coverage_at, signed_distance_field};
 
@@ -494,98 +494,85 @@ fn to_u8(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
-/// Fill and stroke as two flat colours, each bounded by its own offset of the
-/// same edge, composited fill over stroke.
-fn paint_banded(pixmap: &mut Pixmap, path: &Path, fill: Rgba, spec: StrokeSpec) -> Result<(), String> {
-    let (width, height) = (pixmap.width(), pixmap.height());
-
+/// Antialiased coverage of the path, the only thing either layer is bounded by.
+fn coverage_of(path: &Path, width: u32, height: u32) -> Result<Vec<f32>, String> {
     let mut mask = Mask::new(width, height).ok_or_else(|| "mask alloc failed".to_string())?;
     mask.fill_path(path, FillRule::Winding, true, Transform::identity());
-    let coverage: Vec<f32> = mask.data().iter().map(|&v| v as f32 / 255.0).collect();
+    Ok(mask.data().iter().map(|&v| v as f32 / 255.0).collect())
+}
 
-    let field = signed_distance_field(&coverage, width as usize, height as usize);
-    let (outer, inner) = band_offsets(spec.position, spec.width);
-
-    // The rasterizer's own coverage beats anything read back off the distance
-    // field, so it stands wherever the boundary asked for is the shape's own.
-    let layer = |offset: f32, i: usize| {
-        if offset == 0.0 {
-            coverage[i]
-        } else {
-            coverage_at(field[i], offset)
-        }
-    };
-
+/// Fill over stroke, two flat colours, each bounded by its own coverage.
+///
+/// Straight alpha rather than premultiplied: the only consumer wraps these
+/// bytes in an ImageData, which is defined as non-premultiplied, and reading
+/// premultiplied bytes as though they were straight pulls every soft edge
+/// towards black — invisible on black text, a grey halo around a white stroke.
+/// Composing from coverage rather than multiplying and dividing back out also
+/// keeps the colour exact where the division would amplify its rounding.
+fn compose(layers: impl Fn(usize) -> (f32, f32), count: usize, fill: Rgba, ink: Rgba) -> Vec<u8> {
+    let mut rgba = vec![0u8; count * 4];
     let (fr, fg, fb, fa) = unit(fill);
-    let (sr, sg, sb, sa) = unit(spec.color);
+    let (sr, sg, sb, sa) = unit(ink);
 
-    let data = pixmap.data_mut();
-    for i in 0..(width as usize * height as usize) {
-        let s = layer(outer, i) * sa;
-        let f = layer(inner, i) * fa;
+    for i in 0..count {
+        let (fill_coverage, ink_coverage) = layers(i);
+        let f = fill_coverage * fa;
+        let s = ink_coverage * sa;
         let alpha = f + s * (1.0 - f);
         if alpha <= 0.0 {
             continue;
         }
-        let a8 = to_u8(alpha);
-        // Premultiplied, and never above the alpha it is multiplied by —
-        // rounding the two independently can otherwise break that invariant
-        // by one and hand tiny-skia a pixel it considers malformed.
-        data[i * 4] = to_u8(fr * f + sr * s * (1.0 - f)).min(a8);
-        data[i * 4 + 1] = to_u8(fg * f + sg * s * (1.0 - f)).min(a8);
-        data[i * 4 + 2] = to_u8(fb * f + sb * s * (1.0 - f)).min(a8);
-        data[i * 4 + 3] = a8;
+        let mix = |above: f32, below: f32| (above * f + below * s * (1.0 - f)) / alpha;
+        rgba[i * 4] = to_u8(mix(fr, sr));
+        rgba[i * 4 + 1] = to_u8(mix(fg, sg));
+        rgba[i * 4 + 2] = to_u8(mix(fb, sb));
+        rgba[i * 4 + 3] = to_u8(alpha);
     }
-    Ok(())
+    rgba
 }
 
 fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<TextBitmap, String> {
-    let mut pixmap =
-        Pixmap::new(run.width, run.height).ok_or_else(|| "pixmap alloc failed".to_string())?;
+    let count = run.width as usize * run.height as usize;
 
-    let path = match run.path {
-        Some(p) => p,
-        None => {
-            // No glyphs drew anything — return a transparent bitmap.
-            return Ok(TextBitmap {
-                width: run.width,
-                height: run.height,
-                rgba: pixmap.data().to_vec(),
-                baseline: run.baseline,
-                clusters: run.clusters,
-            });
-        }
+    let Some(path) = run.path else {
+        // No glyphs drew anything — return a transparent bitmap.
+        return Ok(TextBitmap {
+            width: run.width,
+            height: run.height,
+            rgba: vec![0u8; count * 4],
+            baseline: run.baseline,
+            clusters: run.clusters,
+        });
     };
 
-    match stroke {
+    let coverage = coverage_of(&path, run.width, run.height)?;
+
+    let rgba = match stroke {
         Some(spec) if spec.width > 0.0 && spec.color.3 != 0 => {
-            paint_banded(&mut pixmap, &path, fill, spec)?;
+            let field = signed_distance_field(&coverage, run.width as usize, run.height as usize);
+            let (outer, inner) = band_offsets(spec.position, spec.width);
+            // The rasterizer's own coverage beats anything read back off the
+            // distance field, so it stands wherever the boundary asked for is
+            // the shape's own.
+            let layer = |offset: f32, i: usize| {
+                if offset == 0.0 {
+                    coverage[i]
+                } else {
+                    coverage_at(field[i], offset)
+                }
+            };
+            compose(|i| (layer(inner, i), layer(outer, i)), count, fill, spec.color)
         }
-        _ => {
-            let mut fill_paint = Paint::default();
-            fill_paint.set_color(rgba_to_color(fill));
-            fill_paint.anti_alias = true;
-            pixmap.fill_path(
-                &path,
-                &fill_paint,
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-        }
-    }
+        _ => compose(|i| (coverage[i], 0.0), count, fill, fill),
+    };
 
     Ok(TextBitmap {
         width: run.width,
         height: run.height,
-        rgba: pixmap.data().to_vec(),
+        rgba,
         baseline: run.baseline,
         clusters: run.clusters,
     })
-}
-
-fn rgba_to_color(c: Rgba) -> Color {
-    Color::from_rgba8(c.0, c.1, c.2, c.3)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -700,6 +687,53 @@ mod stroke_tests {
     /// Angles chosen to hit axes, diagonals and directions in between, which
     /// is where a distance transform is least accurate.
     const ANGLES: [f32; 8] = [0.0, 23.0, 45.0, 67.0, 90.0, 141.0, 200.0, 314.0];
+
+    /// Every pixel the edge only partly covers, since a premultiplied byte
+    /// read as a straight one shows up exactly there and nowhere else.
+    fn soft_edge_colours(bmp: &TextBitmap) -> Vec<[u8; 3]> {
+        (0..bmp.width as usize * bmp.height as usize)
+            .filter(|i| {
+                let a = bmp.rgba[i * 4 + 3];
+                a > 0 && a < 255
+            })
+            .map(|i| [bmp.rgba[i * 4], bmp.rgba[i * 4 + 1], bmp.rgba[i * 4 + 2]])
+            .collect()
+    }
+
+    #[test]
+    fn a_light_fill_keeps_its_colour_where_the_edge_is_soft() {
+        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), None).unwrap();
+        let soft = soft_edge_colours(&bmp);
+        assert!(soft.len() > 50, "no soft edge to look at");
+        assert!(
+            soft.iter().all(|c| c == &[255, 255, 255]),
+            "edge pulled towards black: {:?}",
+            soft.iter().find(|c| c != &&[255, 255, 255]).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_light_stroke_keeps_its_colour_on_its_outer_edge() {
+        let bmp = paint_run(
+            disc_run(30.5),
+            Rgba(0, 0, 0, 255),
+            Some(StrokeSpec {
+                width: 6.0,
+                color: Rgba(255, 255, 255, 255),
+                position: StrokePosition::Outside,
+            }),
+        )
+        .unwrap();
+        // The fill's own edge is buried under the band, so every soft pixel
+        // left belongs to the stroke.
+        let soft = soft_edge_colours(&bmp);
+        assert!(soft.len() > 50, "no soft edge to look at");
+        assert!(
+            soft.iter().all(|c| c == &[255, 255, 255]),
+            "stroke edge pulled towards black: {:?}",
+            soft.iter().find(|c| c != &&[255, 255, 255]).unwrap()
+        );
+    }
 
     #[test]
     fn a_pen_wider_than_the_shape_still_fills_solid() {
