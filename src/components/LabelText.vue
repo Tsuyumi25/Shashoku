@@ -3,25 +3,14 @@
     v-if="sample"
     ref="canvasEl"
     v-bind="$attrs"
-    class="absolute select-none"
-    :class="drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab'"
+    class="pointer-events-none absolute select-none"
     :style="boxStyle"
-    @pointerdown.stop="drag.onPointerDown"
-    @pointermove="drag.onPointerMove"
-    @pointerup="drag.onPointerUp"
-    @pointercancel="drag.onPointerUp"
   />
   <span
     v-else-if="failure"
     v-bind="$attrs"
-    class="absolute rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
-    :class="drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab'"
+    class="pointer-events-none absolute rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
     :style="chipStyle"
-    :title="failure"
-    @pointerdown.stop="drag.onPointerDown"
-    @pointermove="drag.onPointerMove"
-    @pointerup="drag.onPointerUp"
-    @pointercancel="drag.onPointerUp"
   >
     無法繪製
   </span>
@@ -30,11 +19,10 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
-import { useLabelDrag, type Anchor } from '@/composables/useLabelDrag'
 import { centeredBoxOnScreen, percentToContentPx, type ViewTransform } from '@/lib/coords'
-import { catalogByFamily, catalogLoaded } from '@/lib/fontCatalog'
-import { sampleFor, sampleSource, type Sample } from '@/lib/fontSampleCache'
-import { engineStrokeFor } from '@/lib/textStyle'
+import { labelBoxSize } from '@/lib/labelBox'
+import { rasterFor } from '@/lib/labelRaster'
+import { sampleSource } from '@/lib/fontSampleCache'
 
 /**
  * One label's text, typeset by the engine and placed in screen coordinates.
@@ -44,6 +32,10 @@ import { engineStrokeFor } from '@/lib/textStyle'
  * prefilter, which at the scales this application spends its time in does not
  * blur hairlines so much as delete them. Owning the downsample means owning
  * `imageSmoothingQuality`, which keeps them.
+ *
+ * Transparent to the pointer: the frame drawn over it is the one hit target
+ * this object has, so that an empty label — which has no bitmap and so nothing
+ * here to hit — is grabbed exactly the same way as one with text in it.
  */
 defineOptions({ inheritAttrs: false })
 
@@ -54,90 +46,35 @@ const props = defineProps<{
   /** Label anchor, as a fraction of the raw image. */
   x: number
   y: number
+  /** The object's own turn on the page, in radians. */
+  rotation: number
   natural: { w: number; h: number }
   view: ViewTransform
 }>()
 
-const emit = defineEmits<{
-  select: []
-  move: [to: Anchor]
-  moveEnd: [from: Anchor, to: Anchor]
-}>()
-
-const drag = useLabelDrag({
-  anchor: () => ({ x: props.x, y: props.y }),
-  natural: () => props.natural,
-  view: () => props.view,
-  onSelect: () => emit('select'),
-  onMove: (to) => emit('move', to),
-  onCommit: (from, to) => emit('moveEnd', from, to),
-})
-
 const dpr = window.devicePixelRatio || 1
 
-type Raster = { ok: true; sample: Sample } | { ok: false; reason: string }
-
-/**
- * A family that is not in the catalogue is reported, never quietly stood in
- * for. Nothing in this pipeline consults a second face, so drawing one would
- * show a result the application cannot produce (see ADR 0001).
- */
-const raster = computed<Raster>(() => {
-  const entry = catalogByFamily.value.get(props.textStyle.fontFamily)
-  if (!entry) {
-    // Nothing to say while the catalogue is still being enumerated: the family
-    // is not missing yet, it is unanswered.
-    if (!catalogLoaded.value) return { ok: false, reason: '' }
-    return { ok: false, reason: `找不到字型「${props.textStyle.fontFamily}」` }
-  }
-  try {
-    return {
-      ok: true,
-      sample: sampleFor({
-        entry,
-        text: props.text,
-        sizePx: props.textStyle.fontSizePx * props.textStyle.renderScale,
-        fillColor: props.textStyle.color,
-        stroke: engineStrokeFor(props.textStyle),
-        vertical: props.textStyle.direction === 'vertical',
-      }),
-    }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
-  }
-})
-
+const raster = computed(() => rasterFor(props.text, props.textStyle))
 const sample = computed(() => (raster.value.ok ? raster.value.sample : null))
 const failure = computed(() => (raster.value.ok ? '' : raster.value.reason))
 
-/**
- * The bitmap is rasterized at renderScale, so its size in document pixels is
- * that many times smaller. This is what makes renderScale oversampling rather
- * than a bigger typeface.
- */
-const docSize = computed(() => {
-  const held = sample.value
-  if (!held) return { w: 0, h: 0 }
-  return {
-    w: held.image.width / props.textStyle.renderScale,
-    h: held.image.height / props.textStyle.renderScale,
-  }
-})
-
 const box = computed(() => {
   const anchor = percentToContentPx(props.x, props.y, props.natural.w, props.natural.h)
-  return centeredBoxOnScreen(anchor, docSize.value, props.view)
+  const size = labelBoxSize(props.textStyle, sample.value?.image ?? null)
+  return centeredBoxOnScreen(anchor, size, props.view)
 })
 
 /**
- * A rotated view turns this element with CSS, which resamples what we already
- * resampled. Baking the rotation into the drawImage below would cost one pass
- * instead of two, at the price of a bounding box that is the rotated run's
- * enclosing rectangle rather than the run itself. Upright — where the
- * application spends nearly all of its time — `rotate(0rad)` is the identity
- * and costs nothing, so the question stays open until it can be seen.
+ * The object's turn and the view's compose into one CSS rotation, which
+ * resamples what we already resampled. Baking it into the drawImage below would
+ * cost one pass instead of two, at the price of a bounding box that is the
+ * rotated run's enclosing rectangle rather than the run itself — and the frame
+ * around this would have to grow to match, so what you grab would stop being
+ * the object. Upright, `rotate(0rad)` is the identity and costs nothing.
  */
-const placement = computed(() => `translate(-50%, -50%) rotate(${props.view.rotate}rad)`)
+const placement = computed(
+  () => `translate(-50%, -50%) rotate(${props.view.rotate + props.rotation}rad)`,
+)
 
 const boxStyle = computed(() => ({
   left: `${box.value.centerX}px`,

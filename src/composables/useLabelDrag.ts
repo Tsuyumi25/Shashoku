@@ -6,7 +6,7 @@ import { clamp, screenDeltaToContentPx, type ViewTransform } from '@/lib/coords'
  * by a pixel every time it was selected, and the move would land in the undo
  * stack as if it had been asked for.
  */
-const DRAG_THRESHOLD_PX = 3
+export const DRAG_THRESHOLD_PX = 3
 
 export interface Anchor {
   x: number

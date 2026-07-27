@@ -41,6 +41,7 @@ export function serializeTranslationForFile(file: ProjectFile): string {
         groupId: l.groupId,
         lines: toLines(l.text),
       }
+      if (l.rotation) entry.rotation = l.rotation
       if (l.styleOverride !== undefined) entry.styleOverride = l.styleOverride
       return entry
     }),
@@ -124,6 +125,7 @@ export const useProjectStore = defineStore('project', () => {
           x: l.x,
           y: l.y,
           groupId: l.groupId,
+          rotation: l.rotation ?? 0,
           text: fromLines(l.lines),
           styleOverride: l.styleOverride,
         }))
@@ -261,6 +263,13 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  function rotateLabel(filename: string, labelId: string, rotation: number) {
+    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    if (!label) return
+    label.rotation = rotation
+    markPageDirty(filename)
+  }
+
   function updateLabelText(filename: string, labelId: string, text: string) {
     const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
     if (!label) return
@@ -382,6 +391,7 @@ export const useProjectStore = defineStore('project', () => {
     addLabel,
     deleteLabel,
     moveLabel,
+    rotateLabel,
     updateLabelText,
     updateLabelGroupId,
     updateLabelStyleOverride,

@@ -7,7 +7,7 @@ import type { LabelItem } from '@/types/project'
 const PAGE = 'p001.png'
 
 function label(id: string, text = ''): LabelItem {
-  return { id, x: 0.5, y: 0.5, groupId: null, text }
+  return { id, x: 0.5, y: 0.5, groupId: null, rotation: 0, text }
 }
 
 function openOnePage(labels: LabelItem[] = []) {
@@ -245,5 +245,55 @@ describe('pending text edit', () => {
 
     expect(labelsOf(project)).toHaveLength(1)
     expect(editor.canRedo).toBe(false)
+  })
+})
+
+describe('cmdRotateLabel', () => {
+  it('takes the object back to how it was lying', () => {
+    const { project, editor } = openOnePage([label('a')])
+    // A rotate drag writes through and only records on release, as a move does.
+    project.rotateLabel(PAGE, 'a', 0.5)
+    editor.cmdRotateLabel(PAGE, 'a', 0, 0.5)
+    expect(labelsOf(project)[0].rotation).toBe(0.5)
+
+    editor.undo()
+    expect(labelsOf(project)[0].rotation).toBe(0)
+
+    editor.redo()
+    expect(labelsOf(project)[0].rotation).toBe(0.5)
+  })
+
+  it('keeps a turn that ended where it started out of the stack', () => {
+    const { editor } = openOnePage([label('a')])
+    editor.cmdRotateLabel(PAGE, 'a', 0.25, 0.25)
+    expect(editor.canUndo).toBe(false)
+  })
+})
+
+describe('cmdUpdateLabelStyleOverride', () => {
+  it('undoes back to inheriting, rather than to the size it was inheriting', () => {
+    const { project, editor } = openOnePage([label('a')])
+    project.updateLabelStyleOverride(PAGE, 'a', { fontSizePx: 48 })
+    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', undefined, { fontSizePx: 48 })
+
+    editor.undo()
+    expect(labelsOf(project)[0].styleOverride).toBeUndefined()
+  })
+
+  it('leaves the rest of an existing override alone', () => {
+    const { project, editor } = openOnePage([label('a')])
+    const before = { color: '#ff0000' }
+    project.updateLabelStyleOverride(PAGE, 'a', before)
+    project.updateLabelStyleOverride(PAGE, 'a', { color: '#ff0000', fontSizePx: 48 })
+    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', before, { color: '#ff0000', fontSizePx: 48 })
+
+    editor.undo()
+    expect(labelsOf(project)[0].styleOverride).toEqual({ color: '#ff0000' })
+  })
+
+  it('keeps a corner nudged and put back out of the stack', () => {
+    const { editor } = openOnePage([label('a')])
+    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', { fontSizePx: 24 }, { fontSizePx: 24 })
+    expect(editor.canUndo).toBe(false)
   })
 })

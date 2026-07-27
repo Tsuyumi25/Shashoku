@@ -226,6 +226,7 @@ export const useEditorStore = defineStore('editor', () => {
       x,
       y,
       groupId: activeGroupId.value,
+      rotation: 0,
       text: '',
     })
   }
@@ -307,6 +308,44 @@ export const useEditorStore = defineStore('editor', () => {
         label: `move-label ${labelId}`,
         do: () => project.moveLabel(filename, labelId, newPos.x, newPos.y),
         undo: () => project.moveLabel(filename, labelId, oldPos.x, oldPos.y),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+
+  function cmdRotateLabel(filename: string, labelId: string, from: number, to: number) {
+    if (from === to) return
+    const project = useProjectStore()
+    pushCommand(
+      {
+        label: `rotate-label ${labelId}`,
+        do: () => project.rotateLabel(filename, labelId, to),
+        undo: () => project.rotateLabel(filename, labelId, from),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
+   * Both sides are snapshots of one label's override taken moments apart, so a
+   * string compare is enough to tell a drag that ended where it started from
+   * one that moved — which is what keeps a corner nudged and put back out of
+   * the undo stack.
+   */
+  function cmdUpdateLabelStyleOverride(
+    filename: string,
+    labelId: string,
+    from: LabelItem['styleOverride'],
+    to: LabelItem['styleOverride'],
+  ) {
+    if (JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) return
+    const project = useProjectStore()
+    pushCommand(
+      {
+        label: `style-override ${labelId}`,
+        do: () => project.updateLabelStyleOverride(filename, labelId, to),
+        undo: () => project.updateLabelStyleOverride(filename, labelId, from),
       },
       { alreadyApplied: true },
     )
@@ -405,6 +444,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDuplicateLabel,
     cmdDeleteLabel,
     cmdMoveLabel,
+    cmdRotateLabel,
+    cmdUpdateLabelStyleOverride,
     cmdUpdateLabelText,
     cmdUpdateLabelGroupId,
     cmdAddGroup,

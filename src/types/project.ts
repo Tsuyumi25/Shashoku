@@ -13,6 +13,14 @@ export interface LabelItem {
   y: number
   
   groupId: string | null
+
+  /**
+   * The object's own turn on the page, in radians, clockwise. Concrete here
+   * where the persisted form leaves it out at zero, so nothing downstream has
+   * to keep asking whether an absent turn means upright.
+   */
+  rotation: number
+
   text: string
   
   styleOverride?: Partial<TextStyle>

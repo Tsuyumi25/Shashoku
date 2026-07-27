@@ -15,43 +15,46 @@
       <canvas ref="baseCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
       <!--
-        Outside the transformed stage on purpose, and under the markers: these
-        carry their own pixels and place themselves in screen coordinates.
-        The layer itself is transparent to the pointer so a drag on bare page
-        still reaches the canvas gestures.
+        Outside the transformed stage on purpose: these carry their own pixels
+        and place themselves in screen coordinates. The layer itself is
+        transparent to the pointer so a drag on bare page still reaches the
+        canvas gestures, and the frames go over the text because they are what
+        the pointer is meant to find.
       -->
       <div v-if="imageReady" class="pointer-events-none absolute inset-0">
         <LabelText
-          v-for="entry in textLabels"
-          :key="entry.id"
-          :class="[!gestureArmed && 'pointer-events-auto']"
-          :text="entry.text"
-          :text-style="entry.style"
-          :x="entry.x"
-          :y="entry.y"
+          v-for="object in objects"
+          :key="object.id"
+          :text="object.text"
+          :text-style="object.style"
+          :x="object.x"
+          :y="object.y"
+          :rotation="object.rotation"
           :natural="editor.viewContentSize"
           :view="view"
-          @select="editor.selectedLabelId = entry.id"
-          @move="moveLabelTo(entry.id, $event)"
-          @move-end="(from, to) => commitLabelMove(entry.id, from, to)"
         />
-      </div>
-
-      <div v-if="imageReady" class="absolute top-0 left-0" :style="stageStyle">
-        <LabelMarker
-          v-for="(label, i) in currentFile.labels"
-          :key="label.id"
-          :class="[gestureArmed && 'pointer-events-none']"
-          :index="i + 1"
-          :x="label.x"
-          :y="label.y"
-          :color="colorOf(label.groupId)"
+        <LabelBox
+          v-for="object in objects"
+          :key="object.id"
+          :class="[!gestureArmed && 'pointer-events-auto']"
+          :index="object.index"
+          :text="object.text"
+          :text-style="object.style"
+          :x="object.x"
+          :y="object.y"
+          :rotation="object.rotation"
+          :color="object.color"
           :natural="editor.viewContentSize"
           :view="view"
-          :selected="label.id === editor.selectedLabelId"
-          @select="editor.selectedLabelId = label.id"
-          @move="moveLabelTo(label.id, $event)"
-          @move-end="(from, to) => commitLabelMove(label.id, from, to)"
+          :selected="object.id === editor.selectedLabelId"
+          @select="editor.selectedLabelId = object.id"
+          @move="moveLabelTo(object.id, $event)"
+          @move-end="(from, to) => commitLabelMove(object.id, from, to)"
+          @scale-start="beginLabelScale(object.id)"
+          @scale="scaleLabelTo(object.id, $event)"
+          @scale-end="commitLabelScale(object.id)"
+          @rotate="rotateLabelTo(object.id, $event)"
+          @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
         />
       </div>
     </template>
@@ -68,9 +71,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
-import LabelMarker from '@/components/LabelMarker.vue'
+import LabelBox from '@/components/LabelBox.vue'
 import LabelText from '@/components/LabelText.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import type { LabelItem } from '@/types/project'
 import type { Anchor } from '@/composables/useLabelDrag'
 import { screenToPageFraction } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
@@ -98,20 +102,24 @@ const currentFile = computed(() =>
 )
 
 /**
+ * Every label on the page, empty ones included: an object with no text still
+ * has a frame, and the frame is what makes it findable.
+ *
  * Resolved here rather than in the template so that panning, which re-renders
  * this component on every frame, does not hand each label a new style object
  * and make it look like the text changed.
  */
-const textLabels = computed(() =>
-  (currentFile.value?.labels ?? [])
-    .filter((label) => label.text.length > 0)
-    .map((label) => ({
-      id: label.id,
-      text: label.text,
-      x: label.x,
-      y: label.y,
-      style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
-    })),
+const objects = computed(() =>
+  (currentFile.value?.labels ?? []).map((label, i) => ({
+    id: label.id,
+    index: i + 1,
+    text: label.text,
+    x: label.x,
+    y: label.y,
+    rotation: label.rotation,
+    color: colorOf(label.groupId),
+    style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
+  })),
 )
 
 // The picker enumerates on its first opening, which is too late for text that
@@ -135,6 +143,51 @@ function moveLabelTo(labelId: string, to: Anchor) {
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentFilename) return
   editor.cmdMoveLabel(editor.currentFilename, labelId, from, to)
+}
+
+function labelById(labelId: string): LabelItem | undefined {
+  return currentFile.value?.labels.find((l) => l.id === labelId)
+}
+
+/**
+ * A corner drag writes an override on top of whatever the label already had,
+ * so the before has to be taken once at the start rather than reconstructed
+ * from the size afterwards: a label that was inheriting its size has no
+ * `fontSizePx` to put back, and undo has to remove the key, not restore a value.
+ */
+let scaledFrom: LabelItem['styleOverride']
+
+function beginLabelScale(labelId: string) {
+  scaledFrom = labelById(labelId)?.styleOverride
+}
+
+function scaleLabelTo(labelId: string, fontSizePx: number) {
+  const label = labelById(labelId)
+  if (!label || !editor.currentFilename) return
+  project.updateLabelStyleOverride(editor.currentFilename, labelId, {
+    ...(label.styleOverride ?? {}),
+    fontSizePx,
+  })
+}
+
+function commitLabelScale(labelId: string) {
+  if (!editor.currentFilename) return
+  editor.cmdUpdateLabelStyleOverride(
+    editor.currentFilename,
+    labelId,
+    scaledFrom,
+    labelById(labelId)?.styleOverride,
+  )
+}
+
+function rotateLabelTo(labelId: string, radians: number) {
+  if (!editor.currentFilename) return
+  project.rotateLabel(editor.currentFilename, labelId, radians)
+}
+
+function commitLabelRotate(labelId: string, from: number, to: number) {
+  if (!editor.currentFilename) return
+  editor.cmdRotateLabel(editor.currentFilename, labelId, from, to)
 }
 
 function colorOf(groupId: string | null): string {
@@ -395,13 +448,6 @@ useEventListener(window, 'keyup', (e) => {
   if (e.key.toLowerCase() === 'r') rDown.value = false
   if (e.code === 'Space') spaceDown.value = false
 })
-
-const stageStyle = computed(() => ({
-  width: `${editor.viewContentSize.w}px`,
-  height: `${editor.viewContentSize.h}px`,
-  transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale}) rotate(${view.rotate}rad)`,
-  transformOrigin: '0 0',
-}))
 </script>
 
 <style scoped>

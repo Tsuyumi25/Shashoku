@@ -232,6 +232,14 @@ function parseLabelForTranslation(v: unknown, i: number, validGroupIds: readonly
   })
   const id = typeof v.id === 'string' && v.id.length > 0 ? v.id : generateId()
   const label: SskLabel = { id, x, y, groupId: groupId as string | null, lines: parsedLines }
+  // Absent on every page written before objects could be turned, and on every
+  // label that never was, so its absence has to keep meaning upright rather
+  // than becoming a parse error.
+  if (v.rotation !== undefined) {
+    if (typeof v.rotation !== 'number' || !Number.isFinite(v.rotation))
+      fail(`${at}.rotation 必須是數字(弧度)`)
+    label.rotation = v.rotation
+  }
   if (v.styleOverride !== undefined) {
     label.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
   }
@@ -277,6 +285,7 @@ export function serializeTranslation(t: TranslationJson): string {
         groupId: l.groupId,
         lines: l.lines,
       }
+      if (l.rotation) entry.rotation = l.rotation
       if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
         entry.styleOverride = serializePartialTextStyle(l.styleOverride)
       return entry
