@@ -1,8 +1,10 @@
 
 
 
+import type { Dirent } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
+import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
   OpenProjectResult,
   PageBadge,
@@ -84,6 +86,42 @@ async function manifestIsHealthy(pageDir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * What each scan point holds right now. Answers for every point given, an
+ * unreadable one included — a folder on a drive that is not mounted today is
+ * empty rather than an error, so one missing disk does not take the whole
+ * library down with it.
+ */
+export async function scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]> {
+  return Promise.all(
+    scanPoints.map(async (point) => ({
+      path: point,
+      projects: await projectsUnder(point),
+    })),
+  );
+}
+
+async function projectsUnder(folderPath: string): Promise<ScannedProject[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(folderPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found = await Promise.all(
+    entries
+      .filter((e) => e.isDirectory())
+      .map(async (e): Promise<ScannedProject | null> => {
+        const path = join(folderPath, e.name);
+        const shashokuDir = join(path, SHASHOKU_DIR);
+        if (!(await exists(join(shashokuDir, SENTINEL_FILENAME)))) return null;
+        const raws = await listImages(join(shashokuDir, DIR_RAWS));
+        return { path, cover: raws[0] ?? null };
+      }),
+  );
+  return found.filter((p): p is ScannedProject => p !== null);
 }
 
 export async function scanRoot(rootPath: string): Promise<ScanRootResult> {

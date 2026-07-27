@@ -1,7 +1,11 @@
+import type { ScannedScanPoint } from "../project/library";
+
 export const CHANNELS = {
   pickRoot: "shashoku:pick-root",
   pickFontFolder: "fonts:pick-folder",
+  pickLibraryFolder: "shashoku:pick-library-folder",
   scanRoot: "shashoku:scan-root",
+  scanLibrary: "shashoku:scan-library",
   createProject: "shashoku:create-project",
   importPages: "shashoku:import-pages",
   openProject: "shashoku:open-project",
@@ -53,7 +57,11 @@ export interface WritePageInput {
 export interface ShashokuApi {
   pickRoot(): Promise<string | null>;
   pickFontFolder(): Promise<string | null>;
+  /** A folder that already holds projects, to be listed and never written to. */
+  pickLibraryFolder(): Promise<string | null>;
   scanRoot(rootPath: string): Promise<ScanRootResult>;
+  /** What each scan point holds today, sentinel-bearing children only. */
+  scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   importPages(rootPath: string, filenames: string[]): Promise<OpenProjectResult>;
   openProject(rootPath: string): Promise<OpenProjectResult>;

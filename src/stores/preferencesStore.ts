@@ -97,6 +97,17 @@ export const usePreferencesStore = defineStore('preferences', () => {
     if (at !== -1) prefs.fontFolders.splice(at, 1)
   }
 
+  function addScanPoint(path: string): boolean {
+    if (!path || prefs.scanPoints.includes(path)) return false
+    prefs.scanPoints.push(path)
+    return true
+  }
+
+  function removeScanPoint(path: string) {
+    const at = prefs.scanPoints.indexOf(path)
+    if (at !== -1) prefs.scanPoints.splice(at, 1)
+  }
+
   function setFontSampleVertical(vertical: boolean) {
     prefs.fontSampleVertical = vertical
   }
@@ -122,6 +133,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setFontSampleVertical,
     addFontFolder,
     removeFontFolder,
+    addScanPoint,
+    removeScanPoint,
     setMissingGlyphMode,
     setMarkMissingGlyphs,
   }

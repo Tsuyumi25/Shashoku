@@ -8,9 +8,7 @@
         class="flex min-w-0 flex-col border-r border-border bg-card"
       >
         <SidebarHeader />
-        <div class="min-h-0 flex-1 overflow-y-auto p-2">
-          <div class="px-1 text-xs text-muted-foreground">Sidebar</div>
-        </div>
+        <ProjectLibrary />
       </SplitterPanel>
 
       <ResizeHandle />
@@ -42,10 +40,12 @@
 import { computed } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import ProjectLibrary from '@/components/ProjectLibrary.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import WindowControls from '@/components/WindowControls.vue'
+import { useOpenProject } from '@/composables/useOpenProject'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -109,17 +109,15 @@ useEventListener(window, 'keydown', (e) => {
 // variable is the person watching devtools. See .env.example.
 const devProject = import.meta.env.DEV ? import.meta.env.RENDERER_VITE_DEV_PROJECT : undefined
 if (devProject) {
-  void project
-    .openByPath(devProject)
-    .then((opened) => {
-      if (opened === null) {
-        console.error(`RENDERER_VITE_DEV_PROJECT is not a Shashoku project: ${devProject}`)
-        return
-      }
-      editor.clearHistory()
-      editor.selectFile(project.files[0]?.filename ?? null)
-      ui.setView('translate')
-    })
-    .catch((err) => console.error('RENDERER_VITE_DEV_PROJECT failed to open', err))
+  const { openPath, lastError } = useOpenProject()
+  void openPath(devProject).then((opened) => {
+    if (!opened) {
+      console.error(
+        lastError.value ?? `RENDERER_VITE_DEV_PROJECT is not a Shashoku project: ${devProject}`,
+      )
+      return
+    }
+    ui.setView('translate')
+  })
 }
 </script>

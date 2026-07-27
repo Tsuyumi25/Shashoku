@@ -11,6 +11,8 @@ import {
 import { TRANSLATION_SCHEMA_VERSION } from '@shared/page/types'
 import { parseTranslation, serializeTranslation } from '@shared/page/schema'
 import { previewImport, type ImportDiff } from '@shared/project/import'
+import { parentFolder } from '@shared/project/library'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { DIR_LAYERS, DIR_RAWS, SHASHOKU_DIR } from '@shared/ssk/constants'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { createAutosave } from '@/lib/autosave'
@@ -163,6 +165,9 @@ export const useProjectStore = defineStore('project', () => {
     files.value = loaded
     metaDirty.value = false
     dirtyFilenames.value = []
+    // Opening a project is also how its neighbours get found: the folder it
+    // sits in becomes somewhere the library looks from now on.
+    usePreferencesStore().addScanPoint(parentFolder(newRootPath))
   }
 
   

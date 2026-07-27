@@ -8,6 +8,7 @@ import {
   importPages,
   openProject,
   readPage,
+  scanLibrary,
   scanRoot,
   writePage,
   writeProjectMeta,
@@ -33,6 +34,20 @@ async function pickFontFolder(win: BrowserWindow | null): Promise<string | null>
   return result.filePaths[0];
 }
 
+/**
+ * Its own picker rather than pickRoot's, because it asks for a different kind
+ * of folder: one that already holds projects, which nothing here will write to.
+ */
+async function pickLibraryFolder(win: BrowserWindow | null): Promise<string | null> {
+  if (!win) return null;
+  const result = await dialog.showOpenDialog(win, {
+    title: "選擇含有專案的資料夾",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+}
+
 export function registerShashokuProjectHandlers(): void {
   ipcMain.handle(CHANNELS.pickRoot, (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
@@ -42,7 +57,12 @@ export function registerShashokuProjectHandlers(): void {
     const win = BrowserWindow.fromWebContents(e.sender);
     return pickFontFolder(win);
   });
+  ipcMain.handle(CHANNELS.pickLibraryFolder, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    return pickLibraryFolder(win);
+  });
   ipcMain.handle(CHANNELS.scanRoot, (_e, rootPath: string) => scanRoot(rootPath));
+  ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));
   ipcMain.handle(CHANNELS.importPages, (_e, rootPath: string, filenames: string[]) =>
     importPages(rootPath, filenames),

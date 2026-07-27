@@ -33,6 +33,13 @@ export interface Preferences {
   /** Outlines the characters a family cannot draw, so a box has a reason. */
   markMissingGlyphs: boolean;
   /**
+   * Folders the sidebar looks under for projects. Recorded rather than
+   * configured: opening a project registers its parent, so the library fills
+   * itself in as it is used. Nothing here says a project exists — the sentinel
+   * on disk does, every time the list is drawn.
+   */
+  scanPoints: string[];
+  /**
    * Splitter geometry, one entry per group keyed by its autoSaveId. reka-ui
    * owns both the keys and the serialized values; we only provide storage.
    */
@@ -52,6 +59,7 @@ export function defaultPreferences(): Preferences {
     fontSampleVertical: false,
     missingGlyphMode: "tofu",
     markMissingGlyphs: true,
+    scanPoints: [],
     panelLayout: {},
   };
 }
