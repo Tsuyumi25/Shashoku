@@ -34,6 +34,7 @@ import {
   serializeManifest,
   serializeTranslation,
 } from "@shared/page/schema";
+import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -369,6 +370,39 @@ export async function writePage(pageDir: string, input: WritePageInput): Promise
   }
   if (input.manifestRaw !== undefined) {
     await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), input.manifestRaw);
+  }
+}
+
+/**
+ * One delivered page.
+ *
+ * Never the project root, and not for tidiness: listImages reads the root
+ * without recursing, so a finished page written beside the raws would be
+ * offered back as a new page to import on the next rescan — and importing it
+ * would typeset the text a second time onto text already burnt in. Any
+ * subfolder is safe, which is why every profile has one.
+ */
+export async function writeExport(
+  rootPath: string,
+  profileFolder: string,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  assertPathSegment(profileFolder, "設定檔資料夾");
+  assertPathSegment(filename, "檔名");
+  const dir = join(rootPath, DIR_EXPORT, profileFolder);
+  await mkdir(dir, { recursive: true });
+  await writeFileAtomic(join(dir, filename), bytes);
+}
+
+/**
+ * One level of the path, and only one. The naming rule's prefix and suffix are
+ * user-entered and end up inside a filename, so the check is repeated here at
+ * the point of the write rather than trusted to have happened upstream.
+ */
+export function assertPathSegment(part: string, label: string): void {
+  if (part.length === 0 || /[\\/]/.test(part) || part === "." || part === "..") {
+    throw new Error(`${label}不可為空、不可含路徑分隔符,也不可是 . 或 ..:${part}`);
   }
 }
 

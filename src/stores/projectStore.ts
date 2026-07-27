@@ -12,6 +12,8 @@ import { TRANSLATION_SCHEMA_VERSION } from '@shared/page/types'
 import { parseTranslation, serializeTranslation } from '@shared/page/schema'
 import { previewImport, type ImportDiff } from '@shared/project/import'
 import { parentFolder } from '@shared/project/library'
+import { assertDistinctFolders } from '@shared/export/profile'
+import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { DIR_LAYERS, DIR_RAWS, SHASHOKU_DIR } from '@shared/ssk/constants'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
@@ -387,7 +389,42 @@ export const useProjectStore = defineStore('project', () => {
     markMetaDirty()
   }
 
+  const exportProfiles = computed(() => projectMeta.value.exportProfiles)
+
+  /**
+   * Both writers refuse rather than repair: a profile that would deliver into
+   * a folder another one already owns has to be changed by whoever asked for
+   * it, since silently nudging it would put the files somewhere they did not
+   * choose.
+   */
+  function addExportProfile(profile: ExportProfile): void {
+    const next = [...projectMeta.value.exportProfiles, profile]
+    assertDistinctFolders(next)
+    projectMeta.value.exportProfiles = next
+    markMetaDirty()
+  }
+
+  function updateExportProfile(index: number, profile: ExportProfile): void {
+    const profiles = projectMeta.value.exportProfiles
+    if (index < 0 || index >= profiles.length) return
+    const next = profiles.map((p, i) => (i === index ? profile : p))
+    assertDistinctFolders(next)
+    projectMeta.value.exportProfiles = next
+    markMetaDirty()
+  }
+
+  function removeExportProfile(index: number): void {
+    const profiles = projectMeta.value.exportProfiles
+    if (index < 0 || index >= profiles.length) return
+    projectMeta.value.exportProfiles = profiles.filter((_, i) => i !== index)
+    markMetaDirty()
+  }
+
   return {
+    exportProfiles,
+    addExportProfile,
+    updateExportProfile,
+    removeExportProfile,
     
     rootPath,
     projectMeta,

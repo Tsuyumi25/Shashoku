@@ -7,10 +7,7 @@
   >
     <SplitterPanel :order="1" :default-size="50" :min-size="25" class="flex min-w-0 flex-col">
       <section class="relative min-h-0 flex-1">
-        <CanvasView v-show="ui.view === 'translate'" />
-        <div v-show="ui.view === 'project-manager'" class="absolute inset-0">
-          <ProjectManagerMode />
-        </div>
+        <CanvasView />
         <div v-show="fontPicker.isOpen.value" class="absolute inset-0 z-10">
           <FontPickerOverlay />
         </div>
@@ -106,13 +103,10 @@ import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
 import TranslateEditor from '@/components/TranslateEditor.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
-import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { useUiStore } from '@/stores/uiStore'
 
-const ui = useUiStore()
 const project = useProjectStore()
 const editor = useEditorStore()
 const preferences = usePreferencesStore()

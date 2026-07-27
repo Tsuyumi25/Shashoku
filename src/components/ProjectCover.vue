@@ -24,6 +24,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { ImageOff } from '@lucide/vue'
+import { coverKey, inRenderSlot, renderCover } from '@/lib/pageThumbnail'
 import { rawsDirOf } from '@/stores/libraryStore'
 
 /**
@@ -42,6 +43,8 @@ const props = defineProps<{
 
 const src = ref<string | null>(null)
 let url: string | null = null
+/** Which load the pending work belongs to, so a stale one cannot land. */
+let generation = 0
 
 function revoke() {
   if (url) {
@@ -50,15 +53,31 @@ function revoke() {
   }
 }
 
+async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array> {
+  const key = await coverKey(projectPath, cover)
+  const cached = await window.api.readThumbnail(key)
+  if (cached) return cached
+
+  return inRenderSlot(async () => {
+    const raw = await window.api.readImage(rawsDirOf(projectPath), cover)
+    const png = await renderCover(raw)
+    // Failing to cache costs the next draw, not this one.
+    void window.api.writeThumbnail(key, png).catch(() => {})
+    return png
+  })
+}
+
 watch(
   () => [props.projectPath, props.cover] as const,
   async ([projectPath, cover]) => {
+    const mine = ++generation
     revoke()
     src.value = null
     if (!cover) return
     try {
-      const bytes = await window.api.readImage(rawsDirOf(projectPath), cover)
-      url = URL.createObjectURL(new Blob([bytes as BlobPart]))
+      const bytes = await bytesFor(projectPath, cover)
+      if (mine !== generation) return
+      url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
       src.value = url
     } catch {
       // A cover that will not read is a missing cover, not a failure worth
@@ -68,5 +87,8 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(revoke)
+onBeforeUnmount(() => {
+  generation++
+  revoke()
+})
 </script>

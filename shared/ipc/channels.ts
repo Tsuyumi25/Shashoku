@@ -12,7 +12,10 @@ export const CHANNELS = {
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
   writeProjectMeta: "shashoku:write-project-meta",
+  writeExport: "shashoku:write-export",
   readImage: "project:readImage",
+  readThumbnail: "thumbnails:read",
+  writeThumbnail: "thumbnails:write",
   readPreferences: "preferences:read",
   writePreferences: "preferences:write",
   windowMinimize: "window:minimize",
@@ -68,7 +71,20 @@ export interface ShashokuApi {
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;
   writeProjectMeta(shashokuDir: string, projectMetaRaw: string): Promise<void>;
+  /** One delivered page, into `<rootPath>/export/<profileFolder>/`. */
+  writeExport(
+    rootPath: string,
+    profileFolder: string,
+    filename: string,
+    bytes: Uint8Array,
+  ): Promise<void>;
   readImage(folder: string, name: string): Promise<Uint8Array>;
+  /**
+   * A composited page held outside the project folder, keyed by a digest of
+   * everything that went into drawing it. null means it has to be drawn.
+   */
+  readThumbnail(key: string): Promise<Uint8Array | null>;
+  writeThumbnail(key: string, bytes: Uint8Array): Promise<void>;
   /** Raw preferences.json contents; "" on first run. */
   readPreferences(): Promise<string>;
   writePreferences(raw: string): Promise<void>;

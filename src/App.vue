@@ -22,8 +22,20 @@
           <WindowControls />
         </div>
 
-        <div class="min-h-0 flex-1">
-          <TranslateMode />
+        <!--
+          The translate workbench stays mounted while the project manager is
+          up: the canvas holds a view transform worth coming back to, and a
+          font picker that was open should still be open. The manager is the
+          other way round — its thumbnails go stale the moment a page is
+          typeset, so it is built fresh each time it is asked for.
+        -->
+        <div class="relative min-h-0 flex-1">
+          <div v-show="ui.view === 'translate'" class="absolute inset-0">
+            <TranslateMode />
+          </div>
+          <div v-if="ui.view === 'project-manager'" class="absolute inset-0">
+            <ProjectManagerLayout />
+          </div>
         </div>
       </SplitterPanel>
     </SplitterGroup>
@@ -46,6 +58,9 @@ import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
+import { isTypingSurface } from '@/lib/editContext'
+import { useExportStore } from '@/stores/exportStore'
+import ProjectManagerLayout from '@/modes/ProjectManagerLayout.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -55,6 +70,7 @@ import { useUiStore } from '@/stores/uiStore'
 const project = useProjectStore()
 const editor = useEditorStore()
 const preferences = usePreferencesStore()
+const exportSelection = useExportStore()
 const ui = useUiStore()
 
 // The window holds itself open until this answers, so every path out of it has
@@ -85,6 +101,17 @@ useEventListener(window, 'keydown', (e) => {
     // an unfinished translation is banked first.
     editor.flushTextEdit()
     void project.flush().catch((err) => console.error(err))
+    return
+  }
+
+  if (key === 'a') {
+    // Whatever holds the caret owns this key. Anywhere else, selecting the
+    // whole window's prose is a web page's idea of what it means: here it
+    // either picks every page or it does nothing, but it never leaves the
+    // interface highlighted blue.
+    if (isTypingSurface(document.activeElement)) return
+    e.preventDefault()
+    if (ui.view === 'project-manager') exportSelection.selectAll()
     return
   }
 

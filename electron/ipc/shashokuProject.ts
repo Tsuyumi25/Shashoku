@@ -10,6 +10,7 @@ import {
   readPage,
   scanLibrary,
   scanRoot,
+  writeExport,
   writePage,
   writeProjectMeta,
 } from "../lib/projectFs";
@@ -74,5 +75,10 @@ export function registerShashokuProjectHandlers(): void {
   );
   ipcMain.handle(CHANNELS.writeProjectMeta, (_e, shashokuDir: string, metaRaw: string) =>
     writeProjectMeta(shashokuDir, metaRaw),
+  );
+  ipcMain.handle(
+    CHANNELS.writeExport,
+    (_e, rootPath: string, profileFolder: string, filename: string, bytes: Uint8Array) =>
+      writeExport(rootPath, profileFolder, filename, bytes),
   );
 }

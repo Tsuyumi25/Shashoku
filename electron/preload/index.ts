@@ -26,7 +26,11 @@ const api: ShashokuApi = {
     ipcRenderer.invoke(CHANNELS.writePage, pageDir, input),
   writeProjectMeta: (shashokuDir, projectMetaRaw) =>
     ipcRenderer.invoke(CHANNELS.writeProjectMeta, shashokuDir, projectMetaRaw),
+  writeExport: (rootPath, profileFolder, filename, bytes) =>
+    ipcRenderer.invoke(CHANNELS.writeExport, rootPath, profileFolder, filename, bytes),
   readImage: (folder, name) => ipcRenderer.invoke(CHANNELS.readImage, folder, name),
+  readThumbnail: (key) => ipcRenderer.invoke(CHANNELS.readThumbnail, key),
+  writeThumbnail: (key, bytes) => ipcRenderer.invoke(CHANNELS.writeThumbnail, key, bytes),
   readPreferences: () => ipcRenderer.invoke(CHANNELS.readPreferences),
   writePreferences: (raw) => ipcRenderer.invoke(CHANNELS.writePreferences, raw),
   windowMinimize: () => ipcRenderer.send(CHANNELS.windowMinimize),

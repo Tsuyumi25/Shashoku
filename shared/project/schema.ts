@@ -5,6 +5,7 @@ import { PROJECT_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { CATEGORY_COLORS, DEFAULT_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
+import { parseExportProfiles, serializeExportProfiles } from '../export/schema'
 
 export class ProjectParseError extends Error {}
 
@@ -72,6 +73,7 @@ export function defaultProjectJson(): ProjectJson {
     })),
     defaultStyle: { ...DEFAULT_TEXT_STYLE },
     comment: '',
+    exportProfiles: [],
   }
 }
 
@@ -106,6 +108,7 @@ export function parseProjectJson(raw: string): ProjectJson {
     defaultStyle,
     comment,
     glossary: parseGlossary(data.glossary),
+    exportProfiles: parseExportProfiles(data.exportProfiles),
   }
 }
 
@@ -123,5 +126,6 @@ export function serializeProjectJson(project: ProjectJson): string {
     comment: project.comment,
   }
   if (project.glossary !== undefined) out.glossary = project.glossary
+  out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`
 }

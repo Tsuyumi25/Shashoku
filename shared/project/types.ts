@@ -9,6 +9,7 @@
 
 
 
+import type { ExportProfile } from '../export/types'
 import type { TextStyle } from '../text-style/types'
 
 export const PROJECT_SCHEMA_VERSION = 2
@@ -35,4 +36,10 @@ export interface ProjectJson {
   comment: string
   
   glossary?: Glossary
+  /**
+   * How this project gets delivered. Kept here rather than in preferences and
+   * inheriting from nothing: a project handed to someone else has to arrive
+   * knowing how it is meant to come out.
+   */
+  exportProfiles: ExportProfile[]
 }

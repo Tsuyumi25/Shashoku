@@ -180,6 +180,38 @@ html, body, #app {
   outline-offset: -2px;
 }
 
+/* Round check mark. Global for the same reason as the segmented control: the
+   page grid and the profile list both pick things, and one of them drifting
+   would read as two different kinds of choice. Always drawn, empty when
+   unpicked — a mark that only appears once chosen cannot say what is
+   choosable. */
+.pick {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0;
+  border: 1.5px solid var(--input);
+  border-radius: 9999px;
+  background: var(--background);
+  color: transparent;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+.pick[data-checked="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.pick-lg {
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
 body {
   margin: 0;
 }
