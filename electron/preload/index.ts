@@ -46,6 +46,7 @@ const engineApi: ShashokuEngineApi = {
     engine.renderText(font, text, sizePx, padding, fillColor, stroke),
   renderVertical: (font, text, sizePx, padding, fillColor, stroke) =>
     engine.renderVertical(font, text, sizePx, padding, fillColor, stroke),
+  encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };
 
 contextBridge.exposeInMainWorld("api", api);

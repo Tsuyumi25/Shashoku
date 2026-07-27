@@ -7,6 +7,7 @@ use napi::{Env, Task};
 use napi_derive::napi;
 use skrifa::{FontRef, MetadataProvider, string::StringId};
 
+mod encode;
 mod enumerate;
 mod render;
 mod stroke;
@@ -303,6 +304,72 @@ pub fn render_text(
         rgba: bmp.rgba.into(),
         clusters: to_cluster_rects(bmp.clusters),
     })
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Delivery encoding
+
+#[napi(object)]
+pub struct EncodeInput {
+    /// "png" | "png-8" | "jpeg" | "webp".
+    pub format: String,
+    /// "color" | "grayscale" | "bilevel".
+    pub color_mode: String,
+    /// Ceiling in bytes. Only honoured by formats with something to turn
+    /// towards it; the result is the smallest attempt when nothing fits.
+    pub max_bytes: Option<u32>,
+    /// Where a JPEG quality search starts, 1..=100. Defaults to 90.
+    pub quality: Option<u32>,
+}
+
+fn encode_input_to_spec(input: EncodeInput) -> napi::Result<encode::EncodeSpec> {
+    let format = match input.format.as_str() {
+        "png" => encode::Format::Png,
+        "png-8" => encode::Format::Png8,
+        "jpeg" => encode::Format::Jpeg,
+        "webp" => encode::Format::Webp,
+        other => {
+            return Err(napi::Error::from_reason(format!(
+                "format must be png|png-8|jpeg|webp, got {other:?}"
+            )));
+        }
+    };
+    let color_mode = match input.color_mode.as_str() {
+        "color" => encode::ColorMode::Color,
+        "grayscale" => encode::ColorMode::Grayscale,
+        "bilevel" => encode::ColorMode::Bilevel,
+        other => {
+            return Err(napi::Error::from_reason(format!(
+                "colorMode must be color|grayscale|bilevel, got {other:?}"
+            )));
+        }
+    };
+    if color_mode == encode::ColorMode::Bilevel && format != encode::Format::Png {
+        return Err(napi::Error::from_reason(
+            "bilevel is only available as PNG; no other format here carries a 1-bit image",
+        ));
+    }
+    Ok(encode::EncodeSpec {
+        format,
+        color_mode,
+        max_bytes: input.max_bytes.map(|b| b as usize),
+        quality: input.quality.unwrap_or(90).clamp(1, 100) as u8,
+    })
+}
+
+/// A finished page as file bytes. Takes straight RGBA, because the compositing
+/// this encodes happens on a canvas in the renderer — nothing here decodes.
+#[napi]
+pub fn encode_image(
+    rgba: Buffer,
+    width: u32,
+    height: u32,
+    input: EncodeInput,
+) -> napi::Result<Buffer> {
+    let spec = encode_input_to_spec(input)?;
+    let bytes =
+        encode::encode(rgba.as_ref(), width, height, &spec).map_err(napi::Error::from_reason)?;
+    Ok(bytes.into())
 }
 
 #[napi]

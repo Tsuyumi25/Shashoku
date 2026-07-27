@@ -93,6 +93,22 @@ export interface EngineFaceInfo {
   faceIndex: number;
 }
 
+export interface EngineEncodeInput {
+  /** Bit depth is folded in: "png" | "png-8" | "jpeg" | "webp". */
+  format: string;
+  /** "color" | "grayscale" | "bilevel". Bilevel is PNG only. */
+  colorMode: string;
+  /**
+   * Ceiling in bytes. Honoured only by the formats with something to turn
+   * towards it — JPEG's quality, PNG-8's palette size. Nothing throws when the
+   * ceiling cannot be met: the smallest attempt comes back and the caller,
+   * which knows which page this was, decides what that means.
+   */
+  maxBytes?: number;
+  /** Where a JPEG quality search starts, 1..=100. Defaults to 90. */
+  quality?: number;
+}
+
 export interface ShashokuEngineApi {
   version(): string;
   /**
@@ -124,4 +140,15 @@ export interface ShashokuEngineApi {
     fillColor?: string,
     stroke?: EngineStrokeSpec,
   ): EngineBitmap;
+  /**
+   * A composited page as file bytes. Takes straight RGBA because the
+   * compositing happens on a canvas in the renderer — the engine never
+   * decodes, it only writes what the application just drew.
+   */
+  encodeImage(
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+    input: EngineEncodeInput,
+  ): Uint8Array;
 }
