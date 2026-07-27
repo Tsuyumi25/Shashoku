@@ -1,7 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { LabelItem, ProjectFile, ProjectHeader } from '@/types/project'
-import type { SskExportConfig } from '@shared/ssk/types'
 import type { ProjectJson, StyleGroup } from '@shared/project/types'
 import {
   defaultColorForGroupIndex,
@@ -73,7 +72,6 @@ export const useProjectStore = defineStore('project', () => {
     defaultStyle: projectMeta.value.defaultStyle,
     comment: projectMeta.value.comment,
   }))
-  const exportConfig = computed<SskExportConfig>(() => projectMeta.value.exportConfig)
   const dirty = computed(() => metaDirty.value || dirtyFilenames.value.length > 0)
   
   const rawsDir = computed(() =>
@@ -371,7 +369,6 @@ export const useProjectStore = defineStore('project', () => {
     
     folderPath,
     header,
-    exportConfig,
     dirty,
     isOpen,
     metaDirty,

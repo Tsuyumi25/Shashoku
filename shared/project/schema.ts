@@ -4,7 +4,6 @@ import type { Glossary, ProjectJson, StyleGroup } from './types'
 import { PROJECT_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
-import { defaultExportConfig, parseExportConfigStrict } from '../ssk/schema'
 import { CATEGORY_COLORS, DEFAULT_GROUPS, RESERVED_GROUP_NAMES } from '../ssk/constants'
 
 export class ProjectParseError extends Error {}
@@ -73,7 +72,6 @@ export function defaultProjectJson(): ProjectJson {
     })),
     defaultStyle: { ...DEFAULT_TEXT_STYLE },
     comment: '',
-    exportConfig: defaultExportConfig(),
   }
 }
 
@@ -108,7 +106,6 @@ export function parseProjectJson(raw: string): ProjectJson {
     defaultStyle,
     comment,
     glossary: parseGlossary(data.glossary),
-    exportConfig: parseExportConfigStrict(data.exportConfig, groups.map((g) => g.name)),
   }
 }
 
@@ -126,21 +123,5 @@ export function serializeProjectJson(project: ProjectJson): string {
     comment: project.comment,
   }
   if (project.glossary !== undefined) out.glossary = project.glossary
-  out.exportConfig = {
-    docTemplate: project.exportConfig.docTemplate,
-    docTemplateFilename: project.exportConfig.docTemplateFilename,
-    outputFormat: project.exportConfig.outputFormat,
-    ignoreNoLabelImages: project.exportConfig.ignoreNoLabelImages,
-    createLayerGroups: project.exportConfig.createLayerGroups,
-    font: project.exportConfig.font,
-    fontSizePx: project.exportConfig.fontSizePx,
-    textColor: project.exportConfig.textColor,
-    textLeadingPercent: project.exportConfig.textLeadingPercent,
-    textDirection: project.exportConfig.textDirection,
-    outputLabelIndex: project.exportConfig.outputLabelIndex,
-    actionSetName: project.exportConfig.actionSetName,
-    outputFolderName: project.exportConfig.outputFolderName,
-    exportGroups: project.exportConfig.exportGroups,
-  }
   return `${JSON.stringify(out, null, 2)}\n`
 }

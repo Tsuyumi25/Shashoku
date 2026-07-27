@@ -9,7 +9,6 @@
 
 
 
-import type { SskExportConfig } from '../ssk/types'
 import type { TextStyle } from '../text-style/types'
 
 export const PROJECT_SCHEMA_VERSION = 2
@@ -36,5 +35,4 @@ export interface ProjectJson {
   comment: string
   
   glossary?: Glossary
-  exportConfig: SskExportConfig
 }
