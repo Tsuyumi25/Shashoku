@@ -21,9 +21,15 @@ export const usePreferencesStore = defineStore('preferences', () => {
   let persistTimer: ReturnType<typeof setTimeout> | undefined
 
   function persist() {
-    void window.api.writePreferences(serializePreferences(prefs)).catch((err: unknown) => {
+    return window.api.writePreferences(serializePreferences(prefs)).catch((err: unknown) => {
       console.error('preferences: write failed', err)
     })
+  }
+
+  /** Land the debounced write now, for the moment before the window goes. */
+  function flush(): Promise<void> {
+    clearTimeout(persistTimer)
+    return persist()
   }
 
   watch(
@@ -31,7 +37,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     () => {
       if (!hydrated.value) return
       clearTimeout(persistTimer)
-      persistTimer = setTimeout(persist, PERSIST_DEBOUNCE_MS)
+      persistTimer = setTimeout(() => void persist(), PERSIST_DEBOUNCE_MS)
     },
     { deep: true },
   )
@@ -106,6 +112,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   return {
     prefs,
     hydrate,
+    flush,
     panelStorage,
     favorites,
     isFavorite,

@@ -30,6 +30,10 @@ const api: ShashokuApi = {
   windowMinimize: () => ipcRenderer.send(CHANNELS.windowMinimize),
   windowMaximize: () => ipcRenderer.send(CHANNELS.windowMaximize),
   windowClose: () => ipcRenderer.send(CHANNELS.windowClose),
+  onWillClose: (handler) => {
+    ipcRenderer.on(CHANNELS.windowWillClose, () => handler());
+  },
+  windowCloseReady: () => ipcRenderer.send(CHANNELS.windowCloseReady),
 };
 
 const engineApi: ShashokuEngineApi = {

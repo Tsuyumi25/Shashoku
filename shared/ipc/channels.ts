@@ -14,6 +14,8 @@ export const CHANNELS = {
   windowMinimize: "window:minimize",
   windowMaximize: "window:maximize",
   windowClose: "window:close",
+  windowWillClose: "window:will-close",
+  windowCloseReady: "window:close-ready",
 } as const;
 
 export interface ScanRootResult {
@@ -65,4 +67,10 @@ export interface ShashokuApi {
   windowMinimize(): void;
   windowMaximize(): void;
   windowClose(): void;
+  /**
+   * The window is going away and is holding itself open for the answer.
+   * Whatever still has to reach disk goes now, then windowCloseReady.
+   */
+  onWillClose(handler: () => void): void;
+  windowCloseReady(): void;
 }

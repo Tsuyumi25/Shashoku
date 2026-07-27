@@ -1,5 +1,13 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
+import { CHANNELS } from "@shared/ipc/channels";
+
+/**
+ * How long the window waits for the renderer to say its last writes have
+ * landed. A renderer that is wedged or gone must not be able to keep a window
+ * on screen that the user has asked to close, so the wait has an end.
+ */
+const CLOSE_GRACE_MS = 3000;
 
 export function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -28,6 +36,30 @@ export function createWindow(): BrowserWindow {
   win.once("ready-to-show", () => {
     win.maximize();
     win.show();
+  });
+
+  // Autosave writes are asynchronous, and beforeunload cannot wait for one —
+  // it is the close itself that has to. Every route out goes through this
+  // event, the title bar's own button included, so one hook covers them all.
+  let closing = false;
+  let releasedForClose = false;
+
+  function closeForReal() {
+    releasedForClose = true;
+    if (!win.isDestroyed()) win.close();
+  }
+
+  win.on("close", (e) => {
+    if (releasedForClose) return;
+    e.preventDefault();
+    if (closing) return;
+    closing = true;
+    const giveUp = setTimeout(closeForReal, CLOSE_GRACE_MS);
+    ipcMain.once(CHANNELS.windowCloseReady, () => {
+      clearTimeout(giveUp);
+      closeForReal();
+    });
+    win.webContents.send(CHANNELS.windowWillClose);
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {

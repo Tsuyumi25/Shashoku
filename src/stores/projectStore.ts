@@ -13,6 +13,7 @@ import { parseTranslation, serializeTranslation } from '@shared/page/schema'
 import { previewImport, type ImportDiff } from '@shared/project/import'
 import { DIR_LAYERS, DIR_RAWS, SHASHOKU_DIR } from '@shared/ssk/constants'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
+import { createAutosave } from '@/lib/autosave'
 
 function generateGroupId(): string {
   const c = globalThis.crypto
@@ -90,11 +91,32 @@ export const useProjectStore = defineStore('project', () => {
     return files.value.find((f) => f.filename === filename)
   }
 
+  /**
+   * Deliberately not rescheduled after a failure: a disk that is gone stays
+   * gone, and retrying on a timer would turn one broken write into a loop. The
+   * work stays queued for the next edit or the next flush.
+   */
+  const autosave = createAutosave(save, {
+    onError: (err) => console.error('autosave failed', err),
+  })
+
+  /**
+   * Every mutation below ends here or in markMetaDirty, which is what lets the
+   * autosave be scheduled in two places rather than at each of the twenty-odd
+   * call sites — and what keeps a new mutation from silently opting out of it.
+   */
   function markPageDirty(filename: string) {
     if (!dirtyFilenames.value.includes(filename)) dirtyFilenames.value.push(filename)
+    autosave.mark()
+  }
+
+  function markMetaDirty() {
+    metaDirty.value = true
+    autosave.mark()
   }
 
   function reset() {
+    autosave.cancel()
     rootPath.value = null
     projectMeta.value = defaultProjectJson()
     files.value = []
@@ -102,12 +124,16 @@ export const useProjectStore = defineStore('project', () => {
     dirtyFilenames.value = []
   }
 
-  
+
   async function ingestProject(newRootPath: string, projectMetaRaw: string, pages: Array<{
     filename: string
     pageDir: string
     badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
   }>): Promise<void> {
+    // The only place the open project is replaced, so the only place the
+    // outgoing one has to be banked. Still addressed by the old rootPath here,
+    // which is what makes it land where it came from.
+    await autosave.flush()
     const meta = parseProjectJson(projectMetaRaw)
     const loaded: ProjectFile[] = []
     for (const p of pages) {
@@ -165,21 +191,7 @@ export const useProjectStore = defineStore('project', () => {
     return picked
   }
 
-  
-  function newProject(diskImages: string[]): void {
-    projectMeta.value = defaultProjectJson()
-    files.value = diskImages.map((filename): ProjectFile => ({
-      filename,
-      pageDir: '',
-      labels: [],
-      badge: 'ok',
-    }))
-    rootPath.value = null
-    metaDirty.value = true
-    dirtyFilenames.value = []
-  }
 
-  
   async function previewRescanImport(): Promise<ImportDiff | null> {
     if (rootPath.value === null) return null
     const scan = await window.api.scanRoot(rootPath.value)
@@ -207,32 +219,47 @@ export const useProjectStore = defineStore('project', () => {
     return rootPathToOpen
   }
 
-  
-  async function save(): Promise<'saved' | 'canceled' | 'noop'> {
-    if (rootPath.value === null) return 'noop'
-    if (!dirty.value) return 'saved'
+  /**
+   * The flags are taken and cleared before the first await, so an edit made
+   * while the write is out marks the page again and earns the next write
+   * instead of being cleared along with the one that predated it. A failure
+   * puts them back, which both keeps the data queued and lights the title's
+   * unsaved marker — under autosave that marker means "not on disk", and this
+   * is the only way it stays on.
+   */
+  async function save(): Promise<void> {
+    const root = rootPath.value
+    if (root === null || !dirty.value) return
 
-    
-    for (const filename of [...dirtyFilenames.value]) {
-      const file = fileByName(filename)
-      if (!file) continue
-      await window.api.writePage(file.pageDir, {
-        translationRaw: serializeTranslationForFile(file),
-      })
-    }
+    const pages = dirtyFilenames.value
+    const metaWasDirty = metaDirty.value
     dirtyFilenames.value = []
+    metaDirty.value = false
 
-    if (metaDirty.value) {
-      await window.api.writeProjectMeta(
-        shashokuDirOf(rootPath.value),
-        serializeProjectJson(projectMeta.value),
-      )
-      metaDirty.value = false
+    try {
+      for (const filename of pages) {
+        const file = fileByName(filename)
+        if (!file) continue
+        await window.api.writePage(file.pageDir, {
+          translationRaw: serializeTranslationForFile(file),
+        })
+      }
+      if (metaWasDirty) {
+        await window.api.writeProjectMeta(
+          shashokuDirOf(root),
+          serializeProjectJson(projectMeta.value),
+        )
+      }
+    } catch (err) {
+      for (const filename of pages) {
+        if (!dirtyFilenames.value.includes(filename)) dirtyFilenames.value.push(filename)
+      }
+      if (metaWasDirty) metaDirty.value = true
+      throw err
     }
-    return 'saved'
   }
 
-  
+
 
   function addLabel(filename: string, label: LabelItem, index?: number) {
     const file = fileByName(filename)
@@ -309,7 +336,7 @@ export const useProjectStore = defineStore('project', () => {
       style: { ...DEFAULT_TEXT_STYLE },
     }
     groups.push(group)
-    metaDirty.value = true
+    markMetaDirty()
     return group
   }
 
@@ -317,7 +344,7 @@ export const useProjectStore = defineStore('project', () => {
     const groups = projectMeta.value.groups
     if (index < 0 || index >= groups.length) return
     groups[index].name = name
-    metaDirty.value = true
+    markMetaDirty()
   }
 
   
@@ -325,13 +352,13 @@ export const useProjectStore = defineStore('project', () => {
     const groups = projectMeta.value.groups
     if (index < 0 || index >= groups.length) return
     groups[index].style = { ...groups[index].style, ...patch }
-    metaDirty.value = true
+    markMetaDirty()
   }
 
   
   function updateDefaultStyle(patch: Partial<TextStyle>) {
     projectMeta.value.defaultStyle = { ...projectMeta.value.defaultStyle, ...patch }
-    metaDirty.value = true
+    markMetaDirty()
   }
 
   
@@ -339,25 +366,20 @@ export const useProjectStore = defineStore('project', () => {
     const groups = projectMeta.value.groups
     if (groups.length === 0) return null
     const removed = groups.pop() ?? null
-    metaDirty.value = true
+    markMetaDirty()
     return removed
   }
 
   
   function restoreLastGroup(group: StyleGroup): void {
     projectMeta.value.groups.push(group)
-    metaDirty.value = true
+    markMetaDirty()
   }
 
   function updateComment(text: string) {
     if (projectMeta.value.comment === text) return
     projectMeta.value.comment = text
-    metaDirty.value = true
-  }
-
-  
-  function markMetaDirty() {
-    metaDirty.value = true
+    markMetaDirty()
   }
 
   return {
@@ -378,13 +400,12 @@ export const useProjectStore = defineStore('project', () => {
     
     fileByName,
     reset,
-    newProject,
     createNewProject,
     openExisting,
     openByPath,
     previewRescanImport,
     commitRescanImport,
-    save,
+    flush: autosave.flush,
     addLabel,
     deleteLabel,
     moveLabel,

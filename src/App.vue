@@ -48,12 +48,23 @@ import ThemeToggle from '@/components/ThemeToggle.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const preferences = usePreferencesStore()
 const ui = useUiStore()
+
+// The window holds itself open until this answers, so every path out of it has
+// to reach the release — a failed write loses that one write, not the reply.
+window.api.onWillClose(() => {
+  editor.flushTextEdit()
+  void Promise.allSettled([project.flush(), preferences.flush()]).then(() =>
+    window.api.windowCloseReady(),
+  )
+})
 
 const title = computed(() => {
   if (!project.isOpen) return 'Shashoku 写植'
@@ -68,10 +79,12 @@ useEventListener(window, 'keydown', (e) => {
   if (key === 's') {
     e.preventDefault()
     if (!project.isOpen) return
-    // What lands on disk and what the undo stack says have to agree, so an
-    // unfinished translation is banked before the write.
+    // Everything already saves itself, so this only says "now" — which is
+    // still worth having for the moment before handing the folder to someone
+    // else. What lands on disk and what the undo stack says have to agree, so
+    // an unfinished translation is banked first.
     editor.flushTextEdit()
-    void project.save().catch((err) => console.error(err))
+    void project.flush().catch((err) => console.error(err))
     return
   }
 

@@ -23,7 +23,7 @@
             @select="onSave"
           >
             <Save :size="14" />
-            <span>儲存專案</span>
+            <span>立即儲存</span>
             <span class="ml-auto text-xs text-muted-foreground tracking-widest">Ctrl+S</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -62,7 +62,7 @@ const ui = useUiStore()
 
 async function onSave() {
   try {
-    await project.save()
+    await project.flush()
   } catch (err) {
     console.error(err)
   }
