@@ -17,11 +17,14 @@
     </div>
 
     <textarea
+      ref="textareaRef"
       class="min-h-0 w-full flex-1 resize-none bg-card px-3 py-2 text-sm leading-relaxed focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
       :value="selectedLabel?.text ?? ''"
       :disabled="!selectedLabel"
       :placeholder="selectedLabel ? '輸入翻譯…' : ''"
       @input="onInput"
+      @focus="beginEdit"
+      @blur="editor.commitTextEdit()"
     />
 
     <div class="flex h-6 shrink-0 items-center border-t border-border px-2 select-none">
@@ -31,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -53,6 +56,12 @@ const selectedGroup = computed(() => {
   return project.header.groups.find((g) => g.id === gid)
 })
 
+const textareaRef = useTemplateRef<HTMLTextAreaElement>('textareaRef')
+
+/**
+ * Typing writes through so the canvas keeps up; what enters the undo stack is
+ * the whole visit to this label, closed by whatever takes the caret away.
+ */
 function onInput(e: Event) {
   if (!selectedLabel.value || !editor.currentFilename) return
   project.updateLabelText(
@@ -61,4 +70,19 @@ function onInput(e: Event) {
     (e.target as HTMLTextAreaElement).value,
   )
 }
+
+function beginEdit() {
+  if (!selectedLabel.value || !editor.currentFilename) return
+  editor.beginTextEdit(editor.currentFilename, selectedLabel.value.id, selectedLabel.value.text)
+}
+
+// Moving to another label or another page ends the visit without a blur, so
+// the box would otherwise keep attributing the new typing to the old label.
+watch(
+  () => [editor.currentFilename, editor.selectedLabelId] as const,
+  () => {
+    editor.commitTextEdit()
+    if (document.activeElement === textareaRef.value) beginEdit()
+  },
+)
 </script>

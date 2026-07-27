@@ -1,5 +1,27 @@
 <template>
   <div class="flex h-7 shrink-0 items-center gap-1 border-t border-border bg-card px-1 select-none">
+    <!--
+      The text tool is sticky, so this is the only standing answer to which
+      tool is up: the crosshair cursor disappears with the pointer.
+    -->
+    <button
+      class="page-btn"
+      :class="[editor.tool === 'select' && 'tool-btn-active']"
+      title="選取工具（V）"
+      @click="editor.setTool('select')"
+    >
+      <MousePointer2 :size="13" />
+    </button>
+    <button
+      class="page-btn"
+      :class="[editor.tool === 'text' && 'tool-btn-active']"
+      title="文字工具（T）"
+      @click="editor.setTool('text')"
+    >
+      <Type :size="13" />
+    </button>
+    <div class="mx-1 h-4 w-px bg-border" />
+
     <button class="page-btn" title="縮小" :disabled="!project.isOpen" @click="editor.zoomBy(1 / 1.25)">
       <ZoomOut :size="14" />
     </button>
@@ -37,7 +59,15 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronLeft, ChevronRight, Maximize, ZoomIn, ZoomOut } from '@lucide/vue'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize,
+  MousePointer2,
+  Type,
+  ZoomIn,
+  ZoomOut,
+} from '@lucide/vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -71,5 +101,10 @@ function onSelect(e: Event) {
 }
 .page-btn:disabled {
   opacity: 0.5;
+}
+.tool-btn-active,
+.tool-btn-active:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 </style>

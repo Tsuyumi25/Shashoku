@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import type { LabelItem } from '@/types/project'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore } from '@/stores/projectStore'
+import { screenToPageFraction } from '@/lib/coords'
+import { generateId as generateLabelId } from '@shared/page/schema'
 
 export interface Command {
   
@@ -11,10 +13,19 @@ export interface Command {
   undo(): void
 }
 
+/**
+ * Sticky, as in Photoshop: the text tool stays until V takes it back. The
+ * canvas's other gestures are held rather than toggled, which is why the
+ * bottom bar has to say which tool is up — a cursor shape is gone the moment
+ * the pointer leaves the canvas.
+ */
+export type CanvasTool = 'select' | 'text'
+
 
 export const useEditorStore = defineStore('editor', () => {
   const currentFilename = ref<string | null>(null)
   const selectedLabelId = ref<string | null>(null)
+  const tool = ref<CanvasTool>('select')
   
   const activeGroupId = ref<string | null>(null)
   
@@ -26,6 +37,10 @@ export const useEditorStore = defineStore('editor', () => {
 
   function adjustFontSize(delta: number) {
     fontSize.value = Math.min(24, Math.max(10, fontSize.value + delta))
+  }
+
+  function setTool(next: CanvasTool) {
+    tool.value = next
   }
 
   /**
@@ -48,6 +63,7 @@ export const useEditorStore = defineStore('editor', () => {
   const canRedo = computed(() => redoStack.value.length > 0)
 
   function selectFile(filename: string | null) {
+    commitTextEdit()
     currentFilename.value = filename
     
     const project = useProjectStore()
@@ -91,14 +107,73 @@ export const useEditorStore = defineStore('editor', () => {
     focusEditorRequest.value++
   }
 
-  
+  /**
+   * The translation being typed right now. Every keystroke writes straight
+   * through so the page keeps up, and the editing session is what enters the
+   * undo stack — the same split the drag gestures use. One entry per label you
+   * visited reads as "you edited this line", where a time window would let
+   * typing speed decide how much an undo takes back.
+   */
+  const pendingTextEdit = ref<{ filename: string; labelId: string; from: string } | null>(null)
+
+  /** Undefined once the label being edited has been deleted under the caret. */
+  function textOfPending(): string | undefined {
+    const pending = pendingTextEdit.value
+    if (!pending) return undefined
+    const project = useProjectStore()
+    return project.fileByName(pending.filename)?.labels.find((l) => l.id === pending.labelId)?.text
+  }
+
+  function beginTextEdit(filename: string, labelId: string, from: string) {
+    commitTextEdit()
+    pendingTextEdit.value = { filename, labelId, from }
+  }
+
+  function commitTextEdit() {
+    const pending = pendingTextEdit.value
+    if (!pending) return
+    const text = textOfPending()
+    // Cleared first: the command below re-enters here through pushCommand, and
+    // this is what stops it recursing.
+    pendingTextEdit.value = null
+    // The label was deleted mid-edit, and the delete already captured its text.
+    if (text === undefined) return
+    cmdUpdateLabelText(pending.filename, pending.labelId, pending.from, text)
+  }
+
+  /**
+   * Bank what has been typed without ending the visit, for a save that lands
+   * mid-sentence: the undo stack has to agree with what went to disk, and the
+   * caret is still in the box.
+   */
+  function flushTextEdit() {
+    const pending = pendingTextEdit.value
+    const text = textOfPending()
+    commitTextEdit()
+    if (!pending || text === undefined) return
+    pendingTextEdit.value = { ...pending, from: text }
+  }
+
+  /**
+   * Every command lands here, so this is where an open text edit is closed:
+   * the stack has to run in the order things happened, or undoing a delete
+   * after the text change it swallowed replays them the wrong way round.
+   */
   function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean }) {
+    commitTextEdit()
     if (!opts?.alreadyApplied) cmd.do()
     undoStack.value = [...undoStack.value, cmd]
     redoStack.value = []
   }
 
+  /**
+   * Closed before the stack is read, not after: a session still open is the
+   * most recent thing that happened, so it is what an undo has to take back.
+   * Reading the stack first would reach past it to some earlier command and
+   * leave the typing standing.
+   */
   function undo() {
+    commitTextEdit()
     const cmd = undoStack.value.at(-1)
     if (!cmd) return
     undoStack.value = undoStack.value.slice(0, -1)
@@ -106,7 +181,9 @@ export const useEditorStore = defineStore('editor', () => {
     redoStack.value = [...redoStack.value, cmd]
   }
 
+  /** Typing after an undo ends the redo branch, as it does in any editor. */
   function redo() {
+    commitTextEdit()
     const cmd = redoStack.value.at(-1)
     if (!cmd) return
     redoStack.value = redoStack.value.slice(0, -1)
@@ -118,6 +195,7 @@ export const useEditorStore = defineStore('editor', () => {
   function clearHistory() {
     undoStack.value = []
     redoStack.value = []
+    pendingTextEdit.value = null
   }
 
   
@@ -133,6 +211,47 @@ export const useEditorStore = defineStore('editor', () => {
       },
     })
     selectedLabelId.value = label.id
+  }
+
+  /**
+   * A new label is empty and joins the active group, so a run of them can be
+   * placed first and typed later. It goes on the end because the order of
+   * `labels[]` is the numbering, and inserting near the pointer would renumber
+   * the page under whoever is reading it.
+   */
+  function addLabelAt(x: number, y: number) {
+    if (!currentFilename.value) return
+    cmdAddLabel(currentFilename.value, {
+      id: generateLabelId(),
+      x,
+      y,
+      groupId: activeGroupId.value,
+      text: '',
+    })
+  }
+
+  /**
+   * Where the panel's add button drops a label. The view centre is a container
+   * coordinate, which is what `screenToPageFraction` wants once the container's
+   * own offset is taken out — and it can be off the page after a pan, hence the
+   * clamp inside it.
+   */
+  function addLabelAtViewCenter() {
+    const natural = viewContentSize.value
+    if (!natural.w || !natural.h) return
+    const p = screenToPageFraction(
+      viewContainerSize.value.w / 2,
+      viewContainerSize.value.h / 2,
+      { left: 0, top: 0 },
+      view,
+      natural,
+    )
+    addLabelAt(p.x, p.y)
+  }
+
+  function deleteSelectedLabel() {
+    if (!currentFilename.value || !selectedLabelId.value) return
+    cmdDeleteLabel(currentFilename.value, selectedLabelId.value)
   }
 
   
@@ -250,6 +369,8 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     currentFilename,
     selectedLabelId,
+    tool,
+    setTool,
     activeGroupId,
     showGroups,
     focusEditorRequest,
@@ -270,10 +391,16 @@ export const useEditorStore = defineStore('editor', () => {
     pageBy,
     selectLabelBy,
     requestEditorFocus,
+    beginTextEdit,
+    commitTextEdit,
+    flushTextEdit,
     pushCommand,
     undo,
     redo,
     clearHistory,
+    addLabelAt,
+    addLabelAtViewCenter,
+    deleteSelectedLabel,
     cmdAddLabel,
     cmdDuplicateLabel,
     cmdDeleteLabel,

@@ -72,6 +72,7 @@ import LabelMarker from '@/components/LabelMarker.vue'
 import LabelText from '@/components/LabelText.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { Anchor } from '@/composables/useLabelDrag'
+import { screenToPageFraction } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -276,6 +277,7 @@ const canvasCursor = computed(() => {
     return rotateDirection.sign === 1 ? 'cursor-rotate-cw' : 'cursor-rotate-ccw'
   }
   if (spaceDown.value) return 'cursor-grab'
+  if (editor.tool === 'text') return 'cursor-crosshair'
   return 'cursor-default'
 })
 
@@ -300,10 +302,22 @@ function onPointerDown(e: PointerEvent) {
     resetRotationDirection(rotateDirection, rotateStartAngle)
     return
   }
-  if (e.button !== 0 || !spaceDown.value) return
-  el.setPointerCapture(e.pointerId)
-  panning.value = true
-  panLast = { x: e.clientX, y: e.clientY }
+  if (e.button !== 0) return
+  if (spaceDown.value) {
+    el.setPointerCapture(e.pointerId)
+    panning.value = true
+    panLast = { x: e.clientX, y: e.clientY }
+    return
+  }
+  // Reaching here means bare page: the markers and the text stop the event on
+  // their way out, so anything left started on the page itself.
+  if (editor.tool === 'text') {
+    const rect = containerRef.value.getBoundingClientRect()
+    const p = screenToPageFraction(e.clientX, e.clientY, rect, view, editor.viewContentSize)
+    editor.addLabelAt(p.x, p.y)
+    return
+  }
+  editor.selectedLabelId = null
 }
 
 const ROTATE_SNAP = Math.PI / 12
@@ -355,6 +369,13 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
   } else if (e.key.toLowerCase() === 'r') {
     rDown.value = true
+  } else if (e.key.toLowerCase() === 't') {
+    editor.setTool('text')
+  } else if (e.key.toLowerCase() === 'v') {
+    editor.setTool('select')
+  } else if (e.key === 'Delete') {
+    // No confirmation, as in every editor with an undo stack behind it.
+    editor.deleteSelectedLabel()
   } else if (e.key === 'Escape') {
     const now = performance.now()
     const isDouble = now - lastEscapeAt < ESCAPE_DOUBLE_MS

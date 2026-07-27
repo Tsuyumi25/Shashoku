@@ -63,6 +63,26 @@ export function screenDeltaToContentPx(
 }
 
 /**
+ * Where a screen point sits on the page, in the fraction labels are stored as.
+ * Clamped, because the page is smaller than the viewport once it is fitted:
+ * the gutter around it is still the canvas, and a label dropped out there
+ * could never be reached to be dragged back.
+ */
+export function screenToPageFraction(
+  clientX: number,
+  clientY: number,
+  containerRect: { left: number; top: number },
+  view: ViewTransform,
+  natural: { w: number; h: number },
+): { x: number; y: number } {
+  const p = screenToContentPx(clientX, clientY, containerRect, view)
+  return {
+    x: clamp(p.x / natural.w, 0, 1),
+    y: clamp(p.y / natural.h, 0, 1),
+  }
+}
+
+/**
  * Screen placement of a content-sized box centred on a content point, for the
  * elements that live outside the transformed stage and carry their own pixels.
  * The box stays axis aligned: a rotated view moves its centre but never its

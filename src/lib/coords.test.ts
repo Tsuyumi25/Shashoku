@@ -4,6 +4,7 @@ import {
   contentToScreenPx,
   screenDeltaToContentPx,
   screenToContentPx,
+  screenToPageFraction,
   type ViewTransform,
 } from './coords'
 
@@ -55,6 +56,36 @@ describe('screenDeltaToContentPx', () => {
     const d = screenDeltaToContentPx(drag.x, drag.y, view)
     expect(d.x).toBeCloseTo(after.x - before.x, 6)
     expect(d.y).toBeCloseTo(after.y - before.y, 6)
+  })
+})
+
+describe('screenToPageFraction', () => {
+  const NATURAL = { w: 400, h: 200 }
+
+  it('reads a screen point as the fraction of the page it landed on', () => {
+    const view: ViewTransform = { scale: 2, tx: 50, ty: -30, rotate: 0 }
+    const s = contentToScreenPx(100, 150, view)
+    expect(screenToPageFraction(s.x, s.y, ORIGIN, view, NATURAL)).toEqual({ x: 0.25, y: 0.75 })
+  })
+
+  it('subtracts the container offset like screenToContentPx does', () => {
+    const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: 0 }
+    const rect = { left: 60, top: 20 }
+    expect(screenToPageFraction(260, 120, rect, view, NATURAL)).toEqual({ x: 0.5, y: 0.5 })
+  })
+
+  it('clamps a point off the page to its edge', () => {
+    const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: 0 }
+    expect(screenToPageFraction(-500, -500, ORIGIN, view, NATURAL)).toEqual({ x: 0, y: 0 })
+    expect(screenToPageFraction(9999, 9999, ORIGIN, view, NATURAL)).toEqual({ x: 1, y: 1 })
+  })
+
+  it('follows the view rotation', () => {
+    const view: ViewTransform = { scale: 1.3, tx: 17, ty: -44, rotate: Math.PI / 5 }
+    const s = contentToScreenPx(300, 50, view)
+    const f = screenToPageFraction(s.x, s.y, ORIGIN, view, NATURAL)
+    expect(f.x).toBeCloseTo(0.75, 6)
+    expect(f.y).toBeCloseTo(0.25, 6)
   })
 })
 

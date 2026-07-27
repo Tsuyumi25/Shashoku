@@ -62,9 +62,31 @@ const title = computed(() => {
 })
 
 useEventListener(window, 'keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+  if (!e.ctrlKey && !e.metaKey) return
+  const key = e.key.toLowerCase()
+
+  if (key === 's') {
     e.preventDefault()
-    if (project.isOpen) void project.save().catch((err) => console.error(err))
+    if (!project.isOpen) return
+    // What lands on disk and what the undo stack says have to agree, so an
+    // unfinished translation is banked before the write.
+    editor.flushTextEdit()
+    void project.save().catch((err) => console.error(err))
+    return
+  }
+
+  if (ui.view !== 'translate') return
+  // A text box has its own history, and taking Ctrl+Z off it would undo some
+  // earlier command while the half-typed line sat there untouched.
+  const el = document.activeElement
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+
+  if (key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    editor.undo()
+  } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+    e.preventDefault()
+    editor.redo()
   }
 })
 

@@ -26,9 +26,18 @@
       :min-size="12"
       class="flex min-w-0 flex-col bg-card"
     >
-      <div class="flex h-7 shrink-0 items-center border-b border-border px-2 select-none">
+      <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-2 select-none">
         <span class="text-xs font-medium text-muted-foreground">標籤</span>
         <span class="ml-auto text-xs text-muted-foreground">{{ labelCount }} 條</span>
+        <button
+          type="button"
+          class="ml-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="在畫面中心新增標籤"
+          :disabled="!editor.currentFilename"
+          @click="editor.addLabelAtViewCenter()"
+        >
+          <Plus :size="14" />
+        </button>
       </div>
       <SplitterGroup
         direction="vertical"

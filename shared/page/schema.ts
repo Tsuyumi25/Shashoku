@@ -64,7 +64,8 @@ function parseJson(raw: string, what: string): unknown {
   }
 }
 
-function generateId(): string {
+/** An id for something that lives inside a page — a label or a layer entry. */
+export function generateId(): string {
   const c = globalThis.crypto
   if (c?.randomUUID) return c.randomUUID()
   return `lbl-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
