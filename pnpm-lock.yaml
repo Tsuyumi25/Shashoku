@@ -35,10 +35,13 @@ importers:
       vue:
         specifier: ^3.5.40
         version: 3.5.40(typescript@5.9.3)
+      vue-toastification:
+        specifier: 2.0.0-rc.5
+        version: 2.0.0-rc.5(vue@3.5.40(typescript@5.9.3))
     devDependencies:
       '@napi-rs/cli':
         specifier: ^3.7.4
-        version: 3.7.4(@emnapi/runtime@1.11.2)(@types/node@22.20.1)
+        version: 3.7.4(@emnapi/runtime@1.9.2)(@types/node@22.20.1)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0))
@@ -1954,6 +1957,11 @@ packages:
       '@vue/composition-api':
         optional: true
 
+  vue-toastification@2.0.0-rc.5:
+    resolution: {integrity: sha512-q73e5jy6gucEO/U+P48hqX+/qyXDozAGmaGgLFm5tXX4wJBcVsnGp4e/iJqlm9xzHETYOilUuwOUje2Qg1JdwA==}
+    peerDependencies:
+      vue: ^3.0.2
+
   vue-tsc@3.3.8:
     resolution: {integrity: sha512-xXmYlVQpcwJDWyGlqbHrGVOl1h3UOsASymRibrHc+iy9j/UNnOrOn4u+fntHz4D6Cs74RtapeqVV6CzJeg+UlA==}
     hasBin: true
@@ -2458,7 +2466,7 @@ snapshots:
     dependencies:
       vue: 3.5.40(typescript@5.9.3)
 
-  '@napi-rs/cli@3.7.4(@emnapi/runtime@1.11.2)(@types/node@22.20.1)':
+  '@napi-rs/cli@3.7.4(@emnapi/runtime@1.9.2)(@types/node@22.20.1)':
     dependencies:
       '@inquirer/prompts': 8.5.2(@types/node@22.20.1)
       '@napi-rs/cross-toolchain': 1.0.3
@@ -2473,7 +2481,7 @@ snapshots:
       semver: 7.8.5
       typanion: 3.14.0
     optionalDependencies:
-      '@emnapi/runtime': 1.11.2
+      '@emnapi/runtime': 1.9.2
     transitivePeerDependencies:
       - '@napi-rs/cross-toolchain-arm64-target-aarch64'
       - '@napi-rs/cross-toolchain-arm64-target-armv7'
@@ -3564,6 +3572,10 @@ snapshots:
   vscode-uri@3.1.0: {}
 
   vue-demi@0.14.10(vue@3.5.40(typescript@5.9.3)):
+    dependencies:
+      vue: 3.5.40(typescript@5.9.3)
+
+  vue-toastification@2.0.0-rc.5(vue@3.5.40(typescript@5.9.3)):
     dependencies:
       vue: 3.5.40(typescript@5.9.3)
 

@@ -29,8 +29,6 @@
       </ToggleGroupRoot>
     </div>
 
-    <p v-if="lastError" class="shrink-0 px-2 py-1 text-xs text-destructive">{{ lastError }}</p>
-
     <!--
       One grid for the whole list, not one per entry: a grid holding a single
       item has no columns to fill. Series take a row of their own by spanning
@@ -90,9 +88,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { ChevronRight, FilePlus, FolderOpen, FolderSearch, LayoutGrid, List } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
+import { useToast } from 'vue-toastification'
 import ProjectEntryButton from '@/components/ProjectEntryButton.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -101,6 +100,13 @@ import { useProjectStore } from '@/stores/projectStore'
 const library = useLibraryStore()
 const project = useProjectStore()
 const { lastError, createHere, openPicked, openPath } = useOpenProject()
+const toast = useToast()
+
+// A folder that could not be opened is worth saying out loud, but not worth a
+// line appearing above the list and pushing every project down a row.
+watch(lastError, (message) => {
+  if (message) toast.error(message)
+})
 
 // Spacing belongs to the grid, not to the items. Margins do not collapse
 // between grid items, so they would double up between neighbours and stack on

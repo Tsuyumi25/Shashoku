@@ -66,7 +66,6 @@
     <p class="text-xs text-muted-foreground">
       輸出到 <code>export/{{ folder }}/</code>,例如 <code>{{ sampleName }}</code>
     </p>
-    <p v-if="problem" class="text-xs text-destructive">{{ problem }}</p>
   </div>
 </template>
 
@@ -81,11 +80,7 @@ import {
 } from '@shared/export/types'
 import { outputFilename, profileFolderName, withFormat } from '@shared/export/profile'
 
-const props = defineProps<{
-  profile: ExportProfile
-  /** Why the last edit was refused. Owned above, since that is who refuses. */
-  problem: string | null
-}>()
+const props = defineProps<{ profile: ExportProfile }>()
 const emit = defineEmits<{ change: [ExportProfile] }>()
 
 const FORMATS: Array<{ value: ExportFormat; label: string }> = [

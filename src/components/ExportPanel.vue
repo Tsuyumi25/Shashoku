@@ -58,7 +58,6 @@
         <ExportProfileEditor
           v-if="active"
           :profile="active"
-          :problem="problem"
           @change="onChange(exportRun.activeProfile, $event)"
         />
       </div>
@@ -69,8 +68,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
+import { useToast } from 'vue-toastification'
 import { profileFolderName, withFormat } from '@shared/export/profile'
 import { defaultExportProfile, type ExportProfile } from '@shared/export/types'
 import ExportProfileEditor from '@/components/ExportProfileEditor.vue'
@@ -81,21 +81,21 @@ import { useProjectStore } from '@/stores/projectStore'
 const project = useProjectStore()
 const exportRun = useExportStore()
 
+const toast = useToast()
+
 const profiles = computed(() => project.exportProfiles)
-const problem = ref<string | null>(null)
 
 const folderOf = profileFolderName
 const active = computed<ExportProfile | undefined>(() => profiles.value[exportRun.activeProfile])
 
 /** A first profile is the plain one; later ones start from the one in hand. */
 function onAdd() {
-  problem.value = null
   const seed = active.value ?? defaultExportProfile()
   try {
     project.addExportProfile(withFormat(seed, nextFreeFormat(seed)))
     exportRun.activeProfile = profiles.value.length - 1
   } catch (err) {
-    problem.value = err instanceof Error ? err.message : String(err)
+    toast.error(err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -113,16 +113,14 @@ function nextFreeFormat(seed: ExportProfile): ExportProfile['format'] {
 }
 
 function onChange(index: number, next: ExportProfile) {
-  problem.value = null
   try {
     project.updateExportProfile(index, next)
   } catch (err) {
-    problem.value = err instanceof Error ? err.message : String(err)
+    toast.error(err instanceof Error ? err.message : String(err))
   }
 }
 
 function onRemove() {
-  problem.value = null
   project.removeExportProfile(exportRun.activeProfile)
 }
 </script>

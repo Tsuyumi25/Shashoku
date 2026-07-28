@@ -396,6 +396,30 @@ export async function writeExport(
 }
 
 /**
+ * Where one profile delivers, or the nearest folder above it that exists.
+ *
+ * A project that has never been exported has no such folder yet, and a button
+ * that only works after the first export is a button that mostly does not. The
+ * project's own folder is always there, so the walk always lands somewhere the
+ * user recognizes.
+ */
+export async function resolveExportFolder(
+  rootPath: string,
+  profileFolder: string,
+): Promise<string> {
+  assertPathSegment(profileFolder, "設定檔資料夾");
+  const candidates = [
+    join(rootPath, DIR_EXPORT, profileFolder),
+    join(rootPath, DIR_EXPORT),
+    rootPath,
+  ];
+  for (const candidate of candidates) {
+    if (await exists(candidate)) return candidate;
+  }
+  return rootPath;
+}
+
+/**
  * One level of the path, and only one. The naming rule's prefix and suffix are
  * user-entered and end up inside a filename, so the check is repeated here at
  * the point of the write rather than trusted to have happened upstream.

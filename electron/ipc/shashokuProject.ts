@@ -1,13 +1,14 @@
 
 
 
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { CHANNELS, type WritePageInput } from "@shared/ipc/channels";
 import {
   createProject,
   importPages,
   openProject,
   readPage,
+  resolveExportFolder,
   scanLibrary,
   scanRoot,
   writeExport,
@@ -80,5 +81,12 @@ export function registerShashokuProjectHandlers(): void {
     CHANNELS.writeExport,
     (_e, rootPath: string, profileFolder: string, filename: string, bytes: Uint8Array) =>
       writeExport(rootPath, profileFolder, filename, bytes),
+  );
+  // The path is composed here rather than taken whole, so the only thing the
+  // renderer can ask to open is a folder belonging to a project it has open.
+  ipcMain.handle(
+    CHANNELS.openExportFolder,
+    async (_e, rootPath: string, profileFolder: string) =>
+      shell.openPath(await resolveExportFolder(rootPath, profileFolder)),
   );
 }
