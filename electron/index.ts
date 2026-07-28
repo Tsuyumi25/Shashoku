@@ -4,6 +4,7 @@ import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
 import { registerWindowHandlers } from "./ipc/window";
+import { sweepThumbnails } from "./lib/thumbnailCache";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -28,6 +29,13 @@ app.whenReady().then(() => {
   mainWindow = createWindow();
   mainWindow.once("closed", () => {
     mainWindow = null;
+  });
+
+  // Left unawaited and after the window: reclaiming disk is never the reason
+  // someone is waiting for a first frame. A sweep that fails changes nothing
+  // except that the cache stays large, so it is said once and dropped.
+  void sweepThumbnails().catch((err) => {
+    console.error("thumbnail sweep failed", err);
   });
 });
 
