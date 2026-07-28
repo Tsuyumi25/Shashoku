@@ -9,10 +9,6 @@
         <FolderOpen :size="13" />
         <span>開啟</span>
       </button>
-      <button class="lib-entry" title="把一個已經放著專案的資料夾列進清單" @click="onAddFolder">
-        <FolderSearch :size="13" />
-        <span>加入</span>
-      </button>
 
       <ToggleGroupRoot
         type="single"
@@ -89,7 +85,7 @@
 
 <script setup lang="ts">
 import { onMounted, watch } from 'vue'
-import { ChevronRight, FilePlus, FolderOpen, FolderSearch, LayoutGrid, List } from '@lucide/vue'
+import { ChevronRight, FilePlus, FolderOpen, LayoutGrid, List } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { useToast } from 'vue-toastification'
 import ProjectEntryButton from '@/components/ProjectEntryButton.vue'
@@ -123,10 +119,6 @@ async function onCreate() {
 
 async function onOpen() {
   await openPicked()
-}
-
-async function onAddFolder() {
-  await library.addScanPoint()
 }
 
 async function onPick(path: string) {

@@ -38,18 +38,9 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   /**
-   * Registers a folder whose contents are already projects. Read-only by
-   * design — this is the entry that promises not to touch the disk, which is
-   * what separates it from creating a project.
+   * Drops a folder from the list without touching what is in it. Scan points
+   * are recorded by opening a project, so this is how one stops being watched.
    */
-  async function addScanPoint(): Promise<boolean> {
-    const picked = await window.api.pickLibraryFolder()
-    if (picked === null) return false
-    usePreferencesStore().addScanPoint(picked)
-    await refresh()
-    return true
-  }
-
   function forgetScanPoint(path: string): void {
     usePreferencesStore().removeScanPoint(path)
     void refresh()
@@ -71,7 +62,6 @@ export const useLibraryStore = defineStore('library', () => {
     expanded,
     view,
     refresh,
-    addScanPoint,
     forgetScanPoint,
     toggleExpanded,
     isExpanded,

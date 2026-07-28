@@ -14,7 +14,6 @@ const engine = require("@shashoku/engine") as EngineAddon;
 const api: ShashokuApi = {
   pickRoot: () => ipcRenderer.invoke(CHANNELS.pickRoot),
   pickFontFolder: () => ipcRenderer.invoke(CHANNELS.pickFontFolder),
-  pickLibraryFolder: () => ipcRenderer.invoke(CHANNELS.pickLibraryFolder),
   scanRoot: (rootPath) => ipcRenderer.invoke(CHANNELS.scanRoot, rootPath),
   scanLibrary: (scanPoints) => ipcRenderer.invoke(CHANNELS.scanLibrary, scanPoints),
   createProject: (rootPath) => ipcRenderer.invoke(CHANNELS.createProject, rootPath),
