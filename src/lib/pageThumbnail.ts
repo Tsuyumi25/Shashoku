@@ -1,6 +1,6 @@
 import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
-import { serializeProjectJson } from '@shared/project/schema'
+import { serializeTextStyle } from '@shared/text-style/schema'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
 import { serializeTranslationForFile } from '@/stores/projectStore'
 
@@ -13,10 +13,27 @@ async function digest(text: string): Promise<string> {
 }
 
 /**
+ * The part of a project that reaches the page: the styles a label resolves
+ * through, which is `defaultStyle` and what each group lays over it. Identity
+ * comes along because that is what a label names its group by.
+ *
+ * Everything else in the document is left out on purpose. A group's name and
+ * colour belong to the sidebar, and the export profiles decide what a
+ * delivered file is, not what the page looks like — hashing the document whole
+ * made a nudge to a delivery setting throw away every thumbnail in the chapter.
+ */
+function drawingStyles(meta: ProjectJson): unknown {
+  return [
+    serializeTextStyle(meta.defaultStyle),
+    meta.groups.map((g) => [g.id, serializeTextStyle(g.style)]),
+  ]
+}
+
+/**
  * Names everything that went into drawing the page, so a re-typeset one cannot
  * come back showing what it used to look like. The raws copy is written once
  * and never again, so the page's identity is enough to stand for its pixels;
- * the labels and the project's styles are what actually move.
+ * the labels and the styles they resolve through are what actually move.
  */
 export function thumbnailKey(
   file: ProjectFile,
@@ -33,7 +50,7 @@ export function thumbnailKey(
       edge,
       file.pageDir,
       serializeTranslationForFile(file),
-      serializeProjectJson(meta),
+      drawingStyles(meta),
     ]),
   )
 }
