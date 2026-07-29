@@ -86,7 +86,14 @@ const props = defineProps<{
   color: string
   natural: { w: number; h: number }
   view: ViewTransform
+  /**
+   * The cursor — the one a single-object command acts on, and the only one
+   * wearing handles. Canvas gestures still move one object at a time, so a
+   * second set of handles would be offering a drag nothing carries out.
+   */
   selected: boolean
+  /** In the selection, cursor or not. Outlined, but without handles. */
+  inSelection: boolean
 }>()
 
 const emit = defineEmits<{
@@ -128,7 +135,7 @@ const box = computed(() => {
  * hovering says something is here, selection says this is what a key will act on.
  */
 const frameClass = computed(() => {
-  if (props.selected) return 'outline-2 outline-primary'
+  if (props.selected || props.inSelection) return 'outline-2 outline-primary'
   if (hovered.value || drag.dragging.value) return 'outline-1 outline-primary'
   return ''
 })

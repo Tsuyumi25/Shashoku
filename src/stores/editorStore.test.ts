@@ -79,6 +79,70 @@ describe('canvas tool', () => {
   })
 })
 
+describe('selection', () => {
+  const setOf = (editor: ReturnType<typeof useEditorStore>): string[] =>
+    [...editor.selectedLabelIds].sort()
+
+  it('starts empty, with nowhere for the cursor to be', () => {
+    const editor = useEditorStore()
+    expect(setOf(editor)).toEqual([])
+    expect(editor.cursorLabelId).toBeNull()
+  })
+
+  it('holds one object as both the cursor and the whole selection', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+
+    editor.selectOnly('b')
+
+    expect(editor.cursorLabelId).toBe('b')
+    expect(setOf(editor)).toEqual(['b'])
+    expect(editor.isSelected('b')).toBe(true)
+    expect(editor.isSelected('a')).toBe(false)
+  })
+
+  it('replaces rather than accumulates', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+    editor.selectOnly('a')
+    editor.selectOnly('b')
+    expect(setOf(editor)).toEqual(['b'])
+  })
+
+  it('empties both halves together', () => {
+    const { editor } = openOnePage([label('a')])
+    editor.selectOnly('a')
+
+    editor.selectOnly(null)
+
+    expect(editor.cursorLabelId).toBeNull()
+    expect(setOf(editor)).toEqual([])
+  })
+
+  // The invariant the whole model rests on: there is one selection, and the
+  // cursor is a position inside it rather than a second selection of its own.
+  it('keeps the cursor inside the selection through a page turn', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
+    const editor = useEditorStore()
+    editor.selectFile('001.png')
+    expect(setOf(editor)).toEqual(['a'])
+
+    editor.pageBy(1)
+
+    expect(editor.cursorLabelId).toBe('c')
+    expect(setOf(editor)).toEqual(['c'])
+  })
+
+  it('leaves the cursor in the selection after the one it pointed at is deleted', () => {
+    const { editor } = openOnePage([label('a'), label('b'), label('c')])
+    editor.selectOnly('b')
+
+    editor.deleteSelectedLabel()
+
+    expect(editor.cursorLabelId).toBe('c')
+    expect(setOf(editor)).toEqual(['c'])
+  })
+})
+
 describe('addLabelAt', () => {
   it('appends an empty label carrying the active group, and selects it', () => {
     const { project, editor } = openOnePage([label('a')])
@@ -89,7 +153,7 @@ describe('addLabelAt', () => {
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
     expect(added).toMatchObject({ x: 0.25, y: 0.75, groupId: 'grp-1', lines: [''] })
-    expect(editor.selectedLabelId).toBe(added?.id)
+    expect(editor.cursorLabelId).toBe(added?.id)
   })
 
   it('does nothing without a page open', () => {
@@ -150,17 +214,17 @@ describe('addLabelAtViewCenter', () => {
 describe('deleteSelectedLabel', () => {
   it('removes the selection and lands on the label that took its place', () => {
     const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
-    editor.selectedLabelId = 'b'
+    editor.selectOnly('b')
 
     editor.deleteSelectedLabel()
 
     expect(labelsOf(project).map((l) => l.id)).toEqual(['a', 'c'])
-    expect(editor.selectedLabelId).toBe('c')
+    expect(editor.cursorLabelId).toBe('c')
   })
 
   it('undoes back into the slot it was deleted from', () => {
     const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
-    editor.selectedLabelId = 'b'
+    editor.selectOnly('b')
     editor.deleteSelectedLabel()
 
     editor.undo()
@@ -170,7 +234,7 @@ describe('deleteSelectedLabel', () => {
 
   it('does nothing with no selection', () => {
     const { project, editor } = openOnePage([label('a')])
-    editor.selectedLabelId = null
+    editor.selectOnly(null)
     editor.deleteSelectedLabel()
     expect(labelsOf(project)).toHaveLength(1)
     expect(editor.canUndo).toBe(false)
@@ -219,7 +283,7 @@ describe('pending text edit', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.beginTextEdit(PAGE, 'a', 'a0')
     project.updateLabelText(PAGE, 'a', 'a1')
-    editor.selectedLabelId = 'a'
+    editor.selectOnly('a')
     editor.deleteSelectedLabel()
 
     expect(labelsOf(project)).toHaveLength(0)
@@ -262,7 +326,7 @@ describe('pending text edit', () => {
 
   it('is what an undo takes back, rather than the command before it', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
-    editor.selectedLabelId = 'a'
+    editor.selectOnly('a')
     // A drag writes through and only records on release, so the test does both.
     project.moveLabel(PAGE, 'a', 0.2, 0.2)
     editor.cmdMoveLabel(PAGE, 'a', { x: 0.5, y: 0.5 }, { x: 0.2, y: 0.2 })
@@ -276,7 +340,7 @@ describe('pending text edit', () => {
 
   it('ends the redo branch, so a redo after typing is a no-op', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
-    editor.selectedLabelId = 'a'
+    editor.selectOnly('a')
     editor.deleteSelectedLabel()
     editor.undo()
     expect(editor.canRedo).toBe(true)
@@ -299,14 +363,14 @@ describe('revealLabel', () => {
     ]
     const editor = useEditorStore()
     editor.currentFilename = '001.png'
-    editor.selectedLabelId = 'a'
+    editor.selectOnly('a')
 
     editor.revealLabel('002.png', 'd')
 
     expect(editor.currentFilename).toBe('002.png')
     // Turning the page lands on its first object, so the asked-for one has to
     // be put back afterwards or the jump quietly goes somewhere else.
-    expect(editor.selectedLabelId).toBe('d')
+    expect(editor.cursorLabelId).toBe('d')
   })
 
   it('selects without turning the page when the object is already here', () => {
@@ -314,12 +378,12 @@ describe('revealLabel', () => {
     project.files = [pageOf('001.png', [label('a'), label('b')])]
     const editor = useEditorStore()
     editor.currentFilename = '001.png'
-    editor.selectedLabelId = 'a'
+    editor.selectOnly('a')
 
     editor.revealLabel('001.png', 'b')
 
     expect(editor.currentFilename).toBe('001.png')
-    expect(editor.selectedLabelId).toBe('b')
+    expect(editor.cursorLabelId).toBe('b')
   })
 
   it('banks an open editing session when it moves to another page', () => {

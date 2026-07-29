@@ -103,12 +103,12 @@ function toggleCollapsed(id: string) {
 }
 
 function isSelected(id: string): boolean {
-  return id === editor.selectedLabelId
+  return editor.isSelected(id)
 }
 
 function onPick(row: LayerTreeRow) {
   if (row.entry.kind !== 'text') return
-  editor.selectedLabelId = row.entry.id
+  editor.selectOnly(row.entry.id)
 }
 
 function onToggleVisible(entry: LayerEntry) {

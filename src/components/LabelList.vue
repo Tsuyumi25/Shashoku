@@ -94,7 +94,7 @@ function measureRow(el: unknown) {
 }
 
 function isSelected(row: LabelRow): boolean {
-  return row.filename === editor.currentFilename && row.label.id === editor.selectedLabelId
+  return row.filename === editor.currentFilename && editor.isSelected(row.label.id)
 }
 
 function onPick(row: LabelRow) {
@@ -120,7 +120,7 @@ function onInput(row: LabelRow, e: Event) {
  * which is what keeps clicking a row from scrolling under the pointer.
  */
 watch(
-  () => [editor.currentFilename, editor.selectedLabelId] as const,
+  () => [editor.currentFilename, editor.cursorLabelId] as const,
   async ([filename, labelId]) => {
     if (filename === null || labelId === null) return
     const index = rows.value.findIndex(

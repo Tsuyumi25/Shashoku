@@ -46,8 +46,9 @@
           :color="object.color"
           :natural="editor.viewContentSize"
           :view="view"
-          :selected="object.id === editor.selectedLabelId"
-          @select="editor.selectedLabelId = object.id"
+          :selected="object.id === editor.cursorLabelId"
+          :in-selection="editor.isSelected(object.id)"
+          @select="editor.selectOnly(object.id)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
           @scale-start="beginLabelScale(object.id)"
@@ -381,7 +382,7 @@ function onPointerDown(e: PointerEvent) {
     editor.addLabelAt(p.x, p.y)
     return
   }
-  editor.selectedLabelId = null
+  editor.selectOnly(null)
 }
 
 const ROTATE_SNAP = Math.PI / 12

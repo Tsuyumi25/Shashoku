@@ -26,7 +26,28 @@ export type CanvasTool = 'select' | 'text'
 
 export const useEditorStore = defineStore('editor', () => {
   const currentFilename = ref<string | null>(null)
-  const selectedLabelId = ref<string | null>(null)
+
+  /**
+   * One selection, held as a set with a cursor into it — never two selections
+   * that have to be kept in step.
+   *
+   * The cursor is whichever object was touched last. It is what the canvas
+   * turns the page to follow and what a single-object command acts on; the set
+   * is what the canvas outlines and what a command over many acts on. An empty
+   * selection has no cursor, and the cursor is always in the set otherwise.
+   */
+  const selectedLabelIds = ref<Set<string>>(new Set())
+  const cursorLabelId = ref<string | null>(null)
+
+  function selectOnly(labelId: string | null) {
+    cursorLabelId.value = labelId
+    selectedLabelIds.value = labelId === null ? new Set() : new Set([labelId])
+  }
+
+  function isSelected(labelId: string): boolean {
+    return selectedLabelIds.value.has(labelId)
+  }
+
   const tool = ref<CanvasTool>('select')
   
   const activeGroupId = ref<string | null>(null)
@@ -67,7 +88,7 @@ export const useEditorStore = defineStore('editor', () => {
     currentFilename.value = filename
     
     const project = useProjectStore()
-    selectedLabelId.value = filename ? (project.labelsOf(filename)[0]?.id ?? null) : null
+    selectOnly(filename ? (project.labelsOf(filename)[0]?.id ?? null) : null)
   }
 
   
@@ -80,7 +101,7 @@ export const useEditorStore = defineStore('editor', () => {
     selectFile(project.files[next].filename)
     if (landOn === 'last') {
       const labels = project.labelsOf(project.files[next].filename)
-      selectedLabelId.value = labels[labels.length - 1]?.id ?? null
+      selectOnly(labels[labels.length - 1]?.id ?? null)
     }
   }
 
@@ -89,16 +110,16 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     if (!currentFilename.value) return
     const labels = project.labelsOf(currentFilename.value)
-    const index = labels.findIndex((l) => l.id === selectedLabelId.value)
+    const index = labels.findIndex((l) => l.id === cursorLabelId.value)
     if (index === -1 && labels.length > 0) {
-      selectedLabelId.value = labels[offset > 0 ? 0 : labels.length - 1].id
+      selectOnly(labels[offset > 0 ? 0 : labels.length - 1].id)
       return
     }
     
     const next = index + offset
     if (next >= labels.length) pageBy(1)
     else if (next < 0) pageBy(-1, 'last')
-    else selectedLabelId.value = labels[next].id
+    else selectOnly(labels[next].id)
   }
 
   /**
@@ -112,7 +133,7 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function revealLabel(filename: string, labelId: string) {
     if (currentFilename.value !== filename) selectFile(filename)
-    selectedLabelId.value = labelId
+    selectOnly(labelId)
   }
 
   /**
@@ -219,7 +240,7 @@ export const useEditorStore = defineStore('editor', () => {
         place = project.deleteLabel(filename, label.id) ?? undefined
       },
     })
-    selectedLabelId.value = label.id
+    selectOnly(label.id)
   }
 
   /**
@@ -261,8 +282,8 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function deleteSelectedLabel() {
-    if (!currentFilename.value || !selectedLabelId.value) return
-    cmdDeleteLabel(currentFilename.value, selectedLabelId.value)
+    if (!currentFilename.value || !cursorLabelId.value) return
+    cmdDeleteLabel(currentFilename.value, cursorLabelId.value)
   }
 
   
@@ -283,7 +304,7 @@ export const useEditorStore = defineStore('editor', () => {
       },
       opts,
     )
-    selectedLabelId.value = label.id
+    selectOnly(label.id)
   }
 
   function cmdDeleteLabel(filename: string, labelId: string) {
@@ -298,11 +319,10 @@ export const useEditorStore = defineStore('editor', () => {
       },
       undo: () => project.addLabel(filename, label, place),
     })
-    if (selectedLabelId.value === labelId) {
-
+    if (isSelected(labelId)) {
       const labels = project.labelsOf(filename)
       const landing = place?.orderIndex ?? labels.length
-      selectedLabelId.value = labels[Math.min(landing, labels.length - 1)]?.id ?? null
+      selectOnly(labels[Math.min(landing, labels.length - 1)]?.id ?? null)
     }
   }
 
@@ -489,7 +509,10 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     currentFilename,
-    selectedLabelId,
+    selectedLabelIds,
+    cursorLabelId,
+    selectOnly,
+    isSelected,
     tool,
     setTool,
     activeGroupId,
