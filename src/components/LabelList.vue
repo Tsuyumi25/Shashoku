@@ -102,7 +102,7 @@
             :value="textOf((rows[vrow.index] as LabelRow).label)"
             @input="onInput(rows[vrow.index] as LabelRow, $event)"
             @keydown="onInputKey($event)"
-            @blur="editor.commitTextEdit()"
+            @blur="onInputBlur(rows[vrow.index] as LabelRow)"
           />
           <span
             v-else
@@ -316,6 +316,19 @@ useEventListener(window, 'keydown', (e) => {
   searchEl.value?.focus()
   searchEl.value?.select()
 })
+
+/**
+ * A blur ends the visit only while the visit is still this row's.
+ *
+ * Carrying the caret to the next row closes this session and opens that one,
+ * which unmounts this input — and unmounting something focused blurs it. Left
+ * unguarded, that blur would close the session just opened for the row being
+ * moved to, and the caret would arrive with nothing to type into.
+ */
+function onInputBlur(row: LabelRow) {
+  if (!isEditing(row)) return
+  editor.commitTextEdit()
+}
 
 function onInputKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
