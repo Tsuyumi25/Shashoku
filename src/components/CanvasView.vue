@@ -425,9 +425,7 @@ useEventListener(window, 'keydown', (e) => {
     if (imageReady.value) editor.fitToView()
   } else if (e.key === 'ArrowLeft') {
     editor.pageBy(-1)
-  } else if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
-    // Shift+Tab is left alone for the shell to cycle modes with.
-    e.preventDefault()
+  } else if (e.key === 'ArrowRight') {
     editor.pageBy(1)
   } else if (e.code === 'Space') {
     spaceDown.value = true
