@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import {
+  findEntry,
   findTextObject,
   visibleTextObjects,
   insertAtPath,
@@ -111,6 +112,22 @@ describe('visibleTextObjects', () => {
   it('leaves out a visible object nested under a hidden ancestor', () => {
     const layers = [group('g', [group('h', [text('a')])], false)]
     expect(visibleTextObjects(manifest(layers, ['a']))).toEqual([])
+  })
+})
+
+describe('findEntry', () => {
+  it('finds a folder as readily as an object', () => {
+    const layers = [group('g', [text('a')])]
+    expect(findEntry(layers, 'g')?.kind).toBe('group')
+    expect(findEntry(layers, 'a')?.kind).toBe('text')
+  })
+
+  it('reaches something buried a few levels down', () => {
+    expect(findEntry([group('g', [group('h', [raster('r')])])], 'r')?.kind).toBe('raster')
+  })
+
+  it('answers undefined for an id nothing answers to', () => {
+    expect(findEntry([text('a')], 'zz')).toBeUndefined()
   })
 })
 

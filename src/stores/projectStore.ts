@@ -12,6 +12,7 @@ import {
 import { defaultManifest, parseManifest, serializeManifest } from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import {
+  findEntry,
   findTextObject,
   insertAtPath,
   pathOf,
@@ -301,6 +302,19 @@ export const useProjectStore = defineStore('project', () => {
     return { path, orderIndex }
   }
 
+  /**
+   * Any entry, not only a text object: hiding a folder is how a whole run of
+   * them goes away at once.
+   */
+  function setLayerVisible(filename: string, layerId: string, visible: boolean) {
+    const file = fileByName(filename)
+    if (!file) return
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.visible === visible) return
+    entry.visible = visible
+    markPageDirty(filename)
+  }
+
   function moveLabel(filename: string, labelId: string, x: number, y: number) {
     const label = labelById(filename, labelId)
     if (!label) return
@@ -471,6 +485,7 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelText,
     updateLabelGroupId,
     updateLabelStyleOverride,
+    setLayerVisible,
     addGroup,
     renameGroup,
     updateGroupStyle,

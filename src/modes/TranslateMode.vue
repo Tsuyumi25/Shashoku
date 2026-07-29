@@ -23,10 +23,23 @@
       :min-size="12"
       class="flex min-w-0 flex-col bg-card"
     >
-      <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-2 select-none">
-        <span class="text-xs font-medium text-muted-foreground">標籤</span>
-        <span class="ml-auto text-xs text-muted-foreground">{{ labelCount }} 條</span>
+      <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-1 select-none">
         <button
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+          :title="showingLabels ? '改看圖層樹（本頁）' : '改看標籤清單（整章）'"
+          @click="ui.togglePanel()"
+        >
+          <component :is="showingLabels ? List : Layers" :size="14" />
+        </button>
+        <span class="ml-1 text-xs font-medium text-muted-foreground">
+          {{ showingLabels ? '標籤' : '圖層' }}
+        </span>
+        <span v-if="showingLabels" class="ml-auto text-xs text-muted-foreground">
+          {{ labelCount }} 條
+        </span>
+        <button
+          v-if="showingLabels"
           type="button"
           class="ml-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           title="在畫面中心新增標籤"
@@ -36,7 +49,8 @@
           <Plus :size="14" />
         </button>
       </div>
-      <LabelList />
+      <LabelList v-if="showingLabels" />
+      <LayerTree v-else />
     </SplitterPanel>
 
     <ResizeHandle />
@@ -79,24 +93,29 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Plus } from '@lucide/vue'
+import { Layers, List, Plus } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import GroupList from '@/components/GroupList.vue'
 import LabelList from '@/components/LabelList.vue'
+import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
+const ui = useUiStore()
 const editor = useEditorStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
+
+const showingLabels = computed(() => ui.panel === 'labels')
 
 // The chapter's, not the open page's — the list below spans the chapter.
 const labelCount = computed(() =>

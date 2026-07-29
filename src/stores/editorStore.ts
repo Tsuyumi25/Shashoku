@@ -361,6 +361,15 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
+    const project = useProjectStore()
+    pushCommand({
+      label: `set-visible ${layerId}`,
+      do: () => project.setLayerVisible(filename, layerId, visible),
+      undo: () => project.setLayerVisible(filename, layerId, !visible),
+    })
+  }
+
   function cmdUpdateLabelText(filename: string, labelId: string, oldText: string, newText: string) {
     if (oldText === newText) return
     const project = useProjectStore()
@@ -455,6 +464,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLabel,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,
+    cmdSetLayerVisible,
     cmdUpdateLabelText,
     cmdUpdateLabelGroupId,
     cmdAddGroup,

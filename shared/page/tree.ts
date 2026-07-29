@@ -29,6 +29,15 @@ export function textObjects(layers: readonly LayerEntry[]): TextLayerEntry[] {
 }
 
 
+/** Anything on the page by id — a folder and a raster included. */
+export function findEntry(
+  layers: readonly LayerEntry[],
+  id: string,
+): LayerEntry | undefined {
+  return allEntries(layers).find((e) => e.id === id)
+}
+
+
 export function findTextObject(
   layers: readonly LayerEntry[],
   id: string,
