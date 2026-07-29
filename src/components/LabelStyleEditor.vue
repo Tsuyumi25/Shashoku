@@ -38,7 +38,7 @@ const labels = computed(() =>
   editor.currentFilename ? project.labelsOf(editor.currentFilename) : [],
 )
 const selectedIndex = computed(() =>
-  labels.value.findIndex((l) => l.id === editor.cursorLabelId),
+  labels.value.findIndex((l) => l.id === editor.cursorId),
 )
 const selectedLabel = computed(() =>
   selectedIndex.value >= 0 ? labels.value[selectedIndex.value] : undefined,

@@ -81,12 +81,12 @@ describe('canvas tool', () => {
 
 describe('selection', () => {
   const setOf = (editor: ReturnType<typeof useEditorStore>): string[] =>
-    [...editor.selectedLabelIds].sort()
+    [...editor.selectedIds].sort()
 
   it('starts empty, with nowhere for the cursor to be', () => {
     const editor = useEditorStore()
     expect(setOf(editor)).toEqual([])
-    expect(editor.cursorLabelId).toBeNull()
+    expect(editor.cursorId).toBeNull()
   })
 
   it('holds one object as both the cursor and the whole selection', () => {
@@ -94,7 +94,7 @@ describe('selection', () => {
 
     editor.selectOnly('b')
 
-    expect(editor.cursorLabelId).toBe('b')
+    expect(editor.cursorId).toBe('b')
     expect(setOf(editor)).toEqual(['b'])
     expect(editor.isSelected('b')).toBe(true)
     expect(editor.isSelected('a')).toBe(false)
@@ -113,7 +113,7 @@ describe('selection', () => {
 
     editor.selectOnly(null)
 
-    expect(editor.cursorLabelId).toBeNull()
+    expect(editor.cursorId).toBeNull()
     expect(setOf(editor)).toEqual([])
   })
 
@@ -128,7 +128,7 @@ describe('selection', () => {
 
     editor.pageBy(1)
 
-    expect(editor.cursorLabelId).toBe('c')
+    expect(editor.cursorId).toBe('c')
     expect(setOf(editor)).toEqual(['c'])
   })
 
@@ -136,9 +136,9 @@ describe('selection', () => {
     const { editor } = openOnePage([label('a'), label('b'), label('c')])
     editor.selectOnly('b')
 
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
 
-    expect(editor.cursorLabelId).toBe('c')
+    expect(editor.cursorId).toBe('c')
     expect(setOf(editor)).toEqual(['c'])
   })
 })
@@ -153,7 +153,7 @@ describe('addLabelAt', () => {
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
     expect(added).toMatchObject({ x: 0.25, y: 0.75, groupId: 'grp-1', lines: [''] })
-    expect(editor.cursorLabelId).toBe(added?.id)
+    expect(editor.cursorId).toBe(added?.id)
   })
 
   it('does nothing without a page open', () => {
@@ -216,16 +216,16 @@ describe('deleteSelectedLabel', () => {
     const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
     editor.selectOnly('b')
 
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
 
     expect(labelsOf(project).map((l) => l.id)).toEqual(['a', 'c'])
-    expect(editor.cursorLabelId).toBe('c')
+    expect(editor.cursorId).toBe('c')
   })
 
   it('undoes back into the slot it was deleted from', () => {
     const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
     editor.selectOnly('b')
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
 
     editor.undo()
 
@@ -235,7 +235,7 @@ describe('deleteSelectedLabel', () => {
   it('does nothing with no selection', () => {
     const { project, editor } = openOnePage([label('a')])
     editor.selectOnly(null)
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
     expect(labelsOf(project)).toHaveLength(1)
     expect(editor.canUndo).toBe(false)
   })
@@ -284,7 +284,7 @@ describe('pending text edit', () => {
     editor.beginTextEdit(PAGE, 'a', 'a0')
     project.updateLabelText(PAGE, 'a', 'a1')
     editor.selectOnly('a')
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
 
     expect(labelsOf(project)).toHaveLength(0)
     editor.undo()
@@ -341,7 +341,7 @@ describe('pending text edit', () => {
   it('ends the redo branch, so a redo after typing is a no-op', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.selectOnly('a')
-    editor.deleteSelectedLabel()
+    editor.deleteSelection()
     editor.undo()
     expect(editor.canRedo).toBe(true)
 
@@ -370,7 +370,7 @@ describe('revealLabel', () => {
     expect(editor.currentFilename).toBe('002.png')
     // Turning the page lands on its first object, so the asked-for one has to
     // be put back afterwards or the jump quietly goes somewhere else.
-    expect(editor.cursorLabelId).toBe('d')
+    expect(editor.cursorId).toBe('d')
   })
 
   it('selects without turning the page when the object is already here', () => {
@@ -383,7 +383,7 @@ describe('revealLabel', () => {
     editor.revealLabel('001.png', 'b')
 
     expect(editor.currentFilename).toBe('001.png')
-    expect(editor.cursorLabelId).toBe('b')
+    expect(editor.cursorId).toBe('b')
   })
 
   it('banks an open editing session when it moves to another page', () => {
@@ -539,5 +539,159 @@ describe('layer tree edits', () => {
 
     editor.undo()
     expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
+  })
+})
+
+describe('deleteSelection', () => {
+  function folder(id: string, children: LayerEntry[]): GroupLayerEntry {
+    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+  }
+
+  function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
+    const project = useProjectStore()
+    project.files = pages.map((p) => ({
+      filename: p.name,
+      pageDir: `/x/${p.name}`,
+      page: {
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        revision: 0,
+        readingOrder: p.order,
+        layers: p.layers,
+      },
+      badge: 'ok' as const,
+    }))
+    const editor = useEditorStore()
+    editor.currentFilename = pages[0].name
+    return { project, editor }
+  }
+
+  const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
+    project.fileByName(name)?.page.readingOrder ?? []
+
+  const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
+    (project.fileByName(name)?.page.layers ?? []).map((e) => e.id)
+
+  it('takes the whole selection in one step of history', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b'), label('c')], order: ['a', 'b', 'c'] },
+    ])
+    editor.selectOnly('a')
+    editor.selectedIds = new Set(['a', 'c'])
+
+    editor.deleteSelection()
+    expect(orderOf(project, 'p1')).toEqual(['b'])
+
+    editor.undo()
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b', 'c'])
+    expect(editor.canUndo).toBe(false)
+  })
+
+  // Positions are captured before anything moves, so putting them back cannot
+  // depend on the order they happened to come out in.
+  it('puts each object back where it was read, not on the end', () => {
+    const { project, editor } = open([
+      {
+        name: 'p1',
+        layers: [label('a'), label('b'), label('c'), label('d')],
+        order: ['a', 'b', 'c', 'd'],
+      },
+    ])
+    editor.selectOnly('b')
+    editor.selectedIds = new Set(['b', 'd'])
+
+    editor.deleteSelection()
+    editor.undo()
+
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('takes what a folder holds down with it, reading order included', () => {
+    const { project, editor } = open([
+      {
+        name: 'p1',
+        layers: [label('a'), folder('g', [label('b'), label('c')])],
+        order: ['a', 'b', 'c'],
+      },
+    ])
+    editor.selectOnly('g')
+
+    editor.deleteSelection()
+
+    expect(stackOf(project, 'p1')).toEqual(['a'])
+    expect(orderOf(project, 'p1')).toEqual(['a'])
+  })
+
+  it('brings a folder back whole, with its contents back in the reading order', () => {
+    const { project, editor } = open([
+      {
+        name: 'p1',
+        layers: [label('a'), folder('g', [label('b'), label('c')]), label('d')],
+        order: ['a', 'b', 'c', 'd'],
+      },
+    ])
+    editor.selectOnly('g')
+    editor.deleteSelection()
+
+    editor.undo()
+
+    expect(stackOf(project, 'p1')).toEqual(['a', 'g', 'd'])
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('survives a selection holding both a folder and something inside it', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), folder('g', [label('b')])], order: ['a', 'b'] },
+    ])
+    editor.selectOnly('g')
+    editor.selectedIds = new Set(['g', 'b'])
+
+    editor.deleteSelection()
+    expect(stackOf(project, 'p1')).toEqual(['a'])
+
+    editor.undo()
+    expect(stackOf(project, 'p1')).toEqual(['a', 'g'])
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b'])
+  })
+
+  /** Deleting never turns the page, whatever it leaves behind. */
+  it('stays on the page it was on', () => {
+    const { editor } = open([
+      { name: 'p1', layers: [label('a')], order: ['a'] },
+      { name: 'p2', layers: [label('b')], order: ['b'] },
+    ])
+    editor.selectOnly('a')
+
+    editor.deleteSelection()
+
+    expect(editor.currentFilename).toBe('p1')
+    expect(editor.cursorId).toBeNull()
+    expect([...editor.selectedIds]).toEqual([])
+  })
+
+  it('lands on what took the cursor place when the page still has objects', () => {
+    const { editor } = open([
+      { name: 'p1', layers: [label('a'), label('b'), label('c')], order: ['a', 'b', 'c'] },
+    ])
+    editor.selectOnly('b')
+
+    editor.deleteSelection()
+
+    expect(editor.cursorId).toBe('c')
+  })
+
+  it('stays put when the selection reached across pages', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'] },
+      { name: 'p2', layers: [label('c')], order: ['c'] },
+    ])
+    editor.selectOnly('a')
+    editor.selectedIds = new Set(['a', 'c'])
+
+    editor.deleteSelection()
+
+    expect(editor.currentFilename).toBe('p1')
+    expect(orderOf(project, 'p1')).toEqual(['b'])
+    expect(orderOf(project, 'p2')).toEqual([])
+    expect(editor.cursorId).toBe('b')
   })
 })

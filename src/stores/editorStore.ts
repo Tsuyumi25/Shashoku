@@ -2,10 +2,11 @@ import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
-import { useProjectStore, type LabelPlace } from '@/stores/projectStore'
+import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
+import { textObjects } from '@shared/page/tree'
 import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
@@ -31,21 +32,26 @@ export const useEditorStore = defineStore('editor', () => {
    * One selection, held as a set with a cursor into it — never two selections
    * that have to be kept in step.
    *
-   * The cursor is whichever object was touched last. It is what the canvas
-   * turns the page to follow and what a single-object command acts on; the set
-   * is what the canvas outlines and what a command over many acts on. An empty
-   * selection has no cursor, and the cursor is always in the set otherwise.
+   * Any entry can be in it, folders and rasters included: the tree has to be
+   * operable by keyboard too, and a second selection for the things the canvas
+   * cannot draw is the shape this exists to avoid. Each reader decides what to
+   * do with a member it has no way to show.
+   *
+   * The cursor is whichever entry was touched last. It is what the canvas
+   * turns the page to follow and what a single-entry command acts on; the set
+   * is what every surface outlines. An empty selection has no cursor, and the
+   * cursor is always in the set otherwise.
    */
-  const selectedLabelIds = ref<Set<string>>(new Set())
-  const cursorLabelId = ref<string | null>(null)
+  const selectedIds = ref<Set<string>>(new Set())
+  const cursorId = ref<string | null>(null)
 
   function selectOnly(labelId: string | null) {
-    cursorLabelId.value = labelId
-    selectedLabelIds.value = labelId === null ? new Set() : new Set([labelId])
+    cursorId.value = labelId
+    selectedIds.value = labelId === null ? new Set() : new Set([labelId])
   }
 
   function isSelected(labelId: string): boolean {
-    return selectedLabelIds.value.has(labelId)
+    return selectedIds.value.has(labelId)
   }
 
   const tool = ref<CanvasTool>('select')
@@ -110,7 +116,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     if (!currentFilename.value) return
     const labels = project.labelsOf(currentFilename.value)
-    const index = labels.findIndex((l) => l.id === cursorLabelId.value)
+    const index = labels.findIndex((l) => l.id === cursorId.value)
     if (index === -1 && labels.length > 0) {
       selectOnly(labels[offset > 0 ? 0 : labels.length - 1].id)
       return
@@ -281,9 +287,65 @@ export const useEditorStore = defineStore('editor', () => {
     addLabelAt(p.x, p.y)
   }
 
-  function deleteSelectedLabel() {
-    if (!currentFilename.value || !cursorLabelId.value) return
-    cmdDeleteLabel(currentFilename.value, cursorLabelId.value)
+  /**
+   * Where the cursor comes to rest, read before anything moves. Its own place
+   * if it had one; otherwise the earliest place about to be emptied, so the eye
+   * lands where the page changed.
+   */
+  function landingIndex(page: string, ids: readonly string[]): number {
+    const project = useProjectStore()
+    const labels = project.labelsOf(page)
+    const atCursor = labels.findIndex((l) => l.id === cursorId.value)
+    if (atCursor >= 0) return atCursor
+
+    const doomed = new Set<string>()
+    for (const id of ids) {
+      const entry = project.entryById(id)
+      if (entry) for (const t of textObjects([entry])) doomed.add(t.id)
+    }
+    const first = labels.findIndex((l) => doomed.has(l.id))
+    return first >= 0 ? first : 0
+  }
+
+  /**
+   * Everything selected, in one step of history — selecting five and deleting
+   * them is one act, and five entries to undo would say it was five.
+   *
+   * A folder goes with everything it holds. It carries no style and no meaning
+   * of its own, so there is nothing to keep by keeping it.
+   *
+   * Deleting never turns the page. Whatever is left of the page the cursor was
+   * on is where the cursor lands, and a page emptied outright is still the page
+   * being looked at.
+   */
+  function deleteSelection() {
+    const project = useProjectStore()
+    const ids = [...selectedIds.value]
+    if (ids.length === 0) return
+    const page = currentFilename.value
+    const landing = page === null ? 0 : landingIndex(page, ids)
+
+    let removed: RemovedEntry[] = []
+    pushCommand({
+      label: `delete-selection ${ids.length}`,
+      do: () => {
+        removed = ids
+          .map((id) => project.removeEntry(id))
+          .filter((r): r is RemovedEntry => r !== null)
+      },
+      // Backwards, so each recorded path still means what it meant when the
+      // entry was taken out from under it.
+      undo: () => {
+        for (const r of [...removed].reverse()) project.restoreEntry(r)
+      },
+    })
+
+    if (page === null) {
+      selectOnly(null)
+      return
+    }
+    const left = project.labelsOf(page)
+    selectOnly(left[Math.min(landing, left.length - 1)]?.id ?? null)
   }
 
   
@@ -307,24 +369,6 @@ export const useEditorStore = defineStore('editor', () => {
     selectOnly(label.id)
   }
 
-  function cmdDeleteLabel(filename: string, labelId: string) {
-    const project = useProjectStore()
-    const label = project.labelById(filename, labelId)
-    if (!label) return
-    let place: LabelPlace | undefined
-    pushCommand({
-      label: `delete-label ${labelId}`,
-      do: () => {
-        place = project.deleteLabel(filename, labelId) ?? undefined
-      },
-      undo: () => project.addLabel(filename, label, place),
-    })
-    if (isSelected(labelId)) {
-      const labels = project.labelsOf(filename)
-      const landing = place?.orderIndex ?? labels.length
-      selectOnly(labels[Math.min(landing, labels.length - 1)]?.id ?? null)
-    }
-  }
 
   
   function cmdMoveLabel(
@@ -509,8 +553,8 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     currentFilename,
-    selectedLabelIds,
-    cursorLabelId,
+    selectedIds,
+    cursorId,
     selectOnly,
     isSelected,
     tool,
@@ -543,10 +587,9 @@ export const useEditorStore = defineStore('editor', () => {
     clearHistory,
     addLabelAt,
     addLabelAtViewCenter,
-    deleteSelectedLabel,
+    deleteSelection,
     cmdAddLabel,
     cmdDuplicateLabel,
-    cmdDeleteLabel,
     cmdMoveLabel,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,

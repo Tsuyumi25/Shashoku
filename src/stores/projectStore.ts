@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson, StyleGroup } from '@shared/project/types'
-import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import {
   defaultColorForGroupIndex,
   defaultProjectJson,
@@ -20,6 +20,7 @@ import {
   pathOf,
   removeAtPath,
   restoreGroupAt,
+  textObjects,
   textObjectsInReadingOrder,
   type DropTarget,
 } from '@shared/page/tree'
@@ -48,6 +49,22 @@ function generateGroupId(): string {
 export interface LabelPlace {
   path: number[]
   orderIndex: number
+}
+
+
+/**
+ * One entry taken off a page, with everything needed to put it back.
+ *
+ * A folder carries its whole subtree, so removing one takes text objects out
+ * of the reading order that were never named directly. Their places are read
+ * off the sequence before anything moves — working them out afterwards is
+ * impossible, since each removal shifts the ones behind it.
+ */
+export interface RemovedEntry {
+  filename: string
+  path: number[]
+  entry: LayerEntry
+  order: Array<{ id: string; index: number }>
 }
 
 
@@ -349,6 +366,50 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /** Anything on any page of the chapter — the selection reaches across them. */
+  function entryById(id: string): LayerEntry | undefined {
+    for (const file of files.value) {
+      const found = findEntry(file.page.layers, id)
+      if (found) return found
+    }
+    return undefined
+  }
+
+  function removeEntry(id: string): RemovedEntry | null {
+    for (const file of files.value) {
+      const path = pathOf(file.page.layers, id)
+      if (path === null) continue
+      const entry = removeAtPath(file.page.layers, path)
+      if (entry === null) return null
+      const carried = new Set(textObjects([entry]).map((t) => t.id))
+      const order: Array<{ id: string; index: number }> = []
+      file.page.readingOrder.forEach((orderedId, index) => {
+        if (carried.has(orderedId)) order.push({ id: orderedId, index })
+      })
+      file.page.readingOrder = file.page.readingOrder.filter((o) => !carried.has(o))
+      markPageDirty(file.filename)
+      return { filename: file.filename, path, entry, order }
+    }
+    return null
+  }
+
+  /**
+   * Undoes one removal. Reading-order places go back in ascending order, which
+   * is what makes each recorded index still mean what it meant: the ones ahead
+   * of it are already back in place by the time it lands.
+   */
+  function restoreEntry(removed: RemovedEntry): void {
+    const file = fileByName(removed.filename)
+    if (!file) return
+    if (!insertAtPath(file.page.layers, removed.path, removed.entry)) {
+      file.page.layers.push(removed.entry)
+    }
+    for (const { id, index } of removed.order) {
+      file.page.readingOrder.splice(Math.min(index, file.page.readingOrder.length), 0, id)
+    }
+    markPageDirty(removed.filename)
+  }
+
   function moveLayer(filename: string, fromPath: number[], target: DropTarget): boolean {
     const file = fileByName(filename)
     if (!file) return false
@@ -544,6 +605,9 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelGroupId,
     updateLabelStyleOverride,
     setLayerVisible,
+    entryById,
+    removeEntry,
+    restoreEntry,
     moveLayer,
     restoreLayerAt,
     addFolder,

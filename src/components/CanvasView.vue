@@ -46,7 +46,7 @@
           :color="object.color"
           :natural="editor.viewContentSize"
           :view="view"
-          :selected="object.id === editor.cursorLabelId"
+          :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
           @select="editor.selectOnly(object.id)"
           @move="moveLabelTo(object.id, $event)"
@@ -436,9 +436,6 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool('text')
   } else if (e.key.toLowerCase() === 'v') {
     editor.setTool('select')
-  } else if (e.key === 'Delete') {
-    // No confirmation, as in every editor with an undo stack behind it.
-    editor.deleteSelectedLabel()
   } else if (e.key === 'Escape') {
     const now = performance.now()
     const isDouble = now - lastEscapeAt < ESCAPE_DOUBLE_MS

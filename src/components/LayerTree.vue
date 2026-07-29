@@ -107,7 +107,6 @@ function isSelected(id: string): boolean {
 }
 
 function onPick(row: LayerTreeRow) {
-  if (row.entry.kind !== 'text') return
   editor.selectOnly(row.entry.id)
 }
 

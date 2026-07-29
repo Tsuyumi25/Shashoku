@@ -34,7 +34,7 @@ watch(
 
 let lastFilename = editor.currentFilename
 watch(
-  () => [editor.currentFilename, editor.cursorLabelId] as const,
+  () => [editor.currentFilename, editor.cursorId] as const,
   ([filename, labelId]) => {
     const pageChanged = filename !== lastFilename
     lastFilename = filename

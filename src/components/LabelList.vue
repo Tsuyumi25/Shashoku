@@ -120,7 +120,7 @@ function onInput(row: LabelRow, e: Event) {
  * which is what keeps clicking a row from scrolling under the pointer.
  */
 watch(
-  () => [editor.currentFilename, editor.cursorLabelId] as const,
+  () => [editor.currentFilename, editor.cursorId] as const,
   async ([filename, labelId]) => {
     if (filename === null || labelId === null) return
     const index = rows.value.findIndex(

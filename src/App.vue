@@ -130,6 +130,27 @@ useEventListener(window, 'keydown', (e) => {
   }
 })
 
+/**
+ * Keys that act on the document rather than on one surface of it. Delete lives
+ * here because the selection does: the canvas, the label list and the layer
+ * tree all read the same one, so none of them owns the key that empties it.
+ *
+ * The only guard needed is whether the caret is somewhere that owns its own
+ * text — which is also what makes the label list's two layers work, since a row
+ * being edited is a real input and a row merely selected is not.
+ */
+useEventListener(window, 'keydown', (e) => {
+  if (ui.view !== 'translate') return
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (isTypingSurface(document.activeElement)) return
+
+  if (e.key === 'Delete') {
+    // No confirmation, as in every editor with an undo stack behind it.
+    e.preventDefault()
+    editor.deleteSelection()
+  }
+})
+
 // A dev build opens the project named in .env, so restarting costs no trip
 // through the picker. Both failures report to the console rather than the
 // screen: nothing here is reachable in a packaged build, and whoever set the
