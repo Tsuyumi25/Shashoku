@@ -15,8 +15,14 @@
       >
         <div
           v-if="rows[vrow.index].kind === 'page'"
-          class="flex items-baseline gap-2 border-y border-border bg-secondary/60 px-2 py-1 select-none"
-          :class="[rows[vrow.index].filename === editor.currentFilename && 'text-foreground']"
+          tabindex="0"
+          :data-page-id="rows[vrow.index].filename"
+          class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+          :class="[
+            rows[vrow.index].filename === editor.currentFilename && 'text-foreground',
+            isHere(rows[vrow.index]) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
+          ]"
+          @mousedown="editor.selectFile(rows[vrow.index].filename)"
         >
           <span class="min-w-0 truncate text-xs font-medium">
             {{ rows[vrow.index].filename }}
@@ -75,7 +81,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
-import { buildLabelRows, type LabelRow, type PageRow } from '@/lib/labelRows'
+import { buildLabelRows, type ChapterRow, type LabelRow, type PageRow } from '@/lib/labelRows'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -118,6 +124,16 @@ function isSelected(row: LabelRow): boolean {
 }
 
 /**
+ * A page with nothing on it is still somewhere the cursor can be. Walking onto
+ * one leaves no object to stand on, so its heading takes the position instead —
+ * otherwise the highlight stays behind on the page just left, pointing at an
+ * object that is no longer where anyone is.
+ */
+function isHere(row: ChapterRow): boolean {
+  return row.filename === editor.currentFilename && editor.cursorId === null
+}
+
+/**
  * A row is being typed into when the editing session names it. There is no
  * second flag for "this row is in the input layer" — the session is that state,
  * and holding it in two places is how the two drift apart.
@@ -140,8 +156,8 @@ function takeFocus(el: unknown) {
   if (el instanceof HTMLTextAreaElement && document.activeElement !== el) el.focus()
 }
 
-function focusRow(id: string) {
-  scrollEl.value?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`)?.focus()
+function focusIn(selector: string) {
+  scrollEl.value?.querySelector<HTMLElement>(selector)?.focus()
 }
 
 function onPick(row: LabelRow, e: MouseEvent) {
@@ -175,7 +191,7 @@ function onInputKey(e: KeyboardEvent) {
     e.preventDefault()
     const id = editor.pendingTextEdit?.labelId ?? null
     editor.commitTextEdit()
-    if (id !== null) void nextTick(() => focusRow(id))
+    if (id !== null) void nextTick(() => focusIn(`[data-row-id="${CSS.escape(id)}"]`))
     return
   }
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -200,11 +216,18 @@ function onInput(row: LabelRow, e: Event) {
 watch(
   () => [editor.currentFilename, editor.cursorId] as const,
   async ([filename, labelId]) => {
-    if (filename === null || labelId === null) return
-    const index = rows.value.findIndex(
-      (r) => r.kind === 'label' && r.filename === filename && r.label.id === labelId,
-    )
+    if (filename === null) return
+    const index =
+      labelId === null
+        ? rows.value.findIndex((r) => r.kind === 'page' && r.filename === filename)
+        : rows.value.findIndex(
+            (r) => r.kind === 'label' && r.filename === filename && r.label.id === labelId,
+          )
     if (index === -1) return
+    const selector =
+      labelId === null
+        ? `[data-page-id="${CSS.escape(filename)}"]`
+        : `[data-row-id="${CSS.escape(labelId)}"]`
 
     // Focus goes where the cursor went, but only while the list is the thing
     // being used: keys are dispatched by what they act on, so moving the cursor
@@ -218,7 +241,7 @@ watch(
     }
     if (held && editor.pendingTextEdit === null) {
       await nextTick()
-      focusRow(labelId)
+      focusIn(selector)
     }
   },
 )
