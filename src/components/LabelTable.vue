@@ -31,7 +31,7 @@
               </span>
             </td>
             <td class="h-7 max-w-0 truncate px-2 py-1 text-sm">
-              {{ label.text.split('\n')[0] || '(未翻譯)' }}
+              {{ label.lines[0] || '(未翻譯)' }}
             </td>
           </tr>
           <tr v-if="labels.length === 0">
@@ -54,7 +54,7 @@ const project = useProjectStore()
 const editor = useEditorStore()
 
 const labels = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels ?? []) : [],
+  editor.currentFilename ? project.labelsOf(editor.currentFilename) : [],
 )
 
 function colorOf(groupId: string | null): string {

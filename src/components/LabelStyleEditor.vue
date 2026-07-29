@@ -35,7 +35,7 @@ const project = useProjectStore()
 const editor = useEditorStore()
 
 const labels = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels ?? []) : [],
+  editor.currentFilename ? project.labelsOf(editor.currentFilename) : [],
 )
 const selectedIndex = computed(() =>
   labels.value.findIndex((l) => l.id === editor.selectedLabelId),

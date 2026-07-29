@@ -2,25 +2,52 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
-import type { LabelItem } from '@/types/project'
+import type { TextLayerEntry } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { linesOf, textOf } from '@shared/page/text'
 
 const PAGE = 'p001.png'
 
-function label(id: string, text = ''): LabelItem {
-  return { id, x: 0.5, y: 0.5, groupId: null, rotation: 0, text }
+function label(id: string, text = ''): TextLayerEntry {
+  return {
+    kind: 'text',
+    id,
+    visible: true,
+    locked: false,
+    x: 0.5,
+    y: 0.5,
+    groupId: null,
+    rotation: 0,
+    lines: linesOf(text),
+  }
 }
 
-function openOnePage(labels: LabelItem[] = []) {
+function openOnePage(labels: TextLayerEntry[] = []) {
   const project = useProjectStore()
-  project.files = [{ filename: PAGE, pageDir: `/x/${PAGE}`, labels, badge: 'ok' }]
+  project.files = [
+    {
+      filename: PAGE,
+      pageDir: `/x/${PAGE}`,
+      page: {
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        revision: 0,
+        readingOrder: labels.map((l) => l.id),
+        layers: [...labels],
+      },
+      badge: 'ok',
+    },
+  ]
   const editor = useEditorStore()
   editor.currentFilename = PAGE
   return { project, editor }
 }
 
-function labelsOf(project: ReturnType<typeof useProjectStore>): LabelItem[] {
-  return project.fileByName(PAGE)?.labels ?? []
+function labelsOf(project: ReturnType<typeof useProjectStore>): TextLayerEntry[] {
+  return project.labelsOf(PAGE)
 }
+
+const textsOf = (project: ReturnType<typeof useProjectStore>): string[] =>
+  labelsOf(project).map(textOf)
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -46,7 +73,7 @@ describe('addLabelAt', () => {
 
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
-    expect(added).toMatchObject({ x: 0.25, y: 0.75, groupId: 'grp-1', text: '' })
+    expect(added).toMatchObject({ x: 0.25, y: 0.75, groupId: 'grp-1', lines: [''] })
     expect(editor.selectedLabelId).toBe(added?.id)
   })
 
@@ -146,7 +173,7 @@ describe('pending text edit', () => {
 
     expect(editor.canUndo).toBe(true)
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('before')
+    expect(textOf(labelsOf(project)[0])).toBe('before')
     expect(editor.canUndo).toBe(false)
   })
 
@@ -168,9 +195,9 @@ describe('pending text edit', () => {
     editor.commitTextEdit()
 
     editor.undo()
-    expect(labelsOf(project).map((l) => l.text)).toEqual(['a1', 'b0'])
+    expect(textsOf(project)).toEqual(['a1', 'b0'])
     editor.undo()
-    expect(labelsOf(project).map((l) => l.text)).toEqual(['a0', 'b0'])
+    expect(textsOf(project)).toEqual(['a0', 'b0'])
   })
 
   it('keeps the stack in the order things happened', () => {
@@ -182,9 +209,9 @@ describe('pending text edit', () => {
 
     expect(labelsOf(project)).toHaveLength(0)
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('a1')
+    expect(textOf(labelsOf(project)[0])).toBe('a1')
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('a0')
+    expect(textOf(labelsOf(project)[0])).toBe('a0')
   })
 
   it('flushes what has been typed and keeps the visit open', () => {
@@ -196,9 +223,9 @@ describe('pending text edit', () => {
     editor.commitTextEdit()
 
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('a1')
+    expect(textOf(labelsOf(project)[0])).toBe('a1')
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('a0')
+    expect(textOf(labelsOf(project)[0])).toBe('a0')
   })
 
   it('drops a session whose label is gone', () => {
@@ -228,7 +255,7 @@ describe('pending text edit', () => {
     project.updateLabelText(PAGE, 'a', 'a1')
 
     editor.undo()
-    expect(labelsOf(project)[0].text).toBe('a0')
+    expect(textOf(labelsOf(project)[0])).toBe('a0')
     expect(labelsOf(project)[0].x).toBe(0.2)
   })
 

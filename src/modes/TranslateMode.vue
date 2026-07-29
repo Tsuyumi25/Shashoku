@@ -113,7 +113,7 @@ const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 
 const labelCount = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels.length ?? 0) : 0,
+  editor.currentFilename ? project.labelsOf(editor.currentFilename).length : 0,
 )
 
 function onAddGroup() {

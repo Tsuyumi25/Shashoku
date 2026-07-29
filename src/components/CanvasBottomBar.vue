@@ -45,7 +45,7 @@
     >
       <option v-if="!project.isOpen" value="">未開啟專案</option>
       <option v-for="f in project.files" :key="f.filename" :value="f.filename">
-        {{ f.filename }}{{ f.labels.length > 0 ? `（${f.labels.length}）` : '' }}
+        {{ f.filename }}{{ f.page.readingOrder.length > 0 ? `（${f.page.readingOrder.length}）` : '' }}
       </option>
     </select>
     <button class="page-btn" title="上一頁" @click="editor.pageBy(-1)">

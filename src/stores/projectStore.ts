@@ -1,15 +1,24 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { LabelItem, ProjectFile, ProjectHeader } from '@/types/project'
+import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson, StyleGroup } from '@shared/project/types'
+import type { TextLayerEntry } from '@shared/page/types'
 import {
   defaultColorForGroupIndex,
   defaultProjectJson,
   parseProjectJson,
   serializeProjectJson,
 } from '@shared/project/schema'
-import { TRANSLATION_SCHEMA_VERSION } from '@shared/page/types'
-import { parseTranslation, serializeTranslation } from '@shared/page/schema'
+import { defaultManifest, parseManifest, serializeManifest } from '@shared/page/schema'
+import { repairPage } from '@shared/page/repair'
+import {
+  findTextObject,
+  insertAtPath,
+  pathOf,
+  removeAtPath,
+  textObjectsInReadingOrder,
+} from '@shared/page/tree'
+import { linesOf } from '@shared/page/text'
 import { previewImport, type ImportDiff } from '@shared/project/import'
 import { parentFolder } from '@shared/project/library'
 import { assertDistinctFolders } from '@shared/export/profile'
@@ -26,30 +35,14 @@ function generateGroupId(): string {
 }
 
 
-function toLines(text: string): string[] {
-  return text.split('\n')
-}
-function fromLines(lines: string[]): string {
-  return lines.join('\n')
-}
-
-
-export function serializeTranslationForFile(file: ProjectFile): string {
-  return serializeTranslation({
-    schemaVersion: TRANSLATION_SCHEMA_VERSION,
-    labels: file.labels.map((l) => {
-      const entry: import('@shared/ssk/types').SskLabel = {
-        id: l.id,
-        x: l.x,
-        y: l.y,
-        groupId: l.groupId,
-        lines: toLines(l.text),
-      }
-      if (l.rotation) entry.rotation = l.rotation
-      if (l.styleOverride !== undefined) entry.styleOverride = l.styleOverride
-      return entry
-    }),
-  })
+/**
+ * Where a text object sits, in both senses at once: its place in the tree,
+ * which is stacking order, and its place in the reading order. Undo has to put
+ * a deleted object back into both, and neither can be worked out from the other.
+ */
+export interface LabelPlace {
+  path: number[]
+  orderIndex: number
 }
 
 
@@ -139,34 +132,30 @@ export const useProjectStore = defineStore('project', () => {
     // which is what makes it land where it came from.
     await autosave.flush()
     const meta = parseProjectJson(projectMetaRaw)
+    const groupIds = meta.groups.map((g) => g.id)
     const loaded: ProjectFile[] = []
+    // A page whose reading order had drifted is put right here and queued to be
+    // written back, so the fix is made once rather than recomputed every open.
+    const mended: string[] = []
     for (const p of pages) {
-      if (p.badge === 'raw-missing') {
-        
-      }
-      let labels: LabelItem[] = []
+      let page = defaultManifest()
       try {
         const raw = await window.api.readPage(p.pageDir)
-        const t = parseTranslation(raw.translationRaw, meta.groups.map((g) => g.id))
-        labels = t.labels.map((l) => ({
-          id: l.id,
-          x: l.x,
-          y: l.y,
-          groupId: l.groupId,
-          rotation: l.rotation ?? 0,
-          text: fromLines(l.lines),
-          styleOverride: l.styleOverride,
-        }))
+        const repair = repairPage(parseManifest(raw.manifestRaw, groupIds))
+        page = repair.manifest
+        if (repair.repaired.length > 0) mended.push(p.filename)
       } catch {
-        
+        // Opens empty rather than taking the whole project down. The page
+        // already carries a badge saying its manifest could not be read.
       }
-      loaded.push({ filename: p.filename, pageDir: p.pageDir, labels, badge: p.badge })
+      loaded.push({ filename: p.filename, pageDir: p.pageDir, page, badge: p.badge })
     }
     rootPath.value = newRootPath
     projectMeta.value = meta
     files.value = loaded
     metaDirty.value = false
     dirtyFilenames.value = []
+    for (const filename of mended) markPageDirty(filename)
     // Opening a project is also how its neighbours get found: the folder it
     // sits in becomes somewhere the library looks from now on.
     usePreferencesStore().addScanPoint(parentFolder(newRootPath))
@@ -248,7 +237,7 @@ export const useProjectStore = defineStore('project', () => {
         const file = fileByName(filename)
         if (!file) continue
         await window.api.writePage(file.pageDir, {
-          translationRaw: serializeTranslationForFile(file),
+          manifestRaw: serializeManifest(file.page),
         })
       }
       if (metaWasDirty) {
@@ -268,27 +257,52 @@ export const useProjectStore = defineStore('project', () => {
 
 
 
-  function addLabel(filename: string, label: LabelItem, index?: number) {
+  /** A page's text objects as a reader meets them — the label list's order. */
+  function labelsOf(filename: string): TextLayerEntry[] {
+    const file = fileByName(filename)
+    return file ? textObjectsInReadingOrder(file.page) : []
+  }
+
+  function labelById(filename: string, labelId: string): TextLayerEntry | undefined {
+    const file = fileByName(filename)
+    return file ? findTextObject(file.page.layers, labelId) : undefined
+  }
+
+  /**
+   * Without a place, an object joins the end of both orders: the end of the
+   * tree because that is what a new object stacks on top of, and the end of the
+   * reading order because inserting near the pointer would renumber the page
+   * under whoever is reading it.
+   */
+  function addLabel(filename: string, label: TextLayerEntry, at?: LabelPlace) {
     const file = fileByName(filename)
     if (!file) return
-    if (index === undefined) file.labels.push(label)
-    else file.labels.splice(index, 0, label)
+    const place = at ?? {
+      path: [file.page.layers.length],
+      orderIndex: file.page.readingOrder.length,
+    }
+    // The tree can have changed shape since the place was taken — a folder the
+    // path went through may be gone. Landing on top beats losing the object.
+    if (!insertAtPath(file.page.layers, place.path, label)) file.page.layers.push(label)
+    const orderIndex = Math.min(Math.max(place.orderIndex, 0), file.page.readingOrder.length)
+    file.page.readingOrder.splice(orderIndex, 0, label.id)
     markPageDirty(filename)
   }
 
-  function deleteLabel(filename: string, labelId: string): number {
+  function deleteLabel(filename: string, labelId: string): LabelPlace | null {
     const file = fileByName(filename)
-    if (!file) return -1
-    const index = file.labels.findIndex((l) => l.id === labelId)
-    if (index !== -1) {
-      file.labels.splice(index, 1)
-      markPageDirty(filename)
-    }
-    return index
+    if (!file) return null
+    const path = pathOf(file.page.layers, labelId)
+    if (path === null || removeAtPath(file.page.layers, path) === null) return null
+    const found = file.page.readingOrder.indexOf(labelId)
+    const orderIndex = found === -1 ? file.page.readingOrder.length : found
+    if (found !== -1) file.page.readingOrder.splice(found, 1)
+    markPageDirty(filename)
+    return { path, orderIndex }
   }
 
   function moveLabel(filename: string, labelId: string, x: number, y: number) {
-    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = labelById(filename, labelId)
     if (!label) return
     label.x = x
     label.y = y
@@ -296,33 +310,33 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function rotateLabel(filename: string, labelId: string, rotation: number) {
-    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = labelById(filename, labelId)
     if (!label) return
     label.rotation = rotation
     markPageDirty(filename)
   }
 
   function updateLabelText(filename: string, labelId: string, text: string) {
-    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = labelById(filename, labelId)
     if (!label) return
-    label.text = text
+    label.lines = linesOf(text)
     markPageDirty(filename)
   }
 
   function updateLabelGroupId(filename: string, labelId: string, groupId: string | null) {
-    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = labelById(filename, labelId)
     if (!label) return
     label.groupId = groupId
     markPageDirty(filename)
   }
 
-  
+
   function updateLabelStyleOverride(
     filename: string,
     labelId: string,
-    styleOverride: LabelItem['styleOverride'],
+    styleOverride: TextLayerEntry['styleOverride'],
   ) {
-    const label = fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = labelById(filename, labelId)
     if (!label) return
     if (styleOverride === undefined || Object.keys(styleOverride).length === 0)
       delete label.styleOverride
@@ -441,6 +455,8 @@ export const useProjectStore = defineStore('project', () => {
     layersDirOf,
     
     fileByName,
+    labelsOf,
+    labelById,
     reset,
     createNewProject,
     openExisting,

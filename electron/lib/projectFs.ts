@@ -21,19 +21,12 @@ import {
   IMAGE_EXTENSIONS,
   PAGE_MANIFEST_FILENAME,
   PAGE_OCR_FILENAME,
-  PAGE_TRANSLATION_FILENAME,
   PROJECT_JSON_FILENAME,
   SENTINEL_FILENAME,
   SHASHOKU_DIR,
 } from "@shared/ssk/constants";
 import { defaultProjectJson, serializeProjectJson } from "@shared/project/schema";
-import {
-  defaultManifest,
-  defaultTranslation,
-  parseManifest,
-  serializeManifest,
-  serializeTranslation,
-} from "@shared/page/schema";
+import { defaultManifest, parseManifest, serializeManifest } from "@shared/page/schema";
 import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
 
@@ -202,11 +195,6 @@ async function initPageEntry(
   }
   await copyFile(join(rootPath, filename), join(rawsDir, filename));
   await mkdir(pageDir, { recursive: true });
-  
-  await writeFileAtomic(
-    join(pageDir, PAGE_TRANSLATION_FILENAME),
-    serializeTranslation(defaultTranslation()),
-  );
   await writeFileAtomic(
     join(pageDir, PAGE_MANIFEST_FILENAME),
     serializeManifest(defaultManifest()),
@@ -330,25 +318,19 @@ async function gcOrphanLayers(pageDir: string): Promise<void> {
 }
 
 export async function readPage(pageDir: string): Promise<PageRawData> {
-  const [manifestRaw, translationRaw] = await Promise.all([
-    readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8"),
-    readFile(join(pageDir, PAGE_TRANSLATION_FILENAME), "utf8"),
-  ]);
+  const manifestRaw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
   const ocrPath = join(pageDir, PAGE_OCR_FILENAME);
   const ocrRaw = (await exists(ocrPath)) ? await readFile(ocrPath, "utf8") : null;
-  return { manifestRaw, translationRaw, ocrRaw };
+  return { manifestRaw, ocrRaw };
 }
 
+/**
+ * The manifest goes last, always. It is the page's commit anchor: it holds the
+ * text and names the layer files, so as long as it is written after everything
+ * it refers to, a crash mid-write leaves the previous manifest pointing at
+ * data that is all still there.
+ */
 export async function writePage(pageDir: string, input: WritePageInput): Promise<void> {
-  
-  
-  
-  
-  
-  
-  
-  
-  
   await mkdir(pageDir, { recursive: true });
 
   if (input.layerParts && Object.keys(input.layerParts).length > 0) {
@@ -362,9 +344,6 @@ export async function writePage(pageDir: string, input: WritePageInput): Promise
     }
   }
 
-  if (input.translationRaw !== undefined) {
-    await writeFileAtomic(join(pageDir, PAGE_TRANSLATION_FILENAME), input.translationRaw);
-  }
   if (input.ocrRaw !== undefined) {
     await writeFileAtomic(join(pageDir, PAGE_OCR_FILENAME), input.ocrRaw);
   }

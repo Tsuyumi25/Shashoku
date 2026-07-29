@@ -46,13 +46,11 @@ export interface OpenProjectResult {
 
 export interface PageRawData {
   manifestRaw: string;
-  translationRaw: string;
   ocrRaw: string | null;
 }
 
 export interface WritePageInput {
   manifestRaw?: string;
-  translationRaw?: string;
   ocrRaw?: string;
   layerParts?: Record<string, Uint8Array>;
 }

@@ -1,10 +1,11 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import type { LabelItem } from '@/types/project'
+import type { TextLayerEntry } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
-import { useProjectStore } from '@/stores/projectStore'
+import { useProjectStore, type LabelPlace } from '@/stores/projectStore'
 import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
+import { textOf } from '@shared/page/text'
 
 export interface Command {
   
@@ -67,9 +68,7 @@ export const useEditorStore = defineStore('editor', () => {
     currentFilename.value = filename
     
     const project = useProjectStore()
-    selectedLabelId.value = filename
-      ? (project.fileByName(filename)?.labels[0]?.id ?? null)
-      : null
+    selectedLabelId.value = filename ? (project.labelsOf(filename)[0]?.id ?? null) : null
   }
 
   
@@ -81,7 +80,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (next < 0 || next >= project.files.length) return
     selectFile(project.files[next].filename)
     if (landOn === 'last') {
-      const labels = project.files[next].labels
+      const labels = project.labelsOf(project.files[next].filename)
       selectedLabelId.value = labels[labels.length - 1]?.id ?? null
     }
   }
@@ -90,7 +89,7 @@ export const useEditorStore = defineStore('editor', () => {
   function selectLabelBy(offset: number) {
     const project = useProjectStore()
     if (!currentFilename.value) return
-    const labels = project.fileByName(currentFilename.value)?.labels ?? []
+    const labels = project.labelsOf(currentFilename.value)
     const index = labels.findIndex((l) => l.id === selectedLabelId.value)
     if (index === -1 && labels.length > 0) {
       selectedLabelId.value = labels[offset > 0 ? 0 : labels.length - 1].id
@@ -121,7 +120,8 @@ export const useEditorStore = defineStore('editor', () => {
     const pending = pendingTextEdit.value
     if (!pending) return undefined
     const project = useProjectStore()
-    return project.fileByName(pending.filename)?.labels.find((l) => l.id === pending.labelId)?.text
+    const label = project.labelById(pending.filename, pending.labelId)
+    return label === undefined ? undefined : textOf(label)
   }
 
   function beginTextEdit(filename: string, labelId: string, from: string) {
@@ -200,14 +200,14 @@ export const useEditorStore = defineStore('editor', () => {
 
   
 
-  function cmdAddLabel(filename: string, label: LabelItem) {
+  function cmdAddLabel(filename: string, label: TextLayerEntry) {
     const project = useProjectStore()
-    let index: number | undefined
+    let place: LabelPlace | undefined
     pushCommand({
       label: `add-label ${label.id}`,
-      do: () => project.addLabel(filename, label, index),
+      do: () => project.addLabel(filename, label, place),
       undo: () => {
-        index = project.deleteLabel(filename, label.id)
+        place = project.deleteLabel(filename, label.id) ?? undefined
       },
     })
     selectedLabelId.value = label.id
@@ -215,19 +215,20 @@ export const useEditorStore = defineStore('editor', () => {
 
   /**
    * A new label is empty and joins the active group, so a run of them can be
-   * placed first and typed later. It goes on the end because the order of
-   * `labels[]` is the numbering, and inserting near the pointer would renumber
-   * the page under whoever is reading it.
+   * placed first and typed later.
    */
   function addLabelAt(x: number, y: number) {
     if (!currentFilename.value) return
     cmdAddLabel(currentFilename.value, {
+      kind: 'text',
       id: generateLabelId(),
+      visible: true,
+      locked: false,
       x,
       y,
       groupId: activeGroupId.value,
       rotation: 0,
-      text: '',
+      lines: [''],
     })
   }
 
@@ -258,17 +259,17 @@ export const useEditorStore = defineStore('editor', () => {
   
   function cmdDuplicateLabel(
     filename: string,
-    label: LabelItem,
+    label: TextLayerEntry,
     opts?: { alreadyApplied?: boolean },
   ) {
     const project = useProjectStore()
-    let index: number | undefined
+    let place: LabelPlace | undefined
     pushCommand(
       {
         label: `duplicate-label ${label.id}`,
-        do: () => project.addLabel(filename, label, index),
+        do: () => project.addLabel(filename, label, place),
         undo: () => {
-          index = project.deleteLabel(filename, label.id)
+          place = project.deleteLabel(filename, label.id) ?? undefined
         },
       },
       opts,
@@ -278,20 +279,21 @@ export const useEditorStore = defineStore('editor', () => {
 
   function cmdDeleteLabel(filename: string, labelId: string) {
     const project = useProjectStore()
-    const label = project.fileByName(filename)?.labels.find((l) => l.id === labelId)
+    const label = project.labelById(filename, labelId)
     if (!label) return
-    let index = -1
+    let place: LabelPlace | undefined
     pushCommand({
       label: `delete-label ${labelId}`,
       do: () => {
-        index = project.deleteLabel(filename, labelId)
+        place = project.deleteLabel(filename, labelId) ?? undefined
       },
-      undo: () => project.addLabel(filename, label, index),
+      undo: () => project.addLabel(filename, label, place),
     })
     if (selectedLabelId.value === labelId) {
-      
-      const labels = project.fileByName(filename)?.labels ?? []
-      selectedLabelId.value = labels[Math.min(index, labels.length - 1)]?.id ?? null
+
+      const labels = project.labelsOf(filename)
+      const landing = place?.orderIndex ?? labels.length
+      selectedLabelId.value = labels[Math.min(landing, labels.length - 1)]?.id ?? null
     }
   }
 
@@ -336,8 +338,8 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdUpdateLabelStyleOverride(
     filename: string,
     labelId: string,
-    from: LabelItem['styleOverride'],
-    to: LabelItem['styleOverride'],
+    from: TextLayerEntry['styleOverride'],
+    to: TextLayerEntry['styleOverride'],
   ) {
     if (JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) return
     const project = useProjectStore()

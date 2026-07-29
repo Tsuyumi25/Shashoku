@@ -1,7 +1,3 @@
-
-
-
-import type { SskLabel } from '../ssk/types'
 import type {
   GroupLayerEntry,
   LayerEntry,
@@ -11,13 +7,8 @@ import type {
   OcrJson,
   RasterLayerEntry,
   TextLayerEntry,
-  TranslationJson,
 } from './types'
-import {
-  MANIFEST_SCHEMA_VERSION,
-  OCR_SCHEMA_VERSION,
-  TRANSLATION_SCHEMA_VERSION,
-} from './types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
 import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
 
 
@@ -64,7 +55,7 @@ function parseJson(raw: string, what: string): unknown {
   }
 }
 
-/** An id for something that lives inside a page — a label or a layer entry. */
+/** An id for something that lives inside a page — a layer entry of any kind. */
 export function generateId(): string {
   const c = globalThis.crypto
   if (c?.randomUUID) return c.randomUUID()
@@ -75,20 +66,24 @@ export function generateId(): string {
 
 function parseLayerBase(v: Record<string, unknown>, at: string): {
   id: string
-  name: string
   visible: boolean
   locked: boolean
 } {
-  const { id, name, visible, locked } = v
-  if (typeof name !== 'string') fail(`${at}.name 必須是字串`)
+  const { id, visible, locked } = v
   if (typeof visible !== 'boolean') fail(`${at}.visible 必須是布林`)
   if (typeof locked !== 'boolean') fail(`${at}.locked 必須是布林`)
   const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
-  return { id: finalId, name, visible, locked }
+  return { id: finalId, visible, locked }
+}
+
+function parseName(v: Record<string, unknown>, at: string): string {
+  if (typeof v.name !== 'string') fail(`${at}.name 必須是字串`)
+  return v.name
 }
 
 function parseRasterEntry(v: Record<string, unknown>, at: string): RasterLayerEntry {
   const base = parseLayerBase(v, at)
+  const name = parseName(v, at)
   const { file, opacity, blendMode, alphaLocked } = v
   if (typeof file !== 'string' || file.length === 0) fail(`${at}.file 必須是非空字串`)
   if (/[\\/]/.test(file)) fail(`${at}.file 只能是檔名,不可含路徑(避免逃逸出 pages/<n>/layers/)`)
@@ -97,126 +92,15 @@ function parseRasterEntry(v: Record<string, unknown>, at: string): RasterLayerEn
   if (typeof blendMode !== 'string' || !(BLEND_MODE_ALLOWLIST as readonly string[]).includes(blendMode))
     fail(`${at}.blendMode 必須是 ${BLEND_MODE_ALLOWLIST.join(' | ')} 之一`)
   if (typeof alphaLocked !== 'boolean') fail(`${at}.alphaLocked 必須是布林`)
-  return { kind: 'raster', ...base, file, opacity, blendMode, alphaLocked }
+  return { kind: 'raster', ...base, name, file, opacity, blendMode, alphaLocked }
 }
 
-function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry {
+function parseTextEntry(
+  v: Record<string, unknown>,
+  at: string,
+  validGroupIds: readonly string[] | null,
+): TextLayerEntry {
   const base = parseLayerBase(v, at)
-  const { labelId } = v
-  if (typeof labelId !== 'string' || labelId.length === 0) fail(`${at}.labelId 必須是非空字串`)
-  return { kind: 'text', ...base, labelId }
-}
-
-function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
-  const base = parseLayerBase(v, at)
-  const { children, styleBinding } = v
-  if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
-  const parsedChildren = children.map((c, i) => parseLayerEntry(c, `${at}.children[${i}]`))
-  const out: GroupLayerEntry = { kind: 'group', ...base, children: parsedChildren }
-  if (styleBinding !== undefined) {
-    if (!isRecord(styleBinding)) fail(`${at}.styleBinding 必須是物件`)
-    const { labelGroupId } = styleBinding
-    if (typeof labelGroupId !== 'string' || labelGroupId.length === 0)
-      fail(`${at}.styleBinding.labelGroupId 必須是非空字串`)
-    out.styleBinding = { labelGroupId }
-  }
-  return out
-}
-
-function parseLayerEntry(v: unknown, at: string): LayerEntry {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const kind = v.kind
-  if (kind === 'raster') return parseRasterEntry(v, at)
-  if (kind === 'text') return parseTextEntry(v, at)
-  if (kind === 'group') return parseGroupEntry(v, at)
-  fail(`${at}.kind 必須是 raster | text | group 之一(取得 ${JSON.stringify(kind)})`)
-}
-
-
-function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void {
-  for (const e of entries) {
-    if (e.kind === 'raster') out.push(e.file)
-    else if (e.kind === 'group') collectRasterFiles(e.children, out)
-  }
-}
-
-export function defaultManifest(): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, layers: [] }
-}
-
-export function parseManifest(raw: string): ManifestJson {
-  const data = parseJson(raw, 'manifest.json')
-  if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
-
-  if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
-    if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
-      fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
-    
-    
-    
-    if (data.schemaVersion !== 1)
-      fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
-  }
-
-  
-  const revisionRaw = data.revision
-  let revision = 0
-  if (revisionRaw !== undefined) {
-    if (typeof revisionRaw !== 'number' || !Number.isFinite(revisionRaw) || revisionRaw < 0 || !Number.isInteger(revisionRaw))
-      fail('manifest.json.revision 必須是 ≥ 0 的整數')
-    revision = revisionRaw
-  }
-
-  const layersRaw = data.layers
-  if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => {
-    
-    const patched =
-      data.schemaVersion === 1 && isRecord(l) && l.kind === undefined
-        ? { ...l, kind: 'raster' }
-        : l
-    return parseLayerEntry(patched, `layers[${i}]`)
-  })
-
-  const files: string[] = []
-  collectRasterFiles(layers, files)
-  if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
-
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, layers }
-}
-
-function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
-  const base = { kind: l.kind, id: l.id, name: l.name, visible: l.visible, locked: l.locked }
-  if (l.kind === 'raster') {
-    return {
-      ...base,
-      file: l.file,
-      opacity: l.opacity,
-      blendMode: l.blendMode,
-      alphaLocked: l.alphaLocked,
-    }
-  }
-  if (l.kind === 'text') return { ...base, labelId: l.labelId }
-  
-  const out: Record<string, unknown> = { ...base, children: l.children.map(serializeLayerEntry) }
-  if (l.styleBinding !== undefined) out.styleBinding = { labelGroupId: l.styleBinding.labelGroupId }
-  return out
-}
-
-export function serializeManifest(m: ManifestJson): string {
-  const out = {
-    schemaVersion: m.schemaVersion,
-    revision: m.revision,
-    layers: m.layers.map(serializeLayerEntry),
-  }
-  return `${JSON.stringify(out, null, 2)}\n`
-}
-
-
-
-function parseLabelForTranslation(v: unknown, i: number, validGroupIds: readonly string[] | null): SskLabel {
-  const at = `labels[${i}]`
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { x, y, groupId, lines } = v
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
@@ -230,66 +114,153 @@ function parseLabelForTranslation(v: unknown, i: number, validGroupIds: readonly
     if (/[\r\n]/.test(line)) fail(`${at}.lines[${j}] 不可內嵌換行——斷行請用陣列元素表達`)
     return line
   })
-  const id = typeof v.id === 'string' && v.id.length > 0 ? v.id : generateId()
-  const label: SskLabel = { id, x, y, groupId: groupId as string | null, lines: parsedLines }
-  // Absent on every page written before objects could be turned, and on every
-  // label that never was, so its absence has to keep meaning upright rather
-  // than becoming a parse error.
+
+  let rotation = 0
   if (v.rotation !== undefined) {
     if (typeof v.rotation !== 'number' || !Number.isFinite(v.rotation))
       fail(`${at}.rotation 必須是數字(弧度)`)
-    label.rotation = v.rotation
+    rotation = v.rotation
+  }
+
+  const entry: TextLayerEntry = {
+    kind: 'text',
+    ...base,
+    x,
+    y,
+    groupId: groupId as string | null,
+    rotation,
+    lines: parsedLines,
   }
   if (v.styleOverride !== undefined) {
-    label.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
+    entry.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
   }
-  
-  
-  return label
+  return entry
 }
 
-export function defaultTranslation(): TranslationJson {
-  return { schemaVersion: TRANSLATION_SCHEMA_VERSION, labels: [] }
+function parseGroupEntry(
+  v: Record<string, unknown>,
+  at: string,
+  validGroupIds: readonly string[] | null,
+): GroupLayerEntry {
+  const base = parseLayerBase(v, at)
+  const name = parseName(v, at)
+  const { children } = v
+  if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
+  const parsedChildren = children.map((c, i) =>
+    parseLayerEntry(c, `${at}.children[${i}]`, validGroupIds),
+  )
+  return { kind: 'group', ...base, name, children: parsedChildren }
+}
+
+function parseLayerEntry(
+  v: unknown,
+  at: string,
+  validGroupIds: readonly string[] | null,
+): LayerEntry {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const kind = v.kind
+  if (kind === 'raster') return parseRasterEntry(v, at)
+  if (kind === 'text') return parseTextEntry(v, at, validGroupIds)
+  if (kind === 'group') return parseGroupEntry(v, at, validGroupIds)
+  fail(`${at}.kind 必須是 raster | text | group 之一(取得 ${JSON.stringify(kind)})`)
 }
 
 
-export function parseTranslation(
+function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void {
+  for (const e of entries) {
+    if (e.kind === 'raster') out.push(e.file)
+    else if (e.kind === 'group') collectRasterFiles(e.children, out)
+  }
+}
+
+export function defaultManifest(): ManifestJson {
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder: [], layers: [] }
+}
+
+/**
+ * Structure only. Whether `readingOrder` and the tree agree with each other is
+ * the repair layer's question, not this one — a page whose order has drifted is
+ * still readable, and refusing to open it would be the worse answer.
+ */
+export function parseManifest(
   raw: string,
   validGroupIds: readonly string[] | null = null,
-): TranslationJson {
-  const data = parseJson(raw, 'translation.json')
-  if (!isRecord(data)) fail('translation.json 頂層必須是物件')
+): ManifestJson {
+  const data = parseJson(raw, 'manifest.json')
+  if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
 
-  if (data.schemaVersion !== TRANSLATION_SCHEMA_VERSION) {
-    if (typeof data.schemaVersion === 'number' && data.schemaVersion > TRANSLATION_SCHEMA_VERSION)
-      fail(`translation.json 由較新版本建立,請更新軟體`)
-    fail(
-      `不支援的 translation.json 版本:${JSON.stringify(data.schemaVersion)}(v2 以下的舊格式需以新版重建專案)`,
-    )
+  if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
+    if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
+      fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
+    fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
   }
 
-  const labelsRaw = data.labels
-  if (!Array.isArray(labelsRaw)) fail('translation.json.labels 必須是陣列')
-  const labels = labelsRaw.map((l, i) => parseLabelForTranslation(l, i, validGroupIds))
-  return { schemaVersion: TRANSLATION_SCHEMA_VERSION, labels }
+  const revisionRaw = data.revision
+  let revision = 0
+  if (revisionRaw !== undefined) {
+    if (typeof revisionRaw !== 'number' || !Number.isFinite(revisionRaw) || revisionRaw < 0 || !Number.isInteger(revisionRaw))
+      fail('manifest.json.revision 必須是 ≥ 0 的整數')
+    revision = revisionRaw
+  }
+
+  const readingOrderRaw = data.readingOrder
+  if (!Array.isArray(readingOrderRaw)) fail('manifest.json.readingOrder 必須是陣列')
+  const readingOrder = readingOrderRaw.map((id, i) => {
+    if (typeof id !== 'string' || id.length === 0)
+      fail(`manifest.json.readingOrder[${i}] 必須是非空字串`)
+    return id
+  })
+
+  const layersRaw = data.layers
+  if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
+  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`, validGroupIds))
+
+  const files: string[] = []
+  collectRasterFiles(layers, files)
+  if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
+
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, readingOrder, layers }
 }
 
-export function serializeTranslation(t: TranslationJson): string {
+function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
+  const base = { kind: l.kind, id: l.id, visible: l.visible, locked: l.locked }
+  if (l.kind === 'raster') {
+    return {
+      ...base,
+      name: l.name,
+      file: l.file,
+      opacity: l.opacity,
+      blendMode: l.blendMode,
+      alphaLocked: l.alphaLocked,
+    }
+  }
+  if (l.kind === 'group') {
+    return { ...base, name: l.name, children: l.children.map(serializeLayerEntry) }
+  }
+  const out: Record<string, unknown> = {
+    ...base,
+    x: l.x,
+    y: l.y,
+    groupId: l.groupId,
+    lines: l.lines,
+  }
+  if (l.rotation) out.rotation = l.rotation
+  if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
+    out.styleOverride = serializePartialTextStyle(l.styleOverride)
+  return out
+}
+
+/** The drawn part of a page, on its own — what a thumbnail's identity is made of. */
+export function serializeLayers(layers: readonly LayerEntry[]): string {
+  return JSON.stringify(layers.map(serializeLayerEntry))
+}
+
+export function serializeManifest(m: ManifestJson): string {
   const out = {
-    schemaVersion: t.schemaVersion,
-    labels: t.labels.map((l) => {
-      const entry: Record<string, unknown> = {
-        id: l.id,
-        x: l.x,
-        y: l.y,
-        groupId: l.groupId,
-        lines: l.lines,
-      }
-      if (l.rotation) entry.rotation = l.rotation
-      if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
-        entry.styleOverride = serializePartialTextStyle(l.styleOverride)
-      return entry
-    }),
+    schemaVersion: m.schemaVersion,
+    revision: m.revision,
+    readingOrder: m.readingOrder,
+    layers: m.layers.map(serializeLayerEntry),
   }
   return `${JSON.stringify(out, null, 2)}\n`
 }

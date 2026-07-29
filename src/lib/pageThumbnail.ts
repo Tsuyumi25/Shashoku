@@ -1,8 +1,8 @@
 import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
 import { serializeTextStyle } from '@shared/text-style/schema'
+import { serializeLayers } from '@shared/page/schema'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
-import { serializeTranslationForFile } from '@/stores/projectStore'
 
 /** Longest edge of a cached thumbnail. */
 export const THUMBNAIL_EDGE = 320
@@ -49,7 +49,10 @@ export function thumbnailKey(
       'page',
       edge,
       file.pageDir,
-      serializeTranslationForFile(file),
+      // The tree alone. Reading order is left out on purpose: it decides which
+      // object comes first in the label list, never what the page looks like,
+      // and hashing it would throw the picture away for a reordering.
+      serializeLayers(file.page.layers),
       drawingStyles(meta),
     ]),
   )
@@ -139,7 +142,7 @@ export async function renderThumbnail(
 ): Promise<Uint8Array> {
   const full = await compositePage({
     raw,
-    labels: file.labels,
+    page: file.page,
     groups: meta.groups,
     defaultStyle: meta.defaultStyle,
   })

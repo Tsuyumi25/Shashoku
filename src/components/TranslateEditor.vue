@@ -19,7 +19,7 @@
     <textarea
       ref="textareaRef"
       class="min-h-0 w-full flex-1 resize-none bg-card px-3 py-2 text-sm leading-relaxed focus:outline-none disabled:bg-muted disabled:text-muted-foreground"
-      :value="selectedLabel?.text ?? ''"
+      :value="selectedText"
       :disabled="!selectedLabel"
       :placeholder="selectedLabel ? '輸入翻譯…' : ''"
       @input="onInput"
@@ -37,18 +37,22 @@
 import { computed, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { textOf } from '@shared/page/text'
 
 const project = useProjectStore()
 const editor = useEditorStore()
 
 const labels = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename)?.labels ?? []) : [],
+  editor.currentFilename ? project.labelsOf(editor.currentFilename) : [],
 )
 const selectedIndex = computed(() =>
   labels.value.findIndex((l) => l.id === editor.selectedLabelId),
 )
 const selectedLabel = computed(() =>
   selectedIndex.value >= 0 ? labels.value[selectedIndex.value] : undefined,
+)
+const selectedText = computed(() =>
+  selectedLabel.value ? textOf(selectedLabel.value) : '',
 )
 const selectedGroup = computed(() => {
   const gid = selectedLabel.value?.groupId
@@ -73,7 +77,7 @@ function onInput(e: Event) {
 
 function beginEdit() {
   if (!selectedLabel.value || !editor.currentFilename) return
-  editor.beginTextEdit(editor.currentFilename, selectedLabel.value.id, selectedLabel.value.text)
+  editor.beginTextEdit(editor.currentFilename, selectedLabel.value.id, selectedText.value)
 }
 
 // Moving to another label or another page ends the visit without a blur, so

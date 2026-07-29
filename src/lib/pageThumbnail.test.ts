@@ -3,6 +3,8 @@ import { defaultExportProfile } from '@shared/export/types'
 import { defaultProjectJson } from '@shared/project/schema'
 import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
+import type { TextLayerEntry } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
 
 function page(): ProjectFile {
@@ -10,7 +12,24 @@ function page(): ProjectFile {
     filename: '001.png',
     pageDir: '/p/.shashoku/pages/001',
     badge: 'ok',
-    labels: [{ id: 'a', x: 0.5, y: 0.5, groupId: null, rotation: 0, text: 'ふむ' }],
+    page: {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      readingOrder: ['a'],
+      layers: [
+        {
+          kind: 'text',
+          id: 'a',
+          visible: true,
+          locked: false,
+          x: 0.5,
+          y: 0.5,
+          groupId: null,
+          rotation: 0,
+          lines: ['ふむ'],
+        },
+      ],
+    },
   }
 }
 
@@ -63,9 +82,19 @@ describe('thumbnailKey', () => {
   it('changes when the page is retyped', async () => {
     const meta = defaultProjectJson()
     const edited = page()
-    edited.labels[0].text = 'なるほど'
+    ;(edited.page.layers[0] as TextLayerEntry).lines = ['なるほど']
 
     expect(await thumbnailKey(edited, meta)).not.toBe(await thumbnailKey(page(), meta))
+  })
+
+  // Reading order decides which object comes first in the label list, never
+  // what the page looks like.
+  it('is unchanged by the page being reordered for reading', async () => {
+    const meta = defaultProjectJson()
+    const reordered = page()
+    reordered.page.readingOrder = ['zz', 'a']
+
+    expect(await thumbnailKey(reordered, meta)).toBe(await thumbnailKey(page(), meta))
   })
 
   it('separates pages that hold the same labels', async () => {

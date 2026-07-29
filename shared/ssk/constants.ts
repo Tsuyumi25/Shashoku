@@ -45,6 +45,4 @@ export const DIR_FONTS = 'fonts'
 
 export const PAGE_MANIFEST_FILENAME = 'manifest.json'
 
-export const PAGE_TRANSLATION_FILENAME = 'translation.json'
-
 export const PAGE_OCR_FILENAME = 'ocr.json'

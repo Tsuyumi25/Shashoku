@@ -140,7 +140,7 @@ export const useExportStore = defineStore('export', () => {
           const raw = await window.api.readImage(rawsDirOf(root), file.filename)
           page = await compositePage({
             raw,
-            labels: file.labels,
+            page: file.page,
             groups: project.projectMeta.groups,
             defaultStyle: project.projectMeta.defaultStyle,
           })

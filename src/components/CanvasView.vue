@@ -74,7 +74,9 @@ import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
 import LabelText from '@/components/LabelText.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
-import type { LabelItem } from '@/types/project'
+import type { TextLayerEntry } from '@shared/page/types'
+import { visibleTextObjects } from '@shared/page/tree'
+import { textOf } from '@shared/page/text'
 import type { Anchor } from '@/composables/useLabelDrag'
 import { screenToPageFraction } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
@@ -105,22 +107,29 @@ const currentFile = computed(() =>
  * Every label on the page, empty ones included: an object with no text still
  * has a frame, and the frame is what makes it findable.
  *
+ * Laid out in stacking order, which is the tree's, while the number on each
+ * frame comes from the reading order — the two are separate sequences now, and
+ * the canvas is where both are visible at once.
+ *
  * Resolved here rather than in the template so that panning, which re-renders
  * this component on every frame, does not hand each label a new style object
  * and make it look like the text changed.
  */
-const objects = computed(() =>
-  (currentFile.value?.labels ?? []).map((label, i) => ({
+const objects = computed(() => {
+  const file = currentFile.value
+  if (!file) return []
+  const numbering = new Map(file.page.readingOrder.map((id, i) => [id, i + 1]))
+  return visibleTextObjects(file.page).map((label) => ({
     id: label.id,
-    index: i + 1,
-    text: label.text,
+    index: numbering.get(label.id) ?? 0,
+    text: textOf(label),
     x: label.x,
     y: label.y,
     rotation: label.rotation,
     color: colorOf(label.groupId),
     style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
-  })),
-)
+  }))
+})
 
 // The picker enumerates on its first opening, which is too late for text that
 // is on screen before anyone asks to change a font.
@@ -145,8 +154,10 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   editor.cmdMoveLabel(editor.currentFilename, labelId, from, to)
 }
 
-function labelById(labelId: string): LabelItem | undefined {
-  return currentFile.value?.labels.find((l) => l.id === labelId)
+function labelById(labelId: string): TextLayerEntry | undefined {
+  return editor.currentFilename
+    ? project.labelById(editor.currentFilename, labelId)
+    : undefined
 }
 
 /**
@@ -155,7 +166,7 @@ function labelById(labelId: string): LabelItem | undefined {
  * from the size afterwards: a label that was inheriting its size has no
  * `fontSizePx` to put back, and undo has to remove the key, not restore a value.
  */
-let scaledFrom: LabelItem['styleOverride']
+let scaledFrom: TextLayerEntry['styleOverride']
 
 function beginLabelScale(labelId: string) {
   scaledFrom = labelById(labelId)?.styleOverride

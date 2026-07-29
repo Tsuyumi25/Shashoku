@@ -1,6 +1,8 @@
 import type { StyleGroup } from '@shared/project/types'
 import type { TextStyle } from '@shared/text-style/types'
-import type { LabelItem } from '@/types/project'
+import type { ManifestJson } from '@shared/page/types'
+import { visibleTextObjects } from '@shared/page/tree'
+import { textOf } from '@shared/page/text'
 import { percentToContentPx } from '@/lib/coords'
 import { labelBoxSize } from '@/lib/labelBox'
 import { rasterFor } from '@/lib/labelRaster'
@@ -17,7 +19,7 @@ export class CompositeError extends Error {}
 export interface CompositeInput {
   /** The raw page as it sits in the project's own copy. */
   raw: Uint8Array
-  labels: readonly LabelItem[]
+  page: ManifestJson
   groups: readonly StyleGroup[]
   defaultStyle: TextStyle
 }
@@ -41,12 +43,14 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
     if (!ctx) throw new CompositeError('OffscreenCanvas 2d context unavailable')
     ctx.drawImage(bitmap, 0, 0)
 
-    for (const label of input.labels) {
-      if (label.text.length === 0) continue
+    // Stacking order, which is the tree's own order — not the reading order.
+    for (const label of visibleTextObjects(input.page)) {
+      const text = textOf(label)
+      if (text.length === 0) continue
       const style = resolveTextStyle(label, input.groups, input.defaultStyle)
-      const raster = rasterFor(label.text, style)
+      const raster = rasterFor(text, style)
       if (!raster.ok) {
-        throw new CompositeError(raster.reason || `無法繪製標籤「${label.text}」`)
+        throw new CompositeError(raster.reason || `無法繪製標籤「${text}」`)
       }
       const size = labelBoxSize(style, raster.sample.image)
       const anchor = percentToContentPx(label.x, label.y, bitmap.width, bitmap.height)
