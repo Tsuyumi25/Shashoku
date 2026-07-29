@@ -17,7 +17,7 @@
           v-if="rows[vrow.index].kind === 'page'"
           tabindex="0"
           :data-page-id="rows[vrow.index].filename"
-          class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+          class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
             rows[vrow.index].filename === editor.currentFilename && 'text-foreground',
             isHere(rows[vrow.index]) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
@@ -36,7 +36,7 @@
           v-else
           tabindex="0"
           :data-row-id="(rows[vrow.index] as LabelRow).label.id"
-          class="flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+          class="flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
             isSelected(rows[vrow.index] as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
             !isEditing(rows[vrow.index] as LabelRow) && 'select-none',
