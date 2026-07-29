@@ -46,13 +46,42 @@ export const useEditorStore = defineStore('editor', () => {
   const selectedIds = ref<Set<string>>(new Set())
   const cursorId = ref<string | null>(null)
 
+  /**
+   * Where a range reaches from.
+   *
+   * Set by anything that names a single object — a plain click, a keyboard
+   * step, an object added — and deliberately left alone by extending, so that
+   * a run of Shift clicks all measure from the same place. Measuring from the
+   * cursor instead would chain each range onto the end of the last, and the
+   * selection would creep away from where it began.
+   */
+  const anchorId = ref<string | null>(null)
+
   function selectOnly(labelId: string | null) {
     cursorId.value = labelId
+    anchorId.value = labelId
     selectedIds.value = labelId === null ? new Set() : new Set([labelId])
   }
 
   function isSelected(labelId: string): boolean {
     return selectedIds.value.has(labelId)
+  }
+
+  /**
+   * Turn to the page an object lives on. Building a selection carries this
+   * second duty: a selection reaches across pages, so the click that reaches
+   * another one is also what says to go and look at it.
+   *
+   * Driven by what was clicked rather than by where the cursor ends up. Taking
+   * an object back out of the selection moves the cursor to some other member,
+   * which may be pages away — and throwing the view there would leave the
+   * person looking at somewhere they did not point at.
+   */
+  function showPageOf(id: string) {
+    const page = useProjectStore().pageOfEntry(id)
+    if (page === null || page === currentFilename.value) return
+    commitTextEdit()
+    currentFilename.value = page
   }
 
   /** One entry in or out, leaving the rest alone. */
@@ -67,6 +96,8 @@ export const useEditorStore = defineStore('editor', () => {
       cursorId.value = id
     }
     selectedIds.value = next
+    anchorId.value = id
+    showPageOf(id)
   }
 
   /**
@@ -77,7 +108,8 @@ export const useEditorStore = defineStore('editor', () => {
   function extendSelectionTo(id: string, sequence: readonly string[]) {
     const to = sequence.indexOf(id)
     if (to === -1) return
-    const from = cursorId.value === null ? -1 : sequence.indexOf(cursorId.value)
+    const anchor = anchorId.value ?? cursorId.value
+    const from = anchor === null ? -1 : sequence.indexOf(anchor)
     if (from === -1) {
       selectOnly(id)
       return
@@ -85,6 +117,7 @@ export const useEditorStore = defineStore('editor', () => {
     const [lo, hi] = from <= to ? [from, to] : [to, from]
     selectedIds.value = new Set(sequence.slice(lo, hi + 1))
     cursorId.value = id
+    showPageOf(id)
   }
 
   /**
@@ -368,6 +401,93 @@ export const useEditorStore = defineStore('editor', () => {
       natural,
     )
     addLabelAt(p.x, p.y)
+  }
+
+  /** The objects as a reader meets them, so a group dragged stays a group. */
+  function inChapterOrder(ids: readonly string[]): string[] {
+    const project = useProjectStore()
+    const wanted = new Set(ids)
+    const out: string[] = []
+    for (const file of project.files) {
+      for (const id of file.page.readingOrder) if (wanted.has(id)) out.push(id)
+    }
+    return out
+  }
+
+  /**
+   * Drop objects into a place in some page's reading order.
+   *
+   * Within a page this only rearranges what is read first — the tree comes
+   * through untouched, because stacking is a separate question and dragging in
+   * a list of translations is no way to answer it.
+   *
+   * Across pages the object really moves: it leaves the page it was on and
+   * joins the other one, landing on top of that page's stack. There is nothing
+   * to work out about where in the tree it belongs, since reading order says
+   * nothing about stacking and a page with folders has no position to translate
+   * it into.
+   *
+   * Undo restores each affected page's order wholesale. The inverse of
+   * rearranging a sequence is the sequence it was, and reconstructing that from
+   * a list of individual moves would only be the same answer computed twice.
+   */
+  function moveObjectsTo(ids: readonly string[], page: string, index: number) {
+    const project = useProjectStore()
+    const moving = inChapterOrder(ids)
+    if (moving.length === 0) return
+
+    const touched = new Set<string>([page])
+    const incoming: string[] = []
+    for (const id of moving) {
+      const from = project.pageOfEntry(id)
+      if (from === null) continue
+      touched.add(from)
+      if (from !== page) incoming.push(id)
+    }
+
+    const before = new Map<string, string[]>()
+    for (const p of touched) {
+      before.set(p, [...(project.fileByName(p)?.page.readingOrder ?? [])])
+    }
+
+    const wanted = new Set(moving)
+    const orders = new Map<string, string[]>()
+    for (const [p, order] of before) orders.set(p, order.filter((id) => !wanted.has(id)))
+
+    // The drop was aimed at the order as it stood, so anything leaving from
+    // above the target has to be taken back off the index it was counted in.
+    const targetBefore = before.get(page) ?? []
+    const leavingAbove = targetBefore.slice(0, index).filter((id) => wanted.has(id)).length
+    const at = Math.max(0, index - leavingAbove)
+    const target = orders.get(page) ?? []
+    target.splice(Math.min(at, target.length), 0, ...moving)
+
+    const settled =
+      incoming.length === 0 &&
+      [...orders].every(([p, order]) => order.join(' ') === before.get(p)?.join(' '))
+    if (settled) return
+
+    let removed: RemovedEntry[] = []
+    pushCommand({
+      label: `move-objects ${moving.length}`,
+      do: () => {
+        removed = incoming
+          .map((id) => project.removeEntry(id))
+          .filter((r): r is RemovedEntry => r !== null)
+        for (const r of removed) project.appendEntry(page, r.entry)
+        for (const [p, order] of orders) project.setReadingOrder(p, [...order])
+      },
+      undo: () => {
+        for (const r of [...removed].reverse()) {
+          project.removeEntry(r.entry.id)
+          project.restoreEntry(r)
+        }
+        for (const [p, order] of before) project.setReadingOrder(p, [...order])
+      },
+    })
+
+    // The canvas follows the cursor, and the cursor may have just emigrated.
+    if (cursorId.value !== null && wanted.has(cursorId.value)) currentFilename.value = page
   }
 
   /**
@@ -677,6 +797,7 @@ export const useEditorStore = defineStore('editor', () => {
     addLabelAt,
     addLabelAtViewCenter,
     deleteSelection,
+    moveObjectsTo,
     cmdAddLabel,
     cmdDuplicateLabel,
     cmdMoveLabel,

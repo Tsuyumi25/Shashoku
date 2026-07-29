@@ -1,5 +1,6 @@
 import type { LayerEntry } from '@shared/page/types'
 import type { DropTarget } from '@shared/page/tree'
+import type { DropZone } from '@/lib/rowDrop'
 
 export interface LayerTreeRow {
   entry: LayerEntry
@@ -46,9 +47,6 @@ export function flattenLayerRows(
   return rows
 }
 
-
-/** Which part of a row a drag is over. */
-export type DropZone = 'above' | 'below' | 'inside'
 
 /**
  * What a drop on a row means, in the terms the tree's own edits take.

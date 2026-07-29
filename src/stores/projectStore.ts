@@ -366,6 +366,29 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  function setReadingOrder(filename: string, order: string[]) {
+    const file = fileByName(filename)
+    if (!file) return
+    file.page.readingOrder = order
+    markPageDirty(filename)
+  }
+
+  /** On top of everything, which is where an object arriving on a page belongs. */
+  function appendEntry(filename: string, entry: LayerEntry) {
+    const file = fileByName(filename)
+    if (!file) return
+    file.page.layers.push(entry)
+    markPageDirty(filename)
+  }
+
+  /** Which page an entry is on, since the selection reaches across all of them. */
+  function pageOfEntry(id: string): string | null {
+    for (const file of files.value) {
+      if (findEntry(file.page.layers, id)) return file.filename
+    }
+    return null
+  }
+
   /** Anything on any page of the chapter — the selection reaches across them. */
   function entryById(id: string): LayerEntry | undefined {
     for (const file of files.value) {
@@ -606,6 +629,9 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelStyleOverride,
     setLayerVisible,
     entryById,
+    pageOfEntry,
+    setReadingOrder,
+    appendEntry,
     removeEntry,
     restoreEntry,
     moveLayer,

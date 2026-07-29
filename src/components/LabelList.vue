@@ -17,13 +17,19 @@
           v-if="rows[vrow.index].kind === 'page'"
           tabindex="0"
           :data-page-id="rows[vrow.index].filename"
-          class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+          class="relative flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
             rows[vrow.index].filename === editor.currentFilename && 'text-foreground',
             isHere(rows[vrow.index]) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
           ]"
           @mousedown="editor.selectFile(rows[vrow.index].filename)"
+          @dragover.prevent.stop="onDragOver(rows[vrow.index], $event)"
+          @drop.prevent.stop="onDrop"
         >
+          <span
+            v-if="hover?.key === rows[vrow.index].key"
+            class="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-primary"
+          />
           <span class="min-w-0 truncate text-xs font-medium">
             {{ rows[vrow.index].filename }}
           </span>
@@ -35,8 +41,9 @@
         <div
           v-else
           tabindex="0"
+          :draggable="!isEditing(rows[vrow.index] as LabelRow)"
           :data-row-id="(rows[vrow.index] as LabelRow).label.id"
-          class="flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+          class="relative flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
             isSelected(rows[vrow.index] as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
             !isEditing(rows[vrow.index] as LabelRow) && 'select-none',
@@ -44,7 +51,16 @@
           @mousedown="onPick(rows[vrow.index] as LabelRow, $event)"
           @dblclick="onEdit(rows[vrow.index] as LabelRow)"
           @keydown="onRowKey(rows[vrow.index] as LabelRow, $event)"
+          @dragstart="onDragStart(rows[vrow.index] as LabelRow, $event)"
+          @dragover.prevent.stop="onDragOver(rows[vrow.index], $event)"
+          @drop.prevent.stop="onDrop"
+          @dragend="clearDrag"
         >
+          <span
+            v-if="hover?.key === rows[vrow.index].key"
+            class="pointer-events-none absolute inset-x-0 h-0.5 bg-primary"
+            :class="hover.zone === 'above' ? 'top-0' : 'bottom-0'"
+          />
           <span class="w-5 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
             {{ (rows[vrow.index] as LabelRow).index }}
           </span>
@@ -81,7 +97,14 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
-import { buildLabelRows, type ChapterRow, type LabelRow, type PageRow } from '@/lib/labelRows'
+import {
+  buildLabelRows,
+  dropIntoReadingOrder,
+  type ChapterRow,
+  type LabelRow,
+  type PageRow,
+} from '@/lib/labelRows'
+import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -120,7 +143,7 @@ function measureRow(el: unknown) {
 }
 
 function isSelected(row: LabelRow): boolean {
-  return row.filename === editor.currentFilename && editor.isSelected(row.label.id)
+  return editor.isSelected(row.label.id)
 }
 
 /**
@@ -184,6 +207,48 @@ function onRowKey(row: LabelRow, e: KeyboardEvent) {
   if (editor.selectedIds.size > 1) return
   e.preventDefault()
   onEdit(row)
+}
+
+const dragging = ref<string[]>([])
+const hover = ref<{ key: string; zone: DropZone } | null>(null)
+
+/**
+ * One row at a time, as in the layer tree. Carrying a whole selection is a
+ * capability neither panel has, and having it here alone would make the same
+ * gesture mean different things in two lists side by side.
+ *
+ * Nothing about the selection is touched here. The press that began the drag
+ * already settled it, and changing it now would redraw the row under the
+ * pointer mid-gesture — which Chromium answers by abandoning the drag.
+ */
+function onDragStart(row: LabelRow, e: DragEvent) {
+  dragging.value = [row.label.id]
+  // Without a payload Chromium refuses to start the drag at all, even though
+  // the drop is resolved from component state rather than from what is carried.
+  e.dataTransfer?.setData('text/plain', row.label.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragOver(row: ChapterRow, e: DragEvent) {
+  if (dragging.value.length === 0) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  hover.value = { key: row.key, zone: zoneAt(rect, e.clientY, false) }
+}
+
+function onDrop() {
+  const ids = dragging.value
+  const over = hover.value
+  clearDrag()
+  if (ids.length === 0 || over === null) return
+  const row = rows.value.find((r) => r.key === over.key)
+  if (row === undefined) return
+  const target = dropIntoReadingOrder(row, over.zone)
+  editor.moveObjectsTo(ids, target.page, target.index)
+}
+
+function clearDrag() {
+  dragging.value = []
+  hover.value = null
 }
 
 function onInputKey(e: KeyboardEvent) {

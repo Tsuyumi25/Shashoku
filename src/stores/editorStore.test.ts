@@ -864,3 +864,280 @@ describe('editBy', () => {
     expect(editor.pendingTextEdit).toEqual({ filename: '002.png', labelId: 'b', from: 'b0' })
   })
 })
+
+describe('moveObjectsTo', () => {
+  function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
+    const project = useProjectStore()
+    project.files = pages.map((p) => ({
+      filename: p.name,
+      pageDir: `/x/${p.name}`,
+      page: {
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        revision: 0,
+        readingOrder: p.order,
+        layers: p.layers,
+      },
+      badge: 'ok' as const,
+    }))
+    const editor = useEditorStore()
+    editor.currentFilename = pages[0].name
+    return { project, editor }
+  }
+
+  const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
+    project.fileByName(name)?.page.readingOrder ?? []
+
+  const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
+    (project.fileByName(name)?.page.layers ?? []).map((e) => e.id)
+
+  /**
+   * Reordering within a page is about what is read first, and says nothing
+   * about what covers what — so the tree comes through untouched.
+   */
+  it('reorders a page without restacking it', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b'), label('c')], order: ['a', 'b', 'c'] },
+    ])
+
+    editor.moveObjectsTo(['c'], 'p1', 0)
+
+    expect(orderOf(project, 'p1')).toEqual(['c', 'a', 'b'])
+    expect(stackOf(project, 'p1')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('lands where it was aimed when moving down its own page', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b'), label('c')], order: ['a', 'b', 'c'] },
+    ])
+
+    editor.moveObjectsTo(['a'], 'p1', 2)
+
+    expect(orderOf(project, 'p1')).toEqual(['b', 'a', 'c'])
+  })
+
+  it('keeps a group of them together, in the order they were read in', () => {
+    const { project, editor } = open([
+      {
+        name: 'p1',
+        layers: [label('a'), label('b'), label('c'), label('d')],
+        order: ['a', 'b', 'c', 'd'],
+      },
+    ])
+
+    editor.moveObjectsTo(['a', 'c'], 'p1', 4)
+
+    expect(orderOf(project, 'p1')).toEqual(['b', 'd', 'a', 'c'])
+  })
+
+  it('undoes a reorder back to the order it was in', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b'), label('c')], order: ['a', 'b', 'c'] },
+    ])
+    editor.moveObjectsTo(['c'], 'p1', 0)
+
+    editor.undo()
+
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b', 'c'])
+  })
+
+  /** Across pages the object really moves: it leaves one page and joins another. */
+  it('carries an object to another page, tree and all', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'] },
+      { name: 'p2', layers: [label('c')], order: ['c'] },
+    ])
+
+    editor.moveObjectsTo(['a'], 'p2', 1)
+
+    expect(orderOf(project, 'p1')).toEqual(['b'])
+    expect(stackOf(project, 'p1')).toEqual(['b'])
+    expect(orderOf(project, 'p2')).toEqual(['c', 'a'])
+    expect(stackOf(project, 'p2')).toEqual(['c', 'a'])
+  })
+
+  it('can land on a page that had nothing on it', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a')], order: ['a'] },
+      { name: 'p2', layers: [], order: [] },
+    ])
+
+    editor.moveObjectsTo(['a'], 'p2', 0)
+
+    expect(orderOf(project, 'p2')).toEqual(['a'])
+    expect(stackOf(project, 'p2')).toEqual(['a'])
+    expect(orderOf(project, 'p1')).toEqual([])
+  })
+
+  it('sends an object home again on undo, to the place it came from', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'] },
+      { name: 'p2', layers: [label('c')], order: ['c'] },
+    ])
+    editor.moveObjectsTo(['a'], 'p2', 0)
+
+    editor.undo()
+
+    expect(stackOf(project, 'p1')).toEqual(['a', 'b'])
+    expect(orderOf(project, 'p1')).toEqual(['a', 'b'])
+    expect(stackOf(project, 'p2')).toEqual(['c'])
+    expect(orderOf(project, 'p2')).toEqual(['c'])
+  })
+
+  it('is one step of history however many pages it touched', () => {
+    const { editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'] },
+      { name: 'p2', layers: [label('c')], order: ['c'] },
+    ])
+
+    editor.moveObjectsTo(['a', 'c'], 'p2', 0)
+
+    editor.undo()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('does nothing when the drop lands where the objects already are', () => {
+    const { editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'] },
+    ])
+
+    editor.moveObjectsTo(['a'], 'p1', 0)
+
+    expect(editor.canUndo).toBe(false)
+  })
+})
+
+describe('a selection that reaches across pages', () => {
+  function open() {
+    const project = useProjectStore()
+    project.files = [
+      pageOf('001.png', [label('a'), label('b')]),
+      pageOf('002.png', [label('c'), label('d')]),
+    ]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.selectOnly('a')
+    return { project, editor }
+  }
+
+  /**
+   * The page shown is wherever the cursor is, and adding an object to the
+   * selection moves the cursor onto it — so the click that reaches another
+   * page is also the click that turns to it.
+   */
+  it('turns to the page of an object added from another one', () => {
+    const { editor } = open()
+
+    editor.toggleSelected('c')
+
+    expect(editor.cursorId).toBe('c')
+    expect(editor.currentFilename).toBe('002.png')
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'c'])
+  })
+
+  it('turns to the page a range was reached out to', () => {
+    const { editor } = open()
+
+    editor.extendSelectionTo('c', ['a', 'b', 'c', 'd'])
+
+    expect(editor.currentFilename).toBe('002.png')
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  /**
+   * The click decides the page, not the cursor. Taking an object out sends the
+   * cursor to some other member, possibly pages away — going there would be
+   * going somewhere nobody pointed at.
+   */
+  it('stays where the click was, even when the click took something away', () => {
+    const { editor } = open()
+    editor.toggleSelected('c')
+
+    editor.toggleSelected('c')
+
+    expect(editor.cursorId).toBe('a')
+    expect(editor.currentFilename).toBe('002.png')
+  })
+
+  it('leaves the page alone when the selection empties', () => {
+    const { editor } = open()
+
+    editor.toggleSelected('a')
+
+    expect(editor.cursorId).toBeNull()
+    expect(editor.currentFilename).toBe('001.png')
+  })
+})
+
+describe('reaching a range out', () => {
+  const SEQ = ['a', 'b', 'c', 'd', 'e']
+
+  function open() {
+    const { editor } = openOnePage(SEQ.map((id) => label(id)))
+    return editor
+  }
+
+  /**
+   * A run of Shift clicks all measure from the same place. Measuring from the
+   * last one instead chains range onto range, and the selection creeps away
+   * from where it started.
+   */
+  it('keeps measuring from where the range began', () => {
+    const editor = open()
+    editor.selectOnly('b')
+
+    editor.extendSelectionTo('d', SEQ)
+    editor.extendSelectionTo('e', SEQ)
+
+    expect([...editor.selectedIds].sort()).toEqual(['b', 'c', 'd', 'e'])
+  })
+
+  it('shrinks when the far end is brought back in', () => {
+    const editor = open()
+    editor.selectOnly('b')
+
+    editor.extendSelectionTo('e', SEQ)
+    editor.extendSelectionTo('c', SEQ)
+
+    expect([...editor.selectedIds].sort()).toEqual(['b', 'c'])
+  })
+
+  it('turns around when the far end passes the start', () => {
+    const editor = open()
+    editor.selectOnly('c')
+
+    editor.extendSelectionTo('e', SEQ)
+    editor.extendSelectionTo('a', SEQ)
+
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('takes a plain click as the new place to measure from', () => {
+    const editor = open()
+    editor.selectOnly('a')
+    editor.extendSelectionTo('c', SEQ)
+
+    editor.selectOnly('d')
+    editor.extendSelectionTo('e', SEQ)
+
+    expect([...editor.selectedIds].sort()).toEqual(['d', 'e'])
+  })
+
+  it('takes an added object as the new place to measure from', () => {
+    const editor = open()
+    editor.selectOnly('a')
+
+    editor.toggleSelected('c')
+    editor.extendSelectionTo('e', SEQ)
+
+    expect([...editor.selectedIds].sort()).toEqual(['c', 'd', 'e'])
+  })
+
+  it('leaves the cursor on the end that was just reached', () => {
+    const editor = open()
+    editor.selectOnly('b')
+
+    editor.extendSelectionTo('d', SEQ)
+
+    expect(editor.cursorId).toBe('d')
+  })
+})

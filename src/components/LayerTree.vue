@@ -73,7 +73,8 @@
 import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type, Ungroup } from '@lucide/vue'
 import type { LayerEntry } from '@shared/page/types'
-import { dropTargetFor, flattenLayerRows, type DropZone, type LayerTreeRow } from '@/lib/layerRows'
+import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
+import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -137,25 +138,10 @@ function onDragStart(row: LayerTreeRow, e: DragEvent) {
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
 }
 
-/**
- * A folder gets a middle band that files things into it; everything else is
- * split in two. The bands are deliberately narrow, since dropping between two
- * rows is the common move and dropping into a folder the deliberate one.
- */
-function zoneAt(row: LayerTreeRow, e: DragEvent): DropZone {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const ratio = rect.height === 0 ? 0 : (e.clientY - rect.top) / rect.height
-  if (row.entry.kind === 'group') {
-    if (ratio < 0.25) return 'above'
-    if (ratio > 0.75) return 'below'
-    return 'inside'
-  }
-  return ratio < 0.5 ? 'above' : 'below'
-}
-
 function onDragOver(row: LayerTreeRow, e: DragEvent) {
   if (dragging.value === null || dragging.value.id === row.entry.id) return
-  hover.value = { id: row.entry.id, zone: zoneAt(row, e) }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  hover.value = { id: row.entry.id, zone: zoneAt(rect, e.clientY, row.entry.kind === 'group') }
 }
 
 function onDrop() {
