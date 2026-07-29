@@ -1,4 +1,5 @@
 import type { LayerEntry } from '@shared/page/types'
+import type { DropTarget } from '@shared/page/tree'
 
 export interface LayerTreeRow {
   entry: LayerEntry
@@ -43,4 +44,26 @@ export function flattenLayerRows(
 
   walk(layers, [], 0, false)
   return rows
+}
+
+
+/** Which part of a row a drag is over. */
+export type DropZone = 'above' | 'below' | 'inside'
+
+/**
+ * What a drop on a row means, in the terms the tree's own edits take.
+ *
+ * The panel reads top to bottom while the array counts bottom to top, so this
+ * is where the two meet: dropping above a row lands after it in the array, and
+ * dropping below it lands before. Getting that backwards puts every drag one
+ * place off in a way that is easy to miss and maddening to use.
+ */
+export function dropTargetFor(row: LayerTreeRow, zone: DropZone): DropTarget | null {
+  if (zone === 'inside') {
+    if (row.entry.kind !== 'group') return null
+    return { parentPath: row.path, index: row.entry.children.length }
+  }
+  const parentPath = row.path.slice(0, -1)
+  const index = row.path[row.path.length - 1]
+  return { parentPath, index: zone === 'above' ? index + 1 : index }
 }

@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson, StyleGroup } from '@shared/project/types'
-import type { TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
 import {
   defaultColorForGroupIndex,
   defaultProjectJson,
@@ -12,12 +12,16 @@ import {
 import { defaultManifest, parseManifest, serializeManifest } from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import {
+  dissolveGroupAt,
   findEntry,
   findTextObject,
   insertAtPath,
+  moveEntry,
   pathOf,
   removeAtPath,
+  restoreGroupAt,
   textObjectsInReadingOrder,
+  type DropTarget,
 } from '@shared/page/tree'
 import { linesOf } from '@shared/page/text'
 import { previewImport, type ImportDiff } from '@shared/project/import'
@@ -315,6 +319,60 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /** A folder starts empty and on top; things are filed into it afterwards. */
+  function addFolder(filename: string, folder: GroupLayerEntry, path?: number[]) {
+    const file = fileByName(filename)
+    if (!file) return
+    const at = path ?? [file.page.layers.length]
+    if (!insertAtPath(file.page.layers, at, folder)) file.page.layers.push(folder)
+    markPageDirty(filename)
+  }
+
+  function dissolveFolder(
+    filename: string,
+    folderId: string,
+  ): { path: number[]; folder: GroupLayerEntry } | null {
+    const file = fileByName(filename)
+    if (!file) return null
+    const path = pathOf(file.page.layers, folderId)
+    if (path === null) return null
+    const folder = dissolveGroupAt(file.page.layers, path)
+    if (folder === null) return null
+    markPageDirty(filename)
+    return { path, folder }
+  }
+
+  function restoreFolder(filename: string, path: number[], folder: GroupLayerEntry) {
+    const file = fileByName(filename)
+    if (!file) return
+    if (!restoreGroupAt(file.page.layers, path, folder)) return
+    markPageDirty(filename)
+  }
+
+  function moveLayer(filename: string, fromPath: number[], target: DropTarget): boolean {
+    const file = fileByName(filename)
+    if (!file) return false
+    if (!moveEntry(file.page.layers, fromPath, target)) return false
+    markPageDirty(filename)
+    return true
+  }
+
+  /**
+   * Undoes a restack by putting an entry back at the path it left, which the
+   * drop rules cannot express: their indices are read before the entry comes
+   * out, and running them backwards lands one place off.
+   */
+  function restoreLayerAt(filename: string, layerId: string, path: number[]) {
+    const file = fileByName(filename)
+    if (!file) return
+    const current = pathOf(file.page.layers, layerId)
+    if (current === null) return
+    const entry = removeAtPath(file.page.layers, current)
+    if (entry === null) return
+    insertAtPath(file.page.layers, path, entry)
+    markPageDirty(filename)
+  }
+
   function moveLabel(filename: string, labelId: string, x: number, y: number) {
     const label = labelById(filename, labelId)
     if (!label) return
@@ -486,6 +544,11 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelGroupId,
     updateLabelStyleOverride,
     setLayerVisible,
+    moveLayer,
+    restoreLayerAt,
+    addFolder,
+    dissolveFolder,
+    restoreFolder,
     addGroup,
     renameGroup,
     updateGroupStyle,

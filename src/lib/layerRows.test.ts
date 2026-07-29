@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
-import { flattenLayerRows } from '@/lib/layerRows'
+import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
 
 function text(id: string, visible = true): TextLayerEntry {
   return {
@@ -97,5 +97,38 @@ describe('flattenLayerRows', () => {
   it('leaves what is inside a shown folder unmarked', () => {
     const rows = flattenLayerRows([group('g', [text('a')])], new Set())
     expect(rows.every((r) => !r.hiddenByAncestor)).toBe(true)
+  })
+})
+
+describe('dropTargetFor', () => {
+  const rowsOf = (layers: LayerEntry[]) => flattenLayerRows(layers, new Set())
+
+  // Rows read top to bottom while the array counts bottom to top, so landing
+  // above a row on screen means landing after it in the array.
+  it('reads a drop above a row as the slot after it', () => {
+    const rows = rowsOf([text('under'), text('over')])
+    const overRow = rows[0]
+    expect(dropTargetFor(overRow, 'above')).toEqual({ parentPath: [], index: 2 })
+  })
+
+  it('reads a drop below a row as the slot before it', () => {
+    const rows = rowsOf([text('under'), text('over')])
+    expect(dropTargetFor(rows[0], 'below')).toEqual({ parentPath: [], index: 1 })
+  })
+
+  it('keeps the level a nested row belongs to', () => {
+    const rows = rowsOf([group('g', [text('a'), text('b')])])
+    const bRow = rows.find((r) => r.entry.id === 'b')
+    expect(dropTargetFor(bRow!, 'below')).toEqual({ parentPath: [0], index: 1 })
+  })
+
+  it('drops into a folder at the top of what it holds', () => {
+    const rows = rowsOf([group('g', [text('a'), text('b')])])
+    expect(dropTargetFor(rows[0], 'inside')).toEqual({ parentPath: [0], index: 2 })
+  })
+
+  it('has no inside for something that cannot hold anything', () => {
+    const rows = rowsOf([text('a')])
+    expect(dropTargetFor(rows[0], 'inside')).toBeNull()
   })
 })

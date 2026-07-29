@@ -1,11 +1,12 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import type { TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace } from '@/stores/projectStore'
 import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
+import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
   
@@ -361,6 +362,68 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  function cmdAddFolder(filename: string, name: string) {
+    const project = useProjectStore()
+    const folder: GroupLayerEntry = {
+      kind: 'group',
+      id: generateLabelId(),
+      name,
+      visible: true,
+      locked: false,
+      children: [],
+    }
+    let path: number[] | undefined
+    pushCommand({
+      label: `add-folder ${folder.id}`,
+      do: () => project.addFolder(filename, folder, path),
+      undo: () => {
+        const removed = project.dissolveFolder(filename, folder.id)
+        path = removed?.path
+      },
+    })
+  }
+
+  /**
+   * Dissolving rather than deleting: a folder is pure containment, so taking
+   * one away has to leave what it held behind. There is no way to lose a
+   * translation by tidying up.
+   */
+  function cmdDissolveFolder(filename: string, folderId: string) {
+    const project = useProjectStore()
+    const removed = project.dissolveFolder(filename, folderId)
+    if (removed === null) return
+    pushCommand(
+      {
+        label: `dissolve-folder ${folderId}`,
+        do: () => project.dissolveFolder(filename, folderId),
+        undo: () => project.restoreFolder(filename, removed.path, removed.folder),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
+   * Applied first so a refused drop — a folder aimed into itself — never
+   * reaches the stack as an entry that undoes to nothing.
+   */
+  function cmdMoveLayer(
+    filename: string,
+    layerId: string,
+    fromPath: number[],
+    target: DropTarget,
+  ) {
+    const project = useProjectStore()
+    if (!project.moveLayer(filename, fromPath, target)) return
+    pushCommand(
+      {
+        label: `move-layer ${layerId}`,
+        do: () => project.moveLayer(filename, fromPath, target),
+        undo: () => project.restoreLayerAt(filename, layerId, fromPath),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
   function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
     const project = useProjectStore()
     pushCommand({
@@ -464,6 +527,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLabel,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,
+    cmdAddFolder,
+    cmdDissolveFolder,
+    cmdMoveLayer,
     cmdSetLayerVisible,
     cmdUpdateLabelText,
     cmdUpdateLabelGroupId,

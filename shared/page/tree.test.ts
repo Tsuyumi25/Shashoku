@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import {
+  dissolveGroupAt,
   findEntry,
   findTextObject,
+  moveEntry,
+  restoreGroupAt,
   visibleTextObjects,
   insertAtPath,
   pathOf,
@@ -141,6 +144,84 @@ describe('findTextObject', () => {
   })
 })
 
+describe('moveEntry', () => {
+  const layout = (): LayerEntry[] => [
+    text('a'),
+    group('g', [text('b'), text('c')]),
+    text('d'),
+  ]
+
+  it('restacks within one level', () => {
+    const layers = layout()
+    expect(moveEntry(layers, [0], { parentPath: [], index: 3 })).toBe(true)
+    expect(layers.map((e) => e.id)).toEqual(['g', 'd', 'a'])
+  })
+
+  // Taking the entry out first shifts everything after it down one, so an
+  // index taken from the tree as the user saw it no longer means what it said.
+  it('lands where it was aimed when moving down its own level', () => {
+    const layers = layout()
+    moveEntry(layers, [0], { parentPath: [], index: 2 })
+    expect(layers.map((e) => e.id)).toEqual(['g', 'a', 'd'])
+  })
+
+  it('lands where it was aimed when moving up its own level', () => {
+    const layers = layout()
+    moveEntry(layers, [2], { parentPath: [], index: 0 })
+    expect(layers.map((e) => e.id)).toEqual(['d', 'a', 'g'])
+  })
+
+  it('files an entry into a folder', () => {
+    const layers = layout()
+    expect(moveEntry(layers, [0], { parentPath: [1], index: 1 })).toBe(true)
+    expect(layers.map((e) => e.id)).toEqual(['g', 'd'])
+    expect((layers[0] as GroupLayerEntry).children.map((e) => e.id)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('takes an entry back out of a folder', () => {
+    const layers = layout()
+    expect(moveEntry(layers, [1, 0], { parentPath: [], index: 0 })).toBe(true)
+    expect(layers.map((e) => e.id)).toEqual(['b', 'a', 'g', 'd'])
+    expect((layers[2] as GroupLayerEntry).children.map((e) => e.id)).toEqual(['c'])
+  })
+
+  it('corrects a destination that sat after the hole left behind', () => {
+    const layers: LayerEntry[] = [text('a'), group('g', [text('b')])]
+    expect(moveEntry(layers, [0], { parentPath: [1], index: 0 })).toBe(true)
+    expect((layers[0] as GroupLayerEntry).children.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+
+  it('refuses to put a folder inside itself', () => {
+    const layers = layout()
+    const before = JSON.stringify(layers)
+    expect(moveEntry(layers, [1], { parentPath: [1], index: 0 })).toBe(false)
+    expect(JSON.stringify(layers)).toBe(before)
+  })
+
+  it('refuses to put a folder inside something it already contains', () => {
+    const layers: LayerEntry[] = [group('outer', [group('inner', [])])]
+    expect(moveEntry(layers, [0], { parentPath: [0, 0], index: 0 })).toBe(false)
+    expect(layers.map((e) => e.id)).toEqual(['outer'])
+  })
+
+  it('refuses a source that leads nowhere', () => {
+    const layers = layout()
+    expect(moveEntry(layers, [9], { parentPath: [], index: 0 })).toBe(false)
+  })
+
+  it('refuses a destination that is not a folder', () => {
+    const layers = layout()
+    expect(moveEntry(layers, [0], { parentPath: [2], index: 0 })).toBe(false)
+    expect(layers.map((e) => e.id)).toEqual(['a', 'g', 'd'])
+  })
+
+  it('leaves the entries themselves untouched, so nothing about reading changes', () => {
+    const layers = layout()
+    moveEntry(layers, [0], { parentPath: [1], index: 0 })
+    expect(idsOf(textObjects(layers)).sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
 describe('pathOf / removeAtPath / insertAtPath', () => {
   it('names where an entry sits', () => {
     const layers = [text('a'), group('g', [text('b'), text('c')])]
@@ -175,5 +256,41 @@ describe('pathOf / removeAtPath / insertAtPath', () => {
     const layers: LayerEntry[] = [text('a')]
     expect(removeAtPath(layers, [4])).toBeNull()
     expect(removeAtPath(layers, [0, 2])).toBeNull()
+  })
+})
+
+describe('dissolveGroupAt / restoreGroupAt', () => {
+  it('leaves what a folder held exactly where the folder was', () => {
+    const layers: LayerEntry[] = [text('a'), group('g', [text('b'), text('c')]), text('d')]
+    const folder = dissolveGroupAt(layers, [1])
+    expect(folder?.id).toBe('g')
+    expect(layers.map((e) => e.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('just takes an empty folder away', () => {
+    const layers: LayerEntry[] = [text('a'), group('g', [])]
+    expect(dissolveGroupAt(layers, [1])?.id).toBe('g')
+    expect(layers.map((e) => e.id)).toEqual(['a'])
+  })
+
+  it('dissolves one nested inside another', () => {
+    const layers: LayerEntry[] = [group('outer', [text('a'), group('inner', [text('b')])])]
+    expect(dissolveGroupAt(layers, [0, 1])?.id).toBe('inner')
+    expect((layers[0] as GroupLayerEntry).children.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+
+  it('refuses anything that is not a folder', () => {
+    const layers: LayerEntry[] = [text('a')]
+    expect(dissolveGroupAt(layers, [0])).toBeNull()
+    expect(layers.map((e) => e.id)).toEqual(['a'])
+  })
+
+  it('puts the folder back around exactly what it held', () => {
+    const layers: LayerEntry[] = [text('a'), group('g', [text('b'), text('c')]), text('d')]
+    const before = JSON.stringify(layers)
+    const folder = dissolveGroupAt(layers, [1])
+
+    expect(restoreGroupAt(layers, [1], folder as GroupLayerEntry)).toBe(true)
+    expect(JSON.stringify(layers)).toBe(before)
   })
 })

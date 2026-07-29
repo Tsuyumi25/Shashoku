@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import type { ProjectFile } from '@/types/project'
-import type { TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
 
@@ -383,5 +383,97 @@ describe('cmdUpdateLabelStyleOverride', () => {
     const { editor } = openOnePage([label('a')])
     editor.cmdUpdateLabelStyleOverride(PAGE, 'a', { fontSizePx: 24 }, { fontSizePx: 24 })
     expect(editor.canUndo).toBe(false)
+  })
+})
+
+describe('layer tree edits', () => {
+  function folder(id: string, children: TextLayerEntry[]): GroupLayerEntry {
+    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+  }
+
+  function openTree(layers: LayerEntry[], readingOrder: string[]) {
+    const project = useProjectStore()
+    project.files = [
+      {
+        filename: PAGE,
+        pageDir: `/x/${PAGE}`,
+        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, layers },
+        badge: 'ok',
+      },
+    ]
+    const editor = useEditorStore()
+    editor.currentFilename = PAGE
+    return { project, editor }
+  }
+
+  const stackOf = (project: ReturnType<typeof useProjectStore>): string[] =>
+    (project.fileByName(PAGE)?.page.layers ?? []).map((e) => e.id)
+
+  const orderOf = (project: ReturnType<typeof useProjectStore>): string[] =>
+    project.fileByName(PAGE)?.page.readingOrder ?? []
+
+  /**
+   * The reason the two orders are held apart at all: restacking is about what
+   * covers what, and has nothing to say about what is read first.
+   */
+  it('restacks without disturbing what order the page is read in', () => {
+    const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+
+    editor.cmdMoveLayer(PAGE, 'a', [0], { parentPath: [], index: 3 })
+
+    expect(stackOf(project)).toEqual(['b', 'c', 'a'])
+    expect(orderOf(project)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('undoes a restack back to where the entry came from', () => {
+    const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+    editor.cmdMoveLayer(PAGE, 'c', [2], { parentPath: [], index: 0 })
+    expect(stackOf(project)).toEqual(['c', 'a', 'b'])
+
+    editor.undo()
+
+    expect(stackOf(project)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps a refused drop out of the history', () => {
+    const { editor } = openTree([folder('g', [label('a')])], ['a'])
+
+    editor.cmdMoveLayer(PAGE, 'g', [0], { parentPath: [0], index: 0 })
+
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('adds a folder and takes it away again', () => {
+    const { project, editor } = openTree([label('a')], ['a'])
+
+    editor.cmdAddFolder(PAGE, '對白')
+    expect(stackOf(project)).toHaveLength(2)
+
+    editor.undo()
+    expect(stackOf(project)).toEqual(['a'])
+  })
+
+  it('leaves what a folder held behind when it is dissolved, and re-wraps on undo', () => {
+    const { project, editor } = openTree(
+      [label('a'), folder('g', [label('b'), label('c')])],
+      ['a', 'b', 'c'],
+    )
+
+    editor.cmdDissolveFolder(PAGE, 'g')
+    expect(stackOf(project)).toEqual(['a', 'b', 'c'])
+    expect(orderOf(project)).toEqual(['a', 'b', 'c'])
+
+    editor.undo()
+    expect(stackOf(project)).toEqual(['a', 'g'])
+  })
+
+  it('hides a layer and shows it again', () => {
+    const { project, editor } = openTree([label('a')], ['a'])
+
+    editor.cmdSetLayerVisible(PAGE, 'a', false)
+    expect(project.labelById(PAGE, 'a')?.visible).toBe(false)
+
+    editor.undo()
+    expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
   })
 })

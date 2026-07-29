@@ -48,6 +48,16 @@
         >
           <Plus :size="14" />
         </button>
+        <button
+          v-else
+          type="button"
+          class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="新增資料夾"
+          :disabled="!editor.currentFilename"
+          @click="onAddFolder"
+        >
+          <FolderPlus :size="14" />
+        </button>
       </div>
       <LabelList v-if="showingLabels" />
       <LayerTree v-else />
@@ -93,7 +103,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Layers, List, Plus } from '@lucide/vue'
+import { FolderPlus, Layers, List, Plus } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
@@ -108,6 +118,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
+import { allEntries } from '@shared/page/tree'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -121,6 +132,19 @@ const showingLabels = computed(() => ui.panel === 'labels')
 const labelCount = computed(() =>
   project.files.reduce((n, f) => n + f.page.readingOrder.length, 0),
 )
+
+function onAddFolder() {
+  if (!editor.currentFilename) return
+  const page = project.fileByName(editor.currentFilename)?.page
+  const taken = new Set(
+    (page ? allEntries(page.layers) : [])
+      .filter((e) => e.kind === 'group')
+      .map((e) => e.name),
+  )
+  let n = taken.size + 1
+  while (taken.has(`資料夾${n}`)) n++
+  editor.cmdAddFolder(editor.currentFilename, `資料夾${n}`)
+}
 
 function onAddGroup() {
   const taken = new Set(project.header.groups.map((g) => g.name))

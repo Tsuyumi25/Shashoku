@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full min-h-0 overflow-y-auto select-none">
+  <div class="h-full min-h-0 overflow-y-auto select-none" @dragover.prevent @drop.prevent="onDrop">
     <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
       {{ editor.currentFilename ? '本頁沒有圖層' : '尚未開啟頁面' }}
     </div>
@@ -7,14 +7,26 @@
     <div
       v-for="row in rows"
       :key="row.entry.id"
-      class="flex h-7 items-center gap-1 border-b border-border/40 pr-1"
+      draggable="true"
+      class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
       :class="[
         isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
         row.hiddenByAncestor && 'opacity-40',
+        hover?.id === row.entry.id && hover.zone === 'inside' && 'ring-1 ring-inset ring-primary',
       ]"
       :style="{ paddingLeft: `${row.depth * 0.75 + 0.25}rem` }"
       @click="onPick(row)"
+      @dragstart="onDragStart(row, $event)"
+      @dragover.prevent.stop="onDragOver(row, $event)"
+      @drop.prevent.stop="onDrop"
+      @dragend="clearDrag"
     >
+      <span
+        v-if="hover?.id === row.entry.id && hover.zone !== 'inside'"
+        class="pointer-events-none absolute right-0 left-0 h-0.5 bg-primary"
+        :class="hover.zone === 'above' ? 'top-0' : 'bottom-0'"
+      />
+
       <button
         v-if="row.entry.kind === 'group'"
         type="button"
@@ -43,15 +55,25 @@
         class="min-w-0 flex-1 truncate text-xs"
         :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
       >{{ nameFor(row.entry) }}</span>
+
+      <button
+        v-if="row.entry.kind === 'group'"
+        type="button"
+        class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
+        title="解散資料夾（內容留在原地）"
+        @click.stop="onDissolve(row.entry.id)"
+      >
+        <Ungroup :size="13" />
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type } from '@lucide/vue'
+import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type, Ungroup } from '@lucide/vue'
 import type { LayerEntry } from '@shared/page/types'
-import { flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
+import { dropTargetFor, flattenLayerRows, type DropZone, type LayerTreeRow } from '@/lib/layerRows'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -93,6 +115,62 @@ function onToggleVisible(entry: LayerEntry) {
   if (!editor.currentFilename) return
   editor.cmdSetLayerVisible(editor.currentFilename, entry.id, !entry.visible)
 }
+
+function onDissolve(folderId: string) {
+  if (!editor.currentFilename) return
+  editor.cmdDissolveFolder(editor.currentFilename, folderId)
+}
+
+
+const dragging = ref<{ id: string; path: number[] } | null>(null)
+const hover = ref<{ id: string; zone: DropZone } | null>(null)
+
+function onDragStart(row: LayerTreeRow, e: DragEvent) {
+  dragging.value = { id: row.entry.id, path: row.path }
+  // Without a payload Chromium refuses to start the drag at all, even though
+  // the drop is resolved from component state rather than from what is carried.
+  e.dataTransfer?.setData('text/plain', row.entry.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+/**
+ * A folder gets a middle band that files things into it; everything else is
+ * split in two. The bands are deliberately narrow, since dropping between two
+ * rows is the common move and dropping into a folder the deliberate one.
+ */
+function zoneAt(row: LayerTreeRow, e: DragEvent): DropZone {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = rect.height === 0 ? 0 : (e.clientY - rect.top) / rect.height
+  if (row.entry.kind === 'group') {
+    if (ratio < 0.25) return 'above'
+    if (ratio > 0.75) return 'below'
+    return 'inside'
+  }
+  return ratio < 0.5 ? 'above' : 'below'
+}
+
+function onDragOver(row: LayerTreeRow, e: DragEvent) {
+  if (dragging.value === null || dragging.value.id === row.entry.id) return
+  hover.value = { id: row.entry.id, zone: zoneAt(row, e) }
+}
+
+function onDrop() {
+  const from = dragging.value
+  const over = hover.value
+  clearDrag()
+  if (from === null || over === null || !editor.currentFilename) return
+  const row = rows.value.find((r) => r.entry.id === over.id)
+  if (row === undefined) return
+  const target = dropTargetFor(row, over.zone)
+  if (target === null) return
+  editor.cmdMoveLayer(editor.currentFilename, from.id, from.path, target)
+}
+
+function clearDrag() {
+  dragging.value = null
+  hover.value = null
+}
+
 
 function iconFor(entry: LayerEntry) {
   if (entry.kind === 'group') return Folder
