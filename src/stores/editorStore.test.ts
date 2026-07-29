@@ -695,3 +695,172 @@ describe('deleteSelection', () => {
     expect(editor.cursorId).toBe('b')
   })
 })
+
+describe('building a selection', () => {
+  it('adds one and moves the cursor onto it', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+    editor.selectOnly('a')
+
+    editor.toggleSelected('b')
+
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'b'])
+    expect(editor.cursorId).toBe('b')
+  })
+
+  it('takes one back out', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+    editor.selectOnly('a')
+    editor.toggleSelected('b')
+
+    editor.toggleSelected('b')
+
+    expect([...editor.selectedIds]).toEqual(['a'])
+  })
+
+  // The cursor is a place inside the selection, so it cannot be left pointing
+  // at something no longer in it.
+  it('moves the cursor off an entry that is deselected', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+    editor.selectOnly('a')
+    editor.toggleSelected('b')
+    expect(editor.cursorId).toBe('b')
+
+    editor.toggleSelected('b')
+
+    expect(editor.cursorId).toBe('a')
+    expect(editor.selectedIds.has('a')).toBe(true)
+  })
+
+  it('leaves no cursor when the last one is taken out', () => {
+    const { editor } = openOnePage([label('a')])
+    editor.selectOnly('a')
+
+    editor.toggleSelected('a')
+
+    expect(editor.cursorId).toBeNull()
+    expect([...editor.selectedIds]).toEqual([])
+  })
+
+  it('reaches from the cursor to where it was told, forwards', () => {
+    const { editor } = openOnePage([label('a'), label('b'), label('c'), label('d')])
+    editor.selectOnly('b')
+
+    editor.extendSelectionTo('d', ['a', 'b', 'c', 'd'])
+
+    expect([...editor.selectedIds].sort()).toEqual(['b', 'c', 'd'])
+    expect(editor.cursorId).toBe('d')
+  })
+
+  it('reaches backwards just the same', () => {
+    const { editor } = openOnePage([label('a'), label('b'), label('c'), label('d')])
+    editor.selectOnly('c')
+
+    editor.extendSelectionTo('a', ['a', 'b', 'c', 'd'])
+
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'b', 'c'])
+    expect(editor.cursorId).toBe('a')
+  })
+
+  it('replaces rather than adds, so a second reach does not accumulate', () => {
+    const { editor } = openOnePage([label('a'), label('b'), label('c'), label('d')])
+    editor.selectOnly('a')
+    editor.extendSelectionTo('d', ['a', 'b', 'c', 'd'])
+
+    editor.selectOnly('a')
+    editor.extendSelectionTo('b', ['a', 'b', 'c', 'd'])
+
+    expect([...editor.selectedIds].sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('selectLayerBy', () => {
+  function folder(id: string, children: LayerEntry[]): GroupLayerEntry {
+    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+  }
+
+  function openTree(layers: LayerEntry[], order: string[]) {
+    const project = useProjectStore()
+    project.files = [
+      {
+        filename: PAGE,
+        pageDir: `/x/${PAGE}`,
+        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder: order, layers },
+        badge: 'ok' as const,
+      },
+    ]
+    const editor = useEditorStore()
+    editor.currentFilename = PAGE
+    return { editor }
+  }
+
+  // The panel reads top to bottom while the array counts bottom to top, so
+  // "down" has to mean the row below rather than the next array element.
+  it('walks the tree the way the panel shows it', () => {
+    const { editor } = openTree([label('under'), label('over')], ['under', 'over'])
+    editor.selectOnly('over')
+
+    editor.selectLayerBy(1)
+
+    expect(editor.cursorId).toBe('under')
+  })
+
+  it('steps into an open folder', () => {
+    const { editor } = openTree([folder('g', [label('a')])], ['a'])
+    editor.selectOnly('g')
+
+    editor.selectLayerBy(1)
+
+    expect(editor.cursorId).toBe('a')
+  })
+
+  it('steps over a collapsed folder', () => {
+    const { editor } = openTree([label('bottom'), folder('g', [label('a')])], ['a', 'bottom'])
+    editor.collapsedLayerIds = new Set(['g'])
+    editor.selectOnly('g')
+
+    editor.selectLayerBy(1)
+
+    expect(editor.cursorId).toBe('bottom')
+  })
+
+  /** The tree is one page's, so there is nowhere to go on past its ends. */
+  it('stops at the ends rather than turning the page', () => {
+    const { editor } = openTree([label('a')], ['a'])
+    editor.selectOnly('a')
+
+    editor.selectLayerBy(1)
+    expect(editor.cursorId).toBe('a')
+
+    editor.selectLayerBy(-1)
+    expect(editor.cursorId).toBe('a')
+  })
+})
+
+describe('editBy', () => {
+  it('banks the row it leaves and opens the next one', () => {
+    const { project, editor } = openOnePage([label('a', 'a0'), label('b', 'b0')])
+    editor.selectOnly('a')
+    editor.beginTextEdit(PAGE, 'a', 'a0')
+    project.updateLabelText(PAGE, 'a', 'a1')
+
+    editor.editBy(1)
+
+    expect(editor.canUndo).toBe(true)
+    expect(editor.cursorId).toBe('b')
+    expect(editor.pendingTextEdit).toEqual({ filename: PAGE, labelId: 'b', from: 'b0' })
+  })
+
+  it('carries on to the next page at the end of this one', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('b', 'b0')])]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.selectOnly('a')
+    editor.beginTextEdit('001.png', 'a', '')
+
+    editor.editBy(1)
+
+    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.pendingTextEdit).toEqual({ filename: '002.png', labelId: 'b', from: 'b0' })
+  })
+})

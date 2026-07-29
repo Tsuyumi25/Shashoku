@@ -7,6 +7,7 @@ import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
 import { textObjects } from '@shared/page/tree'
+import { flattenLayerRows } from '@/lib/layerRows'
 import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
@@ -53,6 +54,45 @@ export const useEditorStore = defineStore('editor', () => {
   function isSelected(labelId: string): boolean {
     return selectedIds.value.has(labelId)
   }
+
+  /** One entry in or out, leaving the rest alone. */
+  function toggleSelected(id: string) {
+    const next = new Set(selectedIds.value)
+    if (next.delete(id)) {
+      // The cursor is a place inside the selection, so it cannot be left
+      // pointing at something that is no longer in it.
+      if (cursorId.value === id) cursorId.value = next.values().next().value ?? null
+    } else {
+      next.add(id)
+      cursorId.value = id
+    }
+    selectedIds.value = next
+  }
+
+  /**
+   * Everything from the cursor to where the pointer landed, in the order the
+   * panel is showing — which the caller passes in, because what counts as a
+   * range is the list's question and not this store's.
+   */
+  function extendSelectionTo(id: string, sequence: readonly string[]) {
+    const to = sequence.indexOf(id)
+    if (to === -1) return
+    const from = cursorId.value === null ? -1 : sequence.indexOf(cursorId.value)
+    if (from === -1) {
+      selectOnly(id)
+      return
+    }
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    selectedIds.value = new Set(sequence.slice(lo, hi + 1))
+    cursorId.value = id
+  }
+
+  /**
+   * Which folders are closed. Held here rather than in the tree because moving
+   * the cursor by keyboard has to know what is on screen, and a folder that is
+   * shut has nothing on screen to move onto.
+   */
+  const collapsedLayerIds = ref<Set<string>>(new Set())
 
   const tool = ref<CanvasTool>('select')
   
@@ -129,6 +169,30 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * One row up or down the layer tree, as the panel draws it — folders that are
+   * shut take their contents off the screen, and off this walk with them.
+   *
+   * The tree is one page's, so its ends are ends: there is no next page to turn
+   * to, which is what makes this different from walking the label list.
+   */
+  function selectLayerBy(offset: number) {
+    const project = useProjectStore()
+    if (!currentFilename.value) return
+    const file = project.fileByName(currentFilename.value)
+    if (!file) return
+    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value)
+    if (rows.length === 0) return
+    const index = rows.findIndex((r) => r.entry.id === cursorId.value)
+    if (index === -1) {
+      selectOnly(rows[offset > 0 ? 0 : rows.length - 1].entry.id)
+      return
+    }
+    const next = index + offset
+    if (next < 0 || next >= rows.length) return
+    selectOnly(rows[next].entry.id)
+  }
+
+  /**
    * Land on an object wherever in the chapter it lives — what clicking a row of
    * the label list does.
    *
@@ -175,6 +239,25 @@ export const useEditorStore = defineStore('editor', () => {
     // The label was deleted mid-edit, and the delete already captured its text.
     if (text === undefined) return
     cmdUpdateLabelText(pending.filename, pending.labelId, pending.from, text)
+  }
+
+  /**
+   * Finish this row and open the next one for typing — the loop a chapter is
+   * actually translated in, and the reason it is worth a key of its own.
+   *
+   * Commits before moving: staying on the same page does not go through
+   * selectFile, so nothing else would close the visit, and the session would
+   * follow the cursor onto a row it was never opened on.
+   */
+  function editBy(offset: number) {
+    commitTextEdit()
+    selectLabelBy(offset)
+    const page = currentFilename.value
+    const id = cursorId.value
+    if (page === null || id === null) return
+    const label = useProjectStore().labelById(page, id)
+    if (!label) return
+    beginTextEdit(page, id, textOf(label))
   }
 
   /**
@@ -557,6 +640,9 @@ export const useEditorStore = defineStore('editor', () => {
     cursorId,
     selectOnly,
     isSelected,
+    toggleSelected,
+    extendSelectionTo,
+    collapsedLayerIds,
     tool,
     setTool,
     activeGroupId,
@@ -577,10 +663,13 @@ export const useEditorStore = defineStore('editor', () => {
     selectFile,
     pageBy,
     selectLabelBy,
+    selectLayerBy,
     revealLabel,
+    pendingTextEdit,
     beginTextEdit,
     commitTextEdit,
     flushTextEdit,
+    editBy,
     pushCommand,
     undo,
     redo,

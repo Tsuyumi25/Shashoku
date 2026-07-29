@@ -58,7 +58,7 @@ import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
-import { isTypingSurface } from '@/lib/editContext'
+import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerLayout from '@/modes/ProjectManagerLayout.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
@@ -118,8 +118,7 @@ useEventListener(window, 'keydown', (e) => {
   if (ui.view !== 'translate') return
   // A text box has its own history, and taking Ctrl+Z off it would undo some
   // earlier command while the half-typed line sat there untouched.
-  const el = document.activeElement
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+  if (isTypingSurface(document.activeElement)) return
 
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
@@ -131,23 +130,42 @@ useEventListener(window, 'keydown', (e) => {
 })
 
 /**
- * Keys that act on the document rather than on one surface of it. Delete lives
- * here because the selection does: the canvas, the label list and the layer
- * tree all read the same one, so none of them owns the key that empties it.
+ * Keys that act on the document rather than on one surface of it, dispatched by
+ * what they act on rather than by which panel has focus.
  *
- * The only guard needed is whether the caret is somewhere that owns its own
- * text — which is also what makes the label list's two layers work, since a row
- * being edited is a real input and a row merely selected is not.
+ * The selection belongs to the canvas, the label list and the layer tree
+ * equally, so none of them owns the keys that move it or empty it. Left and
+ * right are the page; up and down are one row, whatever the open panel is
+ * showing rows of.
+ *
+ * The only guard is whether the focused element answers the key itself — which
+ * is also what makes the label list's two layers work, since a row being typed
+ * into is a real input and a row merely selected is not.
  */
 useEventListener(window, 'keydown', (e) => {
   if (ui.view !== 'translate') return
   if (e.ctrlKey || e.metaKey || e.altKey) return
-  if (isTypingSurface(document.activeElement)) return
+  if (ownsKeyboard(document.activeElement)) return
 
-  if (e.key === 'Delete') {
+  const byRow = (offset: number) => {
+    e.preventDefault()
+    if (ui.panel === 'layers') editor.selectLayerBy(offset)
+    else editor.selectLabelBy(offset)
+  }
+
+  if (e.key === 'ArrowUp' || e.key === 'k') byRow(-1)
+  else if (e.key === 'ArrowDown' || e.key === 'j') byRow(1)
+  else if (e.key === 'ArrowLeft') editor.pageBy(-1)
+  else if (e.key === 'ArrowRight') editor.pageBy(1)
+  else if (e.key === 'Delete') {
     // No confirmation, as in every editor with an undo stack behind it.
     e.preventDefault()
     editor.deleteSelection()
+  } else if (e.key === 'Escape' && editor.selectedIds.size > 0) {
+    // Backing out one layer at a time. Marked handled so the canvas does not
+    // also read this press as the first half of its double tap to fit.
+    e.preventDefault()
+    editor.selectOnly(null)
   }
 })
 

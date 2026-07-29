@@ -97,7 +97,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: []
+  /** Shift held, so the object joins the selection instead of replacing it. */
+  select: [additive: boolean]
   move: [to: Anchor]
   moveEnd: [from: Anchor, to: Anchor]
   /** Once a corner drag turns out to be a drag, so the undo entry has a before. */
@@ -112,7 +113,7 @@ const drag = useLabelDrag({
   anchor: () => ({ x: props.x, y: props.y }),
   natural: () => props.natural,
   view: () => props.view,
-  onSelect: () => emit('select'),
+  onSelect: (additive) => emit('select', additive),
   onMove: (to) => emit('move', to),
   onCommit: (from, to) => emit('moveEnd', from, to),
 })
@@ -275,7 +276,7 @@ function onScaleDown(e: PointerEvent) {
   scale.center = centerOnScreen()
   scale.from = { x: e.clientX, y: e.clientY }
   scale.startPx = props.textStyle.fontSizePx
-  emit('select')
+  emit('select', false)
 }
 
 function onScaleMove(e: PointerEvent) {
@@ -328,7 +329,7 @@ function onRotateDown(e: PointerEvent) {
   spin.start = props.rotation
   spin.free = props.rotation
   spin.applied = props.rotation
-  emit('select')
+  emit('select', false)
 }
 
 function onRotateMove(e: PointerEvent) {

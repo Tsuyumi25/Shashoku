@@ -48,7 +48,7 @@
           :view="view"
           :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
-          @select="editor.selectOnly(object.id)"
+          @select="onSelectObject(object.id, $event)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
           @scale-start="beginLabelScale(object.id)"
@@ -79,6 +79,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { visibleTextObjects } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
 import type { Anchor } from '@/composables/useLabelDrag'
+import { ownsKeyboard } from '@/lib/editContext'
 import { screenToPageFraction } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
@@ -153,6 +154,16 @@ function moveLabelTo(labelId: string, to: Anchor) {
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentFilename) return
   editor.cmdMoveLabel(editor.currentFilename, labelId, from, to)
+}
+
+/**
+ * Shift adds, as it does on any canvas. There is no Ctrl here: a page has no
+ * order to reach a range over, so building one out of scattered objects is the
+ * label list's job.
+ */
+function onSelectObject(id: string, additive: boolean) {
+  if (additive) editor.toggleSelected(id)
+  else editor.selectOnly(id)
 }
 
 function labelById(labelId: string): TextLayerEntry | undefined {
@@ -416,17 +427,14 @@ const ESCAPE_DOUBLE_MS = 400
 
 useEventListener(window, 'keydown', (e) => {
   if (ui.view !== 'translate' || fontPicker.isOpen.value) return
-  const el = document.activeElement
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
-  if (el instanceof HTMLSelectElement) return
+  if (ownsKeyboard(document.activeElement)) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
+  // Turning the page and moving the cursor act on the document, and are dealt
+  // with there. What is left here acts on the view.
+  if (e.defaultPrevented) return
 
   if (e.key === '0') {
     if (imageReady.value) editor.fitToView()
-  } else if (e.key === 'ArrowLeft') {
-    editor.pageBy(-1)
-  } else if (e.key === 'ArrowRight') {
-    editor.pageBy(1)
   } else if (e.code === 'Space') {
     spaceDown.value = true
     e.preventDefault()

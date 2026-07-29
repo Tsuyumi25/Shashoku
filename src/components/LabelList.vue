@@ -28,9 +28,16 @@
 
         <div
           v-else
-          class="flex items-start gap-1.5 border-b border-border/40 px-2 py-1"
-          :class="[isSelected(rows[vrow.index] as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40']"
-          @mousedown="onPick(rows[vrow.index] as LabelRow)"
+          tabindex="0"
+          :data-row-id="(rows[vrow.index] as LabelRow).label.id"
+          class="flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+          :class="[
+            isSelected(rows[vrow.index] as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
+            !isEditing(rows[vrow.index] as LabelRow) && 'select-none',
+          ]"
+          @mousedown="onPick(rows[vrow.index] as LabelRow, $event)"
+          @dblclick="onEdit(rows[vrow.index] as LabelRow)"
+          @keydown="onRowKey(rows[vrow.index] as LabelRow, $event)"
         >
           <span class="w-5 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
             {{ (rows[vrow.index] as LabelRow).index }}
@@ -40,16 +47,24 @@
             :style="{ backgroundColor: colorOf((rows[vrow.index] as LabelRow).label.groupId) }"
             :title="nameOf((rows[vrow.index] as LabelRow).label.groupId)"
           />
+
           <textarea
+            v-if="isEditing(rows[vrow.index] as LabelRow)"
+            :ref="takeFocus"
             rows="1"
             spellcheck="false"
             placeholder="(未翻譯)"
             class="label-input min-w-0 flex-1 resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
             :value="textOf((rows[vrow.index] as LabelRow).label)"
-            @focus="onFocus(rows[vrow.index] as LabelRow)"
             @input="onInput(rows[vrow.index] as LabelRow, $event)"
+            @keydown="onInputKey($event)"
             @blur="editor.commitTextEdit()"
           />
+          <span
+            v-else
+            class="min-w-0 flex-1 text-sm leading-snug whitespace-pre-wrap"
+            :class="isBlank(rows[vrow.index] as LabelRow) && 'text-muted-foreground/50'"
+          >{{ preview(rows[vrow.index] as LabelRow) }}</span>
         </div>
       </div>
     </div>
@@ -69,10 +84,15 @@ const editor = useEditorStore()
 
 /**
  * The whole chapter, not the open page. Translating and proofreading are read
- * at that scale — which is also what makes multi-page selection fall out of
+ * at that scale — which is also what makes selecting across pages fall out of
  * this list rather than needing anything of its own.
  */
 const rows = computed(() => buildLabelRows(project.files))
+
+/** What a range reaches over, in the order the panel is showing it. */
+const sequence = computed(() =>
+  rows.value.filter((r): r is LabelRow => r.kind === 'label').map((r) => r.label.id),
+)
 
 const scrollEl = ref<HTMLElement | null>(null)
 
@@ -97,13 +117,71 @@ function isSelected(row: LabelRow): boolean {
   return row.filename === editor.currentFilename && editor.isSelected(row.label.id)
 }
 
-function onPick(row: LabelRow) {
-  editor.revealLabel(row.filename, row.label.id)
+/**
+ * A row is being typed into when the editing session names it. There is no
+ * second flag for "this row is in the input layer" — the session is that state,
+ * and holding it in two places is how the two drift apart.
+ */
+function isEditing(row: LabelRow): boolean {
+  const pending = editor.pendingTextEdit
+  return pending?.filename === row.filename && pending?.labelId === row.label.id
 }
 
-function onFocus(row: LabelRow) {
+function isBlank(row: LabelRow): boolean {
+  return row.label.lines.every((line) => line.length === 0)
+}
+
+function preview(row: LabelRow): string {
+  return isBlank(row) ? '(未翻譯)' : textOf(row.label)
+}
+
+/** Focus follows the input into being, so Enter lands the caret without a click. */
+function takeFocus(el: unknown) {
+  if (el instanceof HTMLTextAreaElement && document.activeElement !== el) el.focus()
+}
+
+function focusRow(id: string) {
+  scrollEl.value?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`)?.focus()
+}
+
+function onPick(row: LabelRow, e: MouseEvent) {
+  if (isEditing(row)) return
+  if (e.shiftKey) editor.extendSelectionTo(row.label.id, sequence.value)
+  else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.label.id)
+  else editor.revealLabel(row.filename, row.label.id)
+}
+
+function onEdit(row: LabelRow) {
   editor.revealLabel(row.filename, row.label.id)
   editor.beginTextEdit(row.filename, row.label.id, textOf(row.label))
+}
+
+/**
+ * The keys a row answers to itself. Everything else — moving between rows,
+ * deleting, turning the page — acts on the document and is handled once, above.
+ */
+function onRowKey(row: LabelRow, e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.key !== 'Enter' && e.key !== 'i') return
+  // Opening the input layer is a single-object act. Rather than quietly
+  // throwing away a selection someone built on purpose, it declines.
+  if (editor.selectedIds.size > 1) return
+  e.preventDefault()
+  onEdit(row)
+}
+
+function onInputKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    const id = editor.pendingTextEdit?.labelId ?? null
+    editor.commitTextEdit()
+    if (id !== null) void nextTick(() => focusRow(id))
+    return
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    editor.editBy(e.shiftKey ? -1 : 1)
+  }
 }
 
 /**
@@ -127,9 +205,21 @@ watch(
       (r) => r.kind === 'label' && r.filename === filename && r.label.id === labelId,
     )
     if (index === -1) return
-    if (virtualRows.value.some((v) => v.index === index)) return
-    await nextTick()
-    virtualizer.value.scrollToIndex(index, { align: 'center' })
+
+    // Focus goes where the cursor went, but only while the list is the thing
+    // being used: keys are dispatched by what they act on, so moving the cursor
+    // from here would otherwise leave focus on the row left behind, and the
+    // next Enter would open a row nobody is looking at.
+    const held = scrollEl.value?.contains(document.activeElement) ?? false
+
+    if (!virtualRows.value.some((v) => v.index === index)) {
+      await nextTick()
+      virtualizer.value.scrollToIndex(index, { align: 'center' })
+    }
+    if (held && editor.pendingTextEdit === null) {
+      await nextTick()
+      focusRow(labelId)
+    }
   },
 )
 

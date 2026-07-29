@@ -15,7 +15,7 @@
         hover?.id === row.entry.id && hover.zone === 'inside' && 'ring-1 ring-inset ring-primary',
       ]"
       :style="{ paddingLeft: `${row.depth * 0.75 + 0.25}rem` }"
-      @click="onPick(row)"
+      @click="onPick(row, $event)"
       @dragstart="onDragStart(row, $event)"
       @dragover.prevent.stop="onDragOver(row, $event)"
       @drop.prevent.stop="onDrop"
@@ -90,24 +90,29 @@ const currentFile = computed(() =>
 
 // Ids belong to one page, so a folder left collapsed here cannot be mistaken
 // for one on another page.
-const collapsed = ref<Set<string>>(new Set())
+const collapsed = computed(() => editor.collapsedLayerIds)
 
 const rows = computed(() =>
   currentFile.value ? flattenLayerRows(currentFile.value.page.layers, collapsed.value) : [],
 )
 
+/** What a range reaches over, in the order the panel is showing it. */
+const sequence = computed(() => rows.value.map((r) => r.entry.id))
+
 function toggleCollapsed(id: string) {
   const next = new Set(collapsed.value)
   if (!next.delete(id)) next.add(id)
-  collapsed.value = next
+  editor.collapsedLayerIds = next
 }
 
 function isSelected(id: string): boolean {
   return editor.isSelected(id)
 }
 
-function onPick(row: LayerTreeRow) {
-  editor.selectOnly(row.entry.id)
+function onPick(row: LayerTreeRow, e: MouseEvent) {
+  if (e.shiftKey) editor.extendSelectionTo(row.entry.id, sequence.value)
+  else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.entry.id)
+  else editor.selectOnly(row.entry.id)
 }
 
 function onToggleVisible(entry: LayerEntry) {

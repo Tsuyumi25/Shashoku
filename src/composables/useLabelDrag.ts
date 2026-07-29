@@ -19,7 +19,7 @@ export interface LabelDragOptions {
   natural: () => { w: number; h: number }
   view: () => ViewTransform
   /** On press, before any movement — taking hold of a label selects it. */
-  onSelect: () => void
+  onSelect: (additive: boolean) => void
   /** Live position, on every frame the pointer moves. */
   onMove: (to: Anchor) => void
   /**
@@ -53,7 +53,7 @@ export function useLabelDrag(options: LabelDragOptions) {
     startClient = { x: e.clientX, y: e.clientY }
     from = options.anchor()
     latest = from
-    options.onSelect()
+    options.onSelect(e.shiftKey)
   }
 
   function onPointerMove(e: PointerEvent) {
