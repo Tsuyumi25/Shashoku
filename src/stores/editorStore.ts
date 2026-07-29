@@ -32,8 +32,6 @@ export const useEditorStore = defineStore('editor', () => {
   
   const showGroups = ref(false)
   
-  const focusEditorRequest = ref(0)
-  
   const fontSize = ref(14)
 
   function adjustFontSize(delta: number) {
@@ -102,8 +100,18 @@ export const useEditorStore = defineStore('editor', () => {
     else selectedLabelId.value = labels[next].id
   }
 
-  function requestEditorFocus() {
-    focusEditorRequest.value++
+  /**
+   * Land on an object wherever in the chapter it lives — what clicking a row of
+   * the label list does.
+   *
+   * The view is left alone on purpose: the list is read at the scale of the
+   * chapter, and a canvas that scrolled and zoomed itself on every click would
+   * make reading down it unbearable. `selectFile` lands on the page's first
+   * object, so the one asked for has to be put back after the turn.
+   */
+  function revealLabel(filename: string, labelId: string) {
+    if (currentFilename.value !== filename) selectFile(filename)
+    selectedLabelId.value = labelId
   }
 
   /**
@@ -414,7 +422,6 @@ export const useEditorStore = defineStore('editor', () => {
     setTool,
     activeGroupId,
     showGroups,
-    focusEditorRequest,
     fontSize,
     adjustFontSize,
     view,
@@ -431,7 +438,7 @@ export const useEditorStore = defineStore('editor', () => {
     selectFile,
     pageBy,
     selectLabelBy,
-    requestEditorFocus,
+    revealLabel,
     beginTextEdit,
     commitTextEdit,
     flushTextEdit,

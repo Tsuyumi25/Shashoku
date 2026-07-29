@@ -36,20 +36,7 @@
           <Plus :size="14" />
         </button>
       </div>
-      <SplitterGroup
-        direction="vertical"
-        class="min-h-0 flex-1"
-        auto-save-id="translate:labels"
-        :storage="preferences.panelStorage"
-      >
-        <SplitterPanel :order="1" :default-size="60" :min-size="20" class="min-h-0">
-          <LabelTable />
-        </SplitterPanel>
-        <ResizeHandle vertical />
-        <SplitterPanel :order="2" :default-size="40" :min-size="20" class="min-h-0">
-          <TranslateEditor />
-        </SplitterPanel>
-      </SplitterGroup>
+      <LabelList />
     </SplitterPanel>
 
     <ResizeHandle />
@@ -98,10 +85,9 @@ import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import GroupList from '@/components/GroupList.vue'
-import LabelTable from '@/components/LabelTable.vue'
+import LabelList from '@/components/LabelList.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
-import TranslateEditor from '@/components/TranslateEditor.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -112,8 +98,9 @@ const editor = useEditorStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 
+// The chapter's, not the open page's — the list below spans the chapter.
 const labelCount = computed(() =>
-  editor.currentFilename ? project.labelsOf(editor.currentFilename).length : 0,
+  project.files.reduce((n, f) => n + f.page.readingOrder.length, 0),
 )
 
 function onAddGroup() {

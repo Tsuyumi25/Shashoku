@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
+import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
@@ -40,6 +41,20 @@ function openOnePage(labels: TextLayerEntry[] = []) {
   const editor = useEditorStore()
   editor.currentFilename = PAGE
   return { project, editor }
+}
+
+function pageOf(filename: string, labels: TextLayerEntry[]): ProjectFile {
+  return {
+    filename,
+    pageDir: `/x/${filename}`,
+    page: {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      readingOrder: labels.map((l) => l.id),
+      layers: [...labels],
+    },
+    badge: 'ok',
+  }
 }
 
 function labelsOf(project: ReturnType<typeof useProjectStore>): TextLayerEntry[] {
@@ -272,6 +287,52 @@ describe('pending text edit', () => {
 
     expect(labelsOf(project)).toHaveLength(1)
     expect(editor.canRedo).toBe(false)
+  })
+})
+
+describe('revealLabel', () => {
+  it('turns to the page an object lives on and selects that object', () => {
+    const project = useProjectStore()
+    project.files = [
+      pageOf('001.png', [label('a'), label('b')]),
+      pageOf('002.png', [label('c'), label('d')]),
+    ]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.selectedLabelId = 'a'
+
+    editor.revealLabel('002.png', 'd')
+
+    expect(editor.currentFilename).toBe('002.png')
+    // Turning the page lands on its first object, so the asked-for one has to
+    // be put back afterwards or the jump quietly goes somewhere else.
+    expect(editor.selectedLabelId).toBe('d')
+  })
+
+  it('selects without turning the page when the object is already here', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a'), label('b')])]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.selectedLabelId = 'a'
+
+    editor.revealLabel('001.png', 'b')
+
+    expect(editor.currentFilename).toBe('001.png')
+    expect(editor.selectedLabelId).toBe('b')
+  })
+
+  it('banks an open editing session when it moves to another page', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a', 'a0')]), pageOf('002.png', [label('c')])]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.beginTextEdit('001.png', 'a', 'a0')
+    project.updateLabelText('001.png', 'a', 'a1')
+
+    editor.revealLabel('002.png', 'c')
+
+    expect(editor.canUndo).toBe(true)
   })
 })
 
