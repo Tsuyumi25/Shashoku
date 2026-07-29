@@ -1,7 +1,29 @@
 <template>
-  <div ref="scrollEl" class="h-full min-h-0 overflow-y-auto">
+  <div class="flex h-full min-h-0 flex-col">
+    <div class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-2">
+      <Search :size="12" class="shrink-0 text-muted-foreground" />
+      <input
+        ref="searchEl"
+        v-model="query"
+        spellcheck="false"
+        placeholder="搜尋譯文"
+        class="min-w-0 flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
+        @keydown="onSearchKey"
+      />
+      <button
+        v-if="query.length > 0"
+        type="button"
+        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+        title="清除搜尋"
+        @click="query = ''"
+      >
+        <X :size="12" />
+      </button>
+    </div>
+
+  <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
     <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
-      {{ project.isOpen ? '本章沒有頁面' : '尚未開啟專案' }}
+      {{ emptyNote }}
     </div>
 
     <div v-else class="relative w-full" :style="{ height: `${totalSize}px` }">
@@ -41,7 +63,7 @@
         <div
           v-else
           tabindex="0"
-          :draggable="!isEditing(rows[vrow.index] as LabelRow)"
+          :draggable="!isEditing(rows[vrow.index] as LabelRow) && !filtering"
           :data-row-id="(rows[vrow.index] as LabelRow).label.id"
           class="relative flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
@@ -91,10 +113,12 @@
       </div>
     </div>
   </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { Search, X } from '@lucide/vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
 import {
@@ -107,6 +131,8 @@ import {
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useEventListener } from '@vueuse/core'
+import { ownsKeyboard } from '@/lib/editContext'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -116,7 +142,24 @@ const editor = useEditorStore()
  * at that scale — which is also what makes selecting across pages fall out of
  * this list rather than needing anything of its own.
  */
-const rows = computed(() => buildLabelRows(project.files))
+const rows = computed(() => buildLabelRows(project.files, editor.labelQuery))
+
+/**
+ * Narrowing lives in the store because moving up and down walks what is on
+ * screen, and only the store is asked to do that.
+ */
+const query = computed({
+  get: () => editor.labelQuery,
+  set: (value: string) => {
+    editor.labelQuery = value
+  },
+})
+const filtering = computed(() => query.value.trim().length > 0)
+
+const emptyNote = computed(() => {
+  if (!project.isOpen) return '尚未開啟專案'
+  return filtering.value ? '沒有符合的譯文' : '本章沒有頁面'
+})
 
 /** What a range reaches over, in the order the panel is showing it. */
 const sequence = computed(() =>
@@ -124,6 +167,7 @@ const sequence = computed(() =>
 )
 
 const scrollEl = ref<HTMLElement | null>(null)
+const searchEl = ref<HTMLInputElement | null>(null)
 
 // Rows are as tall as the translation in them, so the estimate is only a
 // starting point and measureElement corrects each one as it renders.
@@ -250,6 +294,28 @@ function clearDrag() {
   dragging.value = []
   hover.value = null
 }
+
+/**
+ * Escape hands the list back rather than undoing the search. Narrowing is
+ * something looked at, not a layer to back out of — the cross is what ends it,
+ * and it is on screen the whole time it is in force.
+ */
+function onSearchKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  const first = rows.value.find((r): r is LabelRow => r.kind === 'label')
+  if (first === undefined) return
+  editor.revealLabel(first.filename, first.label.id)
+  void nextTick(() => focusIn(`[data-row-id="${CSS.escape(first.label.id)}"]`))
+}
+
+useEventListener(window, 'keydown', (e) => {
+  const wants = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'
+  if (!wants && !(e.key === '/' && !ownsKeyboard(document.activeElement))) return
+  e.preventDefault()
+  searchEl.value?.focus()
+  searchEl.value?.select()
+})
 
 function onInputKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {

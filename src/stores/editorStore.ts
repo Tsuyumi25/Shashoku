@@ -8,6 +8,7 @@ import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
 import { textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
+import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
@@ -121,6 +122,18 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * What the label list is being narrowed to. Held here because moving up and
+   * down has to walk what is on screen, and what is on screen is whatever
+   * survived this.
+   */
+  const labelQuery = ref('')
+
+  /** The label list as it is being shown, filter and all. */
+  function shownRows(): ChapterRow[] {
+    return buildLabelRows(useProjectStore().files, labelQuery.value)
+  }
+
+  /**
    * Which folders are closed. Held here rather than in the tree because moving
    * the cursor by keyboard has to know what is on screen, and a folder that is
    * shut has nothing on screen to move onto.
@@ -184,21 +197,36 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
-  
+  /**
+   * One row up or down the label list, as it is being shown — so narrowing the
+   * list narrows this too, without either having to know about the other.
+   *
+   * A step lands on an object, or on the heading of a page that has none, which
+   * is the only way to reach a page with nothing on it. Pages are crossed on
+   * the way rather than turned to deliberately: the list runs on past the end
+   * of one page, and so does this.
+   */
   function selectLabelBy(offset: number) {
-    const project = useProjectStore()
-    if (!currentFilename.value) return
-    const labels = project.labelsOf(currentFilename.value)
-    const index = labels.findIndex((l) => l.id === cursorId.value)
-    if (index === -1 && labels.length > 0) {
-      selectOnly(labels[offset > 0 ? 0 : labels.length - 1].id)
+    const stops = chapterStops(shownRows())
+    if (stops.length === 0) return
+
+    const at = stops.findIndex((r) =>
+      r.kind === 'label'
+        ? r.label.id === cursorId.value
+        : cursorId.value === null && r.filename === currentFilename.value,
+    )
+    const next = at === -1 ? (offset > 0 ? 0 : stops.length - 1) : at + offset
+    if (next < 0 || next >= stops.length) return
+
+    const row = stops[next]
+    if (row.kind === 'label') {
+      selectOnly(row.label.id)
+      showPageOf(row.label.id)
       return
     }
-    
-    const next = index + offset
-    if (next >= labels.length) pageBy(1)
-    else if (next < 0) pageBy(-1, 'last')
-    else selectOnly(labels[next].id)
+    commitTextEdit()
+    currentFilename.value = row.filename
+    selectOnly(null)
   }
 
   /**
@@ -763,6 +791,7 @@ export const useEditorStore = defineStore('editor', () => {
     toggleSelected,
     extendSelectionTo,
     collapsedLayerIds,
+    labelQuery,
     tool,
     setTool,
     activeGroupId,

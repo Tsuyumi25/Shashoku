@@ -1141,3 +1141,71 @@ describe('reaching a range out', () => {
     expect(editor.cursorId).toBe('d')
   })
 })
+
+describe('moving through a narrowed list', () => {
+  function open() {
+    const project = useProjectStore()
+    project.files = [
+      pageOf('001.png', [label('a', 'そうか'), label('b', 'やめろ'), label('c', 'そうだね')]),
+      pageOf('002.png', [label('d', 'まって')]),
+    ]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    return { editor }
+  }
+
+  it('steps over what the search left out', () => {
+    const { editor } = open()
+    editor.labelQuery = 'そう'
+    editor.selectOnly('a')
+
+    editor.selectLabelBy(1)
+
+    expect(editor.cursorId).toBe('c')
+  })
+
+  it('stops at the end of what is shown', () => {
+    const { editor } = open()
+    editor.labelQuery = 'そう'
+    editor.selectOnly('c')
+
+    editor.selectLabelBy(1)
+
+    expect(editor.cursorId).toBe('c')
+  })
+
+  it('walks the whole chapter again once the search is cleared', () => {
+    const { editor } = open()
+    editor.selectOnly('a')
+
+    editor.selectLabelBy(1)
+
+    expect(editor.cursorId).toBe('b')
+  })
+
+  it('carries on to the next page, narrowed or not', () => {
+    const { editor } = open()
+    editor.selectOnly('c')
+
+    editor.selectLabelBy(1)
+
+    expect(editor.cursorId).toBe('d')
+    expect(editor.currentFilename).toBe('002.png')
+  })
+
+  /** An empty page is somewhere the cursor can be, and its heading is the stop. */
+  it('comes to rest on a page with nothing on it', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', []), pageOf('003.png', [label('c')])]
+    const editor = useEditorStore()
+    editor.currentFilename = '001.png'
+    editor.selectOnly('a')
+
+    editor.selectLabelBy(1)
+    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.cursorId).toBeNull()
+
+    editor.selectLabelBy(1)
+    expect(editor.cursorId).toBe('c')
+  })
+})

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProjectFile } from '@/types/project'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
-import { buildLabelRows, dropIntoReadingOrder } from '@/lib/labelRows'
+import { buildLabelRows, chapterStops, dropIntoReadingOrder } from '@/lib/labelRows'
 
 function text(id: string): TextLayerEntry {
   return {
@@ -105,5 +105,104 @@ describe('dropIntoReadingOrder', () => {
     const empty = rows.find((r) => r.kind === 'page' && r.filename === '002.png')
     expect(dropIntoReadingOrder(empty!, 'above')).toEqual({ page: '002.png', index: 0 })
     expect(dropIntoReadingOrder(empty!, 'below')).toEqual({ page: '002.png', index: 0 })
+  })
+})
+
+describe('buildLabelRows filtered', () => {
+  const chapter = [
+    file('001.png', [text('a'), text('b')], ['a', 'b']),
+    file('002.png', [text('c')], ['c']),
+  ]
+
+  function withText(name: string, lines: Record<string, string[]>): ProjectFile {
+    const ids = Object.keys(lines)
+    return {
+      filename: name,
+      pageDir: `/p/${name}`,
+      badge: 'ok',
+      page: {
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        revision: 0,
+        readingOrder: ids,
+        layers: ids.map((id) => ({ ...text(id), lines: lines[id] })),
+      },
+    }
+  }
+
+  it('shows everything when nothing is being looked for', () => {
+    expect(buildLabelRows(chapter, '')).toEqual(buildLabelRows(chapter))
+  })
+
+  it('keeps only the objects that match', () => {
+    const rows = buildLabelRows(
+      [withText('001.png', { a: ['そうか'], b: ['やめろ'], c: ['そうだね'] })],
+      'そう',
+    )
+    expect(rows.filter((r) => r.kind === 'label').map((r) => r.label.id)).toEqual(['a', 'c'])
+  })
+
+  /** A page with no match is not a page with an empty result — it is not there. */
+  it('drops a page nothing on it matches', () => {
+    const rows = buildLabelRows(
+      [withText('001.png', { a: ['そうか'] }), withText('002.png', { b: ['やめろ'] })],
+      'そう',
+    )
+    expect(rows.filter((r) => r.kind === 'page').map((r) => r.filename)).toEqual(['001.png'])
+  })
+
+  /**
+   * The number is the object's place on its page, which is what the canvas
+   * writes on it — filtering hides rows, it does not renumber the page.
+   */
+  it('keeps each object its own number', () => {
+    const rows = buildLabelRows(
+      [withText('001.png', { a: ['ゆく'], b: ['そう'], c: ['まて'], d: ['そうだ'] })],
+      'そう',
+    )
+    expect(rows.filter((r) => r.kind === 'label').map((r) => [r.label.id, r.index])).toEqual([
+      ['b', 2],
+      ['d', 4],
+    ])
+  })
+
+  it('ignores case, and the spaces around what was typed', () => {
+    const rows = buildLabelRows([withText('001.png', { a: ['Hello'], b: ['bye'] })], '  HEL ')
+    expect(rows.filter((r) => r.kind === 'label').map((r) => r.label.id)).toEqual(['a'])
+  })
+
+  it('looks across the lines of one object, not only the first', () => {
+    const rows = buildLabelRows([withText('001.png', { a: ['one', 'two'] })], 'two')
+    expect(rows.filter((r) => r.kind === 'label')).toHaveLength(1)
+  })
+})
+
+describe('chapterStops', () => {
+  it('walks the objects, not the headings', () => {
+    const rows = buildLabelRows([
+      file('001.png', [text('a'), text('b')], ['a', 'b']),
+      file('002.png', [text('c')], ['c']),
+    ])
+    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.filename))).toEqual([
+      'a',
+      'b',
+      'c',
+    ])
+  })
+
+  /**
+   * Except where there are none. A page with nothing on it is somewhere the
+   * cursor can be, and its heading is the only thing there to stand on.
+   */
+  it('stops on the heading of a page with nothing on it', () => {
+    const rows = buildLabelRows([
+      file('001.png', [text('a')], ['a']),
+      file('002.png', [], []),
+      file('003.png', [text('c')], ['c']),
+    ])
+    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.filename))).toEqual([
+      'a',
+      '002.png',
+      'c',
+    ])
   })
 })
