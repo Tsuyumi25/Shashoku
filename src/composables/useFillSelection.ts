@@ -5,6 +5,7 @@ import { allEntries } from '@shared/page/tree'
 import { nextAutoName } from '@/lib/autoName'
 import { hexToRgb } from '@/lib/color'
 import { fillPixels } from '@/lib/selection/fill'
+import { context2d, encodePng } from '@/lib/pageComposite'
 import { isEmptyRect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
@@ -16,15 +17,13 @@ async function encodePatch(
   h: number,
 ): Promise<Uint8Array> {
   const canvas = new OffscreenCanvas(w, h)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
+  const ctx = context2d(canvas)
   const image = new ImageData(w, h)
   image.data.set(pixels)
   // Written rather than drawn: putImageData ignores compositing entirely, so
   // the straight alpha the mask became survives into the PNG unmultiplied.
   ctx.putImageData(image, 0, 0)
-  const blob = await canvas.convertToBlob({ type: 'image/png' })
-  return new Uint8Array(await blob.arrayBuffer())
+  return encodePng(canvas)
 }
 
 /**

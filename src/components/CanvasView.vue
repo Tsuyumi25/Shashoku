@@ -37,7 +37,7 @@
           :view="view"
           :groups="project.header.groups"
           :default-style="project.header.defaultStyle"
-          :held="heldOffset"
+          :held="heldLayer"
         />
       </div>
 
@@ -51,10 +51,12 @@
           :selected="layer.entry.id === editor.cursorId"
           :in-selection="true"
           :locked="layer.locked"
-          :offset="offsetOf(layer.entry.id)"
+          :place="placement.placementOf(layer.entry.id)"
           @select="onSelectObject(layer.entry.id, $event)"
-          @drag="onLayerDrag(layer.entry.id, $event)"
-          @drag-end="onLayerDragEnd(layer.entry)"
+          @drag="placement.moveBy(layer.entry.id, $event, view)"
+          @scale="placement.scaleTo(layer.entry.id, $event)"
+          @rotate="placement.rotateTo(layer.entry.id, $event)"
+          @commit="onLayerCommit(layer.entry)"
         />
         <LabelBox
           v-for="object in objects"
@@ -129,17 +131,12 @@ import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/st
 import { isLocked } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
+import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import {
-  applyViewTransform,
-  screenDeltaToContentPx,
-  screenToPageFraction,
-  type Anchor,
-  type Displacement,
-} from '@/lib/coords'
+import { applyViewTransform, screenToPageFraction, type Anchor } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -159,6 +156,7 @@ const selection = useSelectionStore()
 const ui = useUiStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
+const placement = useLayerPlacement()
 const { chooseTool } = useToolChoice()
 
 const view = editor.view
@@ -223,55 +221,19 @@ const rasterFrames = computed(() => {
 })
 
 /**
- * The drag in progress, in screen pixels and belonging to nobody's data.
+ * Which layer the stack keeps on a canvas of its own, and where a gesture has
+ * taken it.
  *
- * A raster layer's position is whole page pixels, and the manifest refuses
- * anything else — so a drag cannot write through the way a label's does. It
- * previews instead: the frame and the pixels both read this, and only the
- * release rounds it to whole pixels and enters the undo stack.
- */
-const heldLayer = ref<{ id: string; dx: number; dy: number } | null>(null)
-
-const ZERO_OFFSET: Displacement = { dx: 0, dy: 0 }
-
-function offsetOf(id: string): Displacement {
-  return heldLayer.value?.id === id ? heldLayer.value : ZERO_OFFSET
-}
-
-/**
- * Which layer the stack keeps on a canvas of its own, and how far it has been
- * dragged in the page's own pixels.
- *
- * The layer wearing the cursor rather than the one being dragged, so the page
+ * The layer wearing the cursor rather than the one being handled, so the page
  * is cut the moment it is selected and not while a pointer is already moving.
  */
-const heldOffset = computed(() => {
+const heldLayer = computed(() => {
   const id = rasterFrames.value.find((l) => l.entry.id === editor.cursorId)?.entry.id
-  if (id === undefined) return null
-  const held = heldLayer.value
-  if (held?.id !== id) return { id, x: 0, y: 0 }
-  const delta = screenDeltaToContentPx(held.dx, held.dy, view)
-  return { id, x: delta.x, y: delta.y }
+  return id === undefined ? null : { id, place: placement.placementOf(id) }
 })
 
-function onLayerDrag(id: string, d: Displacement) {
-  if (editor.isLayerLocked(id)) return
-  heldLayer.value = { id, dx: d.dx, dy: d.dy }
-}
-
-function onLayerDragEnd(entry: RasterLayerEntry) {
-  const held = heldLayer.value
-  heldLayer.value = null
-  if (held === null || held.id !== entry.id || !editor.currentFilename) return
-  // The half pixel the preview gives back here is not a compromise: a raster
-  // layer's axis is pixels, so a position between two of them does not exist.
-  const delta = screenDeltaToContentPx(held.dx, held.dy, view)
-  editor.cmdMoveLayerFrame(
-    editor.currentFilename,
-    entry.id,
-    { x: entry.x, y: entry.y },
-    { x: entry.x + delta.x, y: entry.y + delta.y },
-  )
+function onLayerCommit(entry: RasterLayerEntry) {
+  void placement.commit(entry).catch((err: unknown) => console.error('place layer failed', err))
 }
 
 // The picker enumerates on its first opening, which is too late for text that

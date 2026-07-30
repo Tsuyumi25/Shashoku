@@ -54,6 +54,16 @@ export function context2d(canvas: OffscreenCanvas): OffscreenCanvasRenderingCont
   return ctx
 }
 
+/**
+ * The bytes a layer file is written from. Shared by everything that puts new
+ * pixels on a page — filling a selection, merging a stack, baking a transform —
+ * so those three cannot end up writing three subtly different PNGs.
+ */
+export async function encodePng(canvas: OffscreenCanvas): Promise<Uint8Array> {
+  const blob = await canvas.convertToBlob({ type: 'image/png' })
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
 /** A layer with no frame yet has nothing to draw and no file worth reading. */
 export function hasPixels(node: RasterStackNode): boolean {
   return node.entry.w > 0 && node.entry.h > 0

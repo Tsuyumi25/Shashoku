@@ -14,6 +14,7 @@ import {
   context2d,
   decodeLayerBitmaps,
   drawStack,
+  encodePng,
   hasPixels,
   rasterNodes,
 } from '@/lib/pageComposite'
@@ -97,8 +98,7 @@ export function useMergeLayers() {
           throw new Error('merge reached a text object, which it never takes')
         },
       })
-      const blob = await canvas.convertToBlob({ type: 'image/png' })
-      return new Uint8Array(await blob.arrayBuffer())
+      return await encodePng(canvas)
     } finally {
       for (const bitmap of rasters.values()) bitmap.close()
     }

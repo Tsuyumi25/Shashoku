@@ -6,7 +6,7 @@
       :layers-dir="layersDir"
       :container="container"
       :view="view"
-      :offset="offsetFor(segment)"
+      :place="placeFor(segment)"
     />
     <LabelText
       v-else-if="segment.kind === 'text'"
@@ -44,6 +44,7 @@ import LabelText from '@/components/LabelText.vue'
 import RasterRun from '@/components/RasterRun.vue'
 import { stackSegments, type StackSegment } from '@/lib/stackSegments'
 import type { ViewTransform } from '@/lib/coords'
+import type { LayerPlacement } from '@/lib/layerTransform'
 import { resolveTextStyle } from '@/lib/textStyle'
 
 /**
@@ -68,18 +69,18 @@ const props = defineProps<{
   groups: readonly StyleGroup[]
   defaultStyle: TextStyle
   /**
-   * The layer being dragged and how far it has come, in page pixels. It is
-   * held out of its run so the offset reaches it alone, and it goes back the
-   * moment the drag ends.
+   * The layer a gesture is on and where that gesture has taken it. It is held
+   * out of its run so the transform reaches it alone, and it goes back into
+   * one when nothing is selected there any more.
    */
-  held?: { id: string; x: number; y: number } | null
+  held?: { id: string; place: LayerPlacement } | null
 }>()
 
 const segments = computed(() => stackSegments(props.nodes, props.held?.id ?? null))
 
-function offsetFor(segment: StackSegment): { x: number; y: number } | undefined {
+function placeFor(segment: StackSegment): LayerPlacement | undefined {
   if (!props.held || segment.kind !== 'rasters') return undefined
-  return segment.nodes[0].entry.id === props.held.id ? props.held : undefined
+  return segment.nodes[0].entry.id === props.held.id ? props.held.place : undefined
 }
 
 function styleOf(entry: TextLayerEntry): TextStyle {

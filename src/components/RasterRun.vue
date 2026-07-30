@@ -6,6 +6,7 @@
 import { onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 import type { RasterStackNode } from '@shared/page/stack'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
+import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 
 /**
  * A run of raster layers on one canvas, drawn in page coordinates under the
@@ -23,16 +24,16 @@ const props = defineProps<{
   container: { w: number; h: number }
   view: ViewTransform
   /**
-   * A drag in progress, in page pixels and deliberately fractional — this is
-   * the preview, and the layer's own whole-pixel position is left alone until
-   * the release lands it. Applied to the whole canvas, which `stackSegments`
-   * has therefore given the dragged layer to itself.
+   * A gesture in progress, in page units and deliberately fractional — this is
+   * the preview, and the layer's own whole-pixel frame is left alone until the
+   * release resamples it. `stackSegments` has given the layer this canvas to
+   * itself, so the transform can be applied to the whole of it.
    *
-   * Redrawn rather than translated in CSS: this canvas holds only what fell
-   * inside the viewport, so sliding the element would drag its own empty edge
+   * Redrawn rather than transformed in CSS: this canvas holds only what fell
+   * inside the viewport, so moving the element would drag its own empty edge
    * into view along with the layer.
    */
-  offset?: { x: number; y: number }
+  place?: LayerPlacement
 }>()
 
 const dpr = window.devicePixelRatio || 1
@@ -113,7 +114,6 @@ function paint() {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, cv.width, cv.height)
   applyViewTransform(ctx, props.view, dpr)
-  if (props.offset) ctx.translate(props.offset.x, props.offset.y)
 
   for (const node of props.nodes) {
     const bitmap = bitmaps.value.get(node.entry.file)
@@ -123,6 +123,15 @@ function paint() {
     // them one at a time.
     ctx.globalAlpha = node.opacity
     const { x, y, w: fw, h: fh } = node.entry
+    if (props.place) {
+      // Around the layer's own middle, and undone afterwards so a preview can
+      // never leak onto whatever else this canvas holds.
+      ctx.save()
+      applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
+      ctx.drawImage(bitmap, 0, 0, fw, fh)
+      ctx.restore()
+      continue
+    }
     ctx.drawImage(bitmap, x, y, fw, fh)
   }
   ctx.globalAlpha = 1
@@ -157,7 +166,7 @@ watch(
   schedulePaint,
 )
 
-watch(() => [props.view, props.container, props.offset] as const, schedulePaint, { deep: true })
+watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 
 onBeforeUnmount(releaseAll)
 </script>

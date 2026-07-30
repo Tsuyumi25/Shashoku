@@ -14,6 +14,7 @@ import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
 import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
+import type { LayerPlace } from '@/lib/layerTransform'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
@@ -741,23 +742,26 @@ export const useEditorStore = defineStore('editor', () => {
 
 
   /**
-   * A raster layer's move, which arrives whole rather than written through: the
-   * drag previewed itself by drawing at an offset and left the entry alone, so
-   * this is the first and only write.
+   * A raster layer's new placement, which arrives whole rather than written
+   * through: the gesture previewed itself and left the entry alone, so this is
+   * the first and only write.
+   *
+   * A turn or a scale hands over a new file as well as a new frame, and undo
+   * puts the old name back — the old file is still on disk until orphans are
+   * swept, which is what makes going back cost nothing.
    */
-  function cmdMoveLayerFrame(
+  function cmdPlaceLayer(
     filename: string,
     layerId: string,
-    oldPos: { x: number; y: number },
-    newPos: { x: number; y: number },
+    from: LayerPlace,
+    to: LayerPlace,
   ) {
     if (isLayerLocked(layerId)) return
-    if (oldPos.x === newPos.x && oldPos.y === newPos.y) return
     const project = useProjectStore()
     pushCommand({
-      label: `move-layer-frame ${layerId}`,
-      do: () => project.moveLayerFrame(filename, layerId, newPos.x, newPos.y),
-      undo: () => project.moveLayerFrame(filename, layerId, oldPos.x, oldPos.y),
+      label: `place-layer ${layerId}`,
+      do: () => project.placeLayer(filename, layerId, to),
+      undo: () => project.placeLayer(filename, layerId, from),
     })
   }
 
@@ -1159,7 +1163,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdAddLabel,
     cmdDuplicateLabel,
     cmdMoveLabel,
-    cmdMoveLayerFrame,
+    cmdPlaceLayer,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,
     cmdAddRasterLayer,

@@ -351,21 +351,27 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * Where a raster layer's pixels sit, in whole page pixels.
+   * Where a raster layer's pixels sit and which file they are in.
    *
-   * Rounded here rather than trusted from the caller because the manifest
-   * refuses a fractional frame outright, and a drag that wrote one would be
-   * picked up by the autosave and leave a project that will not open. A whole
-   * pixel translation is also the one transform that costs nothing — it is a
-   * copy, where a fractional one would be an interpolation.
+   * The frame is rounded here rather than trusted from the caller because the
+   * manifest refuses a fractional one outright, and every mutation reaches the
+   * autosave — one fractional write mid-gesture would leave a project that no
+   * longer opens.
    */
-  function moveLayerFrame(filename: string, layerId: string, x: number, y: number) {
+  function placeLayer(
+    filename: string,
+    layerId: string,
+    at: { file: string; x: number; y: number; w: number; h: number },
+  ) {
     const file = fileByName(filename)
     if (!file) return
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.kind !== 'raster') return
-    entry.x = Math.round(x)
-    entry.y = Math.round(y)
+    entry.file = at.file
+    entry.x = Math.round(at.x)
+    entry.y = Math.round(at.y)
+    entry.w = Math.round(at.w)
+    entry.h = Math.round(at.h)
     markPageDirty(filename)
   }
 
@@ -704,7 +710,7 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelStyleOverride,
     setLayerVisible,
     setLayerLocked,
-    moveLayerFrame,
+    placeLayer,
     renameLayer,
     setLayerOpacity,
     setLayerBlendMode,
