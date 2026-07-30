@@ -8,7 +8,7 @@ import {
   type TextStackNode,
 } from '@shared/page/stack'
 import { textOf } from '@shared/page/text'
-import { percentToContentPx } from '@/lib/coords'
+import { percentToContentPx, smoothingQualityFor } from '@/lib/coords'
 import { labelBoxSize } from '@/lib/labelBox'
 import { rasterFor } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -120,7 +120,10 @@ function drawTextWith(
   ctx.translate(anchor.x, anchor.y)
   ctx.rotate(label.rotation)
   ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
+  // Page pixels per bitmap pixel, which is what renderScale bought: the engine
+  // rasterized at that multiple and this is where it comes back down. The same
+  // rule the canvas uses, so one bitmap cannot be filtered two ways.
+  ctx.imageSmoothingQuality = smoothingQualityFor(1 / style.renderScale)
   ctx.drawImage(sampleSource(raster.sample), -box.w / 2, -box.h / 2, box.w, box.h)
 }
 

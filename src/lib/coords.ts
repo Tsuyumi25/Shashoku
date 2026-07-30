@@ -40,6 +40,24 @@ export function clamp(value: number, min: number, max: number): number {
  * Past 3x the point is to see the pixel grid, as in every other raster editor,
  * and both layers have to agree about that too or their grids will not line up.
  */
+/**
+ * Which filter a bitmap wants, given how many destination pixels it gets per
+ * source pixel.
+ *
+ * Shared because a bitmap drawn at one ratio has one right answer, and the
+ * canvas and the export both draw the same label bitmap. Written out twice they
+ * drifted: the boundary used to be `< 1`, so a ratio of exactly 1 — 100% zoom,
+ * dpr 1, `renderScale` 1 — took the cheap filter on screen and the expensive
+ * one on export, which is the one place a person compares the two.
+ *
+ * The expensive filter is a minification filter and only earns its cost going
+ * down; at 1 there may still be a fractional destination to resolve, so 1
+ * belongs on the paying side of the line.
+ */
+export function smoothingQualityFor(ratio: number): ImageSmoothingQuality {
+  return ratio <= 1 ? 'high' : 'low'
+}
+
 export function applyViewTransform(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   view: ViewTransform,
@@ -49,8 +67,11 @@ export function applyViewTransform(
   ctx.translate(view.tx, view.ty)
   ctx.scale(view.scale, view.scale)
   ctx.rotate(view.rotate)
+  // Nearest neighbour past 3x, where the point is to see the pixel grid as in
+  // every other raster editor. That is a property of looking at a page rather
+  // than of the bitmap, so it stays here and not in the shared rule.
   ctx.imageSmoothingEnabled = view.scale < 3
-  ctx.imageSmoothingQuality = view.scale < 1 ? 'high' : 'low'
+  ctx.imageSmoothingQuality = smoothingQualityFor(view.scale)
 }
 
 export function screenToContentPx(

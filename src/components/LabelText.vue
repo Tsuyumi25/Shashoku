@@ -19,7 +19,12 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
-import { centeredBoxOnScreen, percentToContentPx, type ViewTransform } from '@/lib/coords'
+import {
+  centeredBoxOnScreen,
+  percentToContentPx,
+  smoothingQualityFor,
+  type ViewTransform,
+} from '@/lib/coords'
 import { labelBoxSize } from '@/lib/labelBox'
 import { rasterFor } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -115,7 +120,7 @@ function paint() {
   // going down. This is also where renderScale becomes visible.
   const ratio = (props.view.scale * dpr) / props.textStyle.renderScale
   ctx.imageSmoothingEnabled = ratio < 3
-  ctx.imageSmoothingQuality = ratio < 1 ? 'high' : 'low'
+  ctx.imageSmoothingQuality = smoothingQualityFor(ratio)
   ctx.drawImage(sampleSource(held), 0, 0, w, h)
 }
 

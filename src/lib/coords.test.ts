@@ -5,6 +5,7 @@ import {
   screenDeltaToContentPx,
   screenToContentPx,
   screenToPageFraction,
+  smoothingQualityFor,
   type ViewTransform,
 } from './coords'
 
@@ -86,6 +87,27 @@ describe('screenToPageFraction', () => {
     const f = screenToPageFraction(s.x, s.y, ORIGIN, view, NATURAL)
     expect(f.x).toBeCloseTo(0.75, 6)
     expect(f.y).toBeCloseTo(0.25, 6)
+  })
+})
+
+describe('smoothingQualityFor', () => {
+  it('pays for the good filter going down, which is where it is the one that helps', () => {
+    expect(smoothingQualityFor(0.25)).toBe('high')
+    expect(smoothingQualityFor(0.99)).toBe('high')
+  })
+
+  /**
+   * The boundary the two draw sites used to disagree about. A ratio of exactly
+   * 1 is 100% zoom at dpr 1 and renderScale 1 — the one moment a person can
+   * hold the preview and the export side by side.
+   */
+  it('keeps the good filter at exactly one', () => {
+    expect(smoothingQualityFor(1)).toBe('high')
+  })
+
+  it('stops paying going up, where the two filters agree anyway', () => {
+    expect(smoothingQualityFor(1.5)).toBe('low')
+    expect(smoothingQualityFor(8)).toBe('low')
   })
 })
 
