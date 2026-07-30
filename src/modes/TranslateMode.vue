@@ -62,6 +62,26 @@
           v-if="!showingLabels"
           type="button"
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="複製圖層（Ctrl+J）"
+          :disabled="!canDuplicate"
+          @click="onDuplicate"
+        >
+          <Copy :size="14" />
+        </button>
+        <button
+          v-if="!showingLabels"
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="合併圖層（Ctrl+E）。只吃點陣圖層，以及整包都是點陣的資料夾"
+          :disabled="!canMerge"
+          @click="onMerge"
+        >
+          <Combine :size="14" />
+        </button>
+        <button
+          v-if="!showingLabels"
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           title="新增資料夾"
           :disabled="!editor.currentFilename"
           @click="onAddFolder"
@@ -113,7 +133,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { FolderPlus, Layers, List, PaintBucket, Plus } from '@lucide/vue'
+import { Combine, Copy, FolderPlus, Layers, List, PaintBucket, Plus } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
@@ -125,6 +145,7 @@ import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -137,11 +158,20 @@ const editor = useEditorStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 const { canFill, fillSelection } = useFillSelection()
+const { canMerge, canDuplicate, mergeBySelection, duplicateLayer } = useMergeLayers()
 
 const showingLabels = computed(() => ui.panel === 'labels')
 
 function onFill() {
   void fillSelection().catch((err: unknown) => console.error('fill failed', err))
+}
+
+function onMerge() {
+  void mergeBySelection().catch((err: unknown) => console.error('merge failed', err))
+}
+
+function onDuplicate() {
+  void duplicateLayer().catch((err: unknown) => console.error('duplicate failed', err))
 }
 
 // The chapter's, not the open page's — the list below spans the chapter.

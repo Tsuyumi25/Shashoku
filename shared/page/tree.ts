@@ -97,6 +97,51 @@ export function isLocked(layers: readonly LayerEntry[], id: string): boolean {
 
 
 /**
+ * Whether a node can be merged: pixels, or a container of nothing but pixels.
+ *
+ * Merge exists to turn several appearances into one surface that can still be
+ * worked on — a folder gives you a stack, and a brush stroke across it lands on
+ * one child. Nobody paints across a translation, and the export bakes the
+ * lettering in anyway, so a text object is never what that surface is made of
+ * and a folder holding one cannot flatten without taking it.
+ *
+ * An empty folder qualifies and contributes nothing, which is what the rule
+ * says and costs nothing to allow.
+ */
+export function isMergeable(entry: LayerEntry): boolean {
+  if (entry.kind === 'raster') return true
+  if (entry.kind === 'group') return entry.children.every(isMergeable)
+  return false
+}
+
+
+/**
+ * The members of a set that no other member already contains, in tree order.
+ *
+ * Selecting a folder and something inside it names the same pixels twice, and a
+ * merge that took both would draw them twice and then try to remove the inner
+ * one from a folder it had already consumed.
+ */
+export function outermostEntries(
+  layers: readonly LayerEntry[],
+  ids: ReadonlySet<string>,
+): LayerEntry[] {
+  const out: LayerEntry[] = []
+  const walk = (entries: readonly LayerEntry[]): void => {
+    for (const entry of entries) {
+      if (ids.has(entry.id)) {
+        out.push(entry)
+        continue
+      }
+      if (entry.kind === 'group') walk(entry.children)
+    }
+  }
+  walk(layers)
+  return out
+}
+
+
+/**
  * Where an entry sits: sibling indices from the root down. Enough to put a
  * deleted entry back exactly where it was, which is what undo needs and what a
  * bare index into a flattened list cannot say.

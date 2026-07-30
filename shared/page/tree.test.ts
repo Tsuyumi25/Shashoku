@@ -9,6 +9,8 @@ import {
   restoreGroupAt,
   insertAtPath,
   isLocked,
+  isMergeable,
+  outermostEntries,
   pathOf,
   removeAtPath,
   textObjects,
@@ -320,5 +322,53 @@ describe('isLocked', () => {
   // Nothing is protected by a lock it does not have.
   it('answers false for an entry that is not on this page', () => {
     expect(isLocked([text('a')], 'elsewhere')).toBe(false)
+  })
+})
+
+describe('isMergeable', () => {
+  it('takes pixels', () => {
+    expect(isMergeable(raster('r'))).toBe(true)
+  })
+
+  /**
+   * Nothing paints across a translation, and the export bakes the lettering in
+   * anyway — so the one need merge exists for never points at a text object.
+   */
+  it('never takes a text object', () => {
+    expect(isMergeable(text('a'))).toBe(false)
+  })
+
+  it('takes a folder of nothing but pixels', () => {
+    expect(isMergeable(group('g', [raster('r'), group('h', [raster('s')])]))).toBe(true)
+  })
+
+  it('refuses a folder holding a translation, however deep', () => {
+    expect(isMergeable(group('g', [raster('r'), group('h', [text('a')])]))).toBe(false)
+  })
+
+  it('takes an empty folder, which contributes nothing', () => {
+    expect(isMergeable(group('g', []))).toBe(true)
+  })
+})
+
+describe('outermostEntries', () => {
+  it('drops a member another member already contains', () => {
+    const layers = [group('g', [raster('r')]), raster('s')]
+    expect(idsOf(outermostEntries(layers, new Set(['g', 'r', 's'])))).toEqual(['g', 's'])
+  })
+
+  it('keeps one nested inside a folder nobody named', () => {
+    const layers = [group('g', [raster('r')]), raster('s')]
+    expect(idsOf(outermostEntries(layers, new Set(['r', 's'])))).toEqual(['r', 's'])
+  })
+
+  // Bottom first, which is the order they are drawn in and merged in.
+  it('answers in tree order', () => {
+    const layers = [raster('a'), raster('b'), raster('c')]
+    expect(idsOf(outermostEntries(layers, new Set(['c', 'a'])))).toEqual(['a', 'c'])
+  })
+
+  it('has nothing to say about an empty set', () => {
+    expect(outermostEntries([raster('a')], new Set())).toEqual([])
   })
 })

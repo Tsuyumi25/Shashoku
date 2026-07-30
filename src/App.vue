@@ -78,6 +78,7 @@ import ThemeToggle from '@/components/ThemeToggle.vue'
 import ToolRail from '@/components/ToolRail.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
+import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useExportStore } from '@/stores/exportStore'
@@ -96,6 +97,7 @@ const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
 const fill = useFillSelection()
+const merge = useMergeLayers()
 
 // The window holds itself open until this answers, so every path out of it has
 // to reach the release — a failed write loses that one write, not the reply.
@@ -163,6 +165,16 @@ useEventListener(window, 'keydown', (e) => {
   } else if (key === 'i' && e.shiftKey) {
     e.preventDefault()
     if (!e.repeat && editor.maskTarget) selection.invert(editor.maskTarget)
+  } else if (key === 'e') {
+    // One key for both, as Photoshop's is: several selected means merge those,
+    // one means merge it down.
+    e.preventDefault()
+    if (e.repeat) return
+    void merge.mergeBySelection().catch((err: unknown) => console.error('merge failed', err))
+  } else if (key === 'j') {
+    e.preventDefault()
+    if (e.repeat) return
+    void merge.duplicateLayer().catch((err: unknown) => console.error('duplicate failed', err))
   }
 })
 

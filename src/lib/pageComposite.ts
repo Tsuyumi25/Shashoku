@@ -48,18 +48,18 @@ function canvasBlend(mode: string): GlobalCompositeOperation {
   return mode === 'normal' ? 'source-over' : (mode as GlobalCompositeOperation)
 }
 
-function context2d(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D {
+export function context2d(canvas: OffscreenCanvas): OffscreenCanvasRenderingContext2D {
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new CompositeError('OffscreenCanvas 2d context unavailable')
   return ctx
 }
 
 /** A layer with no frame yet has nothing to draw and no file worth reading. */
-function hasPixels(node: RasterStackNode): boolean {
+export function hasPixels(node: RasterStackNode): boolean {
   return node.entry.w > 0 && node.entry.h > 0
 }
 
-function rasterNodes(nodes: readonly StackNode[]): RasterStackNode[] {
+export function rasterNodes(nodes: readonly StackNode[]): RasterStackNode[] {
   const out: RasterStackNode[] = []
   for (const node of nodes) {
     if (node.kind === 'raster') out.push(node)
@@ -73,28 +73,26 @@ function rasterNodes(nodes: readonly StackNode[]): RasterStackNode[] {
  * A file the manifest names but the disk does not have stops the composite —
  * delivering the page with a patch missing would look like a finished page.
  */
-async function decodeRasters(
+export async function decodeLayerBitmaps(
   stack: readonly StackNode[],
-  load: CompositeInput['loadLayer'],
-  opened: ImageBitmap[],
+  load: (file: string) => Promise<Uint8Array>,
 ): Promise<Map<string, ImageBitmap>> {
   const wanted = [...new Set(rasterNodes(stack).filter(hasPixels).map((n) => n.entry.file))]
   const decoded = new Map<string, ImageBitmap>()
-  for (const file of wanted) {
-    try {
-      const bitmap = await createImageBitmap(new Blob([(await load(file)) as BlobPart]))
-      opened.push(bitmap)
-      decoded.set(file, bitmap)
-    } catch (err) {
-      throw new CompositeError(
-        `無法讀取圖層「${file}」:${err instanceof Error ? err.message : String(err)}`,
-      )
+  try {
+    for (const file of wanted) {
+      decoded.set(file, await createImageBitmap(new Blob([(await load(file)) as BlobPart])))
     }
+  } catch (err) {
+    for (const bitmap of decoded.values()) bitmap.close()
+    throw new CompositeError(
+      `無法讀取圖層:${err instanceof Error ? err.message : String(err)}`,
+    )
   }
   return decoded
 }
 
-function drawText(
+function drawTextWith(
   ctx: OffscreenCanvasRenderingContext2D,
   node: TextStackNode,
   size: Size,
@@ -116,30 +114,54 @@ function drawText(
   ctx.drawImage(sampleSource(raster.sample), -box.w / 2, -box.h / 2, box.w, box.h)
 }
 
-function drawStack(
+/**
+ * What a stack needs to be drawn with, whichever surface is drawing it.
+ *
+ * Shared so that merging several layers into one and compositing a whole page
+ * are the same code reading the same order — the two would otherwise be two
+ * answers to "what does this stack look like", free to drift.
+ */
+export interface StackPaint {
+  /**
+   * The page's own size. A folder that needs a buffer gets one this big, so
+   * that everything inside it stays in page coordinates.
+   */
+  page: Size
+  rasters: ReadonlyMap<string, ImageBitmap>
+  /** How a text object is drawn. Merge never has one and refuses instead. */
+  drawText(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void
+}
+
+/**
+ * A stack onto a context already in page coordinates — the caller decides where
+ * the origin is, which is what lets a merge draw into its own frame.
+ */
+export function drawStack(
   ctx: OffscreenCanvasRenderingContext2D,
   nodes: readonly StackNode[],
-  size: Size,
-  rasters: ReadonlyMap<string, ImageBitmap>,
-  input: CompositeInput,
+  paint: StackPaint,
 ): void {
   for (const node of nodes) {
     ctx.save()
     ctx.globalAlpha = node.opacity
     ctx.globalCompositeOperation = canvasBlend(node.blendMode)
     if (node.kind === 'raster') {
-      const bitmap = rasters.get(node.entry.file)
+      const bitmap = paint.rasters.get(node.entry.file)
       if (bitmap) {
         const { x, y, w, h } = node.entry
         ctx.drawImage(bitmap, x, y, w, h)
       }
     } else if (node.kind === 'text') {
-      drawText(ctx, node, size, input)
+      paint.drawText(ctx, node)
     } else {
       // A folder with blending of its own has to become one picture before that
       // blending can apply, which is the buffer the pass-through default avoids.
-      const buffer = new OffscreenCanvas(size.w, size.h)
-      drawStack(context2d(buffer), node.children, size, rasters, input)
+      //
+      // Always page-sized and drawn in page coordinates, so whatever offset this
+      // context carries is applied once — when the finished buffer lands — and
+      // never again inside it.
+      const buffer = new OffscreenCanvas(paint.page.w, paint.page.h)
+      drawStack(context2d(buffer), node.children, paint)
       ctx.drawImage(buffer, 0, 0)
     }
     ctx.restore()
@@ -158,21 +180,26 @@ function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
-  const opened: ImageBitmap[] = []
+  const page = await createImageBitmap(new Blob([input.raw as BlobPart]))
+  const size = { w: page.width, h: page.height }
+  const stack = pageStack(input.page.layers)
+  const rasters = await decodeLayerBitmaps(stack, input.loadLayer).catch((err: unknown) => {
+    page.close()
+    throw err
+  })
   try {
-    const bitmap = await createImageBitmap(new Blob([input.raw as BlobPart]))
-    opened.push(bitmap)
-    const size = { w: bitmap.width, h: bitmap.height }
-    const stack = pageStack(input.page.layers)
-    const rasters = await decodeRasters(stack, input.loadLayer, opened)
-
     const canvas = new OffscreenCanvas(size.w, size.h)
     const ctx = context2d(canvas)
-    ctx.drawImage(bitmap, 0, 0)
-    drawStack(ctx, stack, size, rasters, input)
+    ctx.drawImage(page, 0, 0)
+    drawStack(ctx, stack, {
+      page: size,
+      rasters,
+      drawText: (target, node) => drawTextWith(target, node, size, input),
+    })
     return canvas
   } finally {
-    for (const bitmap of opened) bitmap.close()
+    page.close()
+    for (const bitmap of rasters.values()) bitmap.close()
   }
 }
 
