@@ -62,6 +62,16 @@
           v-if="!showingLabels"
           type="button"
           class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="新增圖層"
+          :disabled="!editor.currentFilename"
+          @click="onAddLayer"
+        >
+          <FilePlus :size="14" />
+        </button>
+        <button
+          v-if="!showingLabels"
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           title="複製圖層（Ctrl+J）"
           :disabled="!canDuplicate"
           @click="onDuplicate"
@@ -133,7 +143,16 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Combine, Copy, FolderPlus, Layers, List, PaintBucket, Plus } from '@lucide/vue'
+import {
+  Combine,
+  Copy,
+  FilePlus,
+  FolderPlus,
+  Layers,
+  List,
+  PaintBucket,
+  Plus,
+} from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
@@ -150,7 +169,10 @@ import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
-import { allEntries } from '@shared/page/tree'
+import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
+import { generateId } from '@shared/page/schema'
+import { allEntries, pathOf } from '@shared/page/tree'
+import { nextAutoName } from '@/lib/autoName'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -179,26 +201,60 @@ const labelCount = computed(() =>
   project.files.reduce((n, f) => n + f.page.readingOrder.length, 0),
 )
 
+/** The names already spoken for on the open page, among one kind of entry. */
+function takenNames(kind: 'group' | 'raster'): Set<string> {
+  const page = editor.currentFilename
+    ? project.fileByName(editor.currentFilename)?.page
+    : undefined
+  return new Set(
+    (page ? allEntries(page.layers) : [])
+      .filter((e) => e.kind === kind)
+      .map((e) => (e as GroupLayerEntry | RasterLayerEntry).name),
+  )
+}
+
 function onAddFolder() {
   if (!editor.currentFilename) return
-  const page = project.fileByName(editor.currentFilename)?.page
-  const taken = new Set(
-    (page ? allEntries(page.layers) : [])
-      .filter((e) => e.kind === 'group')
-      .map((e) => e.name),
-  )
-  let n = taken.size + 1
-  while (taken.has(`資料夾${n}`)) n++
-  editor.cmdAddFolder(editor.currentFilename, `資料夾${n}`)
+  editor.cmdAddFolder(editor.currentFilename, nextAutoName(takenNames('group'), '資料夾'))
+}
+
+/**
+ * A blank layer, above whatever the cursor is on — where every panel puts a new
+ * one. It has no frame and no file behind it yet; the first write places both.
+ */
+function onAddLayer() {
+  const page = editor.currentFilename
+  if (!page) return
+  const file = project.fileByName(page)
+  if (!file) return
+
+  const id = generateId()
+  const layer: RasterLayerEntry = {
+    kind: 'raster',
+    id,
+    name: nextAutoName(takenNames('raster'), '圖層'),
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    file: `${id}.png`,
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+    alphaLocked: false,
+  }
+
+  const path = editor.cursorId ? pathOf(file.page.layers, editor.cursorId) : null
+  const at =
+    path === null ? undefined : [...path.slice(0, -1), path[path.length - 1] + 1]
+  editor.cmdAddRasterLayer(page, layer, at)
 }
 
 function onAddGroup() {
   const taken = new Set(project.header.groups.map((g) => g.name))
-  let n = project.header.groups.length + 1
-  while (taken.has(`群組${n}`)) n++
-
   const before = project.header.groups.length
-  if (!editor.cmdAddGroup(`群組${n}`)) return
+  if (!editor.cmdAddGroup(nextAutoName(taken, '群組'))) return
   const added = project.header.groups[before]
   if (added) editor.activeGroupId = added.id
 }

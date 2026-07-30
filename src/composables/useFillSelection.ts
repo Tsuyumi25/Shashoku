@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
 import { allEntries } from '@shared/page/tree'
+import { nextAutoName } from '@/lib/autoName'
 import { hexToRgb } from '@/lib/color'
 import { fillPixels } from '@/lib/selection/fill'
 import { isEmptyRect } from '@/lib/selection/rect'
@@ -57,9 +58,7 @@ export function useFillSelection() {
         .filter((e) => e.kind === 'raster')
         .map((e) => e.name),
     )
-    let n = taken.size + 1
-    while (taken.has(`填充${n}`)) n++
-    return `填充${n}`
+    return nextAutoName(taken, '填充')
   }
 
   async function fillSelection(): Promise<void> {

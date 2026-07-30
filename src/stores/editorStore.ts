@@ -1,6 +1,11 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
+import type {
+  GroupLayerEntry,
+  LayerEntry,
+  RasterLayerEntry,
+  TextLayerEntry,
+} from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
@@ -773,6 +778,27 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  /**
+   * A blank layer arrives with no frame at all. The first write places one and
+   * later writes that reach past it grow it — an AI erase patch extended by
+   * hand has to grow the same way, so nothing here is owed to this button alone.
+   */
+  function cmdAddRasterLayer(filename: string, layer: RasterLayerEntry, path?: number[]) {
+    const project = useProjectStore()
+    let removed: RemovedEntry | null = null
+    pushCommand({
+      label: `add-layer ${layer.id}`,
+      do: () => {
+        if (removed === null) project.addLayer(filename, layer, path)
+        else project.restoreEntry(removed)
+      },
+      undo: () => {
+        removed = project.removeEntry(layer.id)
+      },
+    })
+    selectOnly(layer.id)
+  }
+
   function cmdAddFolder(filename: string, name: string) {
     const project = useProjectStore()
     const folder: GroupLayerEntry = {
@@ -1114,6 +1140,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLabel,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,
+    cmdAddRasterLayer,
     cmdAddFolder,
     cmdDissolveFolder,
     cmdMoveLayer,
