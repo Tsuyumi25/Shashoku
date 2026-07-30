@@ -198,7 +198,14 @@ export const useEditorStore = defineStore('editor', () => {
   const collapsedLayerIds = ref<Set<string>>(new Set())
 
   const tool = ref<CanvasTool>('select')
-  
+
+  /**
+   * The colour the eyedropper puts away. Nothing reads it yet — it is here so
+   * that sampling has somewhere to land rather than being invented alongside
+   * the swatch that will show it.
+   */
+  const foreground = ref('#000000')
+
   const activeGroupId = ref<string | null>(null)
   
   const showGroups = ref(false)
@@ -866,6 +873,7 @@ export const useEditorStore = defineStore('editor', () => {
     labelQuery,
     tool,
     setTool,
+    foreground,
     activeGroupId,
     showGroups,
     fontSize,

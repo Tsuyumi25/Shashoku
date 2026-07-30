@@ -8,6 +8,7 @@
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
+    @pointerleave="cursorPos = null"
     @dblclick="selectionTool.onDoubleClick()"
     @contextmenu.prevent
   >
@@ -64,6 +65,29 @@
           @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
         />
       </div>
+
+      <!--
+        The brush, drawn in screen coordinates over everything else. Rotating
+        the view cannot skew it, because a circle at the pointer has no
+        orientation to lose.
+      -->
+      <div
+        v-if="showBrushRing"
+        class="brush-ring pointer-events-none absolute rounded-full"
+        :style="brushRingStyle"
+      />
+      <template v-if="hudGesture && hudBrush">
+        <div
+          class="brush-ring pointer-events-none absolute rounded-full"
+          :style="hudRingStyle"
+        />
+        <div
+          class="pointer-events-none absolute rounded border border-border bg-card px-2 py-1 text-xs whitespace-nowrap"
+          :style="hudLabelStyle"
+        >
+          直徑 {{ hudBrush.size }}px · 硬度 {{ Math.round(hudBrush.hardness * 100) }}%
+        </div>
+      </template>
     </template>
 
     <div v-else class="flex h-full items-center justify-center select-none">
@@ -80,6 +104,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, wa
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
 import LabelText from '@/components/LabelText.vue'
+import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { TextLayerEntry } from '@shared/page/types'
 import { visibleTextObjects } from '@shared/page/tree'
@@ -362,6 +387,109 @@ const spaceDown = ref(false)
 const rDown = ref(false)
 const rotating = ref(false)
 const panning = ref(false)
+
+/** Where the pointer is in this box, so the brush can be drawn where it is. */
+const cursorPos = ref<{ x: number; y: number } | null>(null)
+const capsLock = ref(false)
+const altDown = ref(false)
+
+const {
+  gesture: hudGesture,
+  begin: beginBrushHud,
+  trackTo: trackBrushHud,
+  commit: commitBrushHud,
+  cancel: cancelBrushHud,
+} = useBrushHud()
+
+/** The brush the display is editing, which is the live one rather than a copy. */
+const hudBrush = computed(() =>
+  hudGesture.value === null ? null : selection.brushes[hudGesture.value.mode],
+)
+
+/**
+ * Below this the ring is too small to aim with, so it gives way to the
+ * crosshair — which is what Photoshop does at the same end of the range.
+ */
+const BRUSH_RING_MIN_PX = 6
+
+/** Zero unless a mask tool is up, which is what keeps the ring off otherwise. */
+const brushRingDiameter = computed(() => {
+  const mode = maskBrushModeOf(editor.tool)
+  return mode === null ? 0 : selection.brushes[mode].size * view.scale
+})
+
+/**
+ * The brush drawn at the size it will actually land at. It stands down for
+ * anything that has taken over the pointer, and for Alt, which is the
+ * eyedropper — a ring there would promise a stroke that is not coming.
+ */
+const showBrushRing = computed(
+  () =>
+    cursorPos.value !== null &&
+    !capsLock.value &&
+    !altDown.value &&
+    hudGesture.value === null &&
+    !panning.value &&
+    !rotating.value &&
+    !rDown.value &&
+    !spaceDown.value &&
+    brushRingDiameter.value >= BRUSH_RING_MIN_PX,
+)
+
+function ringStyle(x: number, y: number, diameter: number) {
+  return {
+    left: `${x - diameter / 2}px`,
+    top: `${y - diameter / 2}px`,
+    width: `${diameter}px`,
+    height: `${diameter}px`,
+  }
+}
+
+const brushRingStyle = computed(() =>
+  cursorPos.value === null
+    ? {}
+    : ringStyle(cursorPos.value.x, cursorPos.value.y, brushRingDiameter.value),
+)
+
+/**
+ * The display's own ring, anchored where the drag began rather than following
+ * the pointer — the pointer is the control, so a ring under it would move for
+ * reasons that have nothing to do with the brush.
+ *
+ * Its wash falls off where the brush's does, so hardness is read rather than
+ * counted.
+ */
+const hudRingStyle = computed(() => {
+  const g = hudGesture.value
+  const brush = hudBrush.value
+  if (g === null || brush === null) return {}
+  const inner = Math.min(99.9, brush.hardness * 100)
+  return {
+    ...ringStyle(g.sx, g.sy, brush.size * view.scale),
+    background: `radial-gradient(circle closest-side, color-mix(in srgb, var(--primary) 35%, transparent) ${inner}%, transparent 100%)`,
+  }
+})
+
+/**
+ * Beside the anchor, and flipped to whichever side has room. The canvas clips
+ * what leaves it, so a readout that always sat above and to the right would go
+ * missing exactly when the drag starts near an edge.
+ */
+const HUD_LABEL_GAP = 16
+const HUD_LABEL_W = 150
+const HUD_LABEL_H = 36
+
+const hudLabelStyle = computed(() => {
+  const g = hudGesture.value
+  if (g === null) return {}
+  const { w } = editor.viewContainerSize
+  const right = g.sx + HUD_LABEL_GAP
+  const above = g.sy - HUD_LABEL_H
+  return {
+    left: `${right + HUD_LABEL_W > w ? Math.max(0, g.sx - HUD_LABEL_GAP - HUD_LABEL_W) : right}px`,
+    top: `${above < 0 ? g.sy + HUD_LABEL_GAP : above}px`,
+  }
+})
 let rotatePivot = { x: 0, y: 0 }
 let rotateStartAngle = 0
 let rotateStartTheta = 0
@@ -376,11 +504,17 @@ const rotateDirection = reactive(beginRotationDirection(1, 0))
 const gestureArmed = computed(() => spaceDown.value || rDown.value)
 
 const canvasCursor = computed(() => {
+  // Kept visible through the display's drag: the brush lands where the pointer
+  // is when it is let go, so that has to stay in sight the whole way.
+  if (hudGesture.value !== null) return 'cursor-default'
   if (panning.value) return 'cursor-grabbing'
   if (rotating.value || rDown.value) {
     return rotateDirection.sign === 1 ? 'cursor-rotate-cw' : 'cursor-rotate-ccw'
   }
   if (spaceDown.value) return 'cursor-grab'
+  // The ring is the cursor while it is up; a second mark would only be one more
+  // thing to aim with.
+  if (showBrushRing.value) return 'cursor-none'
   if (editor.tool === 'text' || selecting.value) return 'cursor-crosshair'
   return 'cursor-default'
 })
@@ -406,6 +540,16 @@ function onPointerDown(e: PointerEvent) {
     resetRotationDirection(rotateDirection, rotateStartAngle)
     return
   }
+  // Alt with the right button sizes the brush, as in Photoshop. It reaches the
+  // canvas because the right button does nothing else here and the context
+  // menu is already refused.
+  const hudMode = maskBrushModeOf(editor.tool)
+  if (e.button === 2 && e.altKey && hudMode !== null) {
+    el.setPointerCapture(e.pointerId)
+    const rect = containerRef.value.getBoundingClientRect()
+    beginBrushHud(hudMode, e.clientX - rect.left, e.clientY - rect.top)
+    return
+  }
   if (e.button !== 0) return
   if (spaceDown.value) {
     el.setPointerCapture(e.pointerId)
@@ -416,6 +560,13 @@ function onPointerDown(e: PointerEvent) {
   // Reaching here means bare page: the markers and the text stop the event on
   // their way out, so anything left started on the page itself.
   if (selecting.value) {
+    // Alt over a mask tool is the eyedropper, as in Photoshop: it takes a
+    // colour off the page and deliberately starts no stroke.
+    if (e.altKey && maskBrushModeOf(editor.tool) !== null) {
+      const picked = selectionTool.colorAt(e)
+      if (picked !== null) editor.foreground = picked
+      return
+    }
     if (selectionTool.onPointerDown(e)) return
   }
   if (editor.tool === 'text') {
@@ -430,6 +581,15 @@ function onPointerDown(e: PointerEvent) {
 const ROTATE_SNAP = Math.PI / 12
 
 function onPointerMove(e: PointerEvent) {
+  trackModifiers(e)
+  if (containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    cursorPos.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    if (hudGesture.value !== null) {
+      trackBrushHud(cursorPos.value.x, cursorPos.value.y)
+      return
+    }
+  }
   if (rotating.value && containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect()
     const angle = Math.atan2(
@@ -453,6 +613,10 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp(e: PointerEvent) {
   const el = e.currentTarget as HTMLElement
   if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+  if (hudGesture.value !== null) {
+    commitBrushHud()
+    return
+  }
   // Rotating and panning take the pointer for themselves, so a selection tool
   // only hears about a release that was not one of theirs.
   if (!rotating.value && !panning.value && selecting.value) selectionTool.onPointerUp(e)
@@ -465,6 +629,12 @@ const ESCAPE_DOUBLE_MS = 400
 useEventListener(window, 'keydown', (e) => {
   if (ui.view !== 'translate' || fontPicker.isOpen.value) return
   if (ownsKeyboard(document.activeElement)) return
+  // The display's drag is held under Alt, so its way out has to be reached
+  // before the guard below turns every other key off.
+  if (e.key === 'Escape' && hudGesture.value !== null) {
+    cancelBrushHud()
+    return
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return
   // Turning the page and moving the cursor act on the document, and are dealt
   // with there. What is left here acts on the view.
@@ -524,9 +694,40 @@ useEventListener(window, 'keyup', (e) => {
   if (e.key.toLowerCase() === 'r') rDown.value = false
   if (e.code === 'Space') spaceDown.value = false
 })
+
+/**
+ * Alt and Caps Lock are read off whatever event is to hand rather than counted,
+ * and they need their own listener because the canvas's other keys stand down
+ * the moment a modifier is held.
+ *
+ * Caps Lock especially: it can be turned over while another window has the
+ * keyboard, and a tally kept here would then be inverted for the rest of the
+ * session with no way for a person to work out why.
+ */
+function trackModifiers(e: KeyboardEvent | PointerEvent): void {
+  capsLock.value = e.getModifierState('CapsLock')
+  altDown.value = e.altKey
+}
+
+useEventListener(window, 'keydown', trackModifiers)
+useEventListener(window, 'keyup', trackModifiers)
+// Alt-Tab hands the window away without ever sending the release, which would
+// otherwise leave the eyedropper armed for the rest of the session.
+useEventListener(window, 'blur', () => {
+  altDown.value = false
+})
 </script>
 
 <style scoped>
+/*
+ * A black ring under a white halo, so it reads on a white page and on the dark
+ * gutter around it without either colour having to be sampled.
+ */
+.brush-ring {
+  border: 1px solid rgb(0 0 0 / 0.9);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.6);
+}
+
 /*
  * CSS has no rotate keyword, so these are lucide's redo and undo arcs. An arc
  * is used rather than a full circle because a ring reads the same whichever

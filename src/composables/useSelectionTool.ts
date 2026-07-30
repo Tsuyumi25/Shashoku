@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import { pixelHexAt } from '@/lib/color'
 import { screenToContentPx } from '@/lib/coords'
 import { heldSinceStart } from '@/lib/selection/marquee'
 import type { SelectionOp } from '@/lib/selection/mask'
@@ -208,5 +209,19 @@ export function useSelectionTool(
     return true
   }
 
-  return { onPointerDown, onPointerMove, onPointerUp, onDoubleClick, dropPageSample }
+  /**
+   * The colour of the page under the pointer, for whoever wants to sample it.
+   * The wand already decodes the page once and keeps it, so this costs a lookup
+   * rather than a read-back — which is why it is offered from here rather than
+   * being sampled again somewhere else.
+   */
+  function colorAt(e: MouseEvent): string | null {
+    const pixels = pagePixels()
+    const at = pageAt(e)
+    const img = image.value
+    if (pixels === null || at === null || !img) return null
+    return pixelHexAt(pixels, img.naturalWidth, img.naturalHeight, at.x, at.y)
+  }
+
+  return { onPointerDown, onPointerMove, onPointerUp, onDoubleClick, dropPageSample, colorAt }
 }
