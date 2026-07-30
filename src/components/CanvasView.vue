@@ -56,6 +56,7 @@
           :view="view"
           :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
+          :locked="object.locked"
           @select="onSelectObject(object.id, $event)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -109,6 +110,7 @@ import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { TextLayerEntry } from '@shared/page/types'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
+import { isLocked } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import type { Anchor } from '@/composables/useLabelDrag'
@@ -167,6 +169,7 @@ const objects = computed(() => {
   return stackedTextNodes(stack.value).map(({ entry: label }) => ({
     id: label.id,
     index: numbering.get(label.id) ?? 0,
+    locked: isLocked(file.page.layers, label.id),
     text: textOf(label),
     x: label.x,
     y: label.y,
@@ -190,7 +193,7 @@ onMounted(() => {
  * frame's worth of entries to undo one at a time.
  */
 function moveLabelTo(labelId: string, to: Anchor) {
-  if (!editor.currentFilename) return
+  if (!editor.currentFilename || editor.isLayerLocked(labelId)) return
   project.moveLabel(editor.currentFilename, labelId, to.x, to.y)
 }
 
@@ -229,7 +232,7 @@ function beginLabelScale(labelId: string) {
 
 function scaleLabelTo(labelId: string, fontSizePx: number) {
   const label = labelById(labelId)
-  if (!label || !editor.currentFilename) return
+  if (!label || !editor.currentFilename || editor.isLayerLocked(labelId)) return
   project.updateLabelStyleOverride(editor.currentFilename, labelId, {
     ...(label.styleOverride ?? {}),
     fontSizePx,
@@ -247,7 +250,7 @@ function commitLabelScale(labelId: string) {
 }
 
 function rotateLabelTo(labelId: string, radians: number) {
-  if (!editor.currentFilename) return
+  if (!editor.currentFilename || editor.isLayerLocked(labelId)) return
   project.rotateLabel(editor.currentFilename, labelId, radians)
 }
 

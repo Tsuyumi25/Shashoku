@@ -71,6 +71,32 @@ export function textObjectsInReadingOrder(manifest: ManifestJson): TextLayerEntr
 
 
 /**
+ * Whether an entry refuses to be changed — its own lock, or any folder above it.
+ *
+ * A locked folder locks what it holds, because what gets dragged and deleted by
+ * accident is the children; locking only the shell locks a room with no door.
+ *
+ * An entry that is not on this page answers false. Nothing is protected by a
+ * lock it does not have, and a caller holding an id from somewhere else is
+ * asking about something this tree cannot speak for.
+ */
+export function isLocked(layers: readonly LayerEntry[], id: string): boolean {
+  const walk = (entries: readonly LayerEntry[], inherited: boolean): boolean | null => {
+    for (const entry of entries) {
+      const locked = inherited || entry.locked
+      if (entry.id === id) return locked
+      if (entry.kind === 'group') {
+        const found = walk(entry.children, locked)
+        if (found !== null) return found
+      }
+    }
+    return null
+  }
+  return walk(layers, false) ?? false
+}
+
+
+/**
  * Where an entry sits: sibling indices from the root down. Enough to put a
  * deleted entry back exactly where it was, which is what undo needs and what a
  * bare index into a flattened list cannot say.
@@ -128,6 +154,26 @@ export interface DropTarget {
   parentPath: number[]
   /** Counted before the move is applied, as the tree reads on screen. */
   index: number
+}
+
+/**
+ * The folder a drop is aimed into. Null for the page's own top level, which has
+ * no entry to speak for it — and for a path that leads nowhere, since a move
+ * along one is refused anyway.
+ */
+export function folderAtPath(
+  layers: readonly LayerEntry[],
+  parentPath: readonly number[],
+): GroupLayerEntry | null {
+  let list = layers
+  let folder: GroupLayerEntry | null = null
+  for (const index of parentPath) {
+    const entry = list[index]
+    if (entry === undefined || entry.kind !== 'group') return null
+    folder = entry
+    list = entry.children
+  }
+  return folder
 }
 
 function childrenAt(layers: LayerEntry[], parentPath: readonly number[]): LayerEntry[] | null {

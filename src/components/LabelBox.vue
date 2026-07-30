@@ -2,13 +2,16 @@
   <div
     ref="boxEl"
     class="absolute"
-    :class="[frameClass, drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab']"
+    :class="[
+      frameClass,
+      locked ? 'cursor-default' : drag.dragging.value ? 'cursor-grabbing' : 'cursor-grab',
+    ]"
     :style="boxStyle"
     :title="failure || undefined"
     @pointerenter="hovered = true"
     @pointerleave="hovered = false"
     @pointerdown.stop="drag.onPointerDown"
-    @pointermove="drag.onPointerMove"
+    @pointermove="onBoxMove"
     @pointerup="drag.onPointerUp"
     @pointercancel="drag.onPointerUp"
   >
@@ -19,7 +22,7 @@
       {{ index }}
     </div>
 
-    <template v-if="selected">
+    <template v-if="selected && !locked">
       <div
         v-for="corner in CORNERS"
         :key="corner.key"
@@ -94,6 +97,12 @@ const props = defineProps<{
   selected: boolean
   /** In the selection, cursor or not. Outlined, but without handles. */
   inSelection: boolean
+  /**
+   * Its own lock or a folder's above it. Still selectable — there would be no
+   * way to reach the lock otherwise — but it offers no gesture that would move
+   * it, so the refusal is visible before the drag rather than after it.
+   */
+  locked: boolean
 }>()
 
 const emit = defineEmits<{
@@ -117,6 +126,17 @@ const drag = useLabelDrag({
   onMove: (to) => emit('move', to),
   onCommit: (from, to) => emit('moveEnd', from, to),
 })
+
+/**
+ * The press still lands, so a locked object can be selected and its lock
+ * reached; only the travel is dropped. Letting the move through and relying on
+ * the command to refuse it would not do — the drag writes to the page directly
+ * so the canvas keeps up, and only the release goes through a command.
+ */
+function onBoxMove(e: PointerEvent) {
+  if (props.locked) return
+  drag.onPointerMove(e)
+}
 
 const hovered = ref(false)
 const boxEl = useTemplateRef<HTMLElement>('boxEl')

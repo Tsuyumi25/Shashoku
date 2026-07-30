@@ -7,7 +7,7 @@ import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/pr
 import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
-import { allEntries, textObjects } from '@shared/page/tree'
+import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
@@ -377,8 +377,15 @@ export const useEditorStore = defineStore('editor', () => {
     return label === undefined ? undefined : textOf(label)
   }
 
+  /**
+   * The one choke point every way into typing goes through — a double click, a
+   * key on a row, stepping to the next one — so a locked translation never gets
+   * a caret in the first place. Letting the box open and refusing the keystrokes
+   * would leave someone typing into something that quietly does nothing.
+   */
   function beginTextEdit(filename: string, labelId: string, from: string) {
     commitTextEdit()
+    if (isLayerLocked(labelId)) return
     pendingTextEdit.value = { filename, labelId, from }
   }
 
@@ -559,7 +566,9 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function moveObjectsTo(ids: readonly string[], page: string, index: number) {
     const project = useProjectStore()
-    const moving = inChapterOrder(ids)
+    // Where an object is read, and on which page it lives, are both things a
+    // lock is put on to hold still.
+    const moving = inChapterOrder(ids).filter((id) => !isLayerLocked(id))
     if (moving.length === 0) return
 
     const touched = new Set<string>([page])
@@ -648,10 +657,15 @@ export const useEditorStore = defineStore('editor', () => {
    * Deleting never turns the page. Whatever is left of the page the cursor was
    * on is where the cursor lands, and a page emptied outright is still the page
    * being looked at.
+   *
+   * A locked member is stepped over rather than taking the whole batch down
+   * with it. Selecting ten and losing all ten to one lock would make the lock
+   * the thing standing in the way; what stays behind is on screen and says so
+   * for itself.
    */
   function deleteSelection() {
     const project = useProjectStore()
-    const ids = [...selectedIds.value]
+    const ids = unlockedSelection()
     if (ids.length === 0) return
     const page = currentFilename.value
     const landing = page === null ? 0 : landingIndex(page, ids)
@@ -708,6 +722,7 @@ export const useEditorStore = defineStore('editor', () => {
     oldPos: { x: number; y: number },
     newPos: { x: number; y: number },
   ) {
+    if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand(
       {
@@ -721,7 +736,7 @@ export const useEditorStore = defineStore('editor', () => {
 
 
   function cmdRotateLabel(filename: string, labelId: string, from: number, to: number) {
-    if (from === to) return
+    if (from === to || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand(
       {
@@ -746,6 +761,7 @@ export const useEditorStore = defineStore('editor', () => {
     to: TextLayerEntry['styleOverride'],
   ) {
     if (JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) return
+    if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand(
       {
@@ -786,6 +802,7 @@ export const useEditorStore = defineStore('editor', () => {
    * translation by tidying up.
    */
   function cmdDissolveFolder(filename: string, folderId: string) {
+    if (isLayerLocked(folderId)) return
     const project = useProjectStore()
     const removed = project.dissolveFolder(filename, folderId)
     if (removed === null) return
@@ -809,7 +826,14 @@ export const useEditorStore = defineStore('editor', () => {
     fromPath: number[],
     target: DropTarget,
   ) {
+    if (isLayerLocked(layerId)) return
     const project = useProjectStore()
+    // What a folder holds is part of the folder, so a drop into a locked one is
+    // a change to it — and moving out of a locked folder is already refused
+    // above, since the entry inherits that lock.
+    const file = project.fileByName(filename)
+    const into = file ? folderAtPath(file.page.layers, target.parentPath) : null
+    if (into !== null && isLayerLocked(into.id)) return
     if (!project.moveLayer(filename, fromPath, target)) return
     pushCommand(
       {
@@ -819,6 +843,31 @@ export const useEditorStore = defineStore('editor', () => {
       },
       { alreadyApplied: true },
     )
+  }
+
+  /**
+   * Whether an entry refuses to be changed, its ancestors included.
+   *
+   * Every command that would change a node asks this, and the surfaces ask it
+   * too so a locked object simply does not offer the gesture. The commands are
+   * the ones that matter: a guard on the surface is a courtesy, a guard here is
+   * the protection the lock was put on for.
+   *
+   * Undo and redo deliberately go around it. They reach `projectStore` straight,
+   * and locking is itself a command, so taking one back has already unlocked
+   * whatever it needs by the time it runs.
+   */
+  function isLayerLocked(id: string): boolean {
+    const project = useProjectStore()
+    const page = project.pageOfEntry(id)
+    if (page === null) return false
+    const file = project.fileByName(page)
+    return file ? isLocked(file.page.layers, id) : false
+  }
+
+  /** Whatever is selected that a change is still allowed to reach. */
+  function unlockedSelection(): string[] {
+    return [...selectedIds.value].filter((id) => !isLayerLocked(id))
   }
 
   /**
@@ -834,7 +883,9 @@ export const useEditorStore = defineStore('editor', () => {
     if (page === null) return []
     const file = useProjectStore().fileByName(page)
     if (!file) return []
-    return allEntries(file.page.layers).filter((e) => selectedIds.value.has(e.id))
+    return allEntries(file.page.layers).filter(
+      (e) => selectedIds.value.has(e.id) && !isLocked(file.page.layers, e.id),
+    )
   }
 
   /**
@@ -851,7 +902,7 @@ export const useEditorStore = defineStore('editor', () => {
     before: ReadonlyMap<string, number>,
     opacity: number,
   ) {
-    const moved = [...before].filter(([, was]) => was !== opacity)
+    const moved = [...before].filter(([id, was]) => was !== opacity && !isLayerLocked(id))
     if (moved.length === 0) return
     const project = useProjectStore()
     pushCommand(
@@ -882,7 +933,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const moved: Array<[string, string]> = []
     for (const [id, was] of before) {
-      if (was === blendMode) continue
+      if (was === blendMode || isLayerLocked(id)) continue
       if (!project.setLayerBlendMode(filename, id, blendMode)) continue
       moved.push([id, was])
     }
@@ -907,7 +958,7 @@ export const useEditorStore = defineStore('editor', () => {
    * arrived, and this is the one that acts on the tree.
    */
   function cmdRenameLayer(filename: string, layerId: string, from: string, to: string) {
-    if (from === to) return
+    if (from === to || isLayerLocked(layerId)) return
     const project = useProjectStore()
     // Applied first, as a restack is: a name the tree refuses — a text object
     // has none to change — must not reach the stack as an entry that undoes to
@@ -923,6 +974,25 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  /**
+   * The one change a lock does not refuse — refusing it would leave no way to
+   * take the lock off again.
+   */
+  function cmdSetLayerLocked(filename: string, layerId: string, locked: boolean) {
+    const project = useProjectStore()
+    pushCommand({
+      label: `set-locked ${layerId}`,
+      do: () => project.setLayerLocked(filename, layerId, locked),
+      undo: () => project.setLayerLocked(filename, layerId, !locked),
+    })
+  }
+
+  /**
+   * Left out of the lock deliberately: the eye is a control for looking rather
+   * than for changing, and a locked layer that could not be turned off for a
+   * moment to see what is under it would be frozen rather than protected. The
+   * same exception Photoshop, Krita and Clip Studio all make.
+   */
   function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
     const project = useProjectStore()
     pushCommand({
@@ -932,8 +1002,13 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  /**
+   * A lock that still lets the words be retyped is not protecting the thing it
+   * was put on, so this refuses like every other change rather than being the
+   * one exception content slips through.
+   */
   function cmdUpdateLabelText(filename: string, labelId: string, oldText: string, newText: string) {
-    if (oldText === newText) return
+    if (oldText === newText || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand({
       label: `update-text ${labelId}`,
@@ -948,7 +1023,7 @@ export const useEditorStore = defineStore('editor', () => {
     oldGroupId: string | null,
     newGroupId: string | null,
   ) {
-    if (oldGroupId === newGroupId) return
+    if (oldGroupId === newGroupId || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand({
       label: `update-groupId ${labelId}`,
@@ -1043,6 +1118,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDissolveFolder,
     cmdMoveLayer,
     cmdSetLayerVisible,
+    cmdSetLayerLocked,
+    isLayerLocked,
     cmdRenameLayer,
     cmdSetLayerOpacity,
     cmdSetLayerBlendMode,

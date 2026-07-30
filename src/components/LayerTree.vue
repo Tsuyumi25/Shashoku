@@ -10,7 +10,7 @@
       <div
         v-for="row in rows"
         :key="row.entry.id"
-        :draggable="renaming?.id !== row.entry.id"
+        :draggable="renaming?.id !== row.entry.id && !isRowLocked(row)"
         class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
         :class="[
           isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
@@ -52,6 +52,29 @@
           <EyeOff v-else :size="13" />
         </button>
 
+        <!--
+          Locked by an ancestor reads differently from locked in its own right,
+          and cannot be cleared here: the reason is written on a folder that may
+          be collapsed out of sight, so a button that appeared to work and
+          changed nothing would be worse than one that says where to go.
+        -->
+        <button
+          type="button"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded"
+          :class="[
+            row.lockedByAncestor
+              ? 'cursor-not-allowed text-muted-foreground/40'
+              : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            !row.entry.locked && !row.lockedByAncestor && 'opacity-0 group-hover/row:opacity-100',
+          ]"
+          :title="lockTitle(row)"
+          :disabled="row.lockedByAncestor"
+          @click.stop="onToggleLocked(row.entry)"
+        >
+          <Lock v-if="row.entry.locked || row.lockedByAncestor" :size="12" />
+          <LockOpen v-else :size="12" />
+        </button>
+
         <component :is="iconFor(row.entry)" :size="12" class="shrink-0 text-muted-foreground" />
 
         <input
@@ -70,12 +93,12 @@
           v-else
           class="min-w-0 flex-1 truncate text-xs"
           :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
-          :title="canRename(row.entry) ? '雙擊改名' : undefined"
-          @dblclick.stop="beginRename(row.entry)"
+          :title="canRename(row.entry) && !isRowLocked(row) ? '雙擊改名' : undefined"
+          @dblclick.stop="beginRename(row)"
         >{{ nameFor(row.entry) }}</span>
 
         <button
-          v-if="row.entry.kind === 'group'"
+          v-if="row.entry.kind === 'group' && !isRowLocked(row)"
           type="button"
           class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
           title="解散資料夾（內容留在原地）"
@@ -90,7 +113,18 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from 'vue'
-import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type, Ungroup } from '@lucide/vue'
+import {
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Folder,
+  Image,
+  Lock,
+  LockOpen,
+  Type,
+  Ungroup,
+} from '@lucide/vue'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
 import LayerBlending from '@/components/LayerBlending.vue'
@@ -142,6 +176,16 @@ function onToggleVisible(entry: LayerEntry) {
   editor.cmdSetLayerVisible(editor.currentFilename, entry.id, !entry.visible)
 }
 
+function lockTitle(row: LayerTreeRow): string {
+  if (row.lockedByAncestor) return '由上層資料夾鎖定'
+  return row.entry.locked ? '解鎖' : '鎖定（連同裡面的內容）'
+}
+
+function onToggleLocked(entry: LayerEntry) {
+  if (!editor.currentFilename) return
+  editor.cmdSetLayerLocked(editor.currentFilename, entry.id, !entry.locked)
+}
+
 function onDissolve(folderId: string) {
   if (!editor.currentFilename) return
   editor.cmdDissolveFolder(editor.currentFilename, folderId)
@@ -191,11 +235,17 @@ function canRename(entry: LayerEntry): entry is GroupLayerEntry | RasterLayerEnt
   return entry.kind !== 'text'
 }
 
+/** Its own lock or an ancestor's — either one refuses, so the row offers nothing. */
+function isRowLocked(row: LayerTreeRow): boolean {
+  return row.entry.locked || row.lockedByAncestor
+}
+
 const renaming = ref<{ id: string; draft: string } | null>(null)
 const renameEl = useTemplateRef<HTMLInputElement>('renameEl')
 
-async function beginRename(entry: LayerEntry) {
-  if (!canRename(entry)) return
+async function beginRename(row: LayerTreeRow) {
+  const entry = row.entry
+  if (!canRename(entry) || isRowLocked(row)) return
   renaming.value = { id: entry.id, draft: entry.name }
   await nextTick()
   // Selected rather than merely focused: an auto-named 資料夾3 is there to be

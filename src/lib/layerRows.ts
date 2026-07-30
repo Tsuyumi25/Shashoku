@@ -13,6 +13,15 @@ export interface LayerTreeRow {
    * and the tree is where it gets shown.
    */
   hiddenByAncestor: boolean
+  /**
+   * Locked by a folder above it rather than in its own right.
+   *
+   * Worth keeping apart because inheritance costs diagnosability: the reason a
+   * row will not edit is written on an ancestor, which may be collapsed out of
+   * sight. A row has to be able to look different for it, or a person is left
+   * with a row that refuses and no way to find out why.
+   */
+  lockedByAncestor: boolean
 }
 
 /**
@@ -33,17 +42,24 @@ export function flattenLayerRows(
     prefix: readonly number[],
     depth: number,
     underHidden: boolean,
+    underLocked: boolean,
   ): void => {
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i]
       const path = [...prefix, i]
-      rows.push({ entry, depth, path, hiddenByAncestor: underHidden })
+      rows.push({
+        entry,
+        depth,
+        path,
+        hiddenByAncestor: underHidden,
+        lockedByAncestor: underLocked,
+      })
       if (entry.kind !== 'group' || collapsed.has(entry.id)) continue
-      walk(entry.children, path, depth + 1, underHidden || !entry.visible)
+      walk(entry.children, path, depth + 1, underHidden || !entry.visible, underLocked || entry.locked)
     }
   }
 
-  walk(layers, [], 0, false)
+  walk(layers, [], 0, false, false)
   return rows
 }
 

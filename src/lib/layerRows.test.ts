@@ -114,6 +114,26 @@ describe('flattenLayerRows', () => {
     const rows = flattenLayerRows([group('g', [text('a')])], new Set())
     expect(rows.every((r) => !r.hiddenByAncestor)).toBe(true)
   })
+
+  /**
+   * The lock a row cannot see for itself. Its reason sits on an ancestor that
+   * may be collapsed out of sight, so the row has to be able to look different
+   * for it — otherwise it simply refuses and says nothing about why.
+   */
+  it('marks what a locked folder locks under it, apart from the folder itself', () => {
+    const layers = [{ ...group('g', [text('a'), { ...text('b'), locked: true }]), locked: true }]
+    const rows = flattenLayerRows(layers, new Set())
+    expect(rows.map((r) => [r.entry.id, r.entry.locked, r.lockedByAncestor])).toEqual([
+      ['g', true, false],
+      ['b', true, true],
+      ['a', false, true],
+    ])
+  })
+
+  it('leaves what is inside an unlocked folder unmarked', () => {
+    const rows = flattenLayerRows([group('g', [text('a')])], new Set())
+    expect(rows.every((r) => !r.lockedByAncestor)).toBe(true)
+  })
 })
 
 describe('dropTargetFor', () => {

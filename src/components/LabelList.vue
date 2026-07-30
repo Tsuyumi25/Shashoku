@@ -63,7 +63,11 @@
         <div
           v-else
           tabindex="0"
-          :draggable="!isEditing(rows[vrow.index] as LabelRow) && !filtering"
+          :draggable="
+            !isEditing(rows[vrow.index] as LabelRow) &&
+            !filtering &&
+            !isRowLocked(rows[vrow.index] as LabelRow)
+          "
           :data-row-id="(rows[vrow.index] as LabelRow).label.id"
           class="relative flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
           :class="[
@@ -92,6 +96,18 @@
             :title="nameOf((rows[vrow.index] as LabelRow).label.groupId)"
           />
 
+          <!--
+            Unlike visibility, a lock is worth showing on a flat list: it says
+            this row will refuse, which is otherwise only discoverable by trying
+            to type into it. Where the lock was put on is the tree's to answer.
+          -->
+          <Lock
+            v-if="isRowLocked(rows[vrow.index] as LabelRow)"
+            :size="11"
+            class="mt-1 shrink-0 text-muted-foreground/60"
+            aria-label="已鎖定"
+          />
+
           <textarea
             v-if="isEditing(rows[vrow.index] as LabelRow)"
             :ref="takeFocus"
@@ -118,7 +134,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { Search, X } from '@lucide/vue'
+import { Lock, Search, X } from '@lucide/vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
 import {
@@ -184,6 +200,11 @@ const totalSize = computed(() => virtualizer.value.getTotalSize())
 
 function measureRow(el: unknown) {
   if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
+
+/** Its own lock or a folder's above it, which this list has no way to tell apart. */
+function isRowLocked(row: LabelRow): boolean {
+  return editor.isLayerLocked(row.label.id)
 }
 
 function isSelected(row: LabelRow): boolean {
@@ -349,6 +370,7 @@ function onInputKey(e: KeyboardEvent) {
  * the whole visit to this row, closed by whatever takes the caret away.
  */
 function onInput(row: LabelRow, e: Event) {
+  if (editor.isLayerLocked(row.label.id)) return
   project.updateLabelText(row.filename, row.label.id, (e.target as HTMLTextAreaElement).value)
 }
 

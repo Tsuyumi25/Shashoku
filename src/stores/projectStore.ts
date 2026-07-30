@@ -350,6 +350,15 @@ export const useProjectStore = defineStore('project', () => {
     return true
   }
 
+  function setLayerLocked(filename: string, layerId: string, locked: boolean) {
+    const file = fileByName(filename)
+    if (!file) return
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.locked === locked) return
+    entry.locked = locked
+    markPageDirty(filename)
+  }
+
   /** Any entry too — a folder carries blending so a run can be faded as one. */
   function setLayerOpacity(filename: string, layerId: string, opacity: number) {
     const file = fileByName(filename)
@@ -675,6 +684,7 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelGroupId,
     updateLabelStyleOverride,
     setLayerVisible,
+    setLayerLocked,
     renameLayer,
     setLayerOpacity,
     setLayerBlendMode,

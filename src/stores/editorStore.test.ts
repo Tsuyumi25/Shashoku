@@ -597,6 +597,132 @@ describe('layer tree edits', () => {
     expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
   })
 
+  describe('a lock refuses every change', () => {
+    const lock = (project: ReturnType<typeof useProjectStore>, id: string) =>
+      project.setLayerLocked(PAGE, id, true)
+
+    it('refuses to move, turn or restyle a locked object', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      lock(project, 'a')
+
+      editor.cmdMoveLabel(PAGE, 'a', { x: 0.5, y: 0.5 }, { x: 0.1, y: 0.1 })
+      editor.cmdRotateLabel(PAGE, 'a', 0, 1)
+      editor.cmdUpdateLabelStyleOverride(PAGE, 'a', undefined, { fontSizePx: 40 })
+
+      expect(editor.canUndo).toBe(false)
+    })
+
+    /** A lock that still lets the words be retyped is not protecting anything. */
+    it('refuses to retype a locked translation', () => {
+      const { project, editor } = openTree([label('a', 'before')], ['a'])
+      lock(project, 'a')
+
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
+
+      expect(textOf(labelsOf(project)[0])).toBe('before')
+      expect(editor.canUndo).toBe(false)
+    })
+
+    it('refuses to rename or reblend a locked layer', () => {
+      const { project, editor } = openTree([folder('g', [])], [])
+      lock(project, 'g')
+
+      editor.cmdRenameLayer(PAGE, 'g', 'g', '塗白')
+      editor.cmdSetLayerBlendMode(PAGE, new Map([['g', PASS_THROUGH]]), 'multiply')
+
+      expect(editor.canUndo).toBe(false)
+    })
+
+    it('refuses to restack a locked layer', () => {
+      const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
+      lock(project, 'a')
+
+      editor.cmdMoveLayer(PAGE, 'a', [0], { parentPath: [], index: 2 })
+
+      expect(stackOf(project)).toEqual(['a', 'b'])
+    })
+
+    // What a folder holds is part of the folder.
+    it('refuses a drop into a locked folder', () => {
+      const { project, editor } = openTree([label('a'), folder('g', [])], ['a'])
+      lock(project, 'g')
+
+      editor.cmdMoveLayer(PAGE, 'a', [0], { parentPath: [1], index: 0 })
+
+      expect(stackOf(project)).toEqual(['a', 'g'])
+    })
+
+    it('refuses to dissolve a locked folder', () => {
+      const { project, editor } = openTree([folder('g', [label('a')])], ['a'])
+      lock(project, 'g')
+
+      editor.cmdDissolveFolder(PAGE, 'g')
+
+      expect(stackOf(project)).toEqual(['g'])
+    })
+
+    /**
+     * It passes down, because what gets dragged and deleted by accident is the
+     * children — locking only the shell locks a room with no door.
+     */
+    it('refuses a change to what a locked folder holds', () => {
+      const { project, editor } = openTree([folder('g', [label('a', 'before')])], ['a'])
+      lock(project, 'g')
+
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
+
+      expect(textOf(labelsOf(project)[0])).toBe('before')
+    })
+
+    it('deletes what it can and steps over the locked', () => {
+      const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+      lock(project, 'b')
+      editor.selectOnly('a')
+      editor.toggleSelected('b')
+      editor.toggleSelected('c')
+
+      editor.deleteSelection()
+
+      expect(stackOf(project)).toEqual(['b'])
+    })
+
+    // The eye is a control for looking, not for changing.
+    it('still lets a locked layer be hidden and shown', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      lock(project, 'a')
+
+      editor.cmdSetLayerVisible(PAGE, 'a', false)
+
+      expect(project.labelById(PAGE, 'a')?.visible).toBe(false)
+    })
+
+    // Refusing this would leave no way to take the lock off again.
+    it('still lets the lock itself be taken off', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      lock(project, 'a')
+
+      editor.cmdSetLayerLocked(PAGE, 'a', false)
+
+      expect(editor.isLayerLocked('a')).toBe(false)
+    })
+
+    /**
+     * Undo reaches `projectStore` straight, and locking is itself a command —
+     * so by the time a change is taken back, the lock put on after it has
+     * already come off.
+     */
+    it('undoes a change that was made before the lock went on', () => {
+      const { project, editor } = openTree([label('a', 'before')], ['a'])
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
+      editor.cmdSetLayerLocked(PAGE, 'a', true)
+
+      editor.undo()
+      editor.undo()
+
+      expect(textOf(labelsOf(project)[0])).toBe('before')
+    })
+  })
+
   describe('renaming', () => {
     const nameOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
       const entry = findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)

@@ -8,6 +8,7 @@ import {
   moveEntry,
   restoreGroupAt,
   insertAtPath,
+  isLocked,
   pathOf,
   removeAtPath,
   textObjects,
@@ -285,5 +286,39 @@ describe('dissolveGroupAt / restoreGroupAt', () => {
 
     expect(restoreGroupAt(layers, [1], folder as GroupLayerEntry)).toBe(true)
     expect(JSON.stringify(layers)).toBe(before)
+  })
+})
+
+describe('isLocked', () => {
+  const locked = <T extends LayerEntry>(entry: T): T => ({ ...entry, locked: true })
+
+  it('answers a lock an entry put on itself', () => {
+    expect(isLocked([locked(text('a')), text('b')], 'a')).toBe(true)
+    expect(isLocked([locked(text('a')), text('b')], 'b')).toBe(false)
+  })
+
+  /**
+   * What gets dragged and deleted by accident is the children, so locking only
+   * the shell would lock a room with no door.
+   */
+  it("passes a folder's lock down to what it holds", () => {
+    const layers = [locked(group('g', [text('a')])), text('b')]
+    expect(isLocked(layers, 'a')).toBe(true)
+    expect(isLocked(layers, 'b')).toBe(false)
+  })
+
+  it('reaches down however many folders deep it has to', () => {
+    const layers = [locked(group('g', [group('h', [group('i', [text('a')])])]))]
+    expect(isLocked(layers, 'a')).toBe(true)
+  })
+
+  it('leaves a sibling branch alone', () => {
+    const layers = [locked(group('g', [text('a')])), group('h', [text('b')])]
+    expect(isLocked(layers, 'b')).toBe(false)
+  })
+
+  // Nothing is protected by a lock it does not have.
+  it('answers false for an entry that is not on this page', () => {
+    expect(isLocked([text('a')], 'elsewhere')).toBe(false)
   })
 })
