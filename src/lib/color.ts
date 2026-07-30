@@ -16,6 +16,32 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${hex2(r)}${hex2(g)}${hex2(b)}`
 }
 
+export interface Rgb {
+  r: number
+  g: number
+  b: number
+}
+
+/**
+ * `#rgb` or `#rrggbb` back to channels, or null for anything else. Refused
+ * rather than stood in for: a swatch that silently became black would be a
+ * fill nobody asked for, landing on pixels that then have to be undone.
+ */
+export function hexToRgb(hex: string): Rgb | null {
+  const body = hex.startsWith('#') ? hex.slice(1) : hex
+  if (!/^[0-9a-fA-F]+$/.test(body)) return null
+  if (body.length === 3) {
+    const [r, g, b] = [...body].map((c) => parseInt(c + c, 16))
+    return { r, g, b }
+  }
+  if (body.length !== 6) return null
+  return {
+    r: parseInt(body.slice(0, 2), 16),
+    g: parseInt(body.slice(2, 4), 16),
+    b: parseInt(body.slice(4, 6), 16),
+  }
+}
+
 /**
  * The colour of one pixel of an RGBA buffer, or null when the point is off it.
  *

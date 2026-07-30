@@ -2,6 +2,7 @@ import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
 import { serializeTextStyle } from '@shared/text-style/schema'
 import { serializeLayers } from '@shared/page/schema'
+import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
 
 /** Longest edge of a cached thumbnail. */
@@ -145,6 +146,7 @@ export async function renderThumbnail(
     page: file.page,
     groups: meta.groups,
     defaultStyle: meta.defaultStyle,
+    loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
   })
   const size = fitWithin({ w: full.width, h: full.height }, edge)
   return encodePng(resizeCanvas(full, size.w, size.h))

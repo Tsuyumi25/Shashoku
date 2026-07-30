@@ -49,9 +49,19 @@
           <Plus :size="14" />
         </button>
         <button
-          v-else
+          v-if="!showingLabels"
           type="button"
           class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          title="用前景色填充選區，成為新的圖層（Alt+Backspace）"
+          :disabled="!canFill"
+          @click="onFill"
+        >
+          <PaintBucket :size="14" />
+        </button>
+        <button
+          v-if="!showingLabels"
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           title="新增資料夾"
           :disabled="!editor.currentFilename"
           @click="onAddFolder"
@@ -103,7 +113,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { FolderPlus, Layers, List, Plus } from '@lucide/vue'
+import { FolderPlus, Layers, List, PaintBucket, Plus } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
@@ -113,6 +123,7 @@ import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import StylePanel from '@/components/StylePanel.vue'
+import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -125,8 +136,13 @@ const ui = useUiStore()
 const editor = useEditorStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
+const { canFill, fillSelection } = useFillSelection()
 
 const showingLabels = computed(() => ui.panel === 'labels')
+
+function onFill() {
+  void fillSelection().catch((err: unknown) => console.error('fill failed', err))
+}
 
 // The chapter's, not the open page's — the list below spans the chapter.
 const labelCount = computed(() =>

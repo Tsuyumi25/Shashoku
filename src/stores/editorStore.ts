@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
+import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { screenToPageFraction } from '@/lib/coords'
@@ -14,11 +15,26 @@ import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
-  
+
   label: string
   do(): void
   undo(): void
 }
+
+/**
+ * How far back the stack reaches.
+ *
+ * It was unbounded while every command held a small text or geometry delta, and
+ * nothing about that was free — a command holds whatever it needs to reverse
+ * itself, and a mask patch is already a region of a page in bytes. Merging
+ * layers puts the pixels of all of them into one entry, which is what turns an
+ * unbounded stack from untidy into a leak that only closing the project clears.
+ *
+ * A count and not a byte budget: a command is a pair of closures, and there is
+ * nothing here to measure. What this bounds is how many of them are kept, which
+ * is enough to stop the stack being the thing that grows for ever.
+ */
+export const UNDO_LIMIT = 100
 
 /**
  * Sticky, as in Photoshop: the text tool stays until V takes it back. The
@@ -418,7 +434,11 @@ export const useEditorStore = defineStore('editor', () => {
   function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean }) {
     commitTextEdit()
     if (!opts?.alreadyApplied) cmd.do()
-    undoStack.value = [...undoStack.value, cmd]
+    const next = [...undoStack.value, cmd]
+    // The oldest goes, as in any editor: what falls off the bottom is the work
+    // furthest from where you are. Redo needs no bound of its own, since it can
+    // only ever hold what this stack handed it.
+    undoStack.value = next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
     redoStack.value = []
   }
 
@@ -480,6 +500,8 @@ export const useEditorStore = defineStore('editor', () => {
       id: generateLabelId(),
       visible: true,
       locked: false,
+      opacity: 1,
+      blendMode: 'normal',
       x,
       y,
       groupId: activeGroupId.value,
@@ -743,12 +765,14 @@ export const useEditorStore = defineStore('editor', () => {
       name,
       visible: true,
       locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
       children: [],
     }
     let path: number[] | undefined
     pushCommand({
       label: `add-folder ${folder.id}`,
-      do: () => project.addFolder(filename, folder, path),
+      do: () => project.addLayer(filename, folder, path),
       undo: () => {
         const removed = project.dissolveFolder(filename, folder.id)
         path = removed?.path

@@ -77,6 +77,7 @@ import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import ToolRail from '@/components/ToolRail.vue'
 import WindowControls from '@/components/WindowControls.vue'
+import { useFillSelection } from '@/composables/useFillSelection'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useExportStore } from '@/stores/exportStore'
@@ -94,6 +95,7 @@ const selection = useSelectionStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
+const fill = useFillSelection()
 
 // The window holds itself open until this answers, so every path out of it has
 // to reach the release — a failed write loses that one write, not the reply.
@@ -162,6 +164,20 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     if (!e.repeat && editor.maskTarget) selection.invert(editor.maskTarget)
   }
+})
+
+/**
+ * Alt+Backspace fills with the foreground colour, as in Photoshop. It sits
+ * apart from the two listeners around it because they divide the keyboard by
+ * whether Ctrl is held, and this key is held by neither side.
+ */
+useEventListener(window, 'keydown', (e) => {
+  if (ui.view !== 'translate' || e.key !== 'Backspace') return
+  if (!e.altKey || e.ctrlKey || e.metaKey) return
+  if (ownsKeyboard(document.activeElement)) return
+  e.preventDefault()
+  if (e.repeat) return
+  void fill.fillSelection().catch((err: unknown) => console.error('fill failed', err))
 })
 
 /**

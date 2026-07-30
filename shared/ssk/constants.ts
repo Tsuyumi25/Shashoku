@@ -43,6 +43,12 @@ export const DIR_CACHE = 'cache'
 export const DIR_FONTS = 'fonts'
 
 
+/** Where a page's raster layers sit, beside its manifest. */
+export function layersDirOf(pageDir: string): string {
+  return `${pageDir}/${DIR_LAYERS}`
+}
+
+
 export const PAGE_MANIFEST_FILENAME = 'manifest.json'
 
 export const PAGE_OCR_FILENAME = 'ocr.json'

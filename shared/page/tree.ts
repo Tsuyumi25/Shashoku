@@ -71,30 +71,6 @@ export function textObjectsInReadingOrder(manifest: ManifestJson): TextLayerEntr
 
 
 /**
- * What is on the page, in the order it is drawn — the canvas and compositing
- * ask the same question and have to get the same answer.
- *
- * Hiding is inherited: a folder that is off takes everything under it with it,
- * whatever those objects say about themselves. That inheritance is also why the
- * label list ignores `visible` entirely — a flat list has nothing to show it
- * with, so the flag it displayed would be lying.
- */
-export function visibleTextObjects(manifest: ManifestJson): TextLayerEntry[] {
-  const out: TextLayerEntry[] = []
-  const walk = (entries: readonly LayerEntry[]): void => {
-    for (const e of entries) {
-      if (!e.visible) continue
-      if (e.kind === 'text') out.push(e)
-      else if (e.kind === 'group') walk(e.children)
-    }
-  }
-  walk(manifest.layers)
-  return out
-}
-
-
-
-/**
  * Where an entry sits: sibling indices from the root down. Enough to put a
  * deleted entry back exactly where it was, which is what undo needs and what a
  * bare index into a flattened list cannot say.

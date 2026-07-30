@@ -10,6 +10,8 @@ function text(id: string): TextLayerEntry {
     id,
     visible: true,
     locked: false,
+    opacity: 1,
+    blendMode: 'normal',
     x: 0,
     y: 0,
     groupId: null,

@@ -22,6 +22,8 @@ function page(): ProjectFile {
           id: 'a',
           visible: true,
           locked: false,
+          opacity: 1,
+          blendMode: 'normal',
           x: 0.5,
           y: 0.5,
           groupId: null,

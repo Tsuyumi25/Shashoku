@@ -249,6 +249,16 @@ export const useSelectionStore = defineStore('selection', () => {
     return held !== null && held.page === page ? mask : null
   }
 
+  /**
+   * The selection's own bytes inside a region, row by row — what anything
+   * turning a selection into pixels needs, without the page-wide array leaving
+   * this store. Null when the page holds no selection.
+   */
+  function maskPatchOf(page: string, region: Rect): Uint8ClampedArray | null {
+    if (mask === null || held === null || held.page !== page) return null
+    return readPatch(mask, held.w, clampToPage(region, held.w, held.h))
+  }
+
   /** Where a selection is being held, whether or not that page is on screen. */
   function heldPage(): string | null {
     return held?.page ?? null
@@ -737,6 +747,7 @@ export const useSelectionStore = defineStore('selection', () => {
     hasSelection,
     isDrawing,
     maskFor,
+    maskPatchOf,
     heldPage,
     displayFor,
     outlinesFor,

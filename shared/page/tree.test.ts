@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
-import { MANIFEST_SCHEMA_VERSION } from './types'
+import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import {
   dissolveGroupAt,
   findEntry,
   findTextObject,
   moveEntry,
   restoreGroupAt,
-  visibleTextObjects,
   insertAtPath,
   pathOf,
   removeAtPath,
@@ -21,6 +20,8 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     id,
     visible: true,
     locked: false,
+    opacity: 1,
+    blendMode: 'normal',
     x: 0,
     y: 0,
     groupId: null,
@@ -31,7 +32,16 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
 }
 
 function group(id: string, children: LayerEntry[], visible = true): GroupLayerEntry {
-  return { kind: 'group', id, name: id, visible, locked: false, children }
+  return {
+    kind: 'group',
+    id,
+    name: id,
+    visible,
+    locked: false,
+    opacity: 1,
+    blendMode: PASS_THROUGH,
+    children,
+  }
 }
 
 function raster(id: string): RasterLayerEntry {
@@ -41,9 +51,13 @@ function raster(id: string): RasterLayerEntry {
     name: id,
     visible: true,
     locked: false,
-    file: `${id}.png`,
     opacity: 1,
     blendMode: 'normal',
+    file: `${id}.png`,
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
     alphaLocked: false,
   }
 }
@@ -96,27 +110,6 @@ describe('textObjectsInReadingOrder', () => {
   })
 })
 
-describe('visibleTextObjects', () => {
-  it('draws in tree order, which is the stacking order', () => {
-    const layers = [text('a'), text('b')]
-    expect(idsOf(visibleTextObjects(manifest(layers, ['b', 'a'])))).toEqual(['a', 'b'])
-  })
-
-  it('leaves out a hidden object', () => {
-    const layers = [text('a', { visible: false }), text('b')]
-    expect(idsOf(visibleTextObjects(manifest(layers, ['a', 'b'])))).toEqual(['b'])
-  })
-
-  it('leaves out a visible object inside a hidden folder', () => {
-    const layers = [group('g', [text('a')], false), text('b')]
-    expect(idsOf(visibleTextObjects(manifest(layers, ['a', 'b'])))).toEqual(['b'])
-  })
-
-  it('leaves out a visible object nested under a hidden ancestor', () => {
-    const layers = [group('g', [group('h', [text('a')])], false)]
-    expect(visibleTextObjects(manifest(layers, ['a']))).toEqual([])
-  })
-})
 
 describe('findEntry', () => {
   it('finds a folder as readily as an object', () => {

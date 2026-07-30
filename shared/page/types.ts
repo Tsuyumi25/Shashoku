@@ -1,16 +1,33 @@
 import type { TextStyle } from '../text-style/types'
 
 
-export const MANIFEST_SCHEMA_VERSION = 3
+export const MANIFEST_SCHEMA_VERSION = 4
 
 export const OCR_SCHEMA_VERSION = 1
 
+/**
+ * A folder with no blending of its own: its children meet whatever is under the
+ * folder directly, so nothing has to be composited into a buffer first. Carried
+ * as a value of the blend-mode list rather than a flag of its own, as in
+ * Photoshop, where it is a group's default.
+ */
+export const PASS_THROUGH = 'pass-through'
 
-interface LayerEntryBase {
+
+export interface LayerEntryBase {
 
   id: string
   visible: boolean
   locked: boolean
+
+  /**
+   * [0,1]. Concrete here where the persisted form leaves it out at 1, so
+   * nothing downstream has to keep asking whether an absent value means opaque.
+   */
+  opacity: number
+
+  /** Concrete for the same reason. A folder's default is `PASS_THROUGH`. */
+  blendMode: string
 }
 
 
@@ -20,9 +37,20 @@ export interface RasterLayerEntry extends LayerEntryBase {
 
   file: string
 
-  opacity: number
+  /**
+   * The layer's own frame in whole page pixels; its PNG covers this and no
+   * more. A full-page buffer is 12 MB decoded however well it compressed, and
+   * one erase patch per region would spend that twenty times over on a page
+   * that is mostly transparent.
+   *
+   * A layer nothing has been written to yet has no frame, which is `w` and `h`
+   * at zero. The first write places the frame and later ones grow it.
+   */
+  x: number
+  y: number
+  w: number
+  h: number
 
-  blendMode: string
   alphaLocked: boolean
 }
 
@@ -59,7 +87,10 @@ export interface TextLayerEntry extends LayerEntryBase {
 }
 
 
-/** A folder, and only that: no style of its own, no meaning to the translation. */
+/**
+ * A folder. It means nothing to the translation, but it does carry the base's
+ * blending, so a run of layers can be dimmed or multiplied as one unit.
+ */
 export interface GroupLayerEntry extends LayerEntryBase {
   kind: 'group'
   name: string

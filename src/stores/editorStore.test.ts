@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { isSelectionTool, maskBrushModeOf, useEditorStore } from './editorStore'
+import { isSelectionTool, maskBrushModeOf, UNDO_LIMIT, useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import type { ProjectFile } from '@/types/project'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
-import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
 
 const PAGE = 'p001.png'
@@ -15,6 +15,8 @@ function label(id: string, text = ''): TextLayerEntry {
     id,
     visible: true,
     locked: false,
+    opacity: 1,
+    blendMode: 'normal',
     x: 0.5,
     y: 0.5,
     groupId: null,
@@ -254,6 +256,37 @@ describe('deleteSelectedLabel', () => {
   })
 })
 
+describe('the undo stack is bounded', () => {
+  it('reaches back a fixed number of steps rather than growing for ever', () => {
+    const editor = useEditorStore()
+    const undone: number[] = []
+    for (let i = 0; i < UNDO_LIMIT + 3; i += 1) {
+      editor.pushCommand({ label: `step ${i}`, do: () => {}, undo: () => undone.push(i) })
+    }
+
+    while (editor.canUndo) editor.undo()
+
+    expect(undone).toHaveLength(UNDO_LIMIT)
+    // The three oldest fell off the bottom, so the furthest back still reachable
+    // is the fourth thing that happened.
+    expect(Math.min(...undone)).toBe(3)
+  })
+
+  it('lets redo replay everything the bounded stack still held', () => {
+    const editor = useEditorStore()
+    const done: number[] = []
+    for (let i = 0; i < UNDO_LIMIT + 3; i += 1) {
+      editor.pushCommand({ label: `step ${i}`, do: () => done.push(i), undo: () => {} })
+    }
+    done.length = 0
+
+    while (editor.canUndo) editor.undo()
+    while (editor.canRedo) editor.redo()
+
+    expect(done).toHaveLength(UNDO_LIMIT)
+  })
+})
+
 describe('pending text edit', () => {
   it('turns one editing session into one undo entry', () => {
     const { project, editor } = openOnePage([label('a', 'before')])
@@ -465,7 +498,16 @@ describe('cmdUpdateLabelStyleOverride', () => {
 
 describe('layer tree edits', () => {
   function folder(id: string, children: TextLayerEntry[]): GroupLayerEntry {
-    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+    return {
+      kind: 'group',
+      id,
+      name: id,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
+      children,
+    }
   }
 
   function openTree(layers: LayerEntry[], readingOrder: string[]) {
@@ -557,7 +599,16 @@ describe('layer tree edits', () => {
 
 describe('deleteSelection', () => {
   function folder(id: string, children: LayerEntry[]): GroupLayerEntry {
-    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+    return {
+      kind: 'group',
+      id,
+      name: id,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
+      children,
+    }
   }
 
   function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
@@ -788,7 +839,16 @@ describe('building a selection', () => {
 
 describe('selectLayerBy', () => {
   function folder(id: string, children: LayerEntry[]): GroupLayerEntry {
-    return { kind: 'group', id, name: id, visible: true, locked: false, children }
+    return {
+      kind: 'group',
+      id,
+      name: id,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
+      children,
+    }
   }
 
   function openTree(layers: LayerEntry[], order: string[]) {

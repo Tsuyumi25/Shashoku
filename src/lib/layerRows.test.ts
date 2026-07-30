@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import { PASS_THROUGH } from '@shared/page/types'
 import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
 
 function text(id: string, visible = true): TextLayerEntry {
@@ -8,6 +9,8 @@ function text(id: string, visible = true): TextLayerEntry {
     id,
     visible,
     locked: false,
+    opacity: 1,
+    blendMode: 'normal',
     x: 0,
     y: 0,
     groupId: null,
@@ -17,7 +20,16 @@ function text(id: string, visible = true): TextLayerEntry {
 }
 
 function group(id: string, children: LayerEntry[], visible = true): GroupLayerEntry {
-  return { kind: 'group', id, name: id, visible, locked: false, children }
+  return {
+    kind: 'group',
+    id,
+    name: id,
+    visible,
+    locked: false,
+    opacity: 1,
+    blendMode: PASS_THROUGH,
+    children,
+  }
 }
 
 function raster(id: string): RasterLayerEntry {
@@ -27,9 +39,13 @@ function raster(id: string): RasterLayerEntry {
     name: id,
     visible: true,
     locked: false,
-    file: `${id}.png`,
     opacity: 1,
     blendMode: 'normal',
+    file: `${id}.png`,
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
     alphaLocked: false,
   }
 }

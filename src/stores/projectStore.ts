@@ -30,7 +30,7 @@ import { parentFolder } from '@shared/project/library'
 import { assertDistinctFolders } from '@shared/export/profile'
 import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
-import { DIR_LAYERS, DIR_RAWS, SHASHOKU_DIR } from '@shared/ssk/constants'
+import { DIR_RAWS, SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { createAutosave } from '@/lib/autosave'
 
@@ -101,11 +101,6 @@ export const useProjectStore = defineStore('project', () => {
   const shashokuDir = computed(() =>
     rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR),
   )
-  
-  function layersDirOf(pageDir: string): string {
-    return joinPath(pageDir, DIR_LAYERS)
-  }
-
   function fileByName(filename: string): ProjectFile | undefined {
     return files.value.find((f) => f.filename === filename)
   }
@@ -336,12 +331,19 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
-  /** A folder starts empty and on top; things are filed into it afterwards. */
-  function addFolder(filename: string, folder: GroupLayerEntry, path?: number[]) {
+  /**
+   * A layer joins the page on top, which is where anything new belongs; a path
+   * is how undo puts one back exactly where it was. A folder arrives empty and
+   * is filed into afterwards.
+   *
+   * Unlike `addLabel` this touches no reading order — a folder and a raster are
+   * not things a reader meets.
+   */
+  function addLayer(filename: string, entry: LayerEntry, path?: number[]) {
     const file = fileByName(filename)
     if (!file) return
     const at = path ?? [file.page.layers.length]
-    if (!insertAtPath(file.page.layers, at, folder)) file.page.layers.push(folder)
+    if (!insertAtPath(file.page.layers, at, entry)) file.page.layers.push(entry)
     markPageDirty(filename)
   }
 
@@ -636,7 +638,7 @@ export const useProjectStore = defineStore('project', () => {
     restoreEntry,
     moveLayer,
     restoreLayerAt,
-    addFolder,
+    addLayer,
     dissolveFolder,
     restoreFolder,
     addGroup,

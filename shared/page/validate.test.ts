@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, TextLayerEntry } from './types'
-import { MANIFEST_SCHEMA_VERSION } from './types'
+import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { validatePage } from './validate'
 
 function text(id: string): TextLayerEntry {
@@ -9,6 +9,8 @@ function text(id: string): TextLayerEntry {
     id,
     visible: true,
     locked: false,
+    opacity: 1,
+    blendMode: 'normal',
     x: 0,
     y: 0,
     groupId: null,
@@ -18,7 +20,16 @@ function text(id: string): TextLayerEntry {
 }
 
 function group(id: string, children: LayerEntry[]): GroupLayerEntry {
-  return { kind: 'group', id, name: id, visible: true, locked: false, children }
+  return {
+    kind: 'group',
+    id,
+    name: id,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: PASS_THROUGH,
+    children,
+  }
 }
 
 function manifest(layers: LayerEntry[], readingOrder: string[]): ManifestJson {

@@ -25,21 +25,22 @@
         Outside the transformed stage on purpose: these carry their own pixels
         and place themselves in screen coordinates. The layer itself is
         transparent to the pointer so a drag on bare page still reaches the
-        canvas gestures, and the frames go over the text because they are what
-        the pointer is meant to find.
+        canvas gestures, and the frames go over everything drawn because they
+        are what the pointer is meant to find.
       -->
-      <div v-if="imageReady" class="pointer-events-none absolute inset-0">
-        <LabelText
-          v-for="object in objects"
-          :key="object.id"
-          :text="object.text"
-          :text-style="object.style"
-          :x="object.x"
-          :y="object.y"
-          :rotation="object.rotation"
+      <div v-if="imageReady && currentFile" class="pointer-events-none absolute inset-0">
+        <PageStack
+          :nodes="stack"
+          :layers-dir="layersDirOf(currentFile.pageDir)"
+          :container="editor.viewContainerSize"
           :natural="editor.viewContentSize"
           :view="view"
+          :groups="project.header.groups"
+          :default-style="project.header.defaultStyle"
         />
+      </div>
+
+      <div v-if="imageReady" class="pointer-events-none absolute inset-0">
         <LabelBox
           v-for="object in objects"
           :key="object.id"
@@ -103,12 +104,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
-import LabelText from '@/components/LabelText.vue'
+import PageStack from '@/components/PageStack.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { TextLayerEntry } from '@shared/page/types'
-import { visibleTextObjects } from '@shared/page/tree'
+import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { textOf } from '@shared/page/text'
+import { layersDirOf } from '@shared/ssk/constants'
 import type { Anchor } from '@/composables/useLabelDrag'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
@@ -142,13 +144,17 @@ const currentFile = computed(() =>
   editor.currentFilename ? (project.fileByName(editor.currentFilename) ?? null) : null,
 )
 
+/** What this page draws and in what order — the same answer the export reads. */
+const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers) : []))
+
 /**
- * Every label on the page, empty ones included: an object with no text still
- * has a frame, and the frame is what makes it findable.
+ * Every label's frame, empty ones included: an object with no text still has a
+ * frame, and the frame is what makes it findable.
  *
- * Laid out in stacking order, which is the tree's, while the number on each
- * frame comes from the reading order — the two are separate sequences now, and
- * the canvas is where both are visible at once.
+ * One flat layer over everything drawn, because a frame is a hit target rather
+ * than part of the picture — a text object dimmed by the folder it sits in is
+ * still grabbed the ordinary way. The number on each comes from the reading
+ * order, while the frames themselves are listed in stacking order.
  *
  * Resolved here rather than in the template so that panning, which re-renders
  * this component on every frame, does not hand each label a new style object
@@ -158,7 +164,7 @@ const objects = computed(() => {
   const file = currentFile.value
   if (!file) return []
   const numbering = new Map(file.page.readingOrder.map((id, i) => [id, i + 1]))
-  return visibleTextObjects(file.page).map((label) => ({
+  return stackedTextNodes(stack.value).map(({ entry: label }) => ({
     id: label.id,
     index: numbering.get(label.id) ?? 0,
     text: textOf(label),

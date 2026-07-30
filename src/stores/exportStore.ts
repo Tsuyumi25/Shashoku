@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { outputFilename, profileFolderName } from '@shared/export/profile'
+import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage } from '@/lib/pageComposite'
 import { encodePage } from '@/lib/pageEncode'
 import { rawsDirOf } from '@/stores/libraryStore'
@@ -143,6 +144,7 @@ export const useExportStore = defineStore('export', () => {
             page: file.page,
             groups: project.projectMeta.groups,
             defaultStyle: project.projectMeta.defaultStyle,
+            loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
           })
         } catch (err) {
           return stop(written, `${file.filename}:${messageOf(err)}`)

@@ -1,6 +1,7 @@
 import type {
   GroupLayerEntry,
   LayerEntry,
+  LayerEntryBase,
   ManifestJson,
   OcrBlockLabel,
   OcrBlockPersisted,
@@ -8,11 +9,12 @@ import type {
   RasterLayerEntry,
   TextLayerEntry,
 } from './types'
-import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
 
 
 export const BLEND_MODE_ALLOWLIST = [
+  PASS_THROUGH,
   'normal',
   'multiply',
   'screen',
@@ -64,16 +66,42 @@ export function generateId(): string {
 
 
 
-function parseLayerBase(v: Record<string, unknown>, at: string): {
-  id: string
-  visible: boolean
-  locked: boolean
-} {
-  const { id, visible, locked } = v
+/**
+ * A folder blends by passing through, everything else blends normally. Both are
+ * left out of the file when they hold, so the common page carries neither key.
+ */
+function defaultBlendMode(kind: string): string {
+  return kind === 'group' ? PASS_THROUGH : 'normal'
+}
+
+function parseLayerBase(v: Record<string, unknown>, at: string, kind: string): LayerEntryBase {
+  const { id, visible, locked, opacity, blendMode } = v
   if (typeof visible !== 'boolean') fail(`${at}.visible 必須是布林`)
   if (typeof locked !== 'boolean') fail(`${at}.locked 必須是布林`)
+
+  let finalOpacity = 1
+  if (opacity !== undefined) {
+    if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
+      fail(`${at}.opacity 必須是 [0,1] 的數字`)
+    finalOpacity = opacity
+  }
+
+  let finalBlendMode = defaultBlendMode(kind)
+  if (blendMode !== undefined) {
+    if (
+      typeof blendMode !== 'string' ||
+      !(BLEND_MODE_ALLOWLIST as readonly string[]).includes(blendMode)
+    )
+      fail(`${at}.blendMode 必須是 ${BLEND_MODE_ALLOWLIST.join(' | ')} 之一`)
+    // Pass-through says "I have no buffer of my own", which is only something a
+    // container can say. On a leaf it would have no meaning to honour.
+    if (blendMode === PASS_THROUGH && kind !== 'group')
+      fail(`${at}.blendMode「${PASS_THROUGH}」只能用在資料夾上`)
+    finalBlendMode = blendMode
+  }
+
   const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
-  return { id: finalId, visible, locked }
+  return { id: finalId, visible, locked, opacity: finalOpacity, blendMode: finalBlendMode }
 }
 
 function parseName(v: Record<string, unknown>, at: string): string {
@@ -81,18 +109,30 @@ function parseName(v: Record<string, unknown>, at: string): string {
   return v.name
 }
 
+function parseFrameEdge(v: unknown, at: string, nonNegative: boolean): number {
+  if (typeof v !== 'number' || !Number.isInteger(v)) fail(`${at} 必須是整數(頁面像素)`)
+  if (nonNegative && v < 0) fail(`${at} 不可為負`)
+  return v
+}
+
 function parseRasterEntry(v: Record<string, unknown>, at: string): RasterLayerEntry {
-  const base = parseLayerBase(v, at)
+  const base = parseLayerBase(v, at, 'raster')
   const name = parseName(v, at)
-  const { file, opacity, blendMode, alphaLocked } = v
+  const { file, alphaLocked } = v
   if (typeof file !== 'string' || file.length === 0) fail(`${at}.file 必須是非空字串`)
   if (/[\\/]/.test(file)) fail(`${at}.file 只能是檔名,不可含路徑(避免逃逸出 pages/<n>/layers/)`)
-  if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
-    fail(`${at}.opacity 必須是 [0,1] 的數字`)
-  if (typeof blendMode !== 'string' || !(BLEND_MODE_ALLOWLIST as readonly string[]).includes(blendMode))
-    fail(`${at}.blendMode 必須是 ${BLEND_MODE_ALLOWLIST.join(' | ')} 之一`)
   if (typeof alphaLocked !== 'boolean') fail(`${at}.alphaLocked 必須是布林`)
-  return { kind: 'raster', ...base, name, file, opacity, blendMode, alphaLocked }
+  return {
+    kind: 'raster',
+    ...base,
+    name,
+    file,
+    x: parseFrameEdge(v.x, `${at}.x`, false),
+    y: parseFrameEdge(v.y, `${at}.y`, false),
+    w: parseFrameEdge(v.w, `${at}.w`, true),
+    h: parseFrameEdge(v.h, `${at}.h`, true),
+    alphaLocked,
+  }
 }
 
 function parseTextEntry(
@@ -100,7 +140,7 @@ function parseTextEntry(
   at: string,
   validGroupIds: readonly string[] | null,
 ): TextLayerEntry {
-  const base = parseLayerBase(v, at)
+  const base = parseLayerBase(v, at, 'text')
   const { x, y, groupId, lines } = v
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
@@ -142,7 +182,7 @@ function parseGroupEntry(
   at: string,
   validGroupIds: readonly string[] | null,
 ): GroupLayerEntry {
-  const base = parseLayerBase(v, at)
+  const base = parseLayerBase(v, at, 'group')
   const name = parseName(v, at)
   const { children } = v
   if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
@@ -223,14 +263,23 @@ export function parseManifest(
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
-  const base = { kind: l.kind, id: l.id, visible: l.visible, locked: l.locked }
+  const base: Record<string, unknown> = {
+    kind: l.kind,
+    id: l.id,
+    visible: l.visible,
+    locked: l.locked,
+  }
+  if (l.opacity !== 1) base.opacity = l.opacity
+  if (l.blendMode !== defaultBlendMode(l.kind)) base.blendMode = l.blendMode
   if (l.kind === 'raster') {
     return {
       ...base,
       name: l.name,
       file: l.file,
-      opacity: l.opacity,
-      blendMode: l.blendMode,
+      x: l.x,
+      y: l.y,
+      w: l.w,
+      h: l.h,
       alphaLocked: l.alphaLocked,
     }
   }
