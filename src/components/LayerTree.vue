@@ -1,70 +1,74 @@
 <template>
-  <div class="h-full min-h-0 overflow-y-auto select-none" @dragover.prevent @drop.prevent="onDrop">
-    <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
-      {{ editor.currentFilename ? '本頁沒有圖層' : '尚未開啟頁面' }}
-    </div>
+  <div class="flex h-full min-h-0 flex-col select-none">
+    <LayerBlending />
 
-    <div
-      v-for="row in rows"
-      :key="row.entry.id"
-      draggable="true"
-      class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
-      :class="[
-        isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
-        row.hiddenByAncestor && 'opacity-40',
-        hover?.id === row.entry.id && hover.zone === 'inside' && 'ring-1 ring-inset ring-primary',
-      ]"
-      :style="{ paddingLeft: `${row.depth * 0.75 + 0.25}rem` }"
-      @click="onPick(row, $event)"
-      @dragstart="onDragStart(row, $event)"
-      @dragover.prevent.stop="onDragOver(row, $event)"
-      @drop.prevent.stop="onDrop"
-      @dragend="clearDrag"
-    >
-      <span
-        v-if="hover?.id === row.entry.id && hover.zone !== 'inside'"
-        class="pointer-events-none absolute right-0 left-0 h-0.5 bg-primary"
-        :class="hover.zone === 'above' ? 'top-0' : 'bottom-0'"
-      />
+    <div class="min-h-0 flex-1 overflow-y-auto" @dragover.prevent @drop.prevent="onDrop">
+      <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
+        {{ editor.currentFilename ? '本頁沒有圖層' : '尚未開啟頁面' }}
+      </div>
 
-      <button
-        v-if="row.entry.kind === 'group'"
-        type="button"
-        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-        :title="collapsed.has(row.entry.id) ? '展開' : '收合'"
-        @click.stop="toggleCollapsed(row.entry.id)"
+      <div
+        v-for="row in rows"
+        :key="row.entry.id"
+        draggable="true"
+        class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
+        :class="[
+          isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
+          row.hiddenByAncestor && 'opacity-40',
+          hover?.id === row.entry.id && hover.zone === 'inside' && 'ring-1 ring-inset ring-primary',
+        ]"
+        :style="{ paddingLeft: `${row.depth * 0.75 + 0.25}rem` }"
+        @click="onPick(row, $event)"
+        @dragstart="onDragStart(row, $event)"
+        @dragover.prevent.stop="onDragOver(row, $event)"
+        @drop.prevent.stop="onDrop"
+        @dragend="clearDrag"
       >
-        <ChevronRight v-if="collapsed.has(row.entry.id)" :size="12" />
-        <ChevronDown v-else :size="12" />
-      </button>
-      <span v-else class="w-4 shrink-0" />
+        <span
+          v-if="hover?.id === row.entry.id && hover.zone !== 'inside'"
+          class="pointer-events-none absolute right-0 left-0 h-0.5 bg-primary"
+          :class="hover.zone === 'above' ? 'top-0' : 'bottom-0'"
+        />
 
-      <button
-        type="button"
-        class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-        :title="row.entry.visible ? '隱藏' : '顯示'"
-        @click.stop="onToggleVisible(row.entry)"
-      >
-        <Eye v-if="row.entry.visible" :size="13" />
-        <EyeOff v-else :size="13" />
-      </button>
+        <button
+          v-if="row.entry.kind === 'group'"
+          type="button"
+          class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          :title="collapsed.has(row.entry.id) ? '展開' : '收合'"
+          @click.stop="toggleCollapsed(row.entry.id)"
+        >
+          <ChevronRight v-if="collapsed.has(row.entry.id)" :size="12" />
+          <ChevronDown v-else :size="12" />
+        </button>
+        <span v-else class="w-4 shrink-0" />
 
-      <component :is="iconFor(row.entry)" :size="12" class="shrink-0 text-muted-foreground" />
+        <button
+          type="button"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+          :title="row.entry.visible ? '隱藏' : '顯示'"
+          @click.stop="onToggleVisible(row.entry)"
+        >
+          <Eye v-if="row.entry.visible" :size="13" />
+          <EyeOff v-else :size="13" />
+        </button>
 
-      <span
-        class="min-w-0 flex-1 truncate text-xs"
-        :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
-      >{{ nameFor(row.entry) }}</span>
+        <component :is="iconFor(row.entry)" :size="12" class="shrink-0 text-muted-foreground" />
 
-      <button
-        v-if="row.entry.kind === 'group'"
-        type="button"
-        class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
-        title="解散資料夾（內容留在原地）"
-        @click.stop="onDissolve(row.entry.id)"
-      >
-        <Ungroup :size="13" />
-      </button>
+        <span
+          class="min-w-0 flex-1 truncate text-xs"
+          :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
+        >{{ nameFor(row.entry) }}</span>
+
+        <button
+          v-if="row.entry.kind === 'group'"
+          type="button"
+          class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
+          title="解散資料夾（內容留在原地）"
+          @click.stop="onDissolve(row.entry.id)"
+        >
+          <Ungroup :size="13" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -73,6 +77,7 @@
 import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type, Ungroup } from '@lucide/vue'
 import type { LayerEntry } from '@shared/page/types'
+import LayerBlending from '@/components/LayerBlending.vue'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'

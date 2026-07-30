@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson, StyleGroup } from '@shared/project/types'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
+import { PASS_THROUGH } from '@shared/page/types'
 import {
   defaultColorForGroupIndex,
   defaultProjectJson,
@@ -331,6 +332,31 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /** Any entry too — a folder carries blending so a run can be faded as one. */
+  function setLayerOpacity(filename: string, layerId: string, opacity: number) {
+    const file = fileByName(filename)
+    if (!file) return
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.opacity === opacity) return
+    entry.opacity = opacity
+    markPageDirty(filename)
+  }
+
+  /**
+   * Refused rather than corrected for a mode the entry cannot mean:
+   * pass-through says "no buffer of my own", and only a container has one to
+   * decline. Letting it through would write a manifest that will not parse.
+   */
+  function setLayerBlendMode(filename: string, layerId: string, blendMode: string) {
+    const file = fileByName(filename)
+    if (!file) return
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.blendMode === blendMode) return
+    if (blendMode === PASS_THROUGH && entry.kind !== 'group') return
+    entry.blendMode = blendMode
+    markPageDirty(filename)
+  }
+
   /**
    * A layer joins the page on top, which is where anything new belongs; a path
    * is how undo puts one back exactly where it was. A folder arrives empty and
@@ -630,6 +656,8 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelGroupId,
     updateLabelStyleOverride,
     setLayerVisible,
+    setLayerOpacity,
+    setLayerBlendMode,
     entryById,
     pageOfEntry,
     setReadingOrder,

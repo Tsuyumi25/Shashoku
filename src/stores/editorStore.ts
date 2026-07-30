@@ -1,13 +1,13 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import type { GroupLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { screenToPageFraction } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
-import { textObjects } from '@shared/page/tree'
+import { allEntries, textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
@@ -821,6 +821,76 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  /**
+   * What the blending controls act on: everything selected that is on the open
+   * page, in tree order.
+   *
+   * The selection reaches across pages, and these controls show one page's
+   * tree — so anything selected elsewhere is deliberately left alone rather
+   * than changed by a slider nobody could see it under.
+   */
+  function layersToBlend(): LayerEntry[] {
+    const page = currentFilename.value
+    if (page === null) return []
+    const file = useProjectStore().fileByName(page)
+    if (!file) return []
+    return allEntries(file.page.layers).filter((e) => selectedIds.value.has(e.id))
+  }
+
+  /**
+   * Everything selected, in one step of history — as with deleting, dimming
+   * five layers is one act and five entries to undo would say it was five.
+   *
+   * `before` is read at the start of the drag rather than reconstructed, and
+   * the whole thing is recorded on release: the slider writes straight through
+   * so the page keeps up with the hand, which would otherwise leave a frame's
+   * worth of entries to undo one at a time.
+   */
+  function cmdSetLayerOpacity(
+    filename: string,
+    before: ReadonlyMap<string, number>,
+    opacity: number,
+  ) {
+    const moved = [...before].filter(([, was]) => was !== opacity)
+    if (moved.length === 0) return
+    const project = useProjectStore()
+    pushCommand(
+      {
+        label: `set-opacity ${moved.length}`,
+        do: () => {
+          for (const [id] of moved) project.setLayerOpacity(filename, id, opacity)
+        },
+        undo: () => {
+          for (const [id, was] of moved) project.setLayerOpacity(filename, id, was)
+        },
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
+   * A blend mode lands in one go rather than through a drag, so unlike opacity
+   * this applies the change itself.
+   */
+  function cmdSetLayerBlendMode(
+    filename: string,
+    before: ReadonlyMap<string, string>,
+    blendMode: string,
+  ) {
+    const moved = [...before].filter(([, was]) => was !== blendMode)
+    if (moved.length === 0) return
+    const project = useProjectStore()
+    pushCommand({
+      label: `set-blend-mode ${moved.length}`,
+      do: () => {
+        for (const [id] of moved) project.setLayerBlendMode(filename, id, blendMode)
+      },
+      undo: () => {
+        for (const [id, was] of moved) project.setLayerBlendMode(filename, id, was)
+      },
+    })
+  }
+
   function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
     const project = useProjectStore()
     pushCommand({
@@ -941,6 +1011,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDissolveFolder,
     cmdMoveLayer,
     cmdSetLayerVisible,
+    cmdSetLayerOpacity,
+    cmdSetLayerBlendMode,
+    layersToBlend,
     cmdUpdateLabelText,
     cmdUpdateLabelGroupId,
     cmdAddGroup,

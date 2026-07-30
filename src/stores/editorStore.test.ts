@@ -6,6 +6,7 @@ import type { ProjectFile } from '@/types/project'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
+import { findEntry } from '@shared/page/tree'
 
 const PAGE = 'p001.png'
 
@@ -594,6 +595,86 @@ describe('layer tree edits', () => {
 
     editor.undo()
     expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
+  })
+
+  describe('blending', () => {
+    const opacityOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+      findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)?.opacity
+
+    const blendOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+      findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)?.blendMode
+
+    it('fades everything selected in one step of history', () => {
+      const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+      const before = new Map([
+        ['a', 1],
+        ['b', 1],
+      ])
+      for (const id of before.keys()) project.setLayerOpacity(PAGE, id, 0.4)
+
+      editor.cmdSetLayerOpacity(PAGE, before, 0.4)
+
+      expect([opacityOf(project, 'a'), opacityOf(project, 'b')]).toEqual([0.4, 0.4])
+      expect(opacityOf(project, 'c')).toBe(1)
+
+      editor.undo()
+      expect([opacityOf(project, 'a'), opacityOf(project, 'b')]).toEqual([1, 1])
+    })
+
+    // A slider nudged and put back is not something anyone wants to undo.
+    it('keeps an opacity that came back where it started out of the stack', () => {
+      const { editor } = openTree([label('a')], ['a'])
+      editor.cmdSetLayerOpacity(PAGE, new Map([['a', 1]]), 1)
+      expect(editor.canUndo).toBe(false)
+    })
+
+    it('changes a blend mode and puts it back', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+
+      editor.cmdSetLayerBlendMode(PAGE, new Map([['a', 'normal']]), 'multiply')
+      expect(blendOf(project, 'a')).toBe('multiply')
+
+      editor.undo()
+      expect(blendOf(project, 'a')).toBe('normal')
+    })
+
+    /**
+     * Pass-through says "no buffer of my own", which only a container has one
+     * to decline — and a manifest carrying it anywhere else will not parse.
+     */
+    it('refuses pass-through on anything that is not a folder', () => {
+      const { project, editor } = openTree([label('a'), folder('g', [])], ['a'])
+
+      editor.cmdSetLayerBlendMode(PAGE, new Map([['a', 'normal']]), PASS_THROUGH)
+      expect(blendOf(project, 'a')).toBe('normal')
+
+      editor.cmdSetLayerBlendMode(PAGE, new Map([['g', 'normal']]), PASS_THROUGH)
+      expect(blendOf(project, 'g')).toBe(PASS_THROUGH)
+    })
+
+    /**
+     * The selection reaches across pages while these controls show one page's
+     * tree, so what is out of sight has to stay out of reach.
+     */
+    it('acts only on what is selected on the open page', () => {
+      const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
+      project.files.push({
+        filename: 'p002.png',
+        pageDir: '/x/p002.png',
+        page: {
+          schemaVersion: MANIFEST_SCHEMA_VERSION,
+          revision: 0,
+          readingOrder: ['z'],
+          layers: [label('z')],
+        },
+        badge: 'ok',
+      })
+      editor.selectOnly('a')
+      editor.toggleSelected('z')
+      editor.currentFilename = PAGE
+
+      expect(editor.layersToBlend().map((e) => e.id)).toEqual(['a'])
+    })
   })
 })
 
