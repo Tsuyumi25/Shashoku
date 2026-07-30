@@ -8,11 +8,17 @@
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
+    @dblclick="selectionTool.onDoubleClick()"
     @contextmenu.prevent
   >
     <template v-if="currentFile && src">
       <img ref="imgRef" :src="src" class="hidden" alt="" @load="onImageLoad" />
       <canvas ref="baseCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
+      <!--
+        A second canvas rather than a mark on the first: the ants crawl on their
+        own clock and the page underneath has no reason to be redrawn for them.
+      -->
+      <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
       <!--
         Outside the transformed stage on purpose: these carry their own pixels
@@ -36,7 +42,7 @@
         <LabelBox
           v-for="object in objects"
           :key="object.id"
-          :class="[!gestureArmed && 'pointer-events-auto']"
+          :class="[!gestureArmed && !selecting && 'pointer-events-auto']"
           :index="object.index"
           :text="object.text"
           :text-style="object.style"
@@ -79,8 +85,11 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { visibleTextObjects } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
 import type { Anchor } from '@/composables/useLabelDrag'
+import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
+import { useSelectionTool } from '@/composables/useSelectionTool'
+import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import { screenToPageFraction } from '@/lib/coords'
+import { applyViewTransform, screenToPageFraction } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -88,16 +97,19 @@ import {
   trackRotationDirection,
 } from '@/lib/rotateDirection'
 import { resolveTextStyle } from '@/lib/textStyle'
-import { useEditorStore } from '@/stores/editorStore'
+import { isSelectionTool, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const selection = useSelectionStore()
 const ui = useUiStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
+const { chooseTool } = useToolChoice()
 
 const view = editor.view
 
@@ -222,7 +234,14 @@ function colorOf(groupId: string | null): string {
 const containerRef = useTemplateRef('containerRef')
 const imgRef = useTemplateRef('imgRef')
 const baseCanvasRef = useTemplateRef('baseCanvasRef')
+const overlayCanvasRef = useTemplateRef('overlayCanvasRef')
 const imageReady = ref(false)
+
+/** Whichever tool is up decides whether a drag on bare page builds a selection. */
+const selecting = computed(() => isSelectionTool(editor.tool))
+
+const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => imageReady.value)
+const selectionTool = useSelectionTool(containerRef, imgRef, () => imageReady.value)
 
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
@@ -232,6 +251,7 @@ useResizeObserver(containerRef, (entries) => {
   editor.viewContainerSize = { w: width, h: height }
   fitUnfittedPage()
   scheduleBaseDraw()
+  selectionOverlay.schedulePaint()
 })
 
 /**
@@ -259,13 +279,7 @@ function drawBase() {
   g.clearRect(0, 0, cv.width, cv.height)
   const img = imgRef.value
   if (!img || !imageReady.value) return
-  g.setTransform(dpr, 0, 0, dpr, 0, 0)
-  g.translate(view.tx, view.ty)
-  g.scale(view.scale, view.scale)
-  g.rotate(view.rotate)
-  // Past 3x the point is to see the pixel grid, as in every other raster editor.
-  g.imageSmoothingEnabled = view.scale < 3
-  g.imageSmoothingQuality = view.scale < 1 ? 'high' : 'low'
+  applyViewTransform(g, view, dpr)
   g.drawImage(img, 0, 0)
 }
 
@@ -298,7 +312,16 @@ watch(
     revoke()
     src.value = null
     imageReady.value = false
+    // Forgotten rather than kept, because a mask is measured in the raw's own
+    // pixels: a page still decoding would otherwise be offered the last page's
+    // dimensions, and Ctrl+A in that gap would select a region of the wrong size.
+    editor.viewContentSize = { w: 0, h: 0 }
+    // Any gesture belonged to the page being left, and the wand's sample was of
+    // its pixels.
+    selection.cancelGesture()
+    selectionTool.dropPageSample()
     scheduleBaseDraw()
+    selectionOverlay.schedulePaint()
     if (!rawsDir || !filename || badge !== 'ok') return
     try {
       const bytes = await window.api.readImage(rawsDir, filename)
@@ -328,7 +351,12 @@ function onImageLoad(e: Event) {
   editor.viewContentSize = { w: img.naturalWidth, h: img.naturalHeight }
   imageReady.value = true
   fitUnfittedPage()
+  selectionOverlay.schedulePaint()
 }
+
+// Switching tool abandons whatever the last one had half drawn, which is what
+// makes the tool rail the mode: nothing carries over between them.
+watch(() => editor.tool, () => selection.cancelGesture())
 
 const spaceDown = ref(false)
 const rDown = ref(false)
@@ -353,7 +381,7 @@ const canvasCursor = computed(() => {
     return rotateDirection.sign === 1 ? 'cursor-rotate-cw' : 'cursor-rotate-ccw'
   }
   if (spaceDown.value) return 'cursor-grab'
-  if (editor.tool === 'text') return 'cursor-crosshair'
+  if (editor.tool === 'text' || selecting.value) return 'cursor-crosshair'
   return 'cursor-default'
 })
 
@@ -387,6 +415,9 @@ function onPointerDown(e: PointerEvent) {
   }
   // Reaching here means bare page: the markers and the text stop the event on
   // their way out, so anything left started on the page itself.
+  if (selecting.value) {
+    if (selectionTool.onPointerDown(e)) return
+  }
   if (editor.tool === 'text') {
     const rect = containerRef.value.getBoundingClientRect()
     const p = screenToPageFraction(e.clientX, e.clientY, rect, view, editor.viewContentSize)
@@ -411,14 +442,20 @@ function onPointerMove(e: PointerEvent) {
     editor.rotateTo(theta, rotatePivot.x, rotatePivot.y)
     return
   }
-  if (!panning.value) return
-  editor.panBy(e.clientX - panLast.x, e.clientY - panLast.y)
-  panLast = { x: e.clientX, y: e.clientY }
+  if (panning.value) {
+    editor.panBy(e.clientX - panLast.x, e.clientY - panLast.y)
+    panLast = { x: e.clientX, y: e.clientY }
+    return
+  }
+  if (selecting.value) selectionTool.onPointerMove(e)
 }
 
 function onPointerUp(e: PointerEvent) {
   const el = e.currentTarget as HTMLElement
   if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+  // Rotating and panning take the pointer for themselves, so a selection tool
+  // only hears about a release that was not one of theirs.
+  if (!rotating.value && !panning.value && selecting.value) selectionTool.onPointerUp(e)
   rotating.value = false
   panning.value = false
 }
@@ -433,17 +470,36 @@ useEventListener(window, 'keydown', (e) => {
   // with there. What is left here acts on the view.
   if (e.defaultPrevented) return
 
+  const key = e.key.toLowerCase()
+
   if (e.key === '0') {
     if (imageReady.value) editor.fitToView()
   } else if (e.code === 'Space') {
     spaceDown.value = true
     e.preventDefault()
-  } else if (e.key.toLowerCase() === 'r') {
+  } else if (key === 'r') {
     rDown.value = true
-  } else if (e.key.toLowerCase() === 't') {
+  } else if (key === 't') {
     editor.setTool('text')
-  } else if (e.key.toLowerCase() === 'v') {
+  } else if (key === 'v') {
     editor.setTool('select')
+  } else if (key === 'm') {
+    // Shift on a tool key reaches the other tool behind it, as it does in
+    // Photoshop, where one slot of the rail holds a pair.
+    editor.setTool(e.shiftKey ? 'marquee-ellipse' : 'marquee-rect')
+  } else if (key === 'l') {
+    editor.setTool(e.shiftKey ? 'lasso-polygon' : 'lasso')
+  } else if (key === 'w') {
+    editor.setTool('wand')
+  } else if (key === 'b') {
+    chooseTool('brush')
+  } else if (key === 'q') {
+    selection.toggleQuickMask()
+  } else if (e.key === '[' || e.key === ']') {
+    selection.nudgeBrushSize(e.key === ']' ? 1 : -1)
+  } else if (e.key === 'Enter' && selection.isDrawing) {
+    e.preventDefault()
+    selection.commitGesture()
   } else if (e.key === 'Escape') {
     const now = performance.now()
     const isDouble = now - lastEscapeAt < ESCAPE_DOUBLE_MS

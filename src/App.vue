@@ -1,6 +1,25 @@
 <template>
-  <div class="relative h-full">
-    <SplitterGroup direction="horizontal" class="h-full">
+  <div class="relative flex h-full">
+    <!--
+      The window's leftmost column, and a fixed width: a sibling of the splitter
+      rather than a panel in it, so it takes no part in the columns' arithmetic
+      and the saved column sizes go on meaning what they meant.
+
+      It starts below a strip of the title band, which runs unbroken across every
+      column — a rail reaching the top edge would punch a hole in the only place
+      the window can be dragged by.
+
+      Standing rather than following the workbench. Which tool is up is sticky
+      state that outlives a trip to the project manager, so picking one from
+      there is picking what you will come back to; and a column that came and
+      went would slide everything beside it every time the view changed.
+    -->
+    <div class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
+      <div class="h-9 shrink-0 border-b border-border" style="-webkit-app-region: drag" />
+      <ToolRail class="min-h-0 flex-1" />
+    </div>
+
+    <SplitterGroup direction="horizontal" class="min-w-0 flex-1">
       <SplitterPanel
         :order="1"
         :default-size="20"
@@ -56,6 +75,7 @@ import ProjectLibrary from '@/components/ProjectLibrary.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SidebarHeader from '@/components/SidebarHeader.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import ToolRail from '@/components/ToolRail.vue'
 import WindowControls from '@/components/WindowControls.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
@@ -65,10 +85,12 @@ import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const selection = useSelectionStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
@@ -107,11 +129,13 @@ useEventListener(window, 'keydown', (e) => {
   if (key === 'a') {
     // Whatever holds the caret owns this key. Anywhere else, selecting the
     // whole window's prose is a web page's idea of what it means: here it
-    // either picks every page or it does nothing, but it never leaves the
+    // picks every page, or every pixel of the open one, but it never leaves the
     // interface highlighted blue.
     if (isTypingSurface(document.activeElement)) return
     e.preventDefault()
+    if (e.repeat) return
     if (ui.view === 'project-manager') exportSelection.selectAll()
+    else if (editor.maskTarget) selection.selectAll(editor.maskTarget)
     return
   }
 
@@ -122,10 +146,21 @@ useEventListener(window, 'keydown', (e) => {
 
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
+    // A half-drawn shape is tool state and not in the document, so its own
+    // vertices are what this takes back first. Reaching past it would undo
+    // whatever came before while the unfinished shape sat there untouched.
+    if (selection.gestureUndo()) return
     editor.undo()
   } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
     e.preventDefault()
+    if (selection.gestureRedo()) return
     editor.redo()
+  } else if (key === 'd') {
+    e.preventDefault()
+    selection.deselect()
+  } else if (key === 'i' && e.shiftKey) {
+    e.preventDefault()
+    if (!e.repeat && editor.maskTarget) selection.invert(editor.maskTarget)
   }
 })
 
@@ -161,9 +196,18 @@ useEventListener(window, 'keydown', (e) => {
     // No confirmation, as in every editor with an undo stack behind it.
     e.preventDefault()
     editor.deleteSelection()
-  } else if (e.key === 'Escape' && editor.selectedIds.size > 0) {
-    // Backing out one layer at a time. Marked handled so the canvas does not
+  } else if (e.key === 'Backspace' && selection.isDrawing) {
+    // The same act as Ctrl+Z inside a gesture, and the key GIMP and Krita both
+    // use for it.
+    e.preventDefault()
+    selection.gestureUndo()
+  } else if (e.key === 'Escape' && selection.isDrawing) {
+    // Backing out one layer at a time, innermost first: a shape being drawn is
+    // the most transient thing on screen. Marked handled so the canvas does not
     // also read this press as the first half of its double tap to fit.
+    e.preventDefault()
+    selection.cancelGesture()
+  } else if (e.key === 'Escape' && editor.selectedIds.size > 0) {
     e.preventDefault()
     editor.selectOnly(null)
   }

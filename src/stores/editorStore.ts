@@ -9,6 +9,7 @@ import { textOf } from '@shared/page/text'
 import { textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
+import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 
 export interface Command {
@@ -23,8 +24,34 @@ export interface Command {
  * canvas's other gestures are held rather than toggled, which is why the
  * bottom bar has to say which tool is up — a cursor shape is gone the moment
  * the pointer leaves the canvas.
+ *
+ * The tool is also the mode. A drag on bare page can mean select a region or
+ * place a text box, and that collision is the only thing that would otherwise
+ * force separate workspaces; picking a tool answers it.
  */
-export type CanvasTool = 'select' | 'text'
+export type CanvasTool =
+  | 'select'
+  | 'text'
+  | 'marquee-rect'
+  | 'marquee-ellipse'
+  | 'lasso'
+  | 'lasso-polygon'
+  | 'wand'
+  | 'brush'
+
+/** The tools whose drag builds a selection rather than acting on objects. */
+export const SELECTION_TOOLS = [
+  'marquee-rect',
+  'marquee-ellipse',
+  'lasso',
+  'lasso-polygon',
+  'wand',
+  'brush',
+] as const satisfies readonly CanvasTool[]
+
+export function isSelectionTool(tool: CanvasTool): boolean {
+  return (SELECTION_TOOLS as readonly CanvasTool[]).includes(tool)
+}
 
 
 export const useEditorStore = defineStore('editor', () => {
@@ -80,9 +107,19 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function showPageOf(id: string) {
     const page = useProjectStore().pageOfEntry(id)
-    if (page === null || page === currentFilename.value) return
+    if (page !== null) showPage(page)
+  }
+
+  /**
+   * Turn to a page without touching what is selected on it — what an undo needs
+   * when the command it is taking back happened somewhere you have since navigated
+   * away from. `selectFile` lands on the page's first object, which would make
+   * undoing a change on page 3 also move the cursor.
+   */
+  function showPage(filename: string) {
+    if (filename === currentFilename.value) return
     commitTextEdit()
-    currentFilename.value = page
+    currentFilename.value = filename
   }
 
   /** One entry in or out, leaving the rest alone. */
@@ -169,6 +206,18 @@ export const useEditorStore = defineStore('editor', () => {
   )
   /** The page the view was last fitted to, so re-decoding one does not refit. */
   const viewFittedPage = ref<string | null>(null)
+
+  /**
+   * The open page as something a selection can be made on — its name together
+   * with the raw's own pixel size, which is what a mask is measured in. Null
+   * until a page has decoded, since there is nothing to measure before that.
+   */
+  const maskTarget = computed<MaskTarget | null>(() => {
+    const page = currentFilename.value
+    const size = viewContentSize.value
+    if (page === null || size.w === 0 || size.h === 0) return null
+    return { page, w: size.w, h: size.h }
+  })
 
   const undoStack = shallowRef<Command[]>([])
   const redoStack = shallowRef<Command[]>([])
@@ -786,6 +835,7 @@ export const useEditorStore = defineStore('editor', () => {
     currentFilename,
     selectedIds,
     cursorId,
+    showPage,
     selectOnly,
     isSelected,
     toggleSelected,
@@ -802,6 +852,7 @@ export const useEditorStore = defineStore('editor', () => {
     viewContainerSize,
     viewContentSize,
     viewFittedPage,
+    maskTarget,
     fitToView,
     wheelZoom,
     zoomBy,

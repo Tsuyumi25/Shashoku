@@ -16,6 +16,31 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
+/**
+ * Put a context into page coordinates, so anything drawn at page pixel `(x, y)`
+ * lands where the page's own pixel `(x, y)` is.
+ *
+ * Shared rather than repeated: the page and the selection over it are two
+ * canvases stacked on each other, and a transform written out twice is a
+ * transform that will eventually differ in one of them — which shows up as the
+ * overlay sliding off the artwork the first time the view is rotated.
+ *
+ * Past 3x the point is to see the pixel grid, as in every other raster editor,
+ * and both layers have to agree about that too or their grids will not line up.
+ */
+export function applyViewTransform(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  view: ViewTransform,
+  dpr: number,
+): void {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.translate(view.tx, view.ty)
+  ctx.scale(view.scale, view.scale)
+  ctx.rotate(view.rotate)
+  ctx.imageSmoothingEnabled = view.scale < 3
+  ctx.imageSmoothingQuality = view.scale < 1 ? 'high' : 'low'
+}
+
 export function screenToContentPx(
   clientX: number,
   clientY: number,
