@@ -73,6 +73,46 @@ export function placedFrame(frame: Rect, place: LayerPlacement): Rect {
 }
 
 /**
+ * How much alpha a pixel needs before it counts as content.
+ *
+ * Zero, which is the only value that provably cannot eat a real edge: a pixel
+ * at alpha 0 contributes nothing to any composite it takes part in, so
+ * dropping it changes no picture anywhere. Antialiasing leaves a ramp of 1, 2,
+ * 3 around every turned edge, and a threshold high enough to reclaim those is
+ * a threshold high enough to shave coverage off the artwork — a trade that
+ * wants a measurement behind it, not an argument. This is also the rule Krita
+ * uses when it writes OpenRaster.
+ */
+const CONTENT_ALPHA = 0
+
+/**
+ * The box the pixels actually occupy, or null if none of them do.
+ *
+ * A turned rectangle cannot be held by an upright box without gaining
+ * transparent corners, and turning back does not give them up — so a frame
+ * left at its geometric size only ever grows. Since the resample has already
+ * walked every pixel, finding the real extents costs one more pass over
+ * memory that is still warm.
+ */
+export function contentBounds(rgba: Uint8ClampedArray, w: number, h: number): Rect | null {
+  let top = h
+  let left = w
+  let right = -1
+  let bottom = -1
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (rgba[(y * w + x) * 4 + 3] <= CONTENT_ALPHA) continue
+      if (y < top) top = y
+      if (y > bottom) bottom = y
+      if (x < left) left = x
+      if (x > right) right = x
+    }
+  }
+  if (right < 0) return null
+  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 }
+}
+
+/**
  * Put a context where a placed layer's own top-left corner is the origin, so
  * whatever is drawn next lands as the placement asks.
  *

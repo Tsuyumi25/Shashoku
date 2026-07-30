@@ -6,6 +6,7 @@ import { clamp, screenDeltaToContentPx, type Displacement, type ViewTransform } 
 import {
   NO_PLACEMENT,
   applyPlacement,
+  contentBounds,
   isMoved,
   placedFrame,
   type LayerPlace,
@@ -83,20 +84,43 @@ export function useLayerPlacement() {
   }
 
   /**
+   * The pixels a trimmed box holds, moved rather than redrawn.
+   *
+   * A whole-pixel blit onto an empty canvas: no scale, no filter, and drawing
+   * over nothing leaves the source exactly as it was — so the one resample the
+   * gesture is allowed stays the only one. Read back through `ImageData`
+   * instead and every faint edge pixel would pay a rounding of its own, since
+   * that path converts out of premultiplied alpha and back.
+   */
+  function cropTo(canvas: OffscreenCanvas, box: Rect): OffscreenCanvas {
+    const cropped = new OffscreenCanvas(box.w, box.h)
+    const ctx = context2d(cropped)
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(canvas, -box.x, -box.y)
+    return cropped
+  }
+
+  /**
    * The layer redrawn through its placement, into a frame of its own.
    *
    * The source is read at its stored size and the destination is the box the
    * placement lands in, so this is one resample rather than a chain of them —
    * which is the whole reason a gesture is held rather than written through.
+   *
+   * The frame that comes back is the one the pixels turned out to need, which
+   * is not the one that was asked for: an upright box cannot hold a turned
+   * rectangle without gaining transparent corners, and nothing later gives
+   * them up. A frame that only ever grows would erode the very thing per-layer
+   * frames exist for.
    */
   async function bake(
     entry: RasterLayerEntry,
     place: LayerPlacement,
     frame: Rect,
     pageDir: string,
-  ): Promise<Uint8Array> {
-    const bytes = await window.api.readImage(layersDirOf(pageDir), entry.file)
-    const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
+  ): Promise<{ bytes: Uint8Array; frame: Rect }> {
+    const source = await window.api.readImage(layersDirOf(pageDir), entry.file)
+    const bitmap = await createImageBitmap(new Blob([source as BlobPart]))
     try {
       const canvas = new OffscreenCanvas(frame.w, frame.h)
       const ctx = context2d(canvas)
@@ -104,7 +128,22 @@ export function useLayerPlacement() {
       ctx.imageSmoothingQuality = 'high'
       applyPlacement(ctx, entry, place, frame)
       ctx.drawImage(bitmap, 0, 0, entry.w, entry.h)
-      return await encodePng(canvas)
+
+      const held = contentBounds(ctx.getImageData(0, 0, frame.w, frame.h).data, frame.w, frame.h)
+      // Nothing survived, which means nothing went in. Keeping the box that was
+      // asked for beats writing a frame of zero, which has no handle to grab
+      // and could never be reached again.
+      if (held === null) return { bytes: await encodePng(canvas), frame }
+      const trimmed = {
+        x: frame.x + held.x,
+        y: frame.y + held.y,
+        w: held.w,
+        h: held.h,
+      }
+      if (held.x === 0 && held.y === 0 && held.w === frame.w && held.h === frame.h) {
+        return { bytes: await encodePng(canvas), frame: trimmed }
+      }
+      return { bytes: await encodePng(cropTo(canvas, held)), frame: trimmed }
     } finally {
       bitmap.close()
     }
@@ -144,9 +183,12 @@ export function useLayerPlacement() {
         editor.cmdPlaceLayer(page, entry.id, from, { ...from, x: frame.x, y: frame.y })
         return
       }
-      const to: LayerPlace = { file: `${entry.id}.${generateId().slice(0, 8)}.png`, ...frame }
-      const bytes = await bake(entry, place, frame, file.pageDir)
-      await window.api.writePage(file.pageDir, { layerParts: { [to.file]: bytes } })
+      const baked = await bake(entry, place, frame, file.pageDir)
+      const to: LayerPlace = {
+        file: `${entry.id}.${generateId().slice(0, 8)}.png`,
+        ...baked.frame,
+      }
+      await window.api.writePage(file.pageDir, { layerParts: { [to.file]: baked.bytes } })
       editor.cmdPlaceLayer(page, entry.id, from, to)
     } finally {
       release(gesture)

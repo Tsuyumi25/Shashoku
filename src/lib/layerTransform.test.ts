@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Rect } from '@/lib/selection/rect'
 import {
   NO_PLACEMENT,
+  contentBounds,
   isMoved,
   placedFrame,
   type LayerPlacement,
@@ -69,5 +70,59 @@ describe('placedFrame', () => {
   it('lands on whole pixels however fractional the gesture was', () => {
     const turned = placedFrame(frame, place({ dx: 0.4, dy: -0.6, scale: 1.3, rotation: 0.3 }))
     for (const n of [turned.x, turned.y, turned.w, turned.h]) expect(Number.isInteger(n)).toBe(true)
+  })
+})
+
+/** An image whose named pixels carry the given alpha and whose rest is empty. */
+function pixels(w: number, h: number, lit: Array<[number, number, number]>): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(w * h * 4)
+  for (const [x, y, alpha] of lit) out[(y * w + x) * 4 + 3] = alpha
+  return out
+}
+
+describe('contentBounds', () => {
+  it('finds nothing in an empty patch', () => {
+    expect(contentBounds(new Uint8ClampedArray(4 * 4 * 4), 4, 4)).toBeNull()
+  })
+
+  it('holds a single pixel in a box of one', () => {
+    expect(contentBounds(pixels(4, 4, [[2, 1, 255]]), 4, 4)).toEqual({ x: 2, y: 1, w: 1, h: 1 })
+  })
+
+  it('reaches both extremes on each axis', () => {
+    const rgba = pixels(6, 5, [
+      [1, 1, 255],
+      [4, 3, 255],
+    ])
+    expect(contentBounds(rgba, 6, 5)).toEqual({ x: 1, y: 1, w: 4, h: 3 })
+  })
+
+  it('leaves a full patch exactly as it is', () => {
+    const lit: Array<[number, number, number]> = []
+    for (let y = 0; y < 3; y += 1) for (let x = 0; x < 3; x += 1) lit.push([x, y, 255])
+    expect(contentBounds(pixels(3, 3, lit), 3, 3)).toEqual({ x: 0, y: 0, w: 3, h: 3 })
+  })
+
+  /**
+   * The whole reason this exists: a turned rectangle leaves its corners empty,
+   * and an untrimmed frame would carry them forever.
+   */
+  it('reclaims the transparent corners a turn leaves behind', () => {
+    const rgba = pixels(5, 5, [
+      [2, 1, 255],
+      [1, 2, 255],
+      [3, 2, 255],
+      [2, 3, 255],
+    ])
+    expect(contentBounds(rgba, 5, 5)).toEqual({ x: 1, y: 1, w: 3, h: 3 })
+  })
+
+  /**
+   * Antialiasing leaves a ramp of 1, 2, 3 around every turned edge. Keeping
+   * them is the only rule that provably changes no picture — a pixel at zero
+   * contributes nothing anywhere, and one at 1 does contribute.
+   */
+  it('counts the faintest edge antialiasing leaves', () => {
+    expect(contentBounds(pixels(4, 4, [[3, 3, 1]]), 4, 4)).toEqual({ x: 3, y: 3, w: 1, h: 1 })
   })
 })
