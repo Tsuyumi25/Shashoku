@@ -4,7 +4,7 @@ import { heldSinceStart } from '@/lib/selection/marquee'
 import type { SelectionOp } from '@/lib/selection/mask'
 import type { Point } from '@/lib/selection/rect'
 import { magicWandRaster } from '@/lib/selection/wand'
-import { useEditorStore, type CanvasTool } from '@/stores/editorStore'
+import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import {
   isPolygonGesture,
   useSelectionStore,
@@ -128,11 +128,12 @@ export function useSelectionTool(
       }
       return true
     }
-    if (editor.tool === 'brush') {
-      // Refused rather than merely invisible. The brush draws the mask and the
-      // mask is only on screen in Quick Mask, so painting outside that mode
-      // would leave no trace — which is what the greyed button is saying.
-      if (selection.quickMask) selection.beginStroke(target, e.altKey ? 'erase' : 'paint', at)
+    const brushMode = maskBrushModeOf(editor.tool)
+    if (brushMode !== null) {
+      // Refused rather than merely invisible. These draw the mask and the mask
+      // is only on screen in Quick Mask, so painting outside that mode would
+      // leave no trace — which is what the greyed button is saying.
+      if (selection.quickMask) selection.beginStroke(target, brushMode, at)
       return true
     }
 
@@ -156,7 +157,7 @@ export function useSelectionTool(
     const at = pageAt(e)
     if (at === null) return false
     if (Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) >= DRAG_SLOP) moved = true
-    if (editor.tool === 'brush') {
+    if (maskBrushModeOf(editor.tool) !== null) {
       if (pressed) selection.strokeTo(at)
       return true
     }
@@ -173,7 +174,7 @@ export function useSelectionTool(
   function onPointerUp(e: PointerEvent): boolean {
     const wasPressed = pressed
     pressed = false
-    if (editor.tool === 'brush') {
+    if (maskBrushModeOf(editor.tool) !== null) {
       if (wasPressed) selection.endStroke()
       return wasPressed
     }

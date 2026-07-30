@@ -526,7 +526,7 @@ describe('the brush', () => {
   it('pushes nothing for a stroke that changed nothing', () => {
     const sel = useSelectionStore()
     const editor = useEditorStore()
-    sel.brushSize = 0
+    sel.brushes.paint.size = 0
     sel.beginStroke(PAGE_A, 'paint', { x: 8, y: 8 })
     sel.endStroke()
     expect(editor.canUndo).toBe(false)
@@ -547,14 +547,33 @@ describe('the brush', () => {
 
   it('steps its size proportionally and stops at the ends', () => {
     const sel = useSelectionStore()
-    sel.brushSize = 100
-    sel.nudgeBrushSize(1)
-    expect(sel.brushSize).toBe(110)
-    sel.nudgeBrushSize(-1)
-    expect(sel.brushSize).toBe(99)
-    sel.brushSize = 1
-    sel.nudgeBrushSize(-1)
-    expect(sel.brushSize).toBe(1)
+    sel.brushes.paint.size = 100
+    sel.nudgeBrushSize('paint', 1)
+    expect(sel.brushes.paint.size).toBe(110)
+    sel.nudgeBrushSize('paint', -1)
+    expect(sel.brushes.paint.size).toBe(99)
+    sel.brushes.paint.size = 1
+    sel.nudgeBrushSize('paint', -1)
+    expect(sel.brushes.paint.size).toBe(1)
+  })
+
+  it('sizes the two directions apart', () => {
+    const sel = useSelectionStore()
+    const painting = sel.brushes.paint.size
+    sel.brushes.erase.size = 200
+    sel.nudgeBrushSize('erase', 1)
+    expect(sel.brushes.erase.size).toBe(220)
+    expect(sel.brushes.paint.size).toBe(painting)
+  })
+
+  it('strokes at the size belonging to the direction it is drawing', () => {
+    const sel = useSelectionStore()
+    sel.brushes.paint.size = 0
+    sel.brushes.erase.size = 40
+    sel.selectAll(PAGE_A)
+    sel.beginStroke(PAGE_A, 'erase', { x: 16, y: 16 })
+    sel.endStroke()
+    expect(maskAt(sel, PAGE_A, 16, 16)).toBe(0)
   })
 })
 

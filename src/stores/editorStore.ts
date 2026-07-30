@@ -9,6 +9,7 @@ import { textOf } from '@shared/page/text'
 import { textObjects } from '@shared/page/tree'
 import { flattenLayerRows } from '@/lib/layerRows'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
+import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 
@@ -38,6 +39,7 @@ export type CanvasTool =
   | 'lasso-polygon'
   | 'wand'
   | 'brush'
+  | 'eraser'
 
 /** The tools whose drag builds a selection rather than acting on objects. */
 export const SELECTION_TOOLS = [
@@ -47,10 +49,28 @@ export const SELECTION_TOOLS = [
   'lasso-polygon',
   'wand',
   'brush',
+  'eraser',
 ] as const satisfies readonly CanvasTool[]
 
 export function isSelectionTool(tool: CanvasTool): boolean {
   return (SELECTION_TOOLS as readonly CanvasTool[]).includes(tool)
+}
+
+/**
+ * The tools that draw the mask by hand, and which way round each one draws it.
+ *
+ * Taking mask away is the eraser's job rather than a modifier on the brush, so
+ * a tool is up for one direction and stays there. Everything downstream asks
+ * this rather than naming a tool, which is what keeps the two of them from
+ * drifting apart as either grows settings of its own.
+ */
+const MASK_BRUSH_MODES = {
+  brush: 'paint',
+  eraser: 'erase',
+} as const satisfies Partial<Record<CanvasTool, MaskBrushMode>>
+
+export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {
+  return tool in MASK_BRUSH_MODES ? MASK_BRUSH_MODES[tool as keyof typeof MASK_BRUSH_MODES] : null
 }
 
 

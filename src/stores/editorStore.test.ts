@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useEditorStore } from './editorStore'
+import { isSelectionTool, maskBrushModeOf, useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import type { ProjectFile } from '@/types/project'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
@@ -76,6 +76,19 @@ describe('canvas tool', () => {
     expect(editor.tool).toBe('text')
     editor.setTool('select')
     expect(editor.tool).toBe('select')
+  })
+
+  it('answers which way each mask tool draws, and nothing for the rest', () => {
+    expect(maskBrushModeOf('brush')).toBe('paint')
+    expect(maskBrushModeOf('eraser')).toBe('erase')
+    expect(maskBrushModeOf('lasso')).toBeNull()
+    expect(maskBrushModeOf('select')).toBeNull()
+  })
+
+  it('counts both mask tools as building a selection', () => {
+    expect(isSelectionTool('brush')).toBe(true)
+    expect(isSelectionTool('eraser')).toBe(true)
+    expect(isSelectionTool('text')).toBe(false)
   })
 })
 

@@ -43,6 +43,7 @@ import { computed, type Component } from 'vue'
 import {
   CircleDashed,
   Contrast,
+  Eraser,
   Lasso,
   LassoSelect,
   MousePointer2,
@@ -52,7 +53,7 @@ import {
   Wand,
 } from '@lucide/vue'
 import { useToolChoice } from '@/composables/useToolChoice'
-import { useEditorStore, type CanvasTool } from '@/stores/editorStore'
+import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
 const editor = useEditorStore()
@@ -84,15 +85,18 @@ const tools = computed<RailTool[]>(() => [
   { tool: 'lasso', icon: Lasso, title: '套索（L）' },
   { tool: 'lasso-polygon', icon: LassoSelect, title: '多邊形套索（Shift+L）' },
   { tool: 'wand', icon: Wand, title: '魔術棒（W）' },
-  {
-    tool: 'brush',
-    icon: Paintbrush,
-    title: '遮罩筆刷（B）',
-    // It paints the mask, and the mask is only visible in Quick Mask. Said out
-    // loud, because a brush that leaves no mark reads as a broken one.
-    inert: editor.tool === 'brush' && !selection.quickMask,
-  },
+  { tool: 'brush', icon: Paintbrush, title: '遮罩筆刷（B）', inert: isInert('brush') },
+  { tool: 'eraser', icon: Eraser, title: '遮罩橡皮擦（E）', inert: isInert('eraser') },
 ])
+
+/**
+ * Both mask tools draw only where Quick Mask can show it. Said out loud,
+ * because a tool that leaves no mark reads as a broken one — and only the tool
+ * that is up says it, since the others are not the ones being refused.
+ */
+function isInert(tool: CanvasTool): boolean {
+  return editor.tool === tool && maskBrushModeOf(tool) !== null && !selection.quickMask
+}
 </script>
 
 <style scoped>

@@ -39,6 +39,12 @@ import { traceMaskOutlines } from '@/lib/selection/trace'
 
 export type { MaskTarget }
 
+/** What a hand-drawn stroke is shaped by. Diameter in page pixels. */
+export interface BrushSettings {
+  size: number
+  hardness: number
+}
+
 export type SelectionGestureKind = 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon'
 
 export interface SelectionGesture {
@@ -112,8 +118,16 @@ export const useSelectionStore = defineStore('selection', () => {
   const revision = ref(0)
   const quickMask = ref(false)
   const gesture = shallowRef<SelectionGesture | null>(null)
-  const brushSize = ref(DEFAULT_BRUSH_SIZE)
-  const brushHardness = ref(DEFAULT_BRUSH_HARDNESS)
+  /**
+   * One set of settings per direction, as in Photoshop, where every painting
+   * tool remembers its own. Shared settings would mean sizing the eraser
+   * silently resizes the brush — and the size control exists to be reached for
+   * often, so that surprise would land constantly rather than once.
+   */
+  const brushes = ref<Record<MaskBrushMode, BrushSettings>>({
+    paint: { size: DEFAULT_BRUSH_SIZE, hardness: DEFAULT_BRUSH_HARDNESS },
+    erase: { size: DEFAULT_BRUSH_SIZE, hardness: DEFAULT_BRUSH_HARDNESS },
+  })
 
   const hasSelection = computed(() => bounds.value !== null)
   const isDrawing = computed(() => gesture.value !== null)
@@ -510,7 +524,9 @@ export const useSelectionStore = defineStore('selection', () => {
   }
   let stroke: Stroke | null = null
 
-  const brushRadius = computed(() => brushSize.value / 2)
+  function brushRadiusFor(mode: MaskBrushMode): number {
+    return brushes.value[mode].size / 2
+  }
 
   /**
    * A stroke is one entry in the stack however long it is, and it writes into
@@ -540,8 +556,8 @@ export const useSelectionStore = defineStore('selection', () => {
       s.target.h,
       s.from,
       at,
-      brushRadius.value,
-      brushHardness.value,
+      brushRadiusFor(s.mode),
+      brushes.value[s.mode].hardness,
       s.mode,
     )
     s.from = at
@@ -577,11 +593,12 @@ export const useSelectionStore = defineStore('selection', () => {
    * Proportional steps, so `[` and `]` are useful at both ends of the range —
    * one pixel at a time out of four hundred is not a size control.
    */
-  function nudgeBrushSize(direction: 1 | -1): void {
-    const step = Math.max(1, Math.round(brushSize.value * 0.1))
-    brushSize.value = Math.min(
+  function nudgeBrushSize(mode: MaskBrushMode, direction: 1 | -1): void {
+    const settings = brushes.value[mode]
+    const step = Math.max(1, Math.round(settings.size * 0.1))
+    settings.size = Math.min(
       MAX_BRUSH_SIZE,
-      Math.max(MIN_BRUSH_SIZE, brushSize.value + step * direction),
+      Math.max(MIN_BRUSH_SIZE, settings.size + step * direction),
     )
   }
 
@@ -715,9 +732,8 @@ export const useSelectionStore = defineStore('selection', () => {
     revision,
     quickMask,
     gesture,
-    brushSize,
-    brushHardness,
-    brushRadius,
+    brushes,
+    brushRadiusFor,
     hasSelection,
     isDrawing,
     maskFor,

@@ -1,4 +1,4 @@
-import { useEditorStore, type CanvasTool } from '@/stores/editorStore'
+import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
 /**
@@ -14,10 +14,10 @@ export function useToolChoice() {
 
   function chooseTool(tool: CanvasTool): void {
     editor.setTool(tool)
-    // The brush draws the mask and the mask is only on screen in Quick Mask, so
-    // asking for the brush is asking for the mode it needs. Turning that mode
-    // back off with the brush up is what greys it out again.
-    if (tool === 'brush' && !selection.quickMask) selection.toggleQuickMask()
+    // These draw the mask and the mask is only on screen in Quick Mask, so
+    // asking for one of them is asking for the mode it needs. Turning that mode
+    // back off with one of them up is what greys it out again.
+    if (maskBrushModeOf(tool) !== null && !selection.quickMask) selection.toggleQuickMask()
   }
 
   return { chooseTool }

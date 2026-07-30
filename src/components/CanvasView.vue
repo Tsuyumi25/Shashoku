@@ -97,7 +97,7 @@ import {
   trackRotationDirection,
 } from '@/lib/rotateDirection'
 import { resolveTextStyle } from '@/lib/textStyle'
-import { isSelectionTool, useEditorStore } from '@/stores/editorStore'
+import { isSelectionTool, maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -493,10 +493,15 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool('wand')
   } else if (key === 'b') {
     chooseTool('brush')
+  } else if (key === 'e') {
+    chooseTool('eraser')
   } else if (key === 'q') {
     selection.toggleQuickMask()
   } else if (e.key === '[' || e.key === ']') {
-    selection.nudgeBrushSize(e.key === ']' ? 1 : -1)
+    // Sizes whichever mask tool is up, and nothing otherwise: the two keep
+    // their own sizes, so with neither of them up there is no one to size.
+    const mode = maskBrushModeOf(editor.tool)
+    if (mode !== null) selection.nudgeBrushSize(mode, e.key === ']' ? 1 : -1)
   } else if (e.key === 'Enter' && selection.isDrawing) {
     e.preventDefault()
     selection.commitGesture()
