@@ -27,8 +27,18 @@ export type StackSegment =
  * given an element of its own where CSS can blend it against what is really
  * underneath. Opacity has no such trouble: drawing at that alpha into the
  * shared canvas and letting the canvas land normally is the same picture.
+ *
+ * `alone` is the second reason to break a run: a layer that can be dragged is
+ * drawn at an offset of its own, and a canvas it shares would carry its
+ * neighbours along with it. It is held aside from the moment it is selected
+ * rather than from the moment it is grabbed, because re-cutting the page under
+ * a pointer that is already moving makes the neighbouring canvases remount and
+ * fetch their layers again — a blink at exactly the wrong time.
  */
-export function stackSegments(nodes: readonly StackNode[]): StackSegment[] {
+export function stackSegments(
+  nodes: readonly StackNode[],
+  alone: string | null = null,
+): StackSegment[] {
   const out: StackSegment[] = []
   for (const node of nodes) {
     if (node.kind === 'text') {
@@ -40,11 +50,16 @@ export function stackSegments(nodes: readonly StackNode[]): StackSegment[] {
       continue
     }
     const last = out[out.length - 1]
+    const held = node.entry.id === alone
     if (
+      !held &&
       node.blendMode === 'normal' &&
       last !== undefined &&
       last.kind === 'rasters' &&
-      last.blendMode === 'normal'
+      last.blendMode === 'normal' &&
+      // A run that ended on the held layer stays closed; joining it would put
+      // the neighbour back under the transform the split exists to keep off it.
+      last.nodes[0].entry.id !== alone
     ) {
       last.nodes.push(node)
       continue

@@ -6,6 +6,7 @@
       :layers-dir="layersDir"
       :container="container"
       :view="view"
+      :offset="offsetFor(segment)"
     />
     <LabelText
       v-else-if="segment.kind === 'text'"
@@ -26,6 +27,7 @@
       :view="view"
       :groups="groups"
       :default-style="defaultStyle"
+      :held="held"
     />
   </div>
 </template>
@@ -65,9 +67,20 @@ const props = defineProps<{
   view: ViewTransform
   groups: readonly StyleGroup[]
   defaultStyle: TextStyle
+  /**
+   * The layer being dragged and how far it has come, in page pixels. It is
+   * held out of its run so the offset reaches it alone, and it goes back the
+   * moment the drag ends.
+   */
+  held?: { id: string; x: number; y: number } | null
 }>()
 
-const segments = computed(() => stackSegments(props.nodes))
+const segments = computed(() => stackSegments(props.nodes, props.held?.id ?? null))
+
+function offsetFor(segment: StackSegment): { x: number; y: number } | undefined {
+  if (!props.held || segment.kind !== 'rasters') return undefined
+  return segment.nodes[0].entry.id === props.held.id ? props.held : undefined
+}
 
 function styleOf(entry: TextLayerEntry): TextStyle {
   return resolveTextStyle(entry, props.groups, props.defaultStyle)

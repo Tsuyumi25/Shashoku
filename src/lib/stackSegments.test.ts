@@ -89,4 +89,42 @@ describe('stackSegments', () => {
     const segments = stackSegments([raster('a'), raster('b'), text('t')])
     expect(segments.map((s) => s.key)).toEqual(['a', 't'])
   })
+
+  describe('with one layer held aside', () => {
+    /**
+     * A dragged layer is offset by a transform on its element, so it has to be
+     * the only thing that element draws — otherwise its neighbours travel with
+     * it.
+     */
+    it('gives the held layer an element of its own', () => {
+      const segments = stackSegments([raster('a'), raster('b'), raster('c')], 'b')
+      expect(segments.map((s) => s.kind)).toEqual(['rasters', 'rasters', 'rasters'])
+      expect(segments.map((s) => s.key)).toEqual(['a', 'b', 'c'])
+      expect(segments[1].kind === 'rasters' && segments[1].nodes).toHaveLength(1)
+    })
+
+    it("closes the run behind it, so what follows does not join the held layer", () => {
+      const segments = stackSegments([raster('a'), raster('b')], 'a')
+      expect(segments).toHaveLength(2)
+      expect(segments[0].kind === 'rasters' && segments[0].nodes).toHaveLength(1)
+    })
+
+    it('leaves the rest of the page gathered as it was', () => {
+      const segments = stackSegments([raster('a'), raster('b'), raster('c'), raster('d')], 'a')
+      expect(segments).toHaveLength(2)
+      expect(segments[1].kind === 'rasters' && segments[1].nodes.map((n) => n.entry.id)).toEqual([
+        'b',
+        'c',
+        'd',
+      ])
+    })
+
+    it('holds nothing aside for an id that is not on this page', () => {
+      expect(stackSegments([raster('a'), raster('b')], 'gone')).toHaveLength(1)
+    })
+
+    it('holds nothing aside when nothing is being held', () => {
+      expect(stackSegments([raster('a'), raster('b')], null)).toHaveLength(1)
+    })
+  })
 })

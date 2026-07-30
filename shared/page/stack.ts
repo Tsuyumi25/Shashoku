@@ -101,3 +101,19 @@ export function stackedTextNodes(nodes: readonly StackNode[]): TextStackNode[] {
   }
   return out
 }
+
+/**
+ * Every raster layer that will be drawn, in drawing order, buffers walked into.
+ *
+ * Read from the stack rather than the tree because that is what makes hiding
+ * inherited here too: a layer inside a folder that is off is not on the page,
+ * and a frame around it would be a handle on nothing.
+ */
+export function stackedRasterNodes(nodes: readonly StackNode[]): RasterStackNode[] {
+  const out: RasterStackNode[] = []
+  for (const node of nodes) {
+    if (node.kind === 'raster') out.push(node)
+    else if (node.kind === 'buffer') out.push(...stackedRasterNodes(node.children))
+  }
+  return out
+}

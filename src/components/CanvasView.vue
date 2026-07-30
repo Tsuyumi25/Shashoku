@@ -37,10 +37,25 @@
           :view="view"
           :groups="project.header.groups"
           :default-style="project.header.defaultStyle"
+          :held="heldOffset"
         />
       </div>
 
       <div v-if="imageReady" class="pointer-events-none absolute inset-0">
+        <RasterFrame
+          v-for="layer in rasterFrames"
+          :key="layer.entry.id"
+          :class="[!gestureArmed && !selecting && 'pointer-events-auto']"
+          :entry="layer.entry"
+          :view="view"
+          :selected="layer.entry.id === editor.cursorId"
+          :in-selection="true"
+          :locked="layer.locked"
+          :offset="offsetOf(layer.entry.id)"
+          @select="onSelectObject(layer.entry.id, $event)"
+          @drag="onLayerDrag(layer.entry.id, $event)"
+          @drag-end="onLayerDragEnd(layer.entry)"
+        />
         <LabelBox
           v-for="object in objects"
           :key="object.id"
@@ -106,19 +121,25 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, wa
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
 import PageStack from '@/components/PageStack.vue'
+import RasterFrame from '@/components/RasterFrame.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
-import type { TextLayerEntry } from '@shared/page/types'
-import { pageStack, stackedTextNodes } from '@shared/page/stack'
+import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
-import type { Anchor } from '@/composables/useLabelDrag'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import { applyViewTransform, screenToPageFraction } from '@/lib/coords'
+import {
+  applyViewTransform,
+  screenDeltaToContentPx,
+  screenToPageFraction,
+  type Anchor,
+  type Displacement,
+} from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -178,6 +199,80 @@ const objects = computed(() => {
     style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
   }))
 })
+
+/**
+ * The raster layers wearing a frame, which is only the ones selected.
+ *
+ * Nothing here hit-tests the page: the layers are drawn into containers that
+ * take no pointer, and a frame is what the pointer is meant to find. A frame
+ * for every layer would be nearly free, but an erase patch's frame is a large,
+ * mostly transparent rectangle — twenty of them would be twenty invisible walls
+ * over the artwork. So the tree says which layer is being worked on, and the
+ * canvas offers a handle for that one. This is Photoshop's default, where the
+ * Move tool moves the selected layer and auto-select is off.
+ */
+const rasterFrames = computed(() => {
+  const file = currentFile.value
+  if (!file) return []
+  return stackedRasterNodes(stack.value)
+    .filter((node) => editor.isSelected(node.entry.id))
+    // A layer with no frame yet — a blank one, before anything has been painted
+    // on it — has no box to draw and nothing to move.
+    .filter((node) => node.entry.w > 0 && node.entry.h > 0)
+    .map((node) => ({ entry: node.entry, locked: isLocked(file.page.layers, node.entry.id) }))
+})
+
+/**
+ * The drag in progress, in screen pixels and belonging to nobody's data.
+ *
+ * A raster layer's position is whole page pixels, and the manifest refuses
+ * anything else — so a drag cannot write through the way a label's does. It
+ * previews instead: the frame and the pixels both read this, and only the
+ * release rounds it to whole pixels and enters the undo stack.
+ */
+const heldLayer = ref<{ id: string; dx: number; dy: number } | null>(null)
+
+const ZERO_OFFSET: Displacement = { dx: 0, dy: 0 }
+
+function offsetOf(id: string): Displacement {
+  return heldLayer.value?.id === id ? heldLayer.value : ZERO_OFFSET
+}
+
+/**
+ * Which layer the stack keeps on a canvas of its own, and how far it has been
+ * dragged in the page's own pixels.
+ *
+ * The layer wearing the cursor rather than the one being dragged, so the page
+ * is cut the moment it is selected and not while a pointer is already moving.
+ */
+const heldOffset = computed(() => {
+  const id = rasterFrames.value.find((l) => l.entry.id === editor.cursorId)?.entry.id
+  if (id === undefined) return null
+  const held = heldLayer.value
+  if (held?.id !== id) return { id, x: 0, y: 0 }
+  const delta = screenDeltaToContentPx(held.dx, held.dy, view)
+  return { id, x: delta.x, y: delta.y }
+})
+
+function onLayerDrag(id: string, d: Displacement) {
+  if (editor.isLayerLocked(id)) return
+  heldLayer.value = { id, dx: d.dx, dy: d.dy }
+}
+
+function onLayerDragEnd(entry: RasterLayerEntry) {
+  const held = heldLayer.value
+  heldLayer.value = null
+  if (held === null || held.id !== entry.id || !editor.currentFilename) return
+  // The half pixel the preview gives back here is not a compromise: a raster
+  // layer's axis is pixels, so a position between two of them does not exist.
+  const delta = screenDeltaToContentPx(held.dx, held.dy, view)
+  editor.cmdMoveLayerFrame(
+    editor.currentFilename,
+    entry.id,
+    { x: entry.x, y: entry.y },
+    { x: entry.x + delta.x, y: entry.y + delta.y },
+  )
+}
 
 // The picker enumerates on its first opening, which is too late for text that
 // is on screen before anyone asks to change a font.

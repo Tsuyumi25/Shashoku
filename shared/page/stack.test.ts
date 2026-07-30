@@ -6,7 +6,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { PASS_THROUGH } from './types'
-import { pageStack, stackedTextNodes, type StackNode } from './stack'
+import { pageStack, stackedRasterNodes, stackedTextNodes, type StackNode } from './stack'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
   return {
@@ -147,5 +147,17 @@ describe('a folder only becomes a buffer when it has to', () => {
     const page = [folder('g', [folder('h', [text('a'), text('b')])], { opacity: 0.5 })]
     const [node] = pageStack(page)
     expect(node.kind === 'buffer' && idsOf(node.children)).toEqual(['a', 'b'])
+  })
+
+  it('lists the raster layers inside a buffer along with the rest', () => {
+    const page = [raster('a'), folder('g', [raster('b')], { opacity: 0.5 }), text('c'), raster('d')]
+    const ids = stackedRasterNodes(pageStack(page)).map((n) => n.entry.id)
+    expect(ids).toEqual(['a', 'b', 'd'])
+  })
+
+  // A frame is offered for something on the page; a hidden layer is not on it.
+  it('leaves out a raster layer a folder is hiding', () => {
+    const page = [raster('a'), folder('g', [raster('b')], { visible: false })]
+    expect(stackedRasterNodes(pageStack(page)).map((n) => n.entry.id)).toEqual(['a'])
   })
 })

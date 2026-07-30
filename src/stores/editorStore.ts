@@ -740,6 +740,27 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
 
+  /**
+   * A raster layer's move, which arrives whole rather than written through: the
+   * drag previewed itself by drawing at an offset and left the entry alone, so
+   * this is the first and only write.
+   */
+  function cmdMoveLayerFrame(
+    filename: string,
+    layerId: string,
+    oldPos: { x: number; y: number },
+    newPos: { x: number; y: number },
+  ) {
+    if (isLayerLocked(layerId)) return
+    if (oldPos.x === newPos.x && oldPos.y === newPos.y) return
+    const project = useProjectStore()
+    pushCommand({
+      label: `move-layer-frame ${layerId}`,
+      do: () => project.moveLayerFrame(filename, layerId, newPos.x, newPos.y),
+      undo: () => project.moveLayerFrame(filename, layerId, oldPos.x, oldPos.y),
+    })
+  }
+
   function cmdRotateLabel(filename: string, labelId: string, from: number, to: number) {
     if (from === to || isLayerLocked(labelId)) return
     const project = useProjectStore()
@@ -1138,6 +1159,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdAddLabel,
     cmdDuplicateLabel,
     cmdMoveLabel,
+    cmdMoveLayerFrame,
     cmdRotateLabel,
     cmdUpdateLabelStyleOverride,
     cmdAddRasterLayer,

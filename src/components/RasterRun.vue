@@ -22,6 +22,17 @@ const props = defineProps<{
   layersDir: string
   container: { w: number; h: number }
   view: ViewTransform
+  /**
+   * A drag in progress, in page pixels and deliberately fractional — this is
+   * the preview, and the layer's own whole-pixel position is left alone until
+   * the release lands it. Applied to the whole canvas, which `stackSegments`
+   * has therefore given the dragged layer to itself.
+   *
+   * Redrawn rather than translated in CSS: this canvas holds only what fell
+   * inside the viewport, so sliding the element would drag its own empty edge
+   * into view along with the layer.
+   */
+  offset?: { x: number; y: number }
 }>()
 
 const dpr = window.devicePixelRatio || 1
@@ -102,6 +113,7 @@ function paint() {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, cv.width, cv.height)
   applyViewTransform(ctx, props.view, dpr)
+  if (props.offset) ctx.translate(props.offset.x, props.offset.y)
 
   for (const node of props.nodes) {
     const bitmap = bitmaps.value.get(node.entry.file)
@@ -145,7 +157,7 @@ watch(
   schedulePaint,
 )
 
-watch(() => [props.view, props.container] as const, schedulePaint, { deep: true })
+watch(() => [props.view, props.container, props.offset] as const, schedulePaint, { deep: true })
 
 onBeforeUnmount(releaseAll)
 </script>

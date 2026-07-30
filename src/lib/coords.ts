@@ -12,6 +12,18 @@ export interface ViewTransform {
   rotate: number
 }
 
+/** Where a text object sits, as a fraction of the raw image. */
+export interface Anchor {
+  x: number
+  y: number
+}
+
+/** A movement on screen, in screen pixels, carrying no origin. */
+export interface Displacement {
+  dx: number
+  dy: number
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
