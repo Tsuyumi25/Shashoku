@@ -75,7 +75,17 @@
           <LockOpen v-else :size="12" />
         </button>
 
-        <component :is="iconFor(row.entry)" :size="12" class="shrink-0 text-muted-foreground" />
+        <LayerThumb
+          v-if="row.entry.kind === 'raster' && layersDir"
+          :entry="row.entry"
+          :layers-dir="layersDir"
+        />
+        <component
+          v-else
+          :is="iconFor(row.entry)"
+          :size="12"
+          class="shrink-0 text-muted-foreground"
+        />
 
         <input
           v-if="renaming?.id === row.entry.id"
@@ -127,7 +137,9 @@ import {
 } from '@lucide/vue'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
+import { layersDirOf } from '@shared/ssk/constants'
 import LayerBlending from '@/components/LayerBlending.vue'
+import LayerThumb from '@/components/LayerThumb.vue'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
@@ -150,6 +162,10 @@ const collapsed = computed(() => editor.collapsedLayerIds)
 
 const rows = computed(() =>
   currentFile.value ? flattenLayerRows(currentFile.value.page.layers, collapsed.value) : [],
+)
+
+const layersDir = computed(() =>
+  currentFile.value ? layersDirOf(currentFile.value.pageDir) : null,
 )
 
 /** What a range reaches over, in the order the panel is showing it. */
