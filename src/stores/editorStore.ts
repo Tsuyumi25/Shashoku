@@ -539,9 +539,11 @@ export const useEditorStore = defineStore('editor', () => {
     const target = orders.get(page) ?? []
     target.splice(Math.min(at, target.length), 0, ...moving)
 
+    // Escaped rather than written out: a literal NUL in the source makes the
+    // whole file binary to ripgrep, which then skips it without saying so.
     const settled =
       incoming.length === 0 &&
-      [...orders].every(([p, order]) => order.join(' ') === before.get(p)?.join(' '))
+      [...orders].every(([p, order]) => order.join('\u0000') === before.get(p)?.join('\u0000'))
     if (settled) return
 
     let removed: RemovedEntry[] = []
