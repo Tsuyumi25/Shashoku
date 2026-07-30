@@ -597,6 +597,39 @@ describe('layer tree edits', () => {
     expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
   })
 
+  describe('renaming', () => {
+    const nameOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
+      const entry = findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)
+      return entry !== undefined && entry.kind !== 'text' ? entry.name : undefined
+    }
+
+    it('renames a folder and puts the old name back', () => {
+      const { project, editor } = openTree([folder('g', [])], [])
+
+      editor.cmdRenameLayer(PAGE, 'g', 'g', '塗白')
+      expect(nameOf(project, 'g')).toBe('塗白')
+
+      editor.undo()
+      expect(nameOf(project, 'g')).toBe('g')
+    })
+
+    /**
+     * A text object's translation is its identity. A name of its own would be a
+     * second one, free to drift from what the label list shows.
+     */
+    it('leaves a text object alone, since it has no name of its own', () => {
+      const { editor } = openTree([label('a')], ['a'])
+      editor.cmdRenameLayer(PAGE, 'a', '', '甲')
+      expect(editor.canUndo).toBe(false)
+    })
+
+    it('keeps a name typed back to what it was out of the stack', () => {
+      const { editor } = openTree([folder('g', [])], [])
+      editor.cmdRenameLayer(PAGE, 'g', 'g', 'g')
+      expect(editor.canUndo).toBe(false)
+    })
+  })
+
   describe('blending', () => {
     const opacityOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
       findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)?.opacity
@@ -647,9 +680,33 @@ describe('layer tree edits', () => {
 
       editor.cmdSetLayerBlendMode(PAGE, new Map([['a', 'normal']]), PASS_THROUGH)
       expect(blendOf(project, 'a')).toBe('normal')
+      // And it leaves no entry that would undo to nothing.
+      expect(editor.canUndo).toBe(false)
 
       editor.cmdSetLayerBlendMode(PAGE, new Map([['g', 'normal']]), PASS_THROUGH)
       expect(blendOf(project, 'g')).toBe(PASS_THROUGH)
+    })
+
+    /** A folder among rasters still takes the mode; only the refusal is skipped. */
+    it('records the part of a mixed selection that took the mode', () => {
+      const { project, editor } = openTree([label('a'), folder('g', [])], ['a'])
+      project.setLayerBlendMode(PAGE, 'g', 'multiply')
+
+      editor.cmdSetLayerBlendMode(
+        PAGE,
+        new Map([
+          ['a', 'normal'],
+          ['g', 'multiply'],
+        ]),
+        PASS_THROUGH,
+      )
+
+      expect(blendOf(project, 'a')).toBe('normal')
+      expect(blendOf(project, 'g')).toBe(PASS_THROUGH)
+
+      editor.undo()
+      expect(blendOf(project, 'g')).toBe('multiply')
+      expect(blendOf(project, 'a')).toBe('normal')
     })
 
     /**

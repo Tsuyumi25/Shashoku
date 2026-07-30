@@ -10,7 +10,7 @@
       <div
         v-for="row in rows"
         :key="row.entry.id"
-        draggable="true"
+        :draggable="renaming?.id !== row.entry.id"
         class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
         :class="[
           isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
@@ -54,9 +54,24 @@
 
         <component :is="iconFor(row.entry)" :size="12" class="shrink-0 text-muted-foreground" />
 
+        <input
+          v-if="renaming?.id === row.entry.id"
+          ref="renameEl"
+          v-model="renaming.draft"
+          type="text"
+          class="min-w-0 flex-1 rounded border border-input bg-background px-1 text-xs"
+          @click.stop
+          @dblclick.stop
+          @keydown.enter.prevent="commitRename"
+          @keydown.esc.prevent="renaming = null"
+          @blur="commitRename"
+        />
         <span
+          v-else
           class="min-w-0 flex-1 truncate text-xs"
           :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
+          :title="canRename(row.entry) ? '雙擊改名' : undefined"
+          @dblclick.stop="beginRename(row.entry)"
         >{{ nameFor(row.entry) }}</span>
 
         <button
@@ -74,9 +89,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import { ChevronDown, ChevronRight, Eye, EyeOff, Folder, Image, Type, Ungroup } from '@lucide/vue'
-import type { LayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
+import { findEntry } from '@shared/page/tree'
 import LayerBlending from '@/components/LayerBlending.vue'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
@@ -166,6 +182,46 @@ function clearDrag() {
   hover.value = null
 }
 
+
+/**
+ * A text object is the one row that cannot be renamed: its translation is its
+ * identity, so a name of its own would only be a second one that can drift.
+ */
+function canRename(entry: LayerEntry): entry is GroupLayerEntry | RasterLayerEntry {
+  return entry.kind !== 'text'
+}
+
+const renaming = ref<{ id: string; draft: string } | null>(null)
+const renameEl = useTemplateRef<HTMLInputElement>('renameEl')
+
+async function beginRename(entry: LayerEntry) {
+  if (!canRename(entry)) return
+  renaming.value = { id: entry.id, draft: entry.name }
+  await nextTick()
+  // Selected rather than merely focused: an auto-named 資料夾3 is there to be
+  // replaced, not appended to.
+  renameEl.value?.select()
+}
+
+/**
+ * Enter and losing focus both land the name, as they do in any tree; Escape
+ * clears the draft first, so the blur that follows it finds nothing to commit.
+ *
+ * An empty name is refused rather than stored — a row with nothing on it could
+ * not be told from its neighbours, and the name it had is the better answer.
+ */
+function commitRename() {
+  const editing = renaming.value
+  renaming.value = null
+  if (editing === null || !editor.currentFilename) return
+  const entry = currentFile.value
+    ? findEntry(currentFile.value.page.layers, editing.id)
+    : undefined
+  if (entry === undefined || !canRename(entry)) return
+  const name = editing.draft.trim()
+  if (name.length === 0) return
+  editor.cmdRenameLayer(editor.currentFilename, editing.id, entry.name, name)
+}
 
 function iconFor(entry: LayerEntry) {
   if (entry.kind === 'group') return Folder

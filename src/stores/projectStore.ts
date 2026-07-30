@@ -332,6 +332,24 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /**
+   * A folder or a raster only.
+   *
+   * A text object has no name to change: the tree and the label list are two
+   * views of the same object, and a name anyone could edit would let one object
+   * read differently in each. A raster is the opposite case — its content is
+   * pixels, which read as nothing, so 「塗白」 carries real information.
+   */
+  function renameLayer(filename: string, layerId: string, name: string): boolean {
+    const file = fileByName(filename)
+    if (!file) return false
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.kind === 'text' || entry.name === name) return false
+    entry.name = name
+    markPageDirty(filename)
+    return true
+  }
+
   /** Any entry too — a folder carries blending so a run can be faded as one. */
   function setLayerOpacity(filename: string, layerId: string, opacity: number) {
     const file = fileByName(filename)
@@ -347,14 +365,15 @@ export const useProjectStore = defineStore('project', () => {
    * pass-through says "no buffer of my own", and only a container has one to
    * decline. Letting it through would write a manifest that will not parse.
    */
-  function setLayerBlendMode(filename: string, layerId: string, blendMode: string) {
+  function setLayerBlendMode(filename: string, layerId: string, blendMode: string): boolean {
     const file = fileByName(filename)
-    if (!file) return
+    if (!file) return false
     const entry = findEntry(file.page.layers, layerId)
-    if (!entry || entry.blendMode === blendMode) return
-    if (blendMode === PASS_THROUGH && entry.kind !== 'group') return
+    if (!entry || entry.blendMode === blendMode) return false
+    if (blendMode === PASS_THROUGH && entry.kind !== 'group') return false
     entry.blendMode = blendMode
     markPageDirty(filename)
+    return true
   }
 
   /**
@@ -656,6 +675,7 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelGroupId,
     updateLabelStyleOverride,
     setLayerVisible,
+    renameLayer,
     setLayerOpacity,
     setLayerBlendMode,
     entryById,

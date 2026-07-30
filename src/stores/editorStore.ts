@@ -869,26 +869,58 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A blend mode lands in one go rather than through a drag, so unlike opacity
-   * this applies the change itself.
+   * A blend mode lands in one go rather than through a drag, so this applies it
+   * as it goes and records only what the tree actually took: a selection can
+   * hold both folders and layers, and pass-through is refused on everything but
+   * a folder.
    */
   function cmdSetLayerBlendMode(
     filename: string,
     before: ReadonlyMap<string, string>,
     blendMode: string,
   ) {
-    const moved = [...before].filter(([, was]) => was !== blendMode)
-    if (moved.length === 0) return
     const project = useProjectStore()
-    pushCommand({
-      label: `set-blend-mode ${moved.length}`,
-      do: () => {
-        for (const [id] of moved) project.setLayerBlendMode(filename, id, blendMode)
+    const moved: Array<[string, string]> = []
+    for (const [id, was] of before) {
+      if (was === blendMode) continue
+      if (!project.setLayerBlendMode(filename, id, blendMode)) continue
+      moved.push([id, was])
+    }
+    if (moved.length === 0) return
+    pushCommand(
+      {
+        label: `set-blend-mode ${moved.length}`,
+        do: () => {
+          for (const [id] of moved) project.setLayerBlendMode(filename, id, blendMode)
+        },
+        undo: () => {
+          for (const [id, was] of moved) project.setLayerBlendMode(filename, id, was)
+        },
       },
-      undo: () => {
-        for (const [id, was] of moved) project.setLayerBlendMode(filename, id, was)
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
+   * `renameGroup` below is the text style groups, which are a different thing
+   * entirely — the two have lived under confusingly close names since the tree
+   * arrived, and this is the one that acts on the tree.
+   */
+  function cmdRenameLayer(filename: string, layerId: string, from: string, to: string) {
+    if (from === to) return
+    const project = useProjectStore()
+    // Applied first, as a restack is: a name the tree refuses — a text object
+    // has none to change — must not reach the stack as an entry that undoes to
+    // nothing.
+    if (!project.renameLayer(filename, layerId, to)) return
+    pushCommand(
+      {
+        label: `rename-layer ${layerId}`,
+        do: () => project.renameLayer(filename, layerId, to),
+        undo: () => project.renameLayer(filename, layerId, from),
       },
-    })
+      { alreadyApplied: true },
+    )
   }
 
   function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
@@ -1011,6 +1043,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDissolveFolder,
     cmdMoveLayer,
     cmdSetLayerVisible,
+    cmdRenameLayer,
     cmdSetLayerOpacity,
     cmdSetLayerBlendMode,
     layersToBlend,
