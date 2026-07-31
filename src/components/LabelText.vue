@@ -20,8 +20,7 @@
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { centeredBoxOnScreen, smoothingQualityFor, type ViewTransform } from '@/lib/coords'
-import { labelBoxSize } from '@/lib/labelBox'
-import { rasterFor } from '@/lib/labelRaster'
+import { drawnLabel } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
 
 /**
@@ -53,14 +52,14 @@ const props = defineProps<{
 
 const dpr = window.devicePixelRatio || 1
 
-const raster = computed(() => rasterFor(props.text, props.textStyle))
-const sample = computed(() => (raster.value.ok ? raster.value.sample : null))
-const failure = computed(() => (raster.value.ok ? '' : raster.value.reason))
+const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }))
+const sample = computed(() => drawn.value.sample)
+const failure = computed(() => drawn.value.reason)
 
-const box = computed(() => {
-  const size = labelBoxSize(props.textStyle, sample.value?.image ?? null)
-  return centeredBoxOnScreen({ x: props.x, y: props.y }, size, props.view)
-})
+// Centred on where the placement put it rather than on the stored position, so
+// the bitmap's corner lands on the page grid — the same corner the export
+// draws at, since both read it from the same function.
+const box = computed(() => centeredBoxOnScreen(drawn.value.center, drawn.value.box, props.view))
 
 /**
  * The object's turn and the view's compose into one CSS rotation, which

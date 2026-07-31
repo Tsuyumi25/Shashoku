@@ -41,8 +41,8 @@ import {
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
-import { labelBoxSize, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX } from '@/lib/labelBox'
-import { rasterFor } from '@/lib/labelRaster'
+import { MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX } from '@/lib/labelBox'
+import { drawnLabel } from '@/lib/labelRaster'
 
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
@@ -88,13 +88,12 @@ const emit = defineEmits<{
   rotateEnd: [from: number, to: number]
 }>()
 
-const raster = computed(() => rasterFor(props.text, props.textStyle))
-const failure = computed(() => (raster.value.ok ? '' : raster.value.reason))
+const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }))
+const failure = computed(() => drawn.value.reason)
 
-const box = computed(() => {
-  const size = labelBoxSize(props.textStyle, raster.value.ok ? raster.value.sample.image : null)
-  return centeredBoxOnScreen({ x: props.x, y: props.y }, size, props.view)
-})
+// On the drawn centre rather than the stored one, so what is grabbed is where
+// the text actually is and the two cannot part company by half a pixel.
+const box = computed(() => centeredBoxOnScreen(drawn.value.center, drawn.value.box, props.view))
 
 /**
  * Where the object was before the drag wrote anything. A drag reports total

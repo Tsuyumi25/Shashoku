@@ -27,6 +27,66 @@ export function labelBoxSize(
 }
 
 /**
+ * How fine a phase the sample cache is willing to pay for, per axis, in page
+ * pixels.
+ *
+ * ⚠️ Not a property of the engine, which takes a real number, and not measured:
+ * it is the constant that makes a fractional position affordable. The cache is
+ * keyed on a whole run rather than on a glyph, so an unrounded phase means
+ * rasterizing the entire line on every frame of a drag.
+ *
+ * The two axes differ on purpose. X stays fractional so spacing lands where it
+ * was put; Y is whole, which is a phase of zero on that axis and keeps
+ * horizontal strokes and baselines on the grid. That is the convention every
+ * text stack converges on, and in Chinese and Japanese the horizontal stroke is
+ * everywhere and thin.
+ */
+const PHASE_STEP = { x: 1 / 4, y: 1 }
+
+export interface LabelPlacement {
+  /**
+   * Where to draw the box's centre so its corner lands on the grid. Within
+   * half a phase step of the stored position and never written back.
+   */
+  center: Point
+  /** What is left over, for the rasterizer to spend on coverage. */
+  phase: Point
+}
+
+/**
+ * Where a label's bitmap goes, split into the part the page grid can hold and
+ * the part only a rasterizer can.
+ *
+ * ```
+ * corner = anchor − box / 2
+ *   ⌊corner⌋            where the bitmap is blitted — always an integer
+ *   corner − ⌊corner⌋   the phase, handed to the engine
+ * ```
+ *
+ * Both draw sites call this, and that is the whole of what it buys. The
+ * correction is at most half a page pixel and nobody will see it; what matters
+ * is that the same rule cannot produce two answers, so the preview and the
+ * export are the same picture by construction rather than by luck. The same
+ * three lines written out twice is exactly how this file's rasterizers came to
+ * disagree about their filter.
+ *
+ * Recomputed at draw time and never stored, which is what answers the editing
+ * case: typing changes `box.w`, and a correction held here moves nothing on
+ * disk. A tool that re-snapped the stored coordinate would have it walk while
+ * somebody types.
+ */
+export function placeLabel(anchor: Point, box: { w: number; h: number }): LabelPlacement {
+  const axis = (at: number, extent: number, step: number) => {
+    const snapped = Math.round((at - extent / 2) / step) * step
+    const blit = Math.floor(snapped)
+    return { center: blit + extent / 2, phase: snapped - blit }
+  }
+  const x = axis(anchor.x, box.w, PHASE_STEP.x)
+  const y = axis(anchor.y, box.h, PHASE_STEP.y)
+  return { center: { x: x.center, y: y.center }, phase: { x: x.phase, y: y.phase } }
+}
+
+/**
  * What a corner drag may leave a label at, in document pixels. The floor keeps
  * a frame you can still find after dragging it down towards nothing; the
  * ceiling is there because the engine rasterizes at `fontSizePx * renderScale`,

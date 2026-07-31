@@ -9,8 +9,7 @@ import {
 } from '@shared/page/stack'
 import { textOf } from '@shared/page/text'
 import { smoothingQualityFor } from '@/lib/coords'
-import { labelBoxSize } from '@/lib/labelBox'
-import { rasterFor } from '@/lib/labelRaster'
+import { drawnLabel } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { resolveTextStyle } from '@/lib/textStyle'
 
@@ -111,18 +110,18 @@ function drawTextWith(
   const text = textOf(label)
   if (text.length === 0) return
   const style = resolveTextStyle(label, input.groups, input.defaultStyle)
-  const raster = rasterFor(text, style)
-  if (!raster.ok) throw new CompositeError(raster.reason || `無法繪製標籤「${text}」`)
-  const box = labelBoxSize(style, raster.sample.image)
+  const drawn = drawnLabel(text, style, { x: label.x, y: label.y })
+  if (!drawn.sample) throw new CompositeError(drawn.reason || `無法繪製標籤「${text}」`)
 
-  ctx.translate(label.x, label.y)
+  const { box } = drawn
+  ctx.translate(drawn.center.x, drawn.center.y)
   ctx.rotate(label.rotation)
   ctx.imageSmoothingEnabled = true
   // Page pixels per bitmap pixel, which is what renderScale bought: the engine
   // rasterized at that multiple and this is where it comes back down. The same
   // rule the canvas uses, so one bitmap cannot be filtered two ways.
   ctx.imageSmoothingQuality = smoothingQualityFor(1 / style.renderScale)
-  ctx.drawImage(sampleSource(raster.sample), -box.w / 2, -box.h / 2, box.w, box.h)
+  ctx.drawImage(sampleSource(drawn.sample), -box.w / 2, -box.h / 2, box.w, box.h)
 }
 
 /**

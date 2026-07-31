@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
-import { angleDelta, labelBoxSize, uniformScaleRatio } from './labelBox'
+import { angleDelta, labelBoxSize, placeLabel, uniformScaleRatio } from './labelBox'
 
 function styleWith(patch: Partial<TextStyle>): TextStyle {
   return { ...DEFAULT_TEXT_STYLE, ...patch }
@@ -26,6 +26,78 @@ describe('labelBoxSize', () => {
     const at1 = labelBoxSize(styleWith({ fontSizePx: 24, renderScale: 1 }), null)
     const at8 = labelBoxSize(styleWith({ fontSizePx: 24, renderScale: 8 }), null)
     expect(at8).toEqual(at1)
+  })
+})
+
+describe('placeLabel', () => {
+  const BOX = { w: 40, h: 20 }
+
+  /** Where the bitmap's top left actually lands, which is the whole point. */
+  const corner = (anchor: { x: number; y: number }, box = BOX) => {
+    const p = placeLabel(anchor, box)
+    return { x: p.center.x - box.w / 2, y: p.center.y - box.h / 2 }
+  }
+
+  it('lands the drawn corner on whole page pixels', () => {
+    for (const at of [0, 0.1, 0.5, 0.9, 7.37, 512.62]) {
+      const c = corner({ x: at, y: at })
+      expect(Number.isInteger(c.x)).toBe(true)
+      expect(Number.isInteger(c.y)).toBe(true)
+    }
+  })
+
+  // On the axis that keeps its fraction, nothing is thrown away: what the grid
+  // cannot hold is exactly what the rasterizer is handed.
+  it('splits the free axis without losing any of it', () => {
+    for (const x of [100.25, 100.5, 100.75, 512.25]) {
+      const p = placeLabel({ x, y: 60 }, BOX)
+      expect(p.center.x + p.phase.x).toBeCloseTo(x, 9)
+    }
+  })
+
+  it('has nothing to correct when the corner is already whole', () => {
+    const p = placeLabel({ x: 100, y: 60 }, BOX)
+    expect(p).toEqual({ center: { x: 100, y: 60 }, phase: { x: 0, y: 0 } })
+  })
+
+  it('halves an odd box onto the corner rather than onto the stored position', () => {
+    // 100 - 41/2 is 79.5: a whole centre still leaves the corner on a half.
+    const p = placeLabel({ x: 100, y: 60 }, { w: 41, h: 20 })
+    expect(p.center.x - 41 / 2).toBe(79)
+    expect(p.phase.x).toBe(0.5)
+  })
+
+  it('keeps the horizontal fraction, so spacing stays where it was put', () => {
+    expect(placeLabel({ x: 100.25, y: 60 }, BOX).phase.x).toBe(0.25)
+    expect(placeLabel({ x: 100.75, y: 60 }, BOX).phase.x).toBe(0.75)
+  })
+
+  /**
+   * The strokes a horizontal snap keeps crisp are everywhere in Chinese and
+   * Japanese, which is why the two axes are quantised differently at all.
+   */
+  it('puts the baseline on the grid, so horizontal strokes stay sharp', () => {
+    for (const y of [60.1, 60.4, 60.5, 60.9]) {
+      expect(placeLabel({ x: 100, y }, BOX).phase.y).toBe(0)
+    }
+  })
+
+  it('rounds the vertical rather than dropping it, so nothing drifts downward', () => {
+    expect(corner({ x: 100, y: 60.4 }).y).toBe(50)
+    expect(corner({ x: 100, y: 60.6 }).y).toBe(51)
+  })
+
+  it('quantises the phase, so a drag cannot rasterize afresh on every frame', () => {
+    const phases = new Set<number>()
+    for (let i = 0; i < 200; i++) phases.add(placeLabel({ x: 100 + i / 200, y: 0 }, BOX).phase.x)
+    expect(phases.size).toBeLessThanOrEqual(4)
+  })
+
+  it('works to the left of the page origin, where flooring and truncating differ', () => {
+    const c = corner({ x: -0.3, y: -0.3 })
+    expect(Number.isInteger(c.x)).toBe(true)
+    expect(placeLabel({ x: -0.3, y: 0 }, BOX).phase.x).toBeGreaterThanOrEqual(0)
+    expect(placeLabel({ x: -0.3, y: 0 }, BOX).phase.x).toBeLessThan(1)
   })
 })
 

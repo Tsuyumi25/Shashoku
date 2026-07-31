@@ -11,6 +11,13 @@ export interface SampleRequest {
   stroke?: EngineStrokeSpec
   /** Columns running right to left instead of rows. */
   vertical?: boolean
+  /**
+   * How far into its own pixel the run starts, in bitmap pixels. Part of the
+   * identity of the bitmap, so it is part of the key — and why the caller has
+   * to round it to something coarse before asking.
+   */
+  phaseX?: number
+  phaseY?: number
 }
 
 export interface Sample {
@@ -55,6 +62,7 @@ function keyOf(req: SampleRequest): string {
     req.fillColor,
     stroke,
     req.vertical ? 'v' : 'h',
+    `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
     req.text,
   ].join('|')
 }
@@ -90,8 +98,26 @@ function rasterize(req: SampleRequest): Sample {
     : undefined
 
   const bmp = req.vertical
-    ? window.engine.renderVertical(drawWith, req.text, req.sizePx, padding, req.fillColor, stroke)
-    : window.engine.renderText(drawWith, req.text, req.sizePx, padding, req.fillColor, stroke)
+    ? window.engine.renderVertical(
+        drawWith,
+        req.text,
+        req.sizePx,
+        padding,
+        req.fillColor,
+        stroke,
+        req.phaseX,
+        req.phaseY,
+      )
+    : window.engine.renderText(
+        drawWith,
+        req.text,
+        req.sizePx,
+        padding,
+        req.fillColor,
+        stroke,
+        req.phaseX,
+        req.phaseY,
+      )
 
   const missing = new Set(uncovered)
   return {
