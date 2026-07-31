@@ -28,6 +28,22 @@ pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
 pub const BLACK: Rgba = Rgba(0, 0, 0, 255);
 
+/// How far into its own pixel the run starts, in bitmap pixels.
+///
+/// The caller floors the position it is drawing at and hands the remainder
+/// here, so the fraction is spent on coverage instead of on a resample the
+/// caller does not control — the standard glyph convention, and the reason a
+/// half-pixel offset costs contrast rather than sharpness.
+///
+/// It moves the run inside a bitmap whose size does not follow, so anything
+/// pushed past the blank margin is clipped. Sub-pixel values always fit;
+/// whole ones are meaningful but are the caller's business to afford.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct Phase {
+    pub x: f32,
+    pub y: f32,
+}
+
 /// No join or cap: the band is grown from the filled shape rather than swept
 /// along its outline, so every corner it turns is round by construction — the
 /// same reason a Photoshop layer-style stroke offers neither.
@@ -310,6 +326,7 @@ fn build_horizontal_path(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    phase: Phase,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -349,8 +366,8 @@ fn build_horizontal_path(
     let mut clusters: Vec<ClusterRect> = Vec::new();
 
     for (line_idx, (line_offset, glyphs)) in lines.iter().enumerate() {
-        let baseline_y = padding as f32 + ascent + line_idx as f32 * line_height;
-        let mut pen_x = padding as f32;
+        let baseline_y = padding as f32 + phase.y + ascent + line_idx as f32 * line_height;
+        let mut pen_x = padding as f32 + phase.x;
         for g in glyphs {
             let gid = GlyphId::new(g.gid);
             if let Some(glyph) = outlines.get(gid) {
@@ -378,7 +395,7 @@ fn build_horizontal_path(
         path: builder.finish(),
         width: w,
         height: h,
-        baseline: padding as f32 + ascent,
+        baseline: padding as f32 + phase.y + ascent,
         clusters: merge_cluster_rects(&clusters),
     })
 }
@@ -389,6 +406,7 @@ fn build_vertical_path(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    phase: Phase,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -418,13 +436,13 @@ fn build_vertical_path(
 
     let outlines = sk_font.outline_glyphs();
     let mut builder = PathBuilder::new();
-    let origin_y = padding as f32;
+    let origin_y = padding as f32 + phase.y;
 
     let mut clusters: Vec<ClusterRect> = Vec::new();
 
     for (col_idx, (col_offset, glyphs)) in columns.iter().enumerate() {
         // Column 0 sits at the right edge, later columns walk leftward.
-        let col_center_x = (w as f32) - padding as f32 - column_width * 0.5
+        let col_center_x = (w as f32) - padding as f32 + phase.x - column_width * 0.5
             - (col_idx as f32) * column_width;
         let mut pen_x = 0.0f32;
         let mut pen_y = 0.0f32;
@@ -460,7 +478,7 @@ fn build_vertical_path(
         width: w,
         height: h,
         clusters: merge_cluster_rects(&clusters),
-        baseline: (w as f32) - padding as f32 - column_width * 0.5,
+        baseline: (w as f32) - padding as f32 + phase.x - column_width * 0.5,
     })
 }
 
@@ -584,10 +602,11 @@ pub fn render_text(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    phase: Phase,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index)?;
+    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase)?;
     paint_run(run, fill, stroke)
 }
 
@@ -597,10 +616,11 @@ pub fn render_vertical(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    phase: Phase,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index)?;
+    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase)?;
     paint_run(run, fill, stroke)
 }
 
@@ -856,6 +876,145 @@ mod stroke_tests {
             let (alpha, _) = probe(&bmp, 24.0, angle);
             assert_eq!(alpha, 0);
         }
+    }
+}
+
+/// The phase is a property of a real run of glyphs, so these draw one. There is
+/// no font in this repository to draw it with, and vendoring one to test a
+/// translation would be a poor trade — so they take whatever face the machine
+/// has and say so when it has none, rather than passing on a machine where they
+/// never ran.
+#[cfg(test)]
+mod phase_tests {
+    use super::*;
+    use crate::enumerate;
+
+    const SIZE: f32 = 32.0;
+    const PADDING: u32 = 4;
+    const TEXT: &str = "Hg";
+
+    fn any_face() -> Option<(Vec<u8>, u32)> {
+        let faces = enumerate::scan(&enumerate::default_dirs(), &[]);
+        faces.into_iter().find_map(|face| {
+            let bytes = std::fs::read(&face.path).ok()?;
+            // Some collections carry faces skrifa declines; only a face that
+            // actually draws is any use here.
+            let run = build_horizontal_path(
+                &bytes,
+                TEXT,
+                SIZE,
+                PADDING,
+                face.face_index,
+                Phase::default(),
+            )
+            .ok()?;
+            run.path.is_some().then_some((bytes, face.face_index))
+        })
+    }
+
+    fn draw(bytes: &[u8], face_index: u32, phase: Phase) -> TextBitmap {
+        render_text(bytes, TEXT, SIZE, PADDING, face_index, phase, BLACK, None).unwrap()
+    }
+
+    fn alpha(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
+        bmp.rgba[((y * bmp.width + x) * 4 + 3) as usize]
+    }
+
+    /// The property everything else rests on: what the phase moves is the
+    /// outline, in bitmap pixels, in the direction the caller means. A whole
+    /// pixel is the one offset whose answer can be stated exactly.
+    #[test]
+    fn a_whole_pixel_of_phase_moves_the_ink_exactly_one_cell() {
+        let Some((bytes, face)) = any_face() else {
+            eprintln!("no font on this machine — phase tests did not run");
+            return;
+        };
+        let at_rest = draw(&bytes, face, Phase::default());
+        let moved = draw(&bytes, face, Phase { x: 1.0, y: 2.0 });
+
+        for y in 0..at_rest.height - 2 {
+            for x in 0..at_rest.width - 1 {
+                assert_eq!(
+                    alpha(&at_rest, x, y),
+                    alpha(&moved, x + 1, y + 2),
+                    "ink did not travel one cell right and two down at ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_the_run_inside_the_bitmap_does_not_resize_it() {
+        let Some((bytes, face)) = any_face() else { return };
+        let at_rest = draw(&bytes, face, Phase::default());
+        let moved = draw(&bytes, face, Phase { x: 0.5, y: 0.75 });
+        assert_eq!((at_rest.width, at_rest.height), (moved.width, moved.height));
+    }
+
+    /// Half a pixel is the Raster Tragedy's case: the same light over twice the
+    /// area, so the ink softens rather than moving to another cell.
+    #[test]
+    fn half_a_pixel_of_phase_spreads_the_ink_without_losing_it() {
+        let Some((bytes, face)) = any_face() else { return };
+        let ink = |bmp: &TextBitmap| -> u64 {
+            (0..bmp.width * bmp.height)
+                .map(|i| bmp.rgba[(i * 4 + 3) as usize] as u64)
+                .sum()
+        };
+        let soft = |bmp: &TextBitmap| -> usize {
+            (0..bmp.width * bmp.height)
+                .filter(|i| {
+                    let a = bmp.rgba[(i * 4 + 3) as usize];
+                    a > 0 && a < 255
+                })
+                .count()
+        };
+        let at_rest = draw(&bytes, face, Phase::default());
+        let halved = draw(&bytes, face, Phase { x: 0.5, y: 0.5 });
+
+        let (before, after) = (ink(&at_rest) as f64, ink(&halved) as f64);
+        assert!(
+            (after - before).abs() / before < 0.02,
+            "ink was lost or gained: {before} -> {after}"
+        );
+        assert!(soft(&halved) > soft(&at_rest), "nothing softened");
+    }
+
+    /// Both are measured on the bitmap, so both have to follow what it holds.
+    #[test]
+    fn the_baseline_and_the_clusters_travel_with_the_run() {
+        let Some((bytes, face)) = any_face() else { return };
+        let at_rest = draw(&bytes, face, Phase::default());
+        let moved = draw(&bytes, face, Phase { x: 0.25, y: 0.5 });
+
+        assert!((moved.baseline - at_rest.baseline - 0.5).abs() < 1e-4);
+        assert!((moved.clusters[0].x - at_rest.clusters[0].x - 0.25).abs() < 1e-4);
+        assert!((moved.clusters[0].y - at_rest.clusters[0].y - 0.5).abs() < 1e-4);
+    }
+
+    /// The vertical run measures its baseline across the columns rather than
+    /// down them, so the axis its phase lands on is the other one.
+    #[test]
+    fn a_vertical_run_moves_on_both_axes_too() {
+        let Some((bytes, face)) = any_face() else { return };
+        let at_rest =
+            render_vertical(&bytes, TEXT, SIZE, PADDING, face, Phase::default(), BLACK, None)
+                .unwrap();
+        let moved = render_vertical(
+            &bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face,
+            Phase { x: 0.25, y: 0.5 },
+            BLACK,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!((at_rest.width, at_rest.height), (moved.width, moved.height));
+        assert!((moved.baseline - at_rest.baseline - 0.25).abs() < 1e-4);
+        assert!((moved.clusters[0].y - at_rest.clusters[0].y - 0.5).abs() < 1e-4);
     }
 }
 

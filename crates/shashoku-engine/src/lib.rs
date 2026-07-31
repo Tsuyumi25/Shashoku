@@ -12,7 +12,7 @@ mod enumerate;
 mod render;
 mod stroke;
 
-use render::{BLACK, StrokePosition, StrokeSpec, parse_hex_rgba};
+use render::{BLACK, Phase, StrokePosition, StrokeSpec, parse_hex_rgba};
 
 #[napi]
 pub fn engine_version() -> String {
@@ -202,6 +202,16 @@ fn fill_from_opt(fill: Option<String>) -> napi::Result<render::Rgba> {
     }
 }
 
+/// A real number, not a flag. Rounding a phase to some number of steps keeps a
+/// bitmap cache finite, which is the caller's problem and the caller's constant
+/// to choose — putting it here would freeze one answer into the surface.
+fn phase_from_opt(x: Option<f64>, y: Option<f64>) -> Phase {
+    Phase {
+        x: x.unwrap_or(0.0) as f32,
+        y: y.unwrap_or(0.0) as f32,
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Enumeration
 
@@ -283,6 +293,8 @@ pub fn render_text(
     padding: Option<u32>,
     fill_color: Option<String>,
     stroke: Option<StrokeInput>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -293,6 +305,7 @@ pub fn render_text(
         size_px as f32,
         padding.unwrap_or(4),
         face_index,
+        phase_from_opt(phase_x, phase_y),
         fill,
         stroke_spec,
     )
@@ -380,6 +393,8 @@ pub fn render_vertical(
     padding: Option<u32>,
     fill_color: Option<String>,
     stroke: Option<StrokeInput>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -390,6 +405,7 @@ pub fn render_vertical(
         size_px as f32,
         padding.unwrap_or(4),
         face_index,
+        phase_from_opt(phase_x, phase_y),
         fill,
         stroke_spec,
     )

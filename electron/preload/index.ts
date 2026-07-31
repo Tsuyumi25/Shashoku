@@ -47,10 +47,10 @@ const engineApi: ShashokuEngineApi = {
   version: () => engine.engineVersion(),
   listFonts: (dirs, locales) => engine.listFonts(dirs, locales),
   uncoveredClusters: (font, text) => engine.uncoveredClusters(font, text),
-  renderText: (font, text, sizePx, padding, fillColor, stroke) =>
-    engine.renderText(font, text, sizePx, padding, fillColor, stroke),
-  renderVertical: (font, text, sizePx, padding, fillColor, stroke) =>
-    engine.renderVertical(font, text, sizePx, padding, fillColor, stroke),
+  renderText: (font, text, sizePx, padding, fillColor, stroke, phaseX, phaseY) =>
+    engine.renderText(font, text, sizePx, padding, fillColor, stroke, phaseX, phaseY),
+  renderVertical: (font, text, sizePx, padding, fillColor, stroke, phaseX, phaseY) =>
+    engine.renderVertical(font, text, sizePx, padding, fillColor, stroke, phaseX, phaseY),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };
 

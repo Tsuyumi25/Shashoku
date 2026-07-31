@@ -124,6 +124,20 @@ export interface ShashokuEngineApi {
    * can draw the whole string. cmap lookups only — no shaping, no raster.
    */
   uncoveredClusters(font: EngineFontSource, text: string): number[];
+  /**
+   * `phaseX` / `phaseY` move the run inside its bitmap, in bitmap pixels,
+   * before any coverage is computed. Hand over the fraction of the position
+   * being drawn at and blit at its floor: the fraction then arrives as ink
+   * rather than as a resample by whatever filter the surface happens to use.
+   *
+   * Real numbers, not steps. Rounding them to keep a bitmap cache finite is the
+   * caller's constant to choose, and rounding both to zero is a rendering
+   * strategy — the crisp horizontals a snapped baseline buys — rather than the
+   * absence of one.
+   *
+   * The bitmap's size does not follow, so a phase past the blank margin around
+   * the run is clipped. Anything under a pixel always fits.
+   */
   renderText(
     font: EngineFontSource,
     text: string,
@@ -131,6 +145,8 @@ export interface ShashokuEngineApi {
     padding?: number,
     fillColor?: string,
     stroke?: EngineStrokeSpec,
+    phaseX?: number,
+    phaseY?: number,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -139,6 +155,8 @@ export interface ShashokuEngineApi {
     padding?: number,
     fillColor?: string,
     stroke?: EngineStrokeSpec,
+    phaseX?: number,
+    phaseY?: number,
   ): EngineBitmap;
   /**
    * A composited page as file bytes. Takes straight RGBA because the
