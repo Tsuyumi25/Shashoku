@@ -33,7 +33,6 @@
           :nodes="stack"
           :layers-dir="layersDirOf(currentFile.pageDir)"
           :container="editor.viewContainerSize"
-          :natural="editor.viewContentSize"
           :view="view"
           :groups="project.header.groups"
           :default-style="project.header.defaultStyle"
@@ -136,7 +135,7 @@ import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import { applyViewTransform, screenToPageFraction, type Anchor } from '@/lib/coords'
+import { applyViewTransform, screenToPagePx, type Anchor } from '@/lib/coords'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -440,6 +439,10 @@ function fitUnfittedPage() {
 function onImageLoad(e: Event) {
   const img = e.target as HTMLImageElement
   editor.viewContentSize = { w: img.naturalWidth, h: img.naturalHeight }
+  // The one moment the page's own size is known: the parser is synchronous and
+  // has no decoded image, so a manifest can only learn this here.
+  if (editor.currentFilename)
+    project.recordPageSize(editor.currentFilename, img.naturalWidth, img.naturalHeight)
   imageReady.value = true
   fitUnfittedPage()
   selectionOverlay.schedulePaint()
@@ -637,7 +640,7 @@ function onPointerDown(e: PointerEvent) {
   }
   if (editor.tool === 'text') {
     const rect = containerRef.value.getBoundingClientRect()
-    const p = screenToPageFraction(e.clientX, e.clientY, rect, view, editor.viewContentSize)
+    const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
     editor.addLabelAt(p.x, p.y)
     return
   }

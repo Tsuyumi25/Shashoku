@@ -8,8 +8,8 @@ const UPRIGHT = {
   id: 'a',
   visible: true,
   locked: false,
-  x: 0.5,
-  y: 0.5,
+  x: 512,
+  y: 300,
   groupId: null,
   lines: ['hi'],
 }
@@ -71,6 +71,93 @@ describe('text object rotation', () => {
   it('round trips a turned object', () => {
     const out = serializeManifest(manifestWith({ ...UPRIGHT, rotation: 1.25 } as TextLayerEntry))
     expect(firstText(parseManifest(out)).rotation).toBe(1.25)
+  })
+})
+
+describe('a text object stands where it was put', () => {
+  it('keeps a position between two pixels, which is what a rasterizer resolves', () => {
+    const parsed = firstText(parseManifest(raw({ ...UPRIGHT, x: 512.37, y: 300.5 })))
+    expect([parsed.x, parsed.y]).toEqual([512.37, 300.5])
+  })
+
+  it('refuses a position that is not a number', () => {
+    expect(() => parseManifest(raw({ ...UPRIGHT, x: '512' }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw({ ...UPRIGHT, y: Number.POSITIVE_INFINITY }))).toThrow(
+      PageParseError,
+    )
+  })
+
+  it('reads a page that names no anchor as measured from the centre', () => {
+    expect(firstText(parseManifest(raw(UPRIGHT))).anchor).toBe('center')
+  })
+
+  it('carries a named anchor through', () => {
+    const parsed = parseManifest(raw({ ...UPRIGHT, anchor: 'bottom-right' }))
+    expect(firstText(parsed).anchor).toBe('bottom-right')
+  })
+
+  it('refuses an anchor that is not one of the nine', () => {
+    expect(() => parseManifest(raw({ ...UPRIGHT, anchor: 'middle' }))).toThrow(PageParseError)
+  })
+
+  it('leaves the centre out of the file rather than writing it on every object', () => {
+    const out = serializeManifest(manifestWith({ ...UPRIGHT, anchor: 'center' } as TextLayerEntry))
+    expect(JSON.parse(out).layers[0]).not.toHaveProperty('anchor')
+  })
+
+  it('round trips an object anchored elsewhere', () => {
+    const out = serializeManifest(manifestWith({ ...UPRIGHT, anchor: 'top-left' } as TextLayerEntry))
+    expect(firstText(parseManifest(out)).anchor).toBe('top-left')
+  })
+})
+
+describe('the page the positions are measured against', () => {
+  it('has no size until somebody has measured one', () => {
+    const parsed = parseManifest(raw(UPRIGHT))
+    expect(parsed.width).toBeUndefined()
+    expect(parsed.height).toBeUndefined()
+  })
+
+  it('carries a measured size through', () => {
+    const sized = JSON.stringify({
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      width: 1668,
+      height: 2388,
+      readingOrder: ['a'],
+      layers: [UPRIGHT],
+    })
+    const parsed = parseManifest(sized)
+    expect([parsed.width, parsed.height]).toEqual([1668, 2388])
+  })
+
+  it('round trips a measured size', () => {
+    const object = {
+      ...UPRIGHT,
+      rotation: 0,
+      anchor: 'center',
+      opacity: 1,
+      blendMode: 'normal',
+    } as TextLayerEntry
+    const source = { ...manifestWith(object), width: 800, height: 1200 }
+    expect(parseManifest(serializeManifest(source))).toEqual(source)
+  })
+
+  it('writes no size for a page nobody has measured', () => {
+    const out = serializeManifest(manifestWith(UPRIGHT as TextLayerEntry))
+    expect(JSON.parse(out)).not.toHaveProperty('width')
+  })
+
+  it('refuses a size no page could have', () => {
+    const bad = JSON.stringify({
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      width: 0,
+      height: 2388,
+      readingOrder: ['a'],
+      layers: [UPRIGHT],
+    })
+    expect(() => parseManifest(bad)).toThrow(PageParseError)
   })
 })
 
@@ -168,11 +255,18 @@ describe('parseManifest', () => {
           opacity: 1,
           blendMode: 'pass-through',
           children: [
-            { ...UPRIGHT, rotation: 0, opacity: 1, blendMode: 'normal' } as TextLayerEntry,
+            {
+              ...UPRIGHT,
+              rotation: 0,
+              anchor: 'center',
+              opacity: 1,
+              blendMode: 'normal',
+            } as TextLayerEntry,
             {
               ...UPRIGHT,
               id: 'b',
               rotation: 0,
+              anchor: 'center',
               opacity: 1,
               blendMode: 'normal',
               lines: ['ゴゴゴ'],
@@ -187,6 +281,18 @@ describe('parseManifest', () => {
   it('refuses a page from a version it does not know', () => {
     const older = JSON.stringify({ schemaVersion: 2, revision: 0, layers: [] })
     expect(() => parseManifest(older)).toThrow(PageParseError)
+  })
+
+  // The version this one replaces stored a fraction of the raw, which cannot be
+  // converted without the page's own size — and this parser has never seen it.
+  it('refuses the version before it rather than reading the old unit as the new one', () => {
+    const v4 = JSON.stringify({
+      schemaVersion: MANIFEST_SCHEMA_VERSION - 1,
+      revision: 0,
+      readingOrder: ['a'],
+      layers: [{ ...UPRIGHT, x: 0.5, y: 0.5 }],
+    })
+    expect(() => parseManifest(v4)).toThrow(PageParseError)
   })
 
   it('refuses a text object whose group the project does not have', () => {

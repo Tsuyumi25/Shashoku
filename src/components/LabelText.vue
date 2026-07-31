@@ -19,12 +19,7 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
-import {
-  centeredBoxOnScreen,
-  percentToContentPx,
-  smoothingQualityFor,
-  type ViewTransform,
-} from '@/lib/coords'
+import { centeredBoxOnScreen, smoothingQualityFor, type ViewTransform } from '@/lib/coords'
 import { labelBoxSize } from '@/lib/labelBox'
 import { rasterFor } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -48,12 +43,11 @@ const props = defineProps<{
   text: string
   /** Already resolved down the default → group → override chain. */
   textStyle: TextStyle
-  /** Label anchor, as a fraction of the raw image. */
+  /** Label anchor, in page pixels. */
   x: number
   y: number
   /** The object's own turn on the page, in radians. */
   rotation: number
-  natural: { w: number; h: number }
   view: ViewTransform
 }>()
 
@@ -64,9 +58,8 @@ const sample = computed(() => (raster.value.ok ? raster.value.sample : null))
 const failure = computed(() => (raster.value.ok ? '' : raster.value.reason))
 
 const box = computed(() => {
-  const anchor = percentToContentPx(props.x, props.y, props.natural.w, props.natural.h)
   const size = labelBoxSize(props.textStyle, sample.value?.image ?? null)
-  return centeredBoxOnScreen(anchor, size, props.view)
+  return centeredBoxOnScreen({ x: props.x, y: props.y }, size, props.view)
 })
 
 /**

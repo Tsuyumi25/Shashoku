@@ -18,9 +18,10 @@ function label(id: string, text = ''): TextLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
-    x: 0.5,
-    y: 0.5,
+    x: 200,
+    y: 150,
     groupId: null,
+    anchor: 'center',
     rotation: 0,
     lines: linesOf(text),
   }
@@ -164,24 +165,24 @@ describe('addLabelAt', () => {
     const { project, editor } = openOnePage([label('a')])
     editor.activeGroupId = 'grp-1'
 
-    editor.addLabelAt(0.25, 0.75)
+    editor.addLabelAt(100, 225)
 
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
-    expect(added).toMatchObject({ x: 0.25, y: 0.75, groupId: 'grp-1', lines: [''] })
+    expect(added).toMatchObject({ x: 100, y: 225, groupId: 'grp-1', lines: [''] })
     expect(editor.cursorId).toBe(added?.id)
   })
 
   it('does nothing without a page open', () => {
     const { project, editor } = openOnePage()
     editor.currentFilename = null
-    editor.addLabelAt(0.5, 0.5)
+    editor.addLabelAt(200, 150)
     expect(labelsOf(project)).toHaveLength(0)
   })
 
   it('undoes back off the page and redoes into the same slot', () => {
     const { project, editor } = openOnePage([label('a'), label('b')])
-    editor.addLabelAt(0.1, 0.1)
+    editor.addLabelAt(40, 30)
     const id = labelsOf(project).at(-1)?.id
 
     editor.undo()
@@ -202,8 +203,8 @@ describe('addLabelAtViewCenter', () => {
     editor.addLabelAtViewCenter()
 
     const added = labelsOf(project).at(-1)
-    expect(added?.x).toBeCloseTo(0.5, 6)
-    expect(added?.y).toBeCloseTo(0.5, 6)
+    expect(added?.x).toBeCloseTo(200, 6)
+    expect(added?.y).toBeCloseTo(150, 6)
   })
 
   it('clamps onto the page when the view has been panned off it', () => {
@@ -215,7 +216,7 @@ describe('addLabelAtViewCenter', () => {
 
     editor.addLabelAtViewCenter()
 
-    expect(labelsOf(project).at(-1)).toMatchObject({ x: 1, y: 1 })
+    expect(labelsOf(project).at(-1)).toMatchObject({ x: 400, y: 300 })
   })
 
   it('does nothing before a page has been measured', () => {
@@ -375,14 +376,14 @@ describe('pending text edit', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.selectOnly('a')
     // A drag writes through and only records on release, so the test does both.
-    project.moveLabel(PAGE, 'a', 0.2, 0.2)
-    editor.cmdMoveLabel(PAGE, 'a', { x: 0.5, y: 0.5 }, { x: 0.2, y: 0.2 })
+    project.moveLabel(PAGE, 'a', 80, 60)
+    editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 80, y: 60 })
     editor.beginTextEdit(PAGE, 'a', 'a0')
     project.updateLabelText(PAGE, 'a', 'a1')
 
     editor.undo()
     expect(textOf(labelsOf(project)[0])).toBe('a0')
-    expect(labelsOf(project)[0].x).toBe(0.2)
+    expect(labelsOf(project)[0].x).toBe(80)
   })
 
   it('ends the redo branch, so a redo after typing is a no-op', () => {
@@ -605,7 +606,7 @@ describe('layer tree edits', () => {
       const { project, editor } = openTree([label('a')], ['a'])
       lock(project, 'a')
 
-      editor.cmdMoveLabel(PAGE, 'a', { x: 0.5, y: 0.5 }, { x: 0.1, y: 0.1 })
+      editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 40, y: 30 })
       editor.cmdRotateLabel(PAGE, 'a', 0, 1)
       editor.cmdUpdateLabelStyleOverride(PAGE, 'a', undefined, { fontSizePx: 40 })
 

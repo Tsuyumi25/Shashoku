@@ -7,9 +7,15 @@ import type {
   OcrBlockPersisted,
   OcrJson,
   RasterLayerEntry,
+  TextAnchor,
   TextLayerEntry,
 } from './types'
-import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
+import {
+  MANIFEST_SCHEMA_VERSION,
+  OCR_SCHEMA_VERSION,
+  PASS_THROUGH,
+  TEXT_ANCHORS,
+} from './types'
 import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
 
 
@@ -142,8 +148,10 @@ function parseTextEntry(
 ): TextLayerEntry {
   const base = parseLayerBase(v, at, 'text')
   const { x, y, groupId, lines } = v
-  if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
-  if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
+  // Deliberately not integer-checked, unlike a raster layer's frame: what lands
+  // on whole pixels is the rasterizer's output, not this.
+  if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字(頁面像素)`)
+  if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字(頁面像素)`)
   if (groupId !== null && typeof groupId !== 'string')
     fail(`${at}.groupId 必須是 string(對應 project.groups[].id)或 null`)
   if (validGroupIds !== null && typeof groupId === 'string' && !validGroupIds.includes(groupId))
@@ -162,11 +170,19 @@ function parseTextEntry(
     rotation = v.rotation
   }
 
+  let anchor: TextAnchor = 'center'
+  if (v.anchor !== undefined) {
+    if (typeof v.anchor !== 'string' || !(TEXT_ANCHORS as readonly string[]).includes(v.anchor))
+      fail(`${at}.anchor 必須是 ${TEXT_ANCHORS.join(' | ')} 之一`)
+    anchor = v.anchor as TextAnchor
+  }
+
   const entry: TextLayerEntry = {
     kind: 'text',
     ...base,
     x,
     y,
+    anchor,
     groupId: groupId as string | null,
     rotation,
     lines: parsedLines,
@@ -218,6 +234,23 @@ export function defaultManifest(): ManifestJson {
 }
 
 /**
+ * Both edges or neither: half a size cannot say what a position was measured
+ * against, so it is refused rather than kept as the more useful looking half.
+ */
+function parsePageSize(data: Record<string, unknown>): { width?: number; height?: number } {
+  const { width, height } = data
+  if (width === undefined && height === undefined) return {}
+  for (const [name, v] of [
+    ['width', width],
+    ['height', height],
+  ] as const) {
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0)
+      fail(`manifest.json.${name} 必須是正數(頁面像素)`)
+  }
+  return { width: width as number, height: height as number }
+}
+
+/**
  * Structure only. Whether `readingOrder` and the tree agree with each other is
  * the repair layer's question, not this one — a page whose order has drifted is
  * still readable, and refusing to open it would be the worse answer.
@@ -243,6 +276,8 @@ export function parseManifest(
     revision = revisionRaw
   }
 
+  const size = parsePageSize(data)
+
   const readingOrderRaw = data.readingOrder
   if (!Array.isArray(readingOrderRaw)) fail('manifest.json.readingOrder 必須是陣列')
   const readingOrder = readingOrderRaw.map((id, i) => {
@@ -259,7 +294,7 @@ export function parseManifest(
   collectRasterFiles(layers, files)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, readingOrder, layers }
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, ...size, readingOrder, layers }
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
@@ -294,6 +329,7 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
     lines: l.lines,
   }
   if (l.rotation) out.rotation = l.rotation
+  if (l.anchor !== 'center') out.anchor = l.anchor
   if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
     out.styleOverride = serializePartialTextStyle(l.styleOverride)
   return out
@@ -305,12 +341,16 @@ export function serializeLayers(layers: readonly LayerEntry[]): string {
 }
 
 export function serializeManifest(m: ManifestJson): string {
-  const out = {
+  const out: Record<string, unknown> = {
     schemaVersion: m.schemaVersion,
     revision: m.revision,
-    readingOrder: m.readingOrder,
-    layers: m.layers.map(serializeLayerEntry),
   }
+  if (m.width !== undefined && m.height !== undefined) {
+    out.width = m.width
+    out.height = m.height
+  }
+  out.readingOrder = m.readingOrder
+  out.layers = m.layers.map(serializeLayerEntry)
   return `${JSON.stringify(out, null, 2)}\n`
 }
 

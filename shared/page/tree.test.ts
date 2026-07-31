@@ -28,6 +28,7 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     x: 0,
     y: 0,
     groupId: null,
+    anchor: 'center',
     rotation: 0,
     lines: [id],
     ...extra,

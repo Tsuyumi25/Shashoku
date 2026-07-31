@@ -538,6 +538,31 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  /**
+   * What the page turned out to measure, learnt the first time its raw decodes.
+   * Positions on it are page pixels, which mean nothing without this.
+   *
+   * A recorded size is never overwritten: a raw swapped for a scan at another
+   * resolution would put every layer on the page somewhere wrong, and the
+   * console is where that stays until replacing a page's material is a command
+   * rather than something done behind the program's back.
+   */
+  function recordPageSize(filename: string, width: number, height: number) {
+    const file = fileByName(filename)
+    if (!file || width <= 0 || height <= 0) return
+    const { page } = file
+    if (page.width !== undefined && page.height !== undefined) {
+      if (page.width !== width || page.height !== height)
+        console.warn(
+          `${filename}: 記錄的頁面尺寸 ${page.width}×${page.height} 與原圖的 ${width}×${height} 不符`,
+        )
+      return
+    }
+    page.width = width
+    page.height = height
+    markPageDirty(filename)
+  }
+
   function moveLabel(filename: string, labelId: string, x: number, y: number) {
     const label = labelById(filename, labelId)
     if (!label) return
@@ -703,6 +728,7 @@ export const useProjectStore = defineStore('project', () => {
     flush: autosave.flush,
     addLabel,
     deleteLabel,
+    recordPageSize,
     moveLabel,
     rotateLabel,
     updateLabelText,

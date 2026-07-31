@@ -8,7 +8,7 @@ import {
   type TextStackNode,
 } from '@shared/page/stack'
 import { textOf } from '@shared/page/text'
-import { percentToContentPx, smoothingQualityFor } from '@/lib/coords'
+import { smoothingQualityFor } from '@/lib/coords'
 import { labelBoxSize } from '@/lib/labelBox'
 import { rasterFor } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -105,7 +105,6 @@ export async function decodeLayerBitmaps(
 function drawTextWith(
   ctx: OffscreenCanvasRenderingContext2D,
   node: TextStackNode,
-  size: Size,
   input: CompositeInput,
 ): void {
   const label = node.entry
@@ -115,9 +114,8 @@ function drawTextWith(
   const raster = rasterFor(text, style)
   if (!raster.ok) throw new CompositeError(raster.reason || `無法繪製標籤「${text}」`)
   const box = labelBoxSize(style, raster.sample.image)
-  const anchor = percentToContentPx(label.x, label.y, size.w, size.h)
 
-  ctx.translate(anchor.x, anchor.y)
+  ctx.translate(label.x, label.y)
   ctx.rotate(label.rotation)
   ctx.imageSmoothingEnabled = true
   // Page pixels per bitmap pixel, which is what renderScale bought: the engine
@@ -207,7 +205,7 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
     drawStack(ctx, stack, {
       page: size,
       rasters,
-      drawText: (target, node) => drawTextWith(target, node, size, input),
+      drawText: (target, node) => drawTextWith(target, node, input),
     })
     return canvas
   } finally {

@@ -15,7 +15,6 @@
       :x="segment.node.entry.x"
       :y="segment.node.entry.y"
       :rotation="segment.node.entry.rotation"
-      :natural="natural"
       :view="view"
     />
     <PageStack
@@ -23,7 +22,6 @@
       :nodes="segment.node.children"
       :layers-dir="layersDir"
       :container="container"
-      :natural="natural"
       :view="view"
       :groups="groups"
       :default-style="defaultStyle"
@@ -63,8 +61,6 @@ const props = defineProps<{
   layersDir: string
   /** The viewport, which is what a raster canvas is sized to. */
   container: { w: number; h: number }
-  /** The raw page's own pixel size, which label anchors are a fraction of. */
-  natural: { w: number; h: number }
   view: ViewTransform
   groups: readonly StyleGroup[]
   defaultStyle: TextStyle

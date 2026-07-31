@@ -12,7 +12,7 @@ export interface ViewTransform {
   rotate: number
 }
 
-/** Where a text object sits, as a fraction of the raw image. */
+/** Where a text object sits, in page pixels. */
 export interface Anchor {
   x: number
   y: number
@@ -121,12 +121,12 @@ export function screenDeltaToContentPx(
 }
 
 /**
- * Where a screen point sits on the page, in the fraction labels are stored as.
- * Clamped, because the page is smaller than the viewport once it is fitted:
- * the gutter around it is still the canvas, and a label dropped out there
- * could never be reached to be dragged back.
+ * Where a screen point sits on the page, in the page pixels objects are stored
+ * in. Clamped to the page, because it is smaller than the viewport once it is
+ * fitted: the gutter around it is still the canvas, and a label dropped out
+ * there could never be reached to be dragged back.
  */
-export function screenToPageFraction(
+export function screenToPagePx(
   clientX: number,
   clientY: number,
   containerRect: { left: number; top: number },
@@ -135,8 +135,8 @@ export function screenToPageFraction(
 ): { x: number; y: number } {
   const p = screenToContentPx(clientX, clientY, containerRect, view)
   return {
-    x: clamp(p.x / natural.w, 0, 1),
-    y: clamp(p.y / natural.h, 0, 1),
+    x: clamp(p.x, 0, natural.w),
+    y: clamp(p.y, 0, natural.h),
   }
 }
 
@@ -158,18 +158,4 @@ export function centeredBoxOnScreen(
     width: size.w * view.scale,
     height: size.h * view.scale,
   }
-}
-
-/**
- * Labels are stored as a fraction of the raw image so a project survives the
- * same page being re-scanned at another resolution. Markers live inside the
- * transformed stage, so placing one needs no view.
- */
-export function percentToContentPx(
-  xPercent: number,
-  yPercent: number,
-  naturalWidth: number,
-  naturalHeight: number,
-): { x: number; y: number } {
-  return { x: xPercent * naturalWidth, y: yPercent * naturalHeight }
 }

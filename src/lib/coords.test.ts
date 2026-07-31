@@ -4,7 +4,7 @@ import {
   contentToScreenPx,
   screenDeltaToContentPx,
   screenToContentPx,
-  screenToPageFraction,
+  screenToPagePx,
   smoothingQualityFor,
   type ViewTransform,
 } from './coords'
@@ -60,33 +60,38 @@ describe('screenDeltaToContentPx', () => {
   })
 })
 
-describe('screenToPageFraction', () => {
+describe('screenToPagePx', () => {
   const NATURAL = { w: 400, h: 200 }
 
-  it('reads a screen point as the fraction of the page it landed on', () => {
+  it('reads a screen point as the page pixel it landed on', () => {
     const view: ViewTransform = { scale: 2, tx: 50, ty: -30, rotate: 0 }
     const s = contentToScreenPx(100, 150, view)
-    expect(screenToPageFraction(s.x, s.y, ORIGIN, view, NATURAL)).toEqual({ x: 0.25, y: 0.75 })
+    expect(screenToPagePx(s.x, s.y, ORIGIN, view, NATURAL)).toEqual({ x: 100, y: 150 })
+  })
+
+  it('keeps a point between two pixels, which is where a person may put one', () => {
+    const view: ViewTransform = { scale: 4, tx: 0, ty: 0, rotate: 0 }
+    expect(screenToPagePx(50, 130, ORIGIN, view, NATURAL)).toEqual({ x: 12.5, y: 32.5 })
   })
 
   it('subtracts the container offset like screenToContentPx does', () => {
     const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: 0 }
     const rect = { left: 60, top: 20 }
-    expect(screenToPageFraction(260, 120, rect, view, NATURAL)).toEqual({ x: 0.5, y: 0.5 })
+    expect(screenToPagePx(260, 120, rect, view, NATURAL)).toEqual({ x: 200, y: 100 })
   })
 
   it('clamps a point off the page to its edge', () => {
     const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: 0 }
-    expect(screenToPageFraction(-500, -500, ORIGIN, view, NATURAL)).toEqual({ x: 0, y: 0 })
-    expect(screenToPageFraction(9999, 9999, ORIGIN, view, NATURAL)).toEqual({ x: 1, y: 1 })
+    expect(screenToPagePx(-500, -500, ORIGIN, view, NATURAL)).toEqual({ x: 0, y: 0 })
+    expect(screenToPagePx(9999, 9999, ORIGIN, view, NATURAL)).toEqual({ x: 400, y: 200 })
   })
 
   it('follows the view rotation', () => {
     const view: ViewTransform = { scale: 1.3, tx: 17, ty: -44, rotate: Math.PI / 5 }
     const s = contentToScreenPx(300, 50, view)
-    const f = screenToPageFraction(s.x, s.y, ORIGIN, view, NATURAL)
-    expect(f.x).toBeCloseTo(0.75, 6)
-    expect(f.y).toBeCloseTo(0.25, 6)
+    const p = screenToPagePx(s.x, s.y, ORIGIN, view, NATURAL)
+    expect(p.x).toBeCloseTo(300, 6)
+    expect(p.y).toBeCloseTo(50, 6)
   })
 })
 

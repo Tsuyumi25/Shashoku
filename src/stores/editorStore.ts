@@ -9,7 +9,7 @@ import type {
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
-import { screenToPageFraction } from '@/lib/coords'
+import { screenToPagePx } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
 import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
@@ -517,6 +517,7 @@ export const useEditorStore = defineStore('editor', () => {
       blendMode: 'normal',
       x,
       y,
+      anchor: 'center',
       groupId: activeGroupId.value,
       rotation: 0,
       lines: [''],
@@ -525,14 +526,14 @@ export const useEditorStore = defineStore('editor', () => {
 
   /**
    * Where the panel's add button drops a label. The view centre is a container
-   * coordinate, which is what `screenToPageFraction` wants once the container's
-   * own offset is taken out — and it can be off the page after a pan, hence the
+   * coordinate, which is what `screenToPagePx` wants once the container's own
+   * offset is taken out — and it can be off the page after a pan, hence the
    * clamp inside it.
    */
   function addLabelAtViewCenter() {
     const natural = viewContentSize.value
     if (!natural.w || !natural.h) return
-    const p = screenToPageFraction(
+    const p = screenToPagePx(
       viewContainerSize.value.w / 2,
       viewContainerSize.value.h / 2,
       { left: 0, top: 0 },

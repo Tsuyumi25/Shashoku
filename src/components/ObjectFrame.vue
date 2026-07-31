@@ -54,10 +54,10 @@ import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/la
  * The frame around one object: what says there is something here, and the only
  * thing on the canvas that takes a pointer.
  *
- * It knows a box on screen and nothing else. Where that box came from — a
- * fraction of the raw page and a size the typesetter derived, or whole page
- * pixels and the extent of a PNG — is the caller's arithmetic, and so is what a
- * gesture means once it has been made. What is shared between the node kinds is
+ * It knows a box on screen and nothing else. Where that box came from — a point
+ * on the page and a size the typesetter derived, or the extent of a PNG — is the
+ * caller's arithmetic, and so is what a gesture means once it has been made.
+ * What is shared between the node kinds is
  * not a coordinate system but the question: where is this box, and what happens
  * when its handles are pushed.
  *

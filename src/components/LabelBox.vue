@@ -36,7 +36,6 @@ import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
   centeredBoxOnScreen,
   clamp,
-  percentToContentPx,
   screenDeltaToContentPx,
   type Anchor,
   type Displacement,
@@ -48,8 +47,8 @@ import { rasterFor } from '@/lib/labelRaster'
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
  *
- * Its anchor is a fraction of the raw page and its size is an output rather than
- * an input — the typesetter decides how big a line of dialogue is — so a corner
+ * Its anchor is a point on the page and its size is an output rather than an
+ * input — the typesetter decides how big a line of dialogue is — so a corner
  * changes the font size and lets the box follow, which is what makes scaling
  * text lossless. Only the four conversions below are text's; everything about
  * being a frame is in `ObjectFrame`.
@@ -64,7 +63,7 @@ const props = defineProps<{
   text: string
   /** Already resolved down the default → group → override chain. */
   textStyle: TextStyle
-  /** Label anchor, as a fraction of the raw image. */
+  /** Label anchor, in page pixels. */
   x: number
   y: number
   /** The object's own turn on the page, in radians. */
@@ -93,9 +92,8 @@ const raster = computed(() => rasterFor(props.text, props.textStyle))
 const failure = computed(() => (raster.value.ok ? '' : raster.value.reason))
 
 const box = computed(() => {
-  const anchor = percentToContentPx(props.x, props.y, props.natural.w, props.natural.h)
   const size = labelBoxSize(props.textStyle, raster.value.ok ? raster.value.sample.image : null)
-  return centeredBoxOnScreen(anchor, size, props.view)
+  return centeredBoxOnScreen({ x: props.x, y: props.y }, size, props.view)
 })
 
 /**
@@ -118,11 +116,11 @@ function onDragStart() {
 function onDrag(d: Displacement) {
   if (!props.natural.w || !props.natural.h) return
   const delta = screenDeltaToContentPx(d.dx, d.dy, props.view)
-  // Clamped to the page: the anchor is a fraction of the image, and one parked
-  // outside it can no longer be reached to be dragged back.
+  // Clamped to the page: an anchor parked outside it can no longer be reached
+  // to be dragged back.
   dragTo = {
-    x: clamp(dragFrom.x + delta.x / props.natural.w, 0, 1),
-    y: clamp(dragFrom.y + delta.y / props.natural.h, 0, 1),
+    x: clamp(dragFrom.x + delta.x, 0, props.natural.w),
+    y: clamp(dragFrom.y + delta.y, 0, props.natural.h),
   }
   emit('move', dragTo)
 }

@@ -1,7 +1,7 @@
 import type { TextStyle } from '../text-style/types'
 
 
-export const MANIFEST_SCHEMA_VERSION = 4
+export const MANIFEST_SCHEMA_VERSION = 5
 
 export const OCR_SCHEMA_VERSION = 1
 
@@ -12,6 +12,20 @@ export const OCR_SCHEMA_VERSION = 1
  * Photoshop, where it is a group's default.
  */
 export const PASS_THROUGH = 'pass-through'
+
+export const TEXT_ANCHORS = [
+  'top-left',
+  'top-center',
+  'top-right',
+  'center-left',
+  'center',
+  'center-right',
+  'bottom-left',
+  'bottom-center',
+  'bottom-right',
+] as const
+
+export type TextAnchor = (typeof TEXT_ANCHORS)[number]
 
 
 export interface LayerEntryBase {
@@ -67,9 +81,31 @@ export interface RasterLayerEntry extends LayerEntryBase {
 export interface TextLayerEntry extends LayerEntryBase {
   kind: 'text'
 
+  /**
+   * Where the object stands on the page, in page pixels, and free to fall
+   * between two of them.
+   *
+   * A raster layer's frame is whole pixels because its content *is* cells and
+   * there is nothing else it could be. Typeset text is not: the pixels a reader
+   * sees are a rasterization of outlines, so a whole number here would be a
+   * property of that output written back onto the input, losing both the
+   * precision and the fact that anything was lost.
+   */
   x: number
 
   y: number
+
+  /**
+   * Which point of the object's frame `x` / `y` names. Nine-valued after the
+   * reference point every layout tool offers — InDesign's
+   * `AutoSizingReferenceEnum` is the same set — rather than two-valued, because
+   * the corner cases someone actually asks for are edges and corners alike.
+   *
+   * Only `center` is reachable today: a label's size is an output of the
+   * typesetter, and anchoring it anywhere but the middle would walk the text
+   * out of the bubble it was placed in as it grows.
+   */
+  anchor: TextAnchor
 
   groupId: string | null
 
@@ -104,6 +140,18 @@ export interface ManifestJson {
   schemaVersion: typeof MANIFEST_SCHEMA_VERSION
 
   revision: number
+
+  /**
+   * The raw's own pixel size, once anything has decoded it. A position in page
+   * pixels means nothing without the page it was measured against, and a raw
+   * replaced by a scan at another resolution would otherwise put every layer
+   * somewhere wrong with nothing able to notice.
+   *
+   * Absent is a state of its own — nobody has measured this page yet — rather
+   * than a zero anyone could mistake for a measurement.
+   */
+  width?: number
+  height?: number
 
   /**
    * Every text object on the page, in the order a reader meets them. Held
