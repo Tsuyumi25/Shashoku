@@ -6,14 +6,6 @@
     class="pointer-events-none absolute select-none"
     :style="boxStyle"
   />
-  <span
-    v-else-if="failure"
-    v-bind="$attrs"
-    class="pointer-events-none absolute rounded-sm bg-background/80 px-1 text-xs whitespace-nowrap text-destructive ring-1 ring-destructive/40 select-none"
-    :style="chipStyle"
-  >
-    無法繪製
-  </span>
 </template>
 
 <script setup lang="ts">
@@ -54,7 +46,6 @@ const dpr = window.devicePixelRatio || 1
 
 const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }))
 const sample = computed(() => drawn.value.sample)
-const failure = computed(() => drawn.value.reason)
 
 // Centred on where the placement put it rather than on the stored position, so
 // the bitmap's corner lands on the page grid — the same corner the export
@@ -78,12 +69,6 @@ const boxStyle = computed(() => ({
   top: `${box.value.centerY}px`,
   width: `${box.value.width}px`,
   height: `${box.value.height}px`,
-  transform: placement.value,
-}))
-
-const chipStyle = computed(() => ({
-  left: `${box.value.centerX}px`,
-  top: `${box.value.centerY}px`,
   transform: placement.value,
 }))
 

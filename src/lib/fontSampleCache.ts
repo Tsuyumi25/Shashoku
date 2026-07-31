@@ -3,7 +3,12 @@ import type { FontEntry } from '@shared/fonts/types'
 import { engineSourceFor } from './fontCatalog'
 
 export interface SampleRequest {
-  entry: FontEntry
+  /**
+   * Null when this machine has no face for the family the object named. The
+   * engine then draws a grid of notdef boxes, which is still shaped by `text`
+   * and `vertical` — only the glyphs are unavailable, not the text.
+   */
+  entry: FontEntry | null
   text: string
   /** Device pixels, so the sample stays crisp on a HiDPI display. */
   sizePx: number
@@ -22,7 +27,11 @@ export interface SampleRequest {
 
 export interface Sample {
   image: ImageData
-  /** Boxes around the characters `entry` has no glyph for, in bitmap pixels. */
+  /**
+   * Boxes around the characters `entry` has no glyph for, in bitmap pixels.
+   * Empty for a notdef box: coverage is a question about a face, and that case
+   * is the one where there is no face.
+   */
   marks: EngineClusterRect[]
   /**
    * Where every cluster landed. The editor overlay answers three questions from
@@ -56,8 +65,10 @@ function keyOf(req: SampleRequest): string {
   const stroke = req.stroke
     ? `${req.stroke.width}/${req.stroke.color}/${req.stroke.position ?? 'outside'}`
     : '-'
+  // The tag keeps the two key spaces apart, so a family that happened to be
+  // named like the notdef key could not answer for it.
   return [
-    req.entry.family,
+    req.entry ? `f${req.entry.family}` : 'n',
     req.sizePx,
     req.fillColor,
     stroke,
@@ -82,9 +93,6 @@ export function coverageFor(entry: FontEntry, text: string): number[] {
 }
 
 function rasterize(req: SampleRequest): Sample {
-  const uncovered = coverageFor(req.entry, req.text)
-  const drawWith = engineSourceFor(req.entry)
-
   const padding = samplePadding(req.stroke)
   // Everything crossing contextBridge has to be structured-cloneable, and a
   // Vue reactive proxy is not — hence the explicit plain copy rather than
@@ -96,6 +104,29 @@ function rasterize(req: SampleRequest): Sample {
         position: req.stroke.position,
       }
     : undefined
+
+  if (!req.entry) {
+    const grid = window.engine.renderNotdef(
+      req.text,
+      req.sizePx,
+      padding,
+      req.vertical,
+      req.fillColor,
+      stroke,
+      req.phaseX,
+      req.phaseY,
+    )
+    // No marks: coverage is a question about a face, and there is no face.
+    return {
+      image: new ImageData(new Uint8ClampedArray(grid.rgba), grid.width, grid.height),
+      marks: [],
+      clusters: grid.clusters,
+      padding,
+    }
+  }
+
+  const uncovered = coverageFor(req.entry, req.text)
+  const drawWith = engineSourceFor(req.entry)
 
   const bmp = req.vertical
     ? window.engine.renderVertical(

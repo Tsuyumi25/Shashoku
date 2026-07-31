@@ -14,6 +14,12 @@ const FAMILY = 'Test Face'
  */
 const BITMAP = { width: 41, height: 20 }
 
+/**
+ * The notdef grid is one square cell per character, so its size follows the
+ * text — the same way a run's does, which is what keeps the frame honest.
+ */
+const NOTDEF_EM = 32
+
 interface DrawCall {
   text: string
   phaseX?: number
@@ -21,6 +27,7 @@ interface DrawCall {
 }
 
 let calls: DrawCall[] = []
+let notdefCalls: DrawCall[] = []
 
 function renderText(
   _font: EngineFontSource,
@@ -41,6 +48,30 @@ function renderText(
   }
 }
 
+function renderNotdef(
+  text: string,
+  _sizePx: number,
+  _padding?: number,
+  vertical?: boolean,
+  _fillColor?: string,
+  _stroke?: EngineStrokeSpec,
+  phaseX?: number,
+  phaseY?: number,
+): EngineBitmap {
+  notdefCalls.push({ text, phaseX, phaseY })
+  const lines = text.split('\n')
+  const longest = Math.max(1, ...lines.map((line) => [...line].length))
+  const across = vertical ? lines.length : longest
+  const down = vertical ? longest : lines.length
+  return {
+    width: across * NOTDEF_EM,
+    height: down * NOTDEF_EM,
+    baseline: 0,
+    rgba: new Uint8Array(across * down * NOTDEF_EM * NOTDEF_EM * 4),
+    clusters: [],
+  }
+}
+
 class StubImageData {
   constructor(
     readonly data: Uint8ClampedArray,
@@ -52,7 +83,12 @@ class StubImageData {
 Object.assign(globalThis, {
   ImageData: StubImageData,
   window: {
-    engine: { renderText, renderVertical: renderText, uncoveredClusters: () => [] },
+    engine: {
+      renderText,
+      renderVertical: renderText,
+      renderNotdef,
+      uncoveredClusters: () => [],
+    },
   },
 })
 
@@ -70,6 +106,7 @@ function uniqueText(): string {
 describe('drawnLabel', () => {
   beforeEach(() => {
     calls = []
+    notdefCalls = []
     catalog.value = [
       {
         family: FAMILY,
@@ -123,14 +160,63 @@ describe('drawnLabel', () => {
   it('still places an empty label, which is what keeps it reachable', () => {
     const drawn = drawnLabel('', styleWith(), { x: 100.4, y: 60.4 })
     expect(drawn.sample).toBeNull()
-    expect(drawn.reason).toBe('')
+    expect(drawn.missingFamily).toBeNull()
     expect(Number.isInteger(drawn.center.x - drawn.box.w / 2)).toBe(true)
   })
 
-  it('reports a family the catalogue does not have, and frames it anyway', () => {
+  it('draws boxes for a family this machine does not have, and names the family', () => {
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    expect(drawn.sample).not.toBeNull()
+    expect(drawn.missingFamily).toBe('Absent')
+    expect(notdefCalls.length).toBeGreaterThan(0)
+  })
+
+  it('hands the engine the text, which is what the grid is shaped by', () => {
+    const text = uniqueText()
+    drawnLabel(text, styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    expect(notdefCalls.at(-1)?.text).toBe(text)
+  })
+
+  it('frames one cell per character, so the frame is not a lone square', () => {
+    const text = uniqueText()
+    const drawn = drawnLabel(text, styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    expect(drawn.box).toEqual({ w: text.length * NOTDEF_EM, h: NOTDEF_EM })
+  })
+
+  it('gives a second line a second row of cells', () => {
+    const drawn = drawnLabel(`${uniqueText()}\nxy`, styleWith({ fontFamily: 'Absent' }), {
+      x: 10,
+      y: 10,
+    })
+    expect(drawn.box.h).toBe(2 * NOTDEF_EM)
+  })
+
+  it('turns the grid on its side for a vertical object', () => {
+    const text = uniqueText()
+    const drawn = drawnLabel(
+      text,
+      styleWith({ fontFamily: 'Absent', direction: 'vertical' }),
+      { x: 10, y: 10 },
+    )
+    expect(drawn.box).toEqual({ w: NOTDEF_EM, h: text.length * NOTDEF_EM })
+  })
+
+  it('lands the grid on the page grid, as it does a run', () => {
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), {
+      x: 100.25,
+      y: 60,
+    })
+    expect(Number.isInteger(drawn.center.x - drawn.box.w / 2)).toBe(true)
+    expect(notdefCalls.at(-1)?.phaseX).toBeCloseTo(0.25, 9)
+  })
+
+  it('draws nothing while the catalogue is still being enumerated', () => {
+    // Not yet answered is not the same as absent, and a box that appeared for
+    // half a second on every start would say the wrong one.
+    catalogLoaded.value = false
     const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
     expect(drawn.sample).toBeNull()
-    expect(drawn.reason).toContain('Absent')
-    expect(drawn.box.w).toBeGreaterThan(0)
+    expect(drawn.missingFamily).toBeNull()
+    expect(notdefCalls).toHaveLength(0)
   })
 })

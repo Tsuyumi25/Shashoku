@@ -107,6 +107,20 @@
           @dblclick.stop="beginRename(row)"
         >{{ nameFor(row.entry) }}</span>
 
+        <!--
+          The same box the canvas is drawing in place of each of this object's
+          characters. A state rather than an error, so it sits with the lock
+          and the eye: the object is intact and exports as itself, and it is
+          this machine that is missing something.
+        -->
+        <span
+          v-if="row.missingFamily"
+          class="flex shrink-0 items-center text-muted-foreground"
+          :title="`這台機器沒有字型「${row.missingFamily}」`"
+        >
+          <SquareX :size="12" />
+        </span>
+
         <button
           v-if="row.entry.kind === 'group' && !isRowLocked(row)"
           type="button"
@@ -132,6 +146,7 @@ import {
   Image,
   Lock,
   LockOpen,
+  SquareX,
   Type,
   Ungroup,
 } from '@lucide/vue'
@@ -140,7 +155,9 @@ import { findEntry } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
 import LayerBlending from '@/components/LayerBlending.vue'
 import LayerThumb from '@/components/LayerThumb.vue'
+import { familyIsMissing } from '@/lib/labelRaster'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
+import { resolveTextStyle } from '@/lib/textStyle'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -160,8 +177,24 @@ const currentFile = computed(() =>
 // for one on another page.
 const collapsed = computed(() => editor.collapsedLayerIds)
 
+/**
+ * The family a text row asked for and this machine does not have, or null.
+ *
+ * Read here rather than off the object because a text style is inherited —
+ * the name that turns out to be missing may be written on the project or on a
+ * group rather than on the row showing it.
+ */
+function missingFamilyOf(entry: LayerEntry): string | null {
+  if (entry.kind !== 'text') return null
+  const style = resolveTextStyle(entry, project.header.groups, project.header.defaultStyle)
+  return familyIsMissing(style.fontFamily) ? style.fontFamily : null
+}
+
 const rows = computed(() =>
-  currentFile.value ? flattenLayerRows(currentFile.value.page.layers, collapsed.value) : [],
+  (currentFile.value
+    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value)
+    : []
+  ).map((row) => ({ ...row, missingFamily: missingFamilyOf(row.entry) })),
 )
 
 const layersDir = computed(() =>

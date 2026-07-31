@@ -7,7 +7,7 @@
     :in-selection="inSelection"
     :locked="locked"
     :handles="true"
-    :title="failure"
+    :title="substitution"
     @select="emit('select', $event)"
     @drag-start="onDragStart"
     @drag="onDrag"
@@ -89,7 +89,15 @@ const emit = defineEmits<{
 }>()
 
 const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }))
-const failure = computed(() => drawn.value.reason)
+
+/**
+ * What the frame says when the object is showing notdef boxes instead of its
+ * text. A state rather than an error — the object is intact and exports as
+ * what it is; this machine is the thing that is missing something.
+ */
+const substitution = computed(() =>
+  drawn.value.missingFamily ? `這台機器沒有字型「${drawn.value.missingFamily}」` : '',
+)
 
 // On the drawn centre rather than the stored one, so what is grabbed is where
 // the text actually is and the two cannot part company by half a pixel.

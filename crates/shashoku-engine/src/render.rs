@@ -4,7 +4,7 @@ use skrifa::{
     instance::{LocationRef, Size},
     outline::{DrawSettings, OutlinePen},
 };
-use tiny_skia::{FillRule, Mask, Path, PathBuilder, Transform};
+use tiny_skia::{FillRule, Mask, Path, PathBuilder, Stroke, Transform};
 
 use crate::stroke::{coverage_at, signed_distance_field};
 
@@ -625,6 +625,196 @@ pub fn render_vertical(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Notdef — what there is to draw when there is no face to draw with
+
+/// Thickness of the notdef box's rule, as a fraction of the em. Taken from the
+/// .notdef glyphs shipping fonts actually carry: 0.056 em in DejaVu Sans,
+/// 0.05 em in Noto Sans CJK.
+const NOTDEF_RULE_EM: f32 = 0.055;
+
+/// Distance between rows of boxes, as a multiple of the em — the same figure
+/// vertical text already spaces its columns by, so the grid a reader sees is
+/// close to what arrives once the font does.
+const NOTDEF_LINE_EM: f32 = 1.2;
+
+/// How much of its cell a box fills, the rest being the gap that separates it
+/// from its neighbours. Glyphs do not fill their advance either, and the
+/// .notdef in Noto Sans CJK is exactly this: 0.8 em wide on a 1 em advance.
+const NOTDEF_BOX_EM: f32 = 0.8;
+
+/// One box with an X through it, a square of `side` at `x`, `y`.
+///
+/// This is the shape OpenType recommends for .notdef — "an empty rectangle, a
+/// rectangle with a question mark inside of it, or a rectangle with an X" —
+/// and the crossed variant is what the CJK families this tool is aimed at
+/// draw. The cross earns its place twice over here: an empty label already
+/// shows as a bare rectangle, so an uncrossed box could not be told from one.
+fn push_notdef_box(pb: &mut PathBuilder, x: f32, y: f32, side: f32, inset: f32) {
+    // Inset by half the rule so the stroke's outer edge lands on the cell's
+    // nominal bounds rather than straddling them.
+    let (lo_x, lo_y) = (x + inset, y + inset);
+    let (hi_x, hi_y) = (x + side - inset, y + side - inset);
+    pb.move_to(lo_x, lo_y);
+    pb.line_to(hi_x, lo_y);
+    pb.line_to(hi_x, hi_y);
+    pb.line_to(lo_x, hi_y);
+    pb.close();
+    pb.move_to(lo_x, lo_y);
+    pb.line_to(hi_x, hi_y);
+    pb.move_to(hi_x, lo_y);
+    pb.line_to(lo_x, hi_y);
+}
+
+/// One box per character, laid out on a fixed square grid.
+///
+/// A box per character rather than one for the whole object, because the
+/// object's shape is information the reader still has: how many characters,
+/// how many lines, and which way they run. One box would collapse a
+/// three-column vertical label and a one-word horizontal one into the same
+/// picture, and would leave a frame that jumps in size the moment the font
+/// arrives.
+///
+/// The grid is square and uniform. Every advance would be a guess without a
+/// face — a proportional one no more accurate than this and no longer
+/// obviously a grid — so this claims to say how much text is here and not how
+/// it will set. A square is also what makes the box read as a box.
+///
+/// Each box fills part of its cell rather than all of it, so neighbours are
+/// separated by a gap the way glyphs are by their side bearings. Boxes ruled
+/// edge to edge read as one grid, not as several characters.
+fn build_notdef_path(
+    text: &str,
+    size_px: f32,
+    padding: u32,
+    vertical: bool,
+    phase: Phase,
+) -> BuiltRun {
+    let em = size_px.max(1.0);
+    // Floored at a pixel so the rule survives at small sizes, where a
+    // proportional one would thin out to nothing.
+    let rule = (em * NOTDEF_RULE_EM).max(1.0);
+    let inset = rule / 2.0;
+    let lead = em * NOTDEF_LINE_EM;
+
+    // Lines are explicit in the data, not the result of measuring, so this is
+    // the one part of layout that survives having no font.
+    let lines: Vec<&str> = text.split('\n').collect();
+    let longest = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1) as f32;
+    let n_lines = lines.len().max(1) as f32;
+
+    let (content_w, content_h) = if vertical {
+        (lead * n_lines, em * longest)
+    } else {
+        (em * longest, lead * n_lines)
+    };
+    let w = (content_w.ceil() as u32).max(1) + padding * 2;
+    let h = (content_h.ceil() as u32).max(1) + padding * 2;
+
+    let side = em * NOTDEF_BOX_EM;
+
+    let mut pb = PathBuilder::new();
+    let mut clusters: Vec<ClusterRect> = Vec::new();
+    let mut offset = 0usize;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        for (cell_idx, ch) in line.chars().enumerate() {
+            let (cell_x, cell_y, cell_w, cell_h) = if vertical {
+                // Column 0 sits at the right edge, later columns walk leftward.
+                (
+                    w as f32 - padding as f32 + phase.x - lead * (line_idx as f32 + 1.0),
+                    padding as f32 + phase.y + em * cell_idx as f32,
+                    lead,
+                    em,
+                )
+            } else {
+                (
+                    padding as f32 + phase.x + em * cell_idx as f32,
+                    padding as f32 + phase.y + lead * line_idx as f32,
+                    em,
+                    lead,
+                )
+            };
+
+            // Whitespace holds its cell without drawing one: a space is not a
+            // character the machine failed to produce. It still gets a rect,
+            // so a caret can rest on it.
+            if !ch.is_whitespace() {
+                push_notdef_box(
+                    &mut pb,
+                    cell_x + (cell_w - side) * 0.5,
+                    cell_y + (cell_h - side) * 0.5,
+                    side,
+                    inset,
+                );
+            }
+            // The rect is the whole cell, not the box inside it: it answers
+            // where a caret goes and which character a click landed on, and
+            // the gap belongs to one character or the other.
+            clusters.push(ClusterRect {
+                cluster: offset as u32,
+                x: cell_x,
+                y: cell_y,
+                width: cell_w,
+                height: cell_h,
+            });
+            offset += ch.len_utf8();
+        }
+        offset += 1; // the newline this line was split on
+    }
+
+    // Stroked into a filled outline rather than stroked onto the mask: the
+    // rest of this file paints from one coverage buffer, and a filled path is
+    // what that takes.
+    let path = pb.finish().and_then(|drawn| {
+        drawn.stroke(
+            &Stroke {
+                width: rule,
+                ..Stroke::default()
+            },
+            1.0,
+        )
+    });
+
+    BuiltRun {
+        path,
+        width: w,
+        height: h,
+        baseline: if vertical {
+            w as f32 - padding as f32 + phase.x - lead * 0.5
+        } else {
+            padding as f32 + phase.y + em
+        },
+        clusters,
+    }
+}
+
+/// The bitmap for a text object whose family this machine has no face for.
+///
+/// Takes no font because there is none to take — that is the whole case. It
+/// still goes through `paint_run`, so the boxes pick up the object's fill and
+/// stroke and are antialiased by the same path as its text would have been.
+pub fn render_notdef(
+    text: &str,
+    size_px: f32,
+    padding: u32,
+    vertical: bool,
+    phase: Phase,
+    fill: Rgba,
+    stroke: Option<StrokeSpec>,
+) -> Result<TextBitmap, String> {
+    paint_run(
+        build_notdef_path(text, size_px, padding, vertical, phase),
+        fill,
+        stroke,
+    )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Pens
 
 struct BaselinePen<'a> {
@@ -661,6 +851,199 @@ impl<'a> OutlinePen for BaselinePen<'a> {
     }
     fn close(&mut self) {
         self.builder.close();
+    }
+}
+
+#[cfg(test)]
+mod notdef_tests {
+    use super::*;
+
+    const SIDE: f32 = 64.0;
+    const PAD: u32 = 8;
+    const FILL: Rgba = Rgba(0, 0, 0, 255);
+
+    /// Row height, as the grid lays it out.
+    fn lead() -> u32 {
+        (SIDE * NOTDEF_LINE_EM).ceil() as u32
+    }
+
+    fn notdef(text: &str, vertical: bool) -> TextBitmap {
+        render_notdef(text, SIDE, PAD, vertical, Phase::default(), FILL, None).unwrap()
+    }
+
+    fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
+        bmp.rgba[((y * bmp.width + x) * 4 + 3) as usize]
+    }
+
+    /// Centre of the box drawn for a given column and row of the horizontal
+    /// grid — the same point as the cell's centre, since the box is centred.
+    fn box_centre(col: u32, row: u32) -> (u32, u32) {
+        (
+            (PAD as f32 + SIDE * (col as f32 + 0.5)) as u32,
+            (PAD as f32 + SIDE * NOTDEF_LINE_EM * (row as f32 + 0.5)) as u32,
+        )
+    }
+
+    /// Half the drawn box, in whole pixels.
+    fn half_box() -> u32 {
+        (SIDE * NOTDEF_BOX_EM * 0.5) as u32
+    }
+
+    /// Leftmost pixel carrying any ink on a given row.
+    fn first_inked_x(bmp: &TextBitmap, y: u32) -> Option<u32> {
+        (0..bmp.width).find(|&x| alpha_at(bmp, x, y) > 0)
+    }
+
+    #[test]
+    fn one_character_takes_one_cell() {
+        let bmp = notdef("字", false);
+        assert_eq!(bmp.width, SIDE as u32 + PAD * 2);
+        assert_eq!(bmp.height, lead() + PAD * 2);
+    }
+
+    #[test]
+    fn the_grid_widens_with_the_longest_line() {
+        assert_eq!(notdef("ab", false).width, SIDE as u32 * 2 + PAD * 2);
+    }
+
+    #[test]
+    fn the_grid_deepens_with_the_line_count() {
+        let bmp = notdef("a\nb", false);
+        assert_eq!(bmp.height, (SIDE * NOTDEF_LINE_EM * 2.0).ceil() as u32 + PAD * 2);
+        // One character wide, since that is the longest line.
+        assert_eq!(bmp.width, SIDE as u32 + PAD * 2);
+    }
+
+    #[test]
+    fn a_vertical_object_stacks_its_characters_into_a_column() {
+        let bmp = notdef("ab", true);
+        assert_eq!(bmp.height, SIDE as u32 * 2 + PAD * 2);
+        assert_eq!(bmp.width, lead() + PAD * 2);
+    }
+
+    #[test]
+    fn every_character_gets_its_own_box() {
+        let bmp = notdef("ab", false);
+        for col in 0..2 {
+            let (x, y) = box_centre(col, 0);
+            assert_eq!(alpha_at(&bmp, x, y), 255, "column {col} has no cross");
+        }
+    }
+
+    #[test]
+    fn a_second_line_draws_below_the_first() {
+        let bmp = notdef("a\nb", false);
+        for row in 0..2 {
+            let (x, y) = box_centre(0, row);
+            assert_eq!(alpha_at(&bmp, x, y), 255, "row {row} has no cross");
+        }
+    }
+
+    #[test]
+    fn the_boxes_stop_short_of_their_cells_so_they_do_not_run_together() {
+        let bmp = notdef("ab", false);
+        let (_, cy) = box_centre(0, 0);
+        // The boundary between the two cells, level with their centres.
+        assert_eq!(
+            alpha_at(&bmp, PAD + SIDE as u32, cy),
+            0,
+            "the boxes met at the cell edge"
+        );
+        // And the gap above the first row, inside the padding-free area.
+        let (cx, _) = box_centre(0, 0);
+        assert_eq!(alpha_at(&bmp, cx, PAD + 1), 0, "the box reached the row edge");
+    }
+
+    #[test]
+    fn the_frame_is_drawn_around_the_box() {
+        let bmp = notdef("字", false);
+        let (cx, cy) = box_centre(0, 0);
+        let half = half_box();
+        // Just inside the left rule, level with the centre.
+        assert!(alpha_at(&bmp, cx - half + 1, cy) > 0);
+        // Just inside the top rule, above the centre.
+        assert!(alpha_at(&bmp, cx, cy - half + 1) > 0);
+    }
+
+    #[test]
+    fn the_quadrants_the_cross_cuts_out_stay_clear() {
+        let bmp = notdef("字", false);
+        let (cx, cy) = box_centre(0, 0);
+        let quarter = half_box() / 2;
+        // Centres of the four triangles the X leaves behind.
+        assert_eq!(alpha_at(&bmp, cx, cy - quarter), 0);
+        assert_eq!(alpha_at(&bmp, cx, cy + quarter), 0);
+        assert_eq!(alpha_at(&bmp, cx - quarter, cy), 0);
+        assert_eq!(alpha_at(&bmp, cx + quarter, cy), 0);
+    }
+
+    #[test]
+    fn whitespace_holds_its_cell_without_drawing_a_box() {
+        let bmp = notdef("a b", false);
+        assert_eq!(bmp.width, SIDE as u32 * 3 + PAD * 2);
+
+        let (gap_x, gap_y) = box_centre(1, 0);
+        assert_eq!(alpha_at(&bmp, gap_x, gap_y), 0, "the space drew a box");
+        // The character after it still lands in the third cell, so the space
+        // took up room rather than being skipped.
+        let (after_x, after_y) = box_centre(2, 0);
+        assert_eq!(alpha_at(&bmp, after_x, after_y), 255);
+    }
+
+    #[test]
+    fn every_character_gets_a_rect_a_caret_can_rest_on() {
+        let bmp = notdef("永a", false);
+        // Byte offsets, not character indices: the CJK character is three
+        // bytes, so the second cluster starts at 3.
+        assert_eq!(
+            bmp.clusters.iter().map(|c| c.cluster).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+    }
+
+    #[test]
+    fn a_newline_is_counted_in_the_offsets_it_separates() {
+        let bmp = notdef("a\nb", false);
+        assert_eq!(
+            bmp.clusters.iter().map(|c| c.cluster).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+    }
+
+    #[test]
+    fn the_phase_moves_the_grid_without_resizing_the_bitmap() {
+        let (_, row) = box_centre(0, 0);
+        let square = notdef("字", false);
+        let shifted =
+            render_notdef("字", SIDE, PAD, false, Phase { x: 2.0, y: 0.0 }, FILL, None).unwrap();
+
+        // Where the box starts, which is the cell edge plus its side bearing.
+        let bearing = ((SIDE - SIDE * NOTDEF_BOX_EM) * 0.5) as u32;
+        assert_eq!(shifted.width, square.width);
+        assert_eq!(first_inked_x(&square, row), Some(PAD + bearing));
+        assert_eq!(first_inked_x(&shifted, row), Some(PAD + bearing + 2));
+    }
+
+    #[test]
+    fn the_boxes_wear_the_fill_colour_they_were_given() {
+        let red = Rgba(255, 0, 0, 255);
+        let bmp = render_notdef("字", SIDE, PAD, false, Phase::default(), red, None).unwrap();
+        let (cx, cy) = box_centre(0, 0);
+        // On the left rule of the box.
+        let at = ((cy * bmp.width + cx - half_box() + 1) * 4) as usize;
+        assert_eq!(
+            [bmp.rgba[at], bmp.rgba[at + 1], bmp.rgba[at + 2]],
+            [255, 0, 0]
+        );
+    }
+
+    #[test]
+    fn a_size_below_one_pixel_still_produces_a_bitmap() {
+        // Font size is clamped well above this upstream, but a rasterizer that
+        // can return a zero-dimension bitmap hands the caller an ImageData that
+        // throws on construction.
+        let bmp = render_notdef("字", 0.0, 0, false, Phase::default(), FILL, None).unwrap();
+        assert!(bmp.width >= 1 && bmp.height >= 1);
     }
 }
 

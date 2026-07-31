@@ -185,20 +185,41 @@ The feature degrades rather than breaks. Availability is detected at runtime; if
 `EditContext` is absent, cells simply are not editable. The shared sample input
 above the grid is never removed, so a complete editing path always exists.
 
-### No font fallback, anywhere
+### Nothing is drawn in a face the object did not name
 
-A family that cannot draw a character draws a box, and the picker says so rather
-than standing another family in. This is the opposite of what a reader-facing
-application does, and it follows from who uses this one: a typesetter picks a
-face for how it looks, and a face that cannot set the line is not a candidate.
-Coverage is a reason to reject a font, not a gap to paper over.
+Two separate things go wrong here, and neither is answered by reaching for some
+other family.
 
-It is also the only honest preview available. A text style names exactly one
-family, and nothing in the pipeline consults a second one, so a sample assembled
-from two faces shows a result the application cannot produce.
+**A face that lacks a character** draws that character as a box, and the picker
+names the characters responsible rather than standing another family in. This
+is the opposite of what a reader-facing application does, and it follows from
+who uses this one: a typesetter picks a face for how it looks, and a face that
+cannot set the line is not a candidate. Coverage is a reason to reject a font,
+not a gap to paper over.
 
-The picker therefore offers one choice about missing glyphs — whether such
-families appear in the list at all — and marks the characters responsible.
+**A family this machine has no face for** draws one box per character — the
+shape OpenType recommends for a face's own .notdef, a rectangle with an X — on
+a square grid. Line breaks are stored rather than measured, so how much text
+there is and which way it runs survive having no font, and the reader keeps
+that much. The grid is uniform on the em because every advance would otherwise
+be a guess: it says how much text is here, not how it will set. The object
+itself is untouched, keeps the family name it was given, and typesets the
+moment that font is present.
+
+Both cases come out of the same constraint. A text style names exactly one
+family and nothing in this pipeline consults a second one, so a sample
+assembled from two faces would show a result the application cannot produce.
+Substituting a bundled font would be that same lie at a larger scope — a page
+that looks typeset in a font the project does not name.
+
+Drawing a box rather than refusing to draw is what keeps "cannot be drawn" from
+existing anywhere downstream. An object always has a bitmap, so the canvas and
+the export are the same picture by construction, and neither carries a failure
+case. The interface marks the substitution on the object's frame and in the
+layer tree, alongside locked and hidden — it is a state, not an error.
+
+The picker therefore offers one choice about missing glyphs: whether families
+that cannot draw the sample appear in the list at all.
 
 ### The thing not to "fix"
 

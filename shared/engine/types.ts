@@ -159,6 +159,35 @@ export interface ShashokuEngineApi {
     phaseY?: number,
   ): EngineBitmap;
   /**
+   * One box with an X through it per character — what there is to draw when
+   * the family a text object names is not on this machine.
+   *
+   * Takes no font because there is none to take. It is the same shape OpenType
+   * recommends for a face's own .notdef, which is deliberate: the two are the
+   * same admission at different scopes, and a reader who knows one reads the
+   * other.
+   *
+   * Takes the text, though, because the characters and the line breaks are
+   * still known — breaks are stored, not measured — and they are what the grid
+   * is shaped by. The grid is square and uniform on the em: every advance
+   * would be a guess without a face, so this says how much text is here and
+   * not how it will set.
+   *
+   * Distinct from a face that lacks a character. That case still renders
+   * through `renderText`, marking the offsets `uncoveredClusters` reports, and
+   * is a property of a chosen font rather than of the machine (see ADR 0001).
+   */
+  renderNotdef(
+    text: string,
+    sizePx: number,
+    padding?: number,
+    vertical?: boolean,
+    fillColor?: string,
+    stroke?: EngineStrokeSpec,
+    phaseX?: number,
+    phaseY?: number,
+  ): EngineBitmap;
+  /**
    * A composited page as file bytes. Takes straight RGBA because the
    * compositing happens on a canvas in the renderer — the engine never
    * decodes, it only writes what the application just drew.

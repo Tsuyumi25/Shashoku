@@ -111,7 +111,11 @@ function drawTextWith(
   if (text.length === 0) return
   const style = resolveTextStyle(label, input.groups, input.defaultStyle)
   const drawn = drawnLabel(text, style, { x: label.x, y: label.y })
-  if (!drawn.sample) throw new CompositeError(drawn.reason || `無法繪製標籤「${text}」`)
+  // A family this machine lacks draws notdef boxes rather than nothing, so the
+  // only way to arrive here without a bitmap is a catalogue that never
+  // answered. Exporting the page short one label silently would be worse than
+  // stopping, since the file would look finished.
+  if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${text}」`)
 
   const { box } = drawn
   ctx.translate(drawn.center.x, drawn.center.y)

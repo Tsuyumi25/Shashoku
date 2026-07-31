@@ -4,9 +4,25 @@ import { sampleFor, type Sample } from './fontSampleCache'
 import { labelBoxSize, placeLabel, type Point } from './labelBox'
 import { engineStrokeFor } from './textStyle'
 
-export type LabelRaster = { ok: true; sample: Sample } | { ok: false; reason: string }
+export interface LabelRaster {
+  /**
+   * Null only when there is nothing to draw at all — an empty label, or a
+   * catalogue that has not answered yet. A family this machine does not have
+   * still draws, as a notdef box.
+   */
+  sample: Sample | null
+  /**
+   * The family the object asked for, when this machine has no usable face for
+   * it — absent from the catalogue, or present but undrawable. The object is
+   * drawn either way; this is what says the drawing is a stand-in. Held as the
+   * name rather than as a message so the interface can word it.
+   */
+  missingFamily: string | null
+}
 
 const NO_PHASE: Point = { x: 0, y: 0 }
+
+const NOTHING: LabelRaster = { sample: null, missingFamily: null }
 
 /**
  * One label's bitmap. Shared because the frame is sized from what the text
@@ -15,49 +31,69 @@ const NO_PHASE: Point = { x: 0, y: 0 }
  * taking it, so a caller inside a `computed` tracks the catalogue for free;
  * repeat calls land on the sample cache.
  *
- * A family that is not in the catalogue is reported, never quietly stood in
- * for. Nothing in this pipeline consults a second face, so drawing one would
- * show a result the application cannot produce (see ADR 0001).
+ * A family this machine has no face for draws a grid of notdef boxes rather
+ * than nothing. That keeps "cannot be drawn" out of every surface downstream:
+ * an object always has a bitmap, so the canvas and the export are the same
+ * picture and neither has a failure case to handle. It is not font fallback —
+ * no second face is consulted, and the boxes say so rather than impersonating
+ * the text (see ADR 0001).
  */
 export function rasterFor(text: string, style: TextStyle, phase: Point = NO_PHASE): LabelRaster {
-  if (text.length === 0) return { ok: false, reason: '' }
+  if (text.length === 0) return NOTHING
 
-  const entry = catalogByFamily.value.get(style.fontFamily)
-  if (!entry) {
-    // Nothing to say while the catalogue is still being enumerated: the family
-    // is not missing yet, it is unanswered.
-    if (!catalogLoaded.value) return { ok: false, reason: '' }
-    return { ok: false, reason: `找不到字型「${style.fontFamily}」` }
+  const entry = catalogByFamily.value.get(style.fontFamily) ?? null
+  // Nothing to say while the catalogue is still being enumerated: the family
+  // is not missing yet, it is unanswered — and a box drawn on every start
+  // would say the wrong one.
+  if (!entry && !catalogLoaded.value) return NOTHING
+
+  const req = {
+    text,
+    sizePx: style.fontSizePx,
+    fillColor: style.color,
+    stroke: engineStrokeFor(style),
+    vertical: style.direction === 'vertical',
+    phaseX: phase.x,
+    phaseY: phase.y,
   }
 
-  try {
-    return {
-      ok: true,
-      sample: sampleFor({
-        entry,
-        text,
-        sizePx: style.fontSizePx,
-        fillColor: style.color,
-        stroke: engineStrokeFor(style),
-        vertical: style.direction === 'vertical',
-        phaseX: phase.x,
-        phaseY: phase.y,
-      }),
+  if (entry) {
+    try {
+      return { sample: sampleFor({ ...req, entry }), missingFamily: null }
+    } catch {
+      // Catalogued but undrawable — a file moved since the scan, or one the
+      // engine cannot parse. That leaves the machine with no usable face for
+      // this object, which is the case below.
     }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
   }
+  return { sample: sampleFor({ ...req, entry: null }), missingFamily: style.fontFamily }
+}
+
+/**
+ * Whether this machine has no face for the family, without drawing anything.
+ *
+ * For surfaces that show one row per object and would otherwise rasterize a
+ * whole page to label them. It answers from the catalogue alone, so a family
+ * that is listed but turns out to be undrawable reads as present here while
+ * the canvas shows notdef boxes — the rarer case, and the one the canvas is
+ * already honest about.
+ *
+ * False while the catalogue is still being enumerated: not yet answered is not
+ * the same as absent.
+ */
+export function familyIsMissing(family: string): boolean {
+  return catalogLoaded.value && !catalogByFamily.value.has(family)
 }
 
 export interface DrawnLabel {
   /**
-   * Null when there is nothing to draw — an empty label, or a family the
-   * catalogue does not have. The frame still exists in both cases, which is
-   * what keeps an empty label reachable instead of invisible.
+   * Null when there is nothing to draw — an empty label, or a catalogue that
+   * has not answered yet. The frame still exists in both cases, which is what
+   * keeps an empty label reachable instead of invisible.
    */
   sample: Sample | null
-  /** Empty when there is simply no text, rather than something went wrong. */
-  reason: string
+  /** Set when what got drawn is a notdef box rather than the object's text. */
+  missingFamily: string | null
   box: { w: number; h: number }
   center: Point
 }
@@ -79,11 +115,9 @@ export interface DrawnLabel {
  */
 export function drawnLabel(text: string, style: TextStyle, anchor: Point): DrawnLabel {
   const measured = rasterFor(text, style)
-  const box = labelBoxSize(style, measured.ok ? measured.sample.image : null)
+  const box = labelBoxSize(style, measured.sample?.image ?? null)
   const { center, phase } = placeLabel(anchor, box)
 
-  if (!measured.ok) return { sample: null, reason: measured.reason, box, center }
-  const drawn = rasterFor(text, style, phase)
-  if (!drawn.ok) return { sample: null, reason: drawn.reason, box, center }
-  return { sample: drawn.sample, reason: '', box, center }
+  if (!measured.sample) return { ...measured, box, center }
+  return { ...rasterFor(text, style, phase), box, center }
 }

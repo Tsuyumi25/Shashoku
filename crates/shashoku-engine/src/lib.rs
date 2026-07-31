@@ -418,3 +418,38 @@ pub fn render_vertical(
         clusters: to_cluster_rects(bmp.clusters),
     })
 }
+
+/// A grid of boxes to draw where a text object names a family this machine has
+/// no face for. Takes the text but no font: the characters and line breaks are
+/// still known, and they are what the grid is shaped by.
+#[napi]
+pub fn render_notdef(
+    text: String,
+    size_px: f64,
+    padding: Option<u32>,
+    vertical: Option<bool>,
+    fill_color: Option<String>,
+    stroke: Option<StrokeInput>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
+) -> napi::Result<TextBitmap> {
+    let fill = fill_from_opt(fill_color)?;
+    let stroke_spec = stroke_input_to_spec(stroke)?;
+    let bmp = render::render_notdef(
+        &text,
+        size_px as f32,
+        padding.unwrap_or(4),
+        vertical.unwrap_or(false),
+        phase_from_opt(phase_x, phase_y),
+        fill,
+        stroke_spec,
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(TextBitmap {
+        width: bmp.width,
+        height: bmp.height,
+        baseline: bmp.baseline as f64,
+        rgba: bmp.rgba.into(),
+        clusters: to_cluster_rects(bmp.clusters),
+    })
+}
