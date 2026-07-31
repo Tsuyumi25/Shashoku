@@ -113,11 +113,11 @@ describe('drawnLabel', () => {
     expect(calls.length - afterFirst).toBeLessThanOrEqual(4)
   })
 
-  it('carries the phase into bitmap pixels, which is what renderScale measures', () => {
-    drawnLabel(uniqueText(), styleWith({ renderScale: 4 }), { x: 100.25, y: 60 })
-    // The box is the bitmap divided back down, so 41/4 wide: a corner at
-    // 100.25 - 41/8 lands 0.125 into its pixel, rounded to a quarter.
-    expect(calls.at(-1)?.phaseX).toBeCloseTo(0.25 * 4, 9)
+  it('hands the phase to the engine in page pixels, unconverted', () => {
+    drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 })
+    // The odd box halves onto a quarter: 100.25 - 41/2 is 79.75, so 0.75 is
+    // what is left once the corner lands on 79.
+    expect(calls.at(-1)?.phaseX).toBeCloseTo(0.75, 9)
   })
 
   it('still places an empty label, which is what keeps it reachable', () => {

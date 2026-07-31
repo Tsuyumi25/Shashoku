@@ -48,12 +48,11 @@ describe('engineStrokeFor', () => {
     expect(engineStrokeFor(defaultStyle)).toBeUndefined()
   })
 
-  it('scales the stroke with renderScale so it survives the downsample', () => {
+  it('hands the stroke to the engine in document pixels, unscaled', () => {
     const stroke = engineStrokeFor({
       ...defaultStyle,
-      renderScale: 4,
       effects: [{ kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }],
     })
-    expect(stroke).toEqual({ width: 12, color: '#ffffff', position: 'outside' })
+    expect(stroke).toEqual({ width: 3, color: '#ffffff', position: 'outside' })
   })
 })

@@ -36,14 +36,12 @@ export function rasterFor(text: string, style: TextStyle, phase: Point = NO_PHAS
       sample: sampleFor({
         entry,
         text,
-        sizePx: style.fontSizePx * style.renderScale,
+        sizePx: style.fontSizePx,
         fillColor: style.color,
         stroke: engineStrokeFor(style),
         vertical: style.direction === 'vertical',
-        // The phase arrives in page pixels and the engine draws in bitmap
-        // pixels, which renderScale is the ratio between.
-        phaseX: phase.x * style.renderScale,
-        phaseY: phase.y * style.renderScale,
+        phaseX: phase.x,
+        phaseY: phase.y,
       }),
     }
   } catch (err) {

@@ -8,6 +8,9 @@ export interface Point {
 /**
  * How big the frame around a label is, in document pixels.
  *
+ * A bitmap pixel is a document pixel — the engine is asked for the size the
+ * page wants, so nothing downstream resamples a label to fit its own frame.
+ *
  * Typeset text is measured from what the engine actually rasterized, padding
  * included, so the frame is the extent of the drawn object rather than of its
  * glyphs — an outside stroke stays inside its own frame. An empty label has no
@@ -23,7 +26,7 @@ export function labelBoxSize(
     const line = style.fontSizePx * (style.leadingPercent / 100)
     return { w: line, h: line }
   }
-  return { w: bitmap.width / style.renderScale, h: bitmap.height / style.renderScale }
+  return { w: bitmap.width, h: bitmap.height }
 }
 
 /**
@@ -89,8 +92,8 @@ export function placeLabel(anchor: Point, box: { w: number; h: number }): LabelP
 /**
  * What a corner drag may leave a label at, in document pixels. The floor keeps
  * a frame you can still find after dragging it down towards nothing; the
- * ceiling is there because the engine rasterizes at `fontSizePx * renderScale`,
- * so a slip of the wrist would otherwise ask it for a bitmap the size of a wall.
+ * ceiling is there because the engine rasterizes at `fontSizePx`, so a slip of
+ * the wrist would otherwise ask it for a bitmap the size of a wall.
  */
 export const MIN_FONT_SIZE_PX = 2
 export const MAX_FONT_SIZE_PX = 1000

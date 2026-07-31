@@ -46,9 +46,9 @@ export function clamp(value: number, min: number, max: number): number {
  *
  * Shared because a bitmap drawn at one ratio has one right answer, and the
  * canvas and the export both draw the same label bitmap. Written out twice they
- * drifted: the boundary used to be `< 1`, so a ratio of exactly 1 — 100% zoom,
- * dpr 1, `renderScale` 1 — took the cheap filter on screen and the expensive
- * one on export, which is the one place a person compares the two.
+ * drifted: the boundary used to be `< 1`, so a ratio of exactly 1 — 100% zoom
+ * at dpr 1 — took the cheap filter on screen and the expensive one on export,
+ * which is the one place a person compares the two.
  *
  * The expensive filter is a minification filter and only earns its cost going
  * down; at 1 there may still be a fractional destination to resolve, so 1

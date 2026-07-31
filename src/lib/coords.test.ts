@@ -103,7 +103,7 @@ describe('smoothingQualityFor', () => {
 
   /**
    * The boundary the two draw sites used to disagree about. A ratio of exactly
-   * 1 is 100% zoom at dpr 1 and renderScale 1 — the one moment a person can
+   * 1 is 100% zoom at dpr 1 — the one moment a person can
    * hold the preview and the export side by side.
    */
   it('keeps the good filter at exactly one', () => {

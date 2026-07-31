@@ -117,10 +117,10 @@ function drawTextWith(
   ctx.translate(drawn.center.x, drawn.center.y)
   ctx.rotate(label.rotation)
   ctx.imageSmoothingEnabled = true
-  // Page pixels per bitmap pixel, which is what renderScale bought: the engine
-  // rasterized at that multiple and this is where it comes back down. The same
-  // rule the canvas uses, so one bitmap cannot be filtered two ways.
-  ctx.imageSmoothingQuality = smoothingQualityFor(1 / style.renderScale)
+  // The frame is the bitmap's own size, so the ratio is 1 by construction and a
+  // rotation is the only thing left here to resample. Still through the shared
+  // rule, so one bitmap cannot be filtered two ways.
+  ctx.imageSmoothingQuality = smoothingQualityFor(1)
   ctx.drawImage(sampleSource(drawn.sample), -box.w / 2, -box.h / 2, box.w, box.h)
 }
 

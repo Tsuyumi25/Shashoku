@@ -7,25 +7,13 @@ function styleWith(patch: Partial<TextStyle>): TextStyle {
 }
 
 describe('labelBoxSize', () => {
-  it('measures a bitmap back down to document pixels', () => {
-    const style = styleWith({ renderScale: 4 })
-    expect(labelBoxSize(style, { width: 200, height: 80 })).toEqual({ w: 50, h: 20 })
-  })
-
-  it('leaves the bitmap alone at renderScale 1', () => {
-    const style = styleWith({ renderScale: 1 })
-    expect(labelBoxSize(style, { width: 37, height: 19 })).toEqual({ w: 37, h: 19 })
+  it('takes the bitmap as the frame, a bitmap pixel being a document pixel', () => {
+    expect(labelBoxSize(styleWith({}), { width: 37, height: 19 })).toEqual({ w: 37, h: 19 })
   })
 
   it('falls back to a one-line square when there is no bitmap to measure', () => {
-    const style = styleWith({ fontSizePx: 30, leadingPercent: 120, renderScale: 4 })
+    const style = styleWith({ fontSizePx: 30, leadingPercent: 120 })
     expect(labelBoxSize(style, null)).toEqual({ w: 36, h: 36 })
-  })
-
-  it('keeps the fallback in document pixels, so renderScale cannot reach it', () => {
-    const at1 = labelBoxSize(styleWith({ fontSizePx: 24, renderScale: 1 }), null)
-    const at8 = labelBoxSize(styleWith({ fontSizePx: 24, renderScale: 8 }), null)
-    expect(at8).toEqual(at1)
   })
 })
 

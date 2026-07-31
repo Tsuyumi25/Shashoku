@@ -63,7 +63,7 @@ function serializeTextEffect(e: TextEffect): Record<string, unknown> {
 
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { fontFamily, fontSizePx, direction, color, leadingPercent, renderScale, effects } = v
+  const { fontFamily, fontSizePx, direction, color, leadingPercent, effects } = v
   if (typeof fontFamily !== 'string' || fontFamily.length === 0) fail(`${at}.fontFamily 必須是非空字串`)
   if (typeof fontSizePx !== 'number' || !Number.isFinite(fontSizePx) || fontSizePx <= 0)
     fail(`${at}.fontSizePx 必須是正數`)
@@ -71,15 +71,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (typeof color !== 'string' || color.length === 0) fail(`${at}.color 必須是非空字串`)
   if (typeof leadingPercent !== 'number' || !Number.isFinite(leadingPercent) || leadingPercent <= 0)
     fail(`${at}.leadingPercent 必須是正數`)
-  
-  let parsedRenderScale: number
-  if (renderScale === undefined) {
-    parsedRenderScale = 1
-  } else {
-    if (typeof renderScale !== 'number' || !Number.isFinite(renderScale) || renderScale <= 0)
-      fail(`${at}.renderScale 必須是正數`)
-    parsedRenderScale = renderScale
-  }
   const parsedEffects =
     effects === undefined ? [] : parseEffectsArray(effects, `${at}.effects`, fail)
   return {
@@ -88,7 +79,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     direction: dir,
     color,
     leadingPercent,
-    renderScale: parsedRenderScale,
     effects: parsedEffects,
   }
 }
@@ -117,11 +107,6 @@ export function parsePartialTextStyle(v: unknown, at: string, fail: Fail): Parti
       fail(`${at}.leadingPercent 必須是正數`)
     out.leadingPercent = v.leadingPercent
   }
-  if (v.renderScale !== undefined) {
-    if (typeof v.renderScale !== 'number' || !Number.isFinite(v.renderScale) || v.renderScale <= 0)
-      fail(`${at}.renderScale 必須是正數`)
-    out.renderScale = v.renderScale
-  }
   if (v.effects !== undefined) {
     out.effects = parseEffectsArray(v.effects, `${at}.effects`, fail)
   }
@@ -136,7 +121,6 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
     direction: s.direction,
     color: s.color,
     leadingPercent: s.leadingPercent,
-    renderScale: s.renderScale,
     effects: s.effects.map(serializeTextEffect),
   }
 }
@@ -149,7 +133,6 @@ export function serializePartialTextStyle(s: Partial<TextStyle>): Record<string,
   if (s.direction !== undefined) out.direction = s.direction
   if (s.color !== undefined) out.color = s.color
   if (s.leadingPercent !== undefined) out.leadingPercent = s.leadingPercent
-  if (s.renderScale !== undefined) out.renderScale = s.renderScale
   if (s.effects !== undefined) out.effects = s.effects.map(serializeTextEffect)
   return out
 }

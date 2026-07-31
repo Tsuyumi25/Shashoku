@@ -59,25 +59,6 @@
       <span class="text-muted-foreground">%</span>
     </div>
 
-    <label
-      class="text-muted-foreground"
-      title="編輯 zoom in 時的文字銳利度。1 = 和文檔 DPI 同；2/4 = 過採樣。不影響匯出。"
-    >
-      清晰度
-    </label>
-    <div class="flex items-center gap-1">
-      <input
-        type="number"
-        min="1"
-        max="8"
-        step="1"
-        class="h-6 w-16 rounded border border-input bg-background px-1.5"
-        :value="value.renderScale"
-        @change="onNumber('renderScale', $event)"
-      />
-      <span class="text-muted-foreground">×</span>
-    </div>
-
     <div class="col-span-2 mt-1 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
       效果
     </div>
@@ -172,7 +153,7 @@ const stroke = computed<StrokeEffect | null>(
   () => (props.value.effects.find((e) => e.kind === 'stroke') as StrokeEffect | undefined) ?? null,
 )
 
-function onNumber(key: 'fontSizePx' | 'leadingPercent' | 'renderScale', e: Event) {
+function onNumber(key: 'fontSizePx' | 'leadingPercent', e: Event) {
   const raw = (e.target as HTMLInputElement).valueAsNumber
   if (!Number.isFinite(raw) || raw <= 0) return
   if (raw === props.value[key]) return

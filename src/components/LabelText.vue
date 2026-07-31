@@ -109,8 +109,8 @@ function paint() {
   // Device pixels per bitmap pixel. Matching the page underneath: filtered
   // while there is detail to lose, nearest neighbour past 3x where the point
   // is to see the pixel grid, and the expensive filter only where it pays —
-  // going down. This is also where renderScale becomes visible.
-  const ratio = (props.view.scale * dpr) / props.textStyle.renderScale
+  // going down.
+  const ratio = props.view.scale * dpr
   ctx.imageSmoothingEnabled = ratio < 3
   ctx.imageSmoothingQuality = smoothingQualityFor(ratio)
   ctx.drawImage(sampleSource(held), 0, 0, w, h)

@@ -20,16 +20,11 @@ export function strokeOf(style: TextStyle): StrokeEffect | null {
   return (style.effects.find((e) => e.kind === 'stroke') as StrokeEffect | undefined) ?? null
 }
 
-/**
- * Stroke width is a document measurement, so it has to be scaled alongside the
- * font size the bitmap is rasterized at — otherwise the stroke thins out by
- * exactly renderScale once the bitmap is put back at document size.
- */
 export function engineStrokeFor(style: TextStyle): EngineStrokeSpec | undefined {
   const stroke = strokeOf(style)
   if (!stroke) return undefined
   return {
-    width: stroke.width * style.renderScale,
+    width: stroke.width,
     color: stroke.color,
     position: stroke.position,
   }

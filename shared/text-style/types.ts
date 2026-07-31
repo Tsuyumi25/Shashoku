@@ -41,9 +41,7 @@ export interface TextStyle {
   color: string
   
   leadingPercent: number
-  
-  renderScale: number
-  
+
   effects: TextEffect[]
 }
 
@@ -54,6 +52,5 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   direction: 'horizontal',
   color: '#000000',
   leadingPercent: 120,
-  renderScale: 1,
   effects: [],
 }
