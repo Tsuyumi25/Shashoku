@@ -53,7 +53,7 @@
           :place="placement.placementOf(layer.entry.id)"
           @select="onSelectObject(layer.entry.id, $event)"
           @drag="placement.moveBy(layer.entry.id, $event, view)"
-          @scale="placement.scaleTo(layer.entry.id, $event)"
+          @scale="(ratio, pin) => placement.scaleTo(layer.entry.id, ratio, pin)"
           @rotate="placement.rotateTo(layer.entry.id, $event)"
           @commit="onLayerCommit(layer.entry)"
         />
@@ -77,7 +77,7 @@
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
           @scale-start="beginLabelScale(object.id)"
-          @scale="scaleLabelTo(object.id, $event)"
+          @scale="(fontSizePx, at) => scaleLabelTo(object.id, fontSizePx, at)"
           @scale-end="commitLabelScale(object.id)"
           @rotate="rotateLabelTo(object.id, $event)"
           @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
@@ -143,7 +143,12 @@ import {
   trackRotationDirection,
 } from '@/lib/rotateDirection'
 import { resolveTextStyle } from '@/lib/textStyle'
-import { isSelectionTool, maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
+import {
+  isSelectionTool,
+  maskBrushModeOf,
+  useEditorStore,
+  type ScaledLabel,
+} from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -277,32 +282,40 @@ function labelById(labelId: string): TextLayerEntry | undefined {
 /**
  * A corner drag writes an override on top of whatever the label already had,
  * so the before has to be taken once at the start rather than reconstructed
- * from the size afterwards: a label that was inheriting its size has no
- * `fontSizePx` to put back, and undo has to remove the key, not restore a value.
+ * afterwards: a label that was inheriting its size has no `fontSizePx` to put
+ * back, and undo has to remove the key, not restore a value.
  */
-let scaledFrom: TextLayerEntry['styleOverride']
+let scaledFrom: ScaledLabel | null = null
 
-function beginLabelScale(labelId: string) {
-  scaledFrom = labelById(labelId)?.styleOverride
+function scaledState(label: TextLayerEntry): ScaledLabel {
+  return { styleOverride: label.styleOverride, x: label.x, y: label.y }
 }
 
-function scaleLabelTo(labelId: string, fontSizePx: number) {
+function beginLabelScale(labelId: string) {
+  const label = labelById(labelId)
+  scaledFrom = label ? scaledState(label) : null
+}
+
+/**
+ * The size and the position are written together on every frame, because the
+ * position is what holds the pinned corner still against the size that just
+ * changed — writing one without the other would let the frame slip for a frame.
+ */
+function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentFilename || editor.isLayerLocked(labelId)) return
   project.updateLabelStyleOverride(editor.currentFilename, labelId, {
     ...(label.styleOverride ?? {}),
     fontSizePx,
   })
+  project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
 }
 
 function commitLabelScale(labelId: string) {
-  if (!editor.currentFilename) return
-  editor.cmdUpdateLabelStyleOverride(
-    editor.currentFilename,
-    labelId,
-    scaledFrom,
-    labelById(labelId)?.styleOverride,
-  )
+  const label = labelById(labelId)
+  if (!editor.currentFilename || !scaledFrom || !label) return
+  editor.cmdScaleLabel(editor.currentFilename, labelId, scaledFrom, scaledState(label))
+  scaledFrom = null
 }
 
 function rotateLabelTo(labelId: string, radians: number) {

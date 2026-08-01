@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   centeredBoxOnScreen,
   contentToScreenPx,
+  framePoint,
+  positionHolding,
   screenDeltaToContentPx,
   screenToContentPx,
   screenToPagePx,
@@ -130,5 +132,39 @@ describe('centeredBoxOnScreen', () => {
     expect(box.centerY).toBeCloseTo(30, 6)
     expect(box.width).toBe(24)
     expect(box.height).toBe(12)
+  })
+})
+
+describe('positionHolding', () => {
+  const TOP_LEFT = { x: 0, y: 0 }
+  const BOTTOM_RIGHT = { x: 1, y: 1 }
+  const START = { x: 0, y: 0 }
+
+  /** The two are each other's inverse, which is the whole of what they promise. */
+  it('undoes framePoint', () => {
+    const held = framePoint({ x: 100, y: 60 }, { w: 40, h: 20 }, START, BOTTOM_RIGHT, 0.4)
+    const back = positionHolding(held, { w: 40, h: 20 }, START, BOTTOM_RIGHT, 0.4)
+    expect(back.x).toBeCloseTo(100, 9)
+    expect(back.y).toBeCloseTo(60, 9)
+  })
+
+  /**
+   * The size is the typesetter's output, so the corner is held against whatever
+   * it reported rather than against what the drag asked for.
+   */
+  it('keeps the held corner still while the size around it changes', () => {
+    const held = { x: 200, y: 120 }
+    for (const box of [{ w: 40, h: 20 }, { w: 61, h: 31 }, { w: 7, h: 90 }]) {
+      const at = positionHolding(held, box, START, BOTTOM_RIGHT, 0)
+      const landed = framePoint(at, box, START, BOTTOM_RIGHT, 0)
+      expect(landed.x).toBeCloseTo(held.x, 9)
+      expect(landed.y).toBeCloseTo(held.y, 9)
+    }
+  })
+
+  /** Holding the point the position already names cannot move the object. */
+  it('leaves the position alone when the held point is the one it names', () => {
+    const at = positionHolding({ x: 100, y: 60 }, { w: 40, h: 20 }, TOP_LEFT, TOP_LEFT, 1.1)
+    expect(at).toEqual({ x: 100, y: 60 })
   })
 })

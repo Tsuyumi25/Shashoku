@@ -2,16 +2,27 @@ import { ref } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
-import { clamp, screenDeltaToContentPx, type Displacement, type ViewTransform } from '@/lib/coords'
+import {
+  clamp,
+  framePoint,
+  positionHolding,
+  screenDeltaToContentPx,
+  type Displacement,
+  type ViewTransform,
+} from '@/lib/coords'
 import {
   NO_PLACEMENT,
   applyPlacement,
   contentBounds,
+  frameCenter,
   isMoved,
   placedFrame,
   type LayerPlace,
   type LayerPlacement,
 } from '@/lib/layerTransform'
+
+/** The frame's own middle, which is what a raster placement's scale grows about. */
+const MIDDLE = { x: 0.5, y: 0.5 }
 import { context2d, encodePng } from '@/lib/pageComposite'
 import type { Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
@@ -53,23 +64,34 @@ export function useLayerPlacement() {
   }
 
   /**
-   * A corner reports how much further from the centre the pointer has come, so
-   * a press that starts near the centre can report a ratio in the hundreds
-   * within one flick of the wrist. Bounded at both ends:
+   * A corner reports how much further from the pinned handle the pointer has
+   * come, so a press that starts near that handle can report a ratio in the
+   * hundreds within one flick of the wrist. Bounded at both ends:
    *
    * the floor keeps a pixel on each axis, since a frame of zero has no box to
    * grab and could never be reached again; the ceiling is the page itself,
    * because everything past its edge is cropped on export and a buffer larger
    * than the page is the bill the layer frame exists to avoid paying.
+   *
+   * The frame grows about its own middle, so holding `pin` still is a matter of
+   * walking that middle back by as much as the pinned corner would otherwise
+   * have travelled — which is what the displacement carries.
    */
-  function scaleTo(id: string, ratio: number): void {
+  function scaleTo(id: string, ratio: number, pin: { x: number; y: number }): void {
     const entry = project.entryById(id)
     const page = editor.maskTarget
     if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) return
     const floor = Math.max(1 / entry.w, 1 / entry.h)
     const ceiling =
       page === null ? Infinity : Math.max(floor, Math.min(page.w / entry.w, page.h / entry.h))
-    set(id, { scale: clamp(ratio, floor, ceiling) })
+    const scale = clamp(ratio, floor, ceiling)
+
+    const was = { w: entry.w, h: entry.h }
+    const rotation = placementOf(id).rotation
+    const center = frameCenter(entry)
+    const held = framePoint(center, was, MIDDLE, pin, rotation)
+    const moved = positionHolding(held, { w: was.w * scale, h: was.h * scale }, MIDDLE, pin, rotation)
+    set(id, { scale, dx: moved.x - center.x, dy: moved.y - center.y })
   }
 
   const rotateTo = (id: string, rotation: number) => set(id, { rotation })

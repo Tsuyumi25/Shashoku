@@ -159,3 +159,55 @@ export function centeredBoxOnScreen(
     height: size.h * view.scale,
   }
 }
+
+/**
+ * The page-axis vector between two fractional points of an upright frame.
+ *
+ * Turned with the object rather than measured in the page's axes, so a frame
+ * set on a slant is walked along its own baseline.
+ */
+function frameOffset(
+  box: { w: number; h: number },
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  rotation: number,
+): Anchor {
+  const dx = box.w * (to.x - from.x)
+  const dy = box.h * (to.y - from.y)
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  return { x: dx * cos - dy * sin, y: dx * sin + dy * cos }
+}
+
+/** Where a fractional point of the object's frame lands on the page. */
+export function framePoint(
+  at: { x: number; y: number },
+  box: { w: number; h: number },
+  origin: { x: number; y: number },
+  ratio: { x: number; y: number },
+  rotation = 0,
+): Anchor {
+  const d = frameOffset(box, origin, ratio, rotation)
+  return { x: at.x + d.x, y: at.y + d.y }
+}
+
+/**
+ * Where the object has to stand for a fractional point of its frame to be at
+ * `held` — the inverse of `framePoint`, and how a corner drag keeps the handle
+ * across from it still while the size changes around it.
+ *
+ * Takes the size the object actually came out at rather than the ratio the
+ * gesture asked for. For a text object those are different things — the size is
+ * the typesetter's output, and it rounds and clamps — so predicting it would
+ * put the frame where the text is not.
+ */
+export function positionHolding(
+  held: { x: number; y: number },
+  box: { w: number; h: number },
+  origin: { x: number; y: number },
+  ratio: { x: number; y: number },
+  rotation = 0,
+): Anchor {
+  const d = frameOffset(box, origin, ratio, rotation)
+  return { x: held.x - d.x, y: held.y - d.y }
+}

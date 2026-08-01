@@ -24,7 +24,7 @@
         class="absolute h-2 w-2 border border-primary bg-background"
         :class="corner.cursor"
         :style="cornerStyle(corner)"
-        @pointerdown.stop="onScaleDown"
+        @pointerdown.stop="onScaleDown($event, corner)"
         @pointermove="onScaleMove"
         @pointerup="onScaleUp"
         @pointercancel="onScaleUp"
@@ -104,8 +104,12 @@ const emit = defineEmits<{
   drag: [d: Displacement]
   /** Once on release, and only if the pointer actually travelled. */
   dragEnd: [d: Displacement]
-  /** Once a corner drag turns out to be a drag, so the undo entry has a before. */
-  scaleStart: []
+  /**
+   * Once a corner drag turns out to be a drag, so the undo entry has a before.
+   * Carries which fractional point of the frame the drag is pinning — the
+   * handle across from the one taken hold of.
+   */
+  scaleStart: [pin: Point]
   scale: [ratio: number]
   scaleEnd: []
   rotate: [radians: number]
@@ -201,12 +205,33 @@ const antennaHandleStyle = computed(() => ({
 /**
  * The frame's centre in client coordinates. A rotated element still reports an
  * upright bounding rectangle, and its centre is the element's centre whichever
- * way it is lying — which is the one point both gestures below turn around.
+ * way it is lying — which is what makes it the one point readable off a
+ * rotated element without undoing the rotation first.
  */
 function centerOnScreen(): Point {
   const rect = boxEl.value?.getBoundingClientRect()
   if (!rect) return { x: 0, y: 0 }
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
+
+/**
+ * A fractional point of the frame in client coordinates, walked out from the
+ * centre in the frame's own axes — the bounding rectangle cannot say where a
+ * corner is once the frame is lying at an angle, but the centre plus a turned
+ * offset can.
+ */
+function pointOnScreen(ratio: Point): Point {
+  const c = centerOnScreen()
+  const dx = (ratio.x - 0.5) * props.box.width
+  const dy = (ratio.y - 0.5) * props.box.height
+  const cos = Math.cos(turn.value)
+  const sin = Math.sin(turn.value)
+  return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos }
+}
+
+/** The handle across the frame from this one, which a drag on it pins. */
+function opposite(corner: Corner): Point {
+  return { x: 1 - corner.kx, y: 1 - corner.ky }
 }
 
 function capture(e: PointerEvent) {
@@ -272,16 +297,17 @@ function onUp(e: PointerEvent) {
  * a corner would otherwise pin a label's own font size at whatever it was
  * inheriting, silently cutting it off from the group it follows.
  */
-const scale = { center: { x: 0, y: 0 }, from: { x: 0, y: 0 } }
+const scale = { pin: { x: 0, y: 0 }, pivot: { x: 0, y: 0 }, from: { x: 0, y: 0 } }
 let scaling = false
 let scaleEngaged = false
 
-function onScaleDown(e: PointerEvent) {
+function onScaleDown(e: PointerEvent, corner: Corner) {
   if (e.button !== 0) return
   capture(e)
   scaling = true
   scaleEngaged = false
-  scale.center = centerOnScreen()
+  scale.pin = opposite(corner)
+  scale.pivot = pointOnScreen(scale.pin)
   scale.from = { x: e.clientX, y: e.clientY }
   emit('select', false)
 }
@@ -292,9 +318,9 @@ function onScaleMove(e: PointerEvent) {
   if (!scaleEngaged) {
     if (!travelled(e, scale.from)) return
     scaleEngaged = true
-    emit('scaleStart')
+    emit('scaleStart', scale.pin)
   }
-  emit('scale', uniformScaleRatio(scale.center, scale.from, to))
+  emit('scale', uniformScaleRatio(scale.pivot, scale.from, to))
 }
 
 function onScaleUp(e: PointerEvent) {

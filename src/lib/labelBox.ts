@@ -1,4 +1,5 @@
 import type { TextAlign, TextStyle } from '@shared/text-style/types'
+import { framePoint } from './coords'
 
 export interface Point {
   x: number
@@ -27,13 +28,11 @@ export function layoutOrigin(style: TextStyle): Point {
   return style.direction === 'vertical' ? { x: 1, y: share } : { x: share, y: 0 }
 }
 
+const FRAME_CENTER: Point = { x: 0.5, y: 0.5 }
+
 /**
  * Where the middle of the frame lands when the point the position names is at
  * `at`.
- *
- * The offset is turned with the object rather than measured in the page's axes,
- * so what stays put as the text grows is the point itself at any angle — a
- * block set on a slant grows along its own baseline.
  */
 export function frameCenter(
   at: Point,
@@ -41,11 +40,7 @@ export function frameCenter(
   origin: Point,
   rotation = 0,
 ): Point {
-  const dx = box.w * (0.5 - origin.x)
-  const dy = box.h * (0.5 - origin.y)
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
-  return { x: at.x + dx * cos - dy * sin, y: at.y + dx * sin + dy * cos }
+  return framePoint(at, box, origin, FRAME_CENTER, rotation)
 }
 
 /**
@@ -195,18 +190,21 @@ export const MAX_FONT_SIZE_PX = 1000
 
 /**
  * What a corner drag multiplies the object's size by: how far the pointer sits
- * from the centre now against where it started.
+ * from the pivot now against where it started.
  *
- * Measured from the pointer rather than from the corner it grabbed so the ratio
- * opens at exactly 1 and the object does not jump on the first frame. Anchored
- * on the centre rather than on the opposite corner — which is what a page
- * layout tool would do — because a label's stored position is its centre, and
- * pinning the far corner would walk the text out of the bubble it was placed in.
+ * Measured from the pointer rather than from the corner it grabbed, so the
+ * ratio opens at exactly 1 and the object does not jump on the first frame.
+ *
+ * The pivot is the handle across from the one taken hold of, which is what
+ * every layout tool does and what the gesture reads as: the corner nobody is
+ * touching is the one that should not move. It is the caller's to pass, since
+ * a frame reached through the pointer knows which handle started this and the
+ * arithmetic here does not.
  */
-export function uniformScaleRatio(center: Point, from: Point, to: Point): number {
-  const started = Math.hypot(from.x - center.x, from.y - center.y)
+export function uniformScaleRatio(pivot: Point, from: Point, to: Point): number {
+  const started = Math.hypot(from.x - pivot.x, from.y - pivot.y)
   if (started < 1e-6) return 1
-  return Math.hypot(to.x - center.x, to.y - center.y) / started
+  return Math.hypot(to.x - pivot.x, to.y - pivot.y) / started
 }
 
 /**

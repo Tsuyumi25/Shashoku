@@ -36,12 +36,14 @@ import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
   centeredBoxOnScreen,
   clamp,
+  framePoint,
+  positionHolding,
   screenDeltaToContentPx,
   type Anchor,
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
-import { MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX } from '@/lib/labelBox'
+import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 
 /**
@@ -82,7 +84,7 @@ const emit = defineEmits<{
   move: [to: Anchor]
   moveEnd: [from: Anchor, to: Anchor]
   scaleStart: []
-  scale: [fontSizePx: number]
+  scale: [fontSizePx: number, at: Anchor]
   scaleEnd: []
   rotate: [radians: number]
   rotateEnd: [from: number, to: number]
@@ -152,18 +154,42 @@ function onDragEnd() {
  */
 let scaleFromPx = 0
 
-function onScaleStart() {
+/** Which point of the frame the drag is holding still, and where it stands. */
+let scalePin: Point = { x: 0, y: 0 }
+let scaleHeld: Point = { x: 0, y: 0 }
+
+function onScaleStart(pin: Point) {
   scaleFromPx = props.textStyle.fontSizePx
+  scalePin = pin
+  scaleHeld = framePoint(
+    { x: props.x, y: props.y },
+    drawn.value.box,
+    layoutOrigin(props.textStyle),
+    pin,
+    props.rotation,
+  )
   emit('scaleStart')
 }
 
 /**
- * Rounded because the rasterizer is keyed on the size it was asked for, and a
- * drag through a continuum of fractional sizes would evict its own cache on
- * every frame.
+ * The size is rounded because the rasterizer is keyed on the size it was asked
+ * for, and a drag through a continuum of fractional sizes would evict its own
+ * cache on every frame.
+ *
+ * Where the object then has to stand is worked out from the size the typesetter
+ * came back with rather than from the ratio the drag asked for — a clamped or
+ * rounded size is not the one the pointer described, and the pinned corner has
+ * to hold against what was actually set.
  */
 function onScale(ratio: number) {
-  emit('scale', clamp(Math.round(scaleFromPx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX))
+  const fontSizePx = clamp(Math.round(scaleFromPx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
+  const style = { ...props.textStyle, fontSizePx }
+  const grown = drawnLabel(props.text, style, { x: props.x, y: props.y }, props.rotation)
+  emit(
+    'scale',
+    fontSizePx,
+    positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation),
+  )
 }
 
 /**

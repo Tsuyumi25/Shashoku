@@ -10,7 +10,8 @@
     @select="emit('select', $event)"
     @drag="emit('drag', $event)"
     @drag-end="emit('commit')"
-    @scale="emit('scale', $event)"
+    @scale-start="onScaleStart"
+    @scale="onScale"
     @scale-end="emit('commit')"
     @rotate="emit('rotate', $event)"
     @rotate-end="emit('commit')"
@@ -49,11 +50,23 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [additive: boolean]
   drag: [d: Displacement]
-  scale: [ratio: number]
+  /** The ratio, and which fractional point of the frame the drag is pinning. */
+  scale: [ratio: number, pin: { x: number; y: number }]
   rotate: [radians: number]
   /** Whichever gesture it was has been let go, and now owes the pixels a pass. */
   commit: []
 }>()
+
+/** Which point of the frame the corner drag is holding still. */
+let scalePin = { x: 0.5, y: 0.5 }
+
+function onScaleStart(pin: { x: number; y: number }) {
+  scalePin = pin
+}
+
+function onScale(ratio: number) {
+  emit('scale', ratio, scalePin)
+}
 
 /**
  * The frame is placed from its centre, while a layer stores its top-left corner

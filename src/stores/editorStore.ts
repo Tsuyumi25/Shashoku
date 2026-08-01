@@ -27,6 +27,13 @@ export interface Command {
   undo(): void
 }
 
+/** Everything a corner drag leaves changed about one label. */
+export interface ScaledLabel {
+  styleOverride: TextLayerEntry['styleOverride']
+  x: number
+  y: number
+}
+
 /**
  * How far back the stack reaches.
  *
@@ -779,25 +786,34 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Both sides are snapshots of one label's override taken moments apart, so a
-   * string compare is enough to tell a drag that ended where it started from
-   * one that moved — which is what keeps a corner nudged and put back out of
-   * the undo stack.
+   * Both sides are snapshots of one label taken moments apart, so a string
+   * compare is enough to tell a drag that ended where it started from one that
+   * moved — which is what keeps a corner nudged and put back out of the undo
+   * stack.
+   *
+   * The size and the position travel together because a corner drag changes
+   * both and is one thing to undo: the size is what the pointer asked for and
+   * the position is what holds the pinned corner still, so putting one back
+   * without the other would leave the label somewhere nobody dragged it.
    */
-  function cmdUpdateLabelStyleOverride(
+  function cmdScaleLabel(
     filename: string,
     labelId: string,
-    from: TextLayerEntry['styleOverride'],
-    to: TextLayerEntry['styleOverride'],
+    from: ScaledLabel,
+    to: ScaledLabel,
   ) {
-    if (JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) return
+    if (JSON.stringify(from) === JSON.stringify(to)) return
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
+    const apply = (state: ScaledLabel) => {
+      project.updateLabelStyleOverride(filename, labelId, state.styleOverride)
+      project.moveLabel(filename, labelId, state.x, state.y)
+    }
     pushCommand(
       {
-        label: `style-override ${labelId}`,
-        do: () => project.updateLabelStyleOverride(filename, labelId, to),
-        undo: () => project.updateLabelStyleOverride(filename, labelId, from),
+        label: `scale-label ${labelId}`,
+        do: () => apply(to),
+        undo: () => apply(from),
       },
       { alreadyApplied: true },
     )
@@ -1165,7 +1181,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLabel,
     cmdPlaceLayer,
     cmdRotateLabel,
-    cmdUpdateLabelStyleOverride,
+    cmdScaleLabel,
     cmdAddRasterLayer,
     cmdAddFolder,
     cmdDissolveFolder,

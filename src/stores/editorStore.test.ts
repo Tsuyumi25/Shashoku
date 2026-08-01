@@ -469,11 +469,19 @@ describe('cmdRotateLabel', () => {
   })
 })
 
-describe('cmdUpdateLabelStyleOverride', () => {
+describe('cmdScaleLabel', () => {
+  /** Where `label('a')` stands, so a gesture can be said to have moved it. */
+  const PUT = { x: 200, y: 150 }
+
   it('undoes back to inheriting, rather than to the size it was inheriting', () => {
     const { project, editor } = openOnePage([label('a')])
     project.updateLabelStyleOverride(PAGE, 'a', { fontSizePx: 48 })
-    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', undefined, { fontSizePx: 48 })
+    editor.cmdScaleLabel(
+      PAGE,
+      'a',
+      { styleOverride: undefined, ...PUT },
+      { styleOverride: { fontSizePx: 48 }, ...PUT },
+    )
 
     editor.undo()
     expect(labelsOf(project)[0].styleOverride).toBeUndefined()
@@ -484,15 +492,43 @@ describe('cmdUpdateLabelStyleOverride', () => {
     const before = { color: '#ff0000' }
     project.updateLabelStyleOverride(PAGE, 'a', before)
     project.updateLabelStyleOverride(PAGE, 'a', { color: '#ff0000', fontSizePx: 48 })
-    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', before, { color: '#ff0000', fontSizePx: 48 })
+    editor.cmdScaleLabel(
+      PAGE,
+      'a',
+      { styleOverride: before, ...PUT },
+      { styleOverride: { color: '#ff0000', fontSizePx: 48 }, ...PUT },
+    )
 
     editor.undo()
     expect(labelsOf(project)[0].styleOverride).toEqual({ color: '#ff0000' })
   })
 
+  /**
+   * A corner drag moves the object as well as resizing it, since the pinned
+   * corner has to stay where it is. Both go back together or the label lands
+   * somewhere nobody dragged it.
+   */
+  it('puts the position back with the size', () => {
+    const { project, editor } = openOnePage([label('a')])
+    project.updateLabelStyleOverride(PAGE, 'a', { fontSizePx: 48 })
+    project.moveLabel(PAGE, 'a', 260, 190)
+    editor.cmdScaleLabel(
+      PAGE,
+      'a',
+      { styleOverride: undefined, ...PUT },
+      { styleOverride: { fontSizePx: 48 }, x: 260, y: 190 },
+    )
+
+    editor.undo()
+    const back = labelsOf(project)[0]
+    expect([back.x, back.y]).toEqual([PUT.x, PUT.y])
+    expect(editor.canUndo).toBe(false)
+  })
+
   it('keeps a corner nudged and put back out of the stack', () => {
     const { editor } = openOnePage([label('a')])
-    editor.cmdUpdateLabelStyleOverride(PAGE, 'a', { fontSizePx: 24 }, { fontSizePx: 24 })
+    const held = { styleOverride: { fontSizePx: 24 }, ...PUT }
+    editor.cmdScaleLabel(PAGE, 'a', held, { ...held })
     expect(editor.canUndo).toBe(false)
   })
 })
@@ -607,7 +643,12 @@ describe('layer tree edits', () => {
 
       editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 40, y: 30 })
       editor.cmdRotateLabel(PAGE, 'a', 0, 1)
-      editor.cmdUpdateLabelStyleOverride(PAGE, 'a', undefined, { fontSizePx: 40 })
+      editor.cmdScaleLabel(
+        PAGE,
+        'a',
+        { styleOverride: undefined, x: 200, y: 150 },
+        { styleOverride: { fontSizePx: 40 }, x: 200, y: 150 },
+      )
 
       expect(editor.canUndo).toBe(false)
     })
