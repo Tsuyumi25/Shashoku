@@ -1,8 +1,51 @@
-import type { TextStyle } from '@shared/text-style/types'
+import type { TextAlign, TextStyle } from '@shared/text-style/types'
 
 export interface Point {
   x: number
   y: number
+}
+
+/** How much of a short line's slack sits ahead of it. */
+const ALIGN_SHARE: Record<TextAlign, number> = { start: 0, center: 0.5, end: 1 }
+
+/**
+ * Which point of an object's upright frame its stored position names, as a
+ * fraction of that frame on each axis.
+ *
+ * Derived rather than stored, because a block of point text has no frame of its
+ * own — its width is the longest line's — so the edge its lines are aligned to
+ * *is* the block's own edge. "Aligned left" and "the left edge is fixed" are one
+ * sentence, and a separate field would be the second half of it written twice.
+ * Area text is where the two come apart, and there is none here.
+ *
+ * The other axis needs no decision at all, because lines only ever stack one
+ * way: down for rows, leftward for columns. The end that cannot move is the one
+ * the first line is already at.
+ */
+export function layoutOrigin(style: TextStyle): Point {
+  const share = ALIGN_SHARE[style.align]
+  return style.direction === 'vertical' ? { x: 1, y: share } : { x: share, y: 0 }
+}
+
+/**
+ * Where the middle of the frame lands when the point the position names is at
+ * `at`.
+ *
+ * The offset is turned with the object rather than measured in the page's axes,
+ * so what stays put as the text grows is the point itself at any angle — a
+ * block set on a slant grows along its own baseline.
+ */
+export function frameCenter(
+  at: Point,
+  box: { w: number; h: number },
+  origin: Point,
+  rotation = 0,
+): Point {
+  const dx = box.w * (0.5 - origin.x)
+  const dy = box.h * (0.5 - origin.y)
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  return { x: at.x + dx * cos - dy * sin, y: at.y + dx * sin + dy * cos }
 }
 
 /**

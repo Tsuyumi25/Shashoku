@@ -139,8 +139,9 @@ describe('drawnLabel', () => {
   })
 
   it('hands the engine the fraction the page grid could not hold', () => {
-    // The box is 41 wide, so a whole anchor already leaves the corner on a half.
-    const drawn = drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 })
+    // Centred, where the odd 41-wide box leaves the corner on a half however
+    // whole the position is.
+    const drawn = drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100.25, y: 60 })
 
     expect(drawn.center.x - drawn.box.w / 2).toBe(79)
     expect(calls.at(-1)?.phaseX).toBe(0.75)
@@ -155,6 +156,47 @@ describe('drawnLabel', () => {
     catalog.value = []
     drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100, y: 60 })
     expect(notdefCalls.at(-1)?.align).toBe('center')
+  })
+
+  /**
+   * What an alignment decides, seen from the outside: the notdef grid is one
+   * cell per character, so a longer label is a wider one, and the edge that
+   * does not move is the one it was aligned to.
+   */
+  describe('what stays put while a label grows', () => {
+    const AT = { x: 100, y: 60 }
+    const edges = (align: TextStyle['align'], text: string) => {
+      catalog.value = []
+      const drawn = drawnLabel(text, styleWith({ align }), AT)
+      return { left: drawn.center.x - drawn.box.w / 2, right: drawn.center.x + drawn.box.w / 2 }
+    }
+
+    it('holds the left edge of a block set from the start', () => {
+      expect(edges('start', 'ab').left).toBe(edges('start', 'abcd').left)
+    })
+
+    it('holds the right edge of a block set from the end', () => {
+      expect(edges('end', 'ab').right).toBe(edges('end', 'abcd').right)
+    })
+
+    it('holds the middle of a centred block, growing to both sides', () => {
+      const short = edges('center', 'ab')
+      const long = edges('center', 'abcd')
+      expect((short.left + short.right) / 2).toBe((long.left + long.right) / 2)
+      expect(long.left).toBeLessThan(short.left)
+    })
+
+    /** Rows only ever stack downward, so the top is not the alignment's to move. */
+    it('holds the top edge whichever way the lines are set', () => {
+      const top = (align: TextStyle['align'], text: string) => {
+        catalog.value = []
+        const drawn = drawnLabel(text, styleWith({ align }), AT)
+        return drawn.center.y - drawn.box.h / 2
+      }
+      for (const align of ['start', 'center', 'end'] as const) {
+        expect(top(align, 'a')).toBe(top(align, 'a\nb'))
+      }
+    })
   })
 
   it('snaps the baseline, so nothing is asked for on the axis that stays whole', () => {
@@ -182,7 +224,7 @@ describe('drawnLabel', () => {
   })
 
   it('hands the phase to the engine in page pixels, unconverted', () => {
-    drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 })
+    drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100.25, y: 60 })
     // The odd box halves onto a quarter: 100.25 - 41/2 is 79.75, so 0.75 is
     // what is left once the corner lands on 79.
     expect(calls.at(-1)?.phaseX).toBeCloseTo(0.75, 9)
@@ -280,7 +322,7 @@ describe('drawnLabel', () => {
 
   it('costs an upright label exactly what it did before', () => {
     const text = uniqueText()
-    drawnLabel(text, styleWith(), { x: 100, y: 60 })
+    drawnLabel(text, styleWith(), { x: 100.25, y: 60 })
     // Measure and draw. At zero the turned pass is the same request as the
     // upright one, so it lands on the cache instead of the engine.
     expect(calls).toHaveLength(2)

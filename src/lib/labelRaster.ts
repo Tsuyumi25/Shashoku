@@ -1,7 +1,14 @@
 import type { TextStyle } from '@shared/text-style/types'
 import { catalogByFamily, catalogLoaded } from './fontCatalog'
 import { sampleFor, type Sample } from './fontSampleCache'
-import { labelBoxSize, placeLabel, quantizeRotation, type Point } from './labelBox'
+import {
+  frameCenter,
+  labelBoxSize,
+  layoutOrigin,
+  placeLabel,
+  quantizeRotation,
+  type Point,
+} from './labelBox'
 import { engineStrokeFor } from './textStyle'
 
 export interface LabelRaster {
@@ -136,6 +143,10 @@ export interface DrawnLabel {
  * One label, ready to draw: the bitmap, the frame around it, and where to put
  * that frame so the bitmap's corner lands on the page's own grid.
  *
+ * `at` is the object's stored position, and which point of the frame that names
+ * follows from the style's alignment — so a frame reached through here has
+ * already grown away from that point rather than around its middle.
+ *
  * Every surface that draws a label goes through here, which is the point. What
  * the canvas shows matching what exports is then a property of there being one
  * answer rather than a hope that two draw sites keep computing the same one.
@@ -158,19 +169,22 @@ export interface DrawnLabel {
 export function drawnLabel(
   text: string,
   style: TextStyle,
-  anchor: Point,
+  at: Point,
   rotation = 0,
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
 
   const measured = rasterFor(text, style)
   const box = labelBoxSize(style, measured.sample?.image ?? null)
-  if (!measured.sample) return { ...measured, box, center: placeLabel(anchor, box, turn).center }
+  // The turned bitmap holds the run at its own middle, so both rectangles share
+  // one centre and the frame is the same point as the ink.
+  const middle = frameCenter(at, box, layoutOrigin(style), turn)
+  if (!measured.sample) return { ...measured, box, center: placeLabel(middle, box, turn).center }
 
   const spun = turn === 0 ? measured : rasterFor(text, style, NO_PHASE, turn)
   const blit = spun.sample
     ? { w: spun.sample.image.width, h: spun.sample.image.height }
     : box
-  const { center, phase } = placeLabel(anchor, blit, turn)
+  const { center, phase } = placeLabel(middle, blit, turn)
   return { ...rasterFor(text, style, phase, turn), box, center }
 }

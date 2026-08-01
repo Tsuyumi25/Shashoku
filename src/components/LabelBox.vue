@@ -88,7 +88,11 @@ const emit = defineEmits<{
   rotateEnd: [from: number, to: number]
 }>()
 
-const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }))
+// Turned, because where the frame's middle sits follows the object round once
+// the position names a point other than that middle.
+const drawn = computed(() =>
+  drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }, props.rotation),
+)
 
 /**
  * What the frame says when the object is showing notdef boxes instead of its

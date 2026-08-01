@@ -1,10 +1,71 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
-import { angleDelta, labelBoxSize, placeLabel, uniformScaleRatio } from './labelBox'
+import {
+  angleDelta,
+  frameCenter,
+  labelBoxSize,
+  layoutOrigin,
+  placeLabel,
+  uniformScaleRatio,
+} from './labelBox'
 
 function styleWith(patch: Partial<TextStyle>): TextStyle {
   return { ...DEFAULT_TEXT_STYLE, ...patch }
 }
+
+describe('layoutOrigin', () => {
+  it('holds the edge a horizontal block is aligned to', () => {
+    expect(layoutOrigin(styleWith({ align: 'start' }))).toEqual({ x: 0, y: 0 })
+    expect(layoutOrigin(styleWith({ align: 'center' }))).toEqual({ x: 0.5, y: 0 })
+    expect(layoutOrigin(styleWith({ align: 'end' }))).toEqual({ x: 1, y: 0 })
+  })
+
+  /**
+   * Columns stack right to left, so the end that does not move is the right —
+   * the other axis needs no decision, because lines only ever stack one way.
+   */
+  it('holds the right edge of a vertical block, where its first column is', () => {
+    const vertical = (align: TextStyle['align']) =>
+      layoutOrigin(styleWith({ direction: 'vertical', align }))
+    expect(vertical('start')).toEqual({ x: 1, y: 0 })
+    expect(vertical('center')).toEqual({ x: 1, y: 0.5 })
+    expect(vertical('end')).toEqual({ x: 1, y: 1 })
+  })
+})
+
+describe('frameCenter', () => {
+  const AT = { x: 100, y: 60 }
+  const BOX = { w: 40, h: 20 }
+
+  it('leaves a centred object where it stands', () => {
+    expect(frameCenter(AT, BOX, { x: 0.5, y: 0.5 })).toEqual(AT)
+  })
+
+  it('puts the frame down and to the right of a top left origin', () => {
+    expect(frameCenter(AT, BOX, { x: 0, y: 0 })).toEqual({ x: 120, y: 70 })
+  })
+
+  /**
+   * The point named is what stays put, so growing the block moves the frame and
+   * never that point — which is the whole of what an alignment decides.
+   */
+  it('grows away from the point rather than around it', () => {
+    const before = frameCenter(AT, { w: 40, h: 20 }, { x: 0, y: 0 })
+    const after = frameCenter(AT, { w: 60, h: 20 }, { x: 0, y: 0 })
+    expect(after.x - before.x).toBe(10)
+    expect(after.y).toBe(before.y)
+  })
+
+  /**
+   * Turned with the object, so a block set at an angle grows along its own
+   * baseline instead of along the page's.
+   */
+  it('measures the offset in the object own axes', () => {
+    const turned = frameCenter(AT, BOX, { x: 0, y: 0 }, Math.PI / 2)
+    expect(turned.x).toBeCloseTo(100 - 10, 9)
+    expect(turned.y).toBeCloseTo(60 + 20, 9)
+  })
+})
 
 describe('labelBoxSize', () => {
   it('takes the bitmap as the frame, a bitmap pixel being a document pixel', () => {
