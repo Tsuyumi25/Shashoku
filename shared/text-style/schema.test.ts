@@ -21,10 +21,26 @@ describe('parseTextStyle', () => {
   it('round-trips a style it wrote itself', () => {
     const style = {
       ...DEFAULT_TEXT_STYLE,
+      fontFamily: 'Some Face',
       fontSizePx: 31,
       direction: 'vertical' as const,
       effects: [{ kind: 'stroke' as const, width: 3, color: '#ffffff', position: 'outside' as const }],
     }
     expect(parseTextStyle(serializeTextStyle(style), 'style', fail)).toEqual(style)
+  })
+
+  /**
+   * A project that has not been given a default font stores no family rather
+   * than a placeholder name, since anything written here is a name a reader
+   * would go looking for in the catalogue.
+   */
+  it('accepts a style with no family chosen', () => {
+    const style = serializeTextStyle({ ...DEFAULT_TEXT_STYLE, fontFamily: '' })
+    expect(parseTextStyle(style, 'style', fail).fontFamily).toBe('')
+  })
+
+  it('still refuses a family that is not a string', () => {
+    const style = { ...serializeTextStyle(DEFAULT_TEXT_STYLE), fontFamily: 42 }
+    expect(() => parseTextStyle(style, 'style', fail)).toThrow()
   })
 })

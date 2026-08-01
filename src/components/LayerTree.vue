@@ -114,9 +114,9 @@
           this machine that is missing something.
         -->
         <span
-          v-if="row.missingFamily"
+          v-if="row.missingFamily !== null"
           class="flex shrink-0 items-center text-muted-foreground"
-          :title="`這台機器沒有字型「${row.missingFamily}」`"
+          :title="missingFamilyLabel(row.missingFamily)"
         >
           <SquareX :size="12" />
         </span>
@@ -155,7 +155,7 @@ import { findEntry } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
 import LayerBlending from '@/components/LayerBlending.vue'
 import LayerThumb from '@/components/LayerThumb.vue'
-import { familyIsMissing } from '@/lib/labelRaster'
+import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
 import { resolveTextStyle } from '@/lib/textStyle'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'

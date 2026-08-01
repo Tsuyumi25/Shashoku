@@ -47,7 +47,7 @@ export interface TextStyle {
 
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
-  fontFamily: 'sans-serif',
+  fontFamily: '',
   fontSizePx: 24,
   direction: 'horizontal',
   color: '#000000',

@@ -13,9 +13,14 @@ export interface LabelRaster {
   sample: Sample | null
   /**
    * The family the object asked for, when this machine has no usable face for
-   * it — absent from the catalogue, or present but undrawable. The object is
-   * drawn either way; this is what says the drawing is a stand-in. Held as the
-   * name rather than as a message so the interface can word it.
+   * it — absent from the catalogue, or present but undrawable. Empty when no
+   * family was asked for at all, which is a project without a default font
+   * rather than a machine missing one, and a different thing to tell someone.
+   * Null when there was nothing to draw in the first place.
+   *
+   * The object draws in all three cases; this is what says the drawing stands
+   * in for its text. Held as the name rather than as a message so the
+   * interface can word it.
    */
   missingFamily: string | null
 }
@@ -83,6 +88,19 @@ export function rasterFor(text: string, style: TextStyle, phase: Point = NO_PHAS
  */
 export function familyIsMissing(family: string): boolean {
   return catalogLoaded.value && !catalogByFamily.value.has(family)
+}
+
+/**
+ * What to say about an object that is drawing notdef boxes.
+ *
+ * An empty family is not a font this machine failed to find — it is a project
+ * that has not been given a default font yet, which is the user's next move
+ * rather than a fault. Shared by the frame and the layer tree so the two
+ * cannot word the same state differently; it moves to the message catalogue
+ * once there is one.
+ */
+export function missingFamilyLabel(family: string): string {
+  return family === '' ? '尚未選擇字型' : `這台機器沒有字型「${family}」`
 }
 
 export interface DrawnLabel {

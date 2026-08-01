@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { EngineBitmap, EngineFontSource, EngineStrokeSpec } from '@shared/engine/types'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { catalog, catalogLoaded } from './fontCatalog'
-import { drawnLabel } from './labelRaster'
+import { drawnLabel, missingFamilyLabel } from './labelRaster'
 
 const FAMILY = 'Test Face'
 
@@ -208,6 +208,22 @@ describe('drawnLabel', () => {
     })
     expect(Number.isInteger(drawn.center.x - drawn.box.w / 2)).toBe(true)
     expect(notdefCalls.at(-1)?.phaseX).toBeCloseTo(0.25, 9)
+  })
+
+  it('tells an unchosen family apart from a family this machine lacks', () => {
+    // Both draw boxes, but only one of them is the user's next move, so the
+    // two cannot collapse into the same value.
+    const unchosen = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), { x: 10, y: 10 })
+    expect(unchosen.sample).not.toBeNull()
+    expect(unchosen.missingFamily).toBe('')
+
+    const absent = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    expect(absent.missingFamily).toBe('Absent')
+  })
+
+  it('words the two cases differently', () => {
+    expect(missingFamilyLabel('')).not.toContain('「')
+    expect(missingFamilyLabel('Absent')).toContain('Absent')
   })
 
   it('draws nothing while the catalogue is still being enumerated', () => {

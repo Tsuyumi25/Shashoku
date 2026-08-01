@@ -42,7 +42,7 @@ import {
   type ViewTransform,
 } from '@/lib/coords'
 import { MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX } from '@/lib/labelBox'
-import { drawnLabel } from '@/lib/labelRaster'
+import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
@@ -95,9 +95,10 @@ const drawn = computed(() => drawnLabel(props.text, props.textStyle, { x: props.
  * text. A state rather than an error — the object is intact and exports as
  * what it is; this machine is the thing that is missing something.
  */
-const substitution = computed(() =>
-  drawn.value.missingFamily ? `這台機器沒有字型「${drawn.value.missingFamily}」` : '',
-)
+const substitution = computed(() => {
+  const missing = drawn.value.missingFamily
+  return missing === null ? '' : missingFamilyLabel(missing)
+})
 
 // On the drawn centre rather than the stored one, so what is grabbed is where
 // the text actually is and the two cannot part company by half a pixel.

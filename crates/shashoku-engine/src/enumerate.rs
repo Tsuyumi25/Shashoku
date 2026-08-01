@@ -34,12 +34,19 @@ fn is_font_file(path: &Path) -> bool {
 
 /// Picks the string whose language best matches `locales`, in the order given,
 /// falling back to English and then to whatever came first.
+///
+/// A record that exists but is blank is passed over at every step. Fonts ship
+/// them — hand-lettered CJK families routinely carry an empty Macintosh record
+/// beside a correct Windows one — and its language is "en", so taking it would
+/// leave a font with no name that the catalogue can key on.
 fn choose_localized<'a>(entries: &[(Option<String>, &'a str)], locales: &[String]) -> Option<&'a str> {
+    let named = |value: &str| !value.trim().is_empty();
+
     for wanted in locales {
         let wanted = wanted.to_ascii_lowercase();
         for (language, value) in entries {
             let Some(language) = language else { continue };
-            if language.to_ascii_lowercase().starts_with(&wanted) {
+            if language.to_ascii_lowercase().starts_with(&wanted) && named(value) {
                 return Some(value);
             }
         }
@@ -48,11 +55,15 @@ fn choose_localized<'a>(entries: &[(Option<String>, &'a str)], locales: &[String
         if language
             .as_deref()
             .is_some_and(|l| l.to_ascii_lowercase().starts_with("en"))
+            && named(value)
         {
             return Some(value);
         }
     }
-    entries.first().map(|(_, value)| *value)
+    entries
+        .iter()
+        .find(|(_, value)| named(value))
+        .map(|(_, value)| *value)
 }
 
 fn localized_entries(font: &FontRef, id: StringId) -> Vec<(Option<String>, String)> {
@@ -322,6 +333,37 @@ mod tests {
     fn a_font_naming_no_language_still_yields_its_name() {
         let names = entries(&[(None, "王漢宗中明體")]);
         assert_eq!(choose_localized(&names, &["zh-Hant".to_string()]), Some("王漢宗中明體"));
+    }
+
+    /**
+     * Hand-lettered CJK families routinely ship an empty Macintosh record
+     * beside a correct Windows one. Its language is "en", so the English
+     * fallback used to select it and hand back a family with no name — which
+     * then collapsed every such font onto one blank entry in the catalogue.
+     */
+    #[test]
+    fn a_blank_record_is_not_a_name() {
+        let names = entries(&[(Some("en"), ""), (Some("en"), "章草")]);
+        assert_eq!(choose_localized(&names, &[]), Some("章草"));
+    }
+
+    #[test]
+    fn a_blank_record_does_not_win_on_its_locale_either() {
+        let names = entries(&[(Some("zh-Hant-TW"), "  "), (Some("en-US"), "Some Face")]);
+        let locales = vec!["zh-Hant".to_string()];
+        assert_eq!(choose_localized(&names, &locales), Some("Some Face"));
+    }
+
+    #[test]
+    fn a_blank_record_does_not_answer_as_the_last_resort() {
+        let names = entries(&[(None, ""), (None, "王漢宗中明體")]);
+        assert_eq!(choose_localized(&names, &[]), Some("王漢宗中明體"));
+    }
+
+    #[test]
+    fn a_face_whose_records_are_all_blank_has_no_name_at_all() {
+        let names = entries(&[(Some("en"), ""), (None, "   ")]);
+        assert_eq!(choose_localized(&names, &[]), None);
     }
 
     #[test]

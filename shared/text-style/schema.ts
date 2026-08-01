@@ -64,7 +64,11 @@ function serializeTextEffect(e: TextEffect): Record<string, unknown> {
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { fontFamily, fontSizePx, direction, color, leadingPercent, effects } = v
-  if (typeof fontFamily !== 'string' || fontFamily.length === 0) fail(`${at}.fontFamily 必須是非空字串`)
+  // Empty is a value: no family has been chosen yet. It is stored rather than
+  // written as some placeholder name because a project file identifies a font
+  // by family, and any name put here would be one a reader could go looking
+  // for. What draws is the same either way — nothing in the catalogue matches.
+  if (typeof fontFamily !== 'string') fail(`${at}.fontFamily 必須是字串`)
   if (typeof fontSizePx !== 'number' || !Number.isFinite(fontSizePx) || fontSizePx <= 0)
     fail(`${at}.fontSizePx 必須是正數`)
   const dir = parseDirection(direction, `${at}.direction`, fail)
@@ -88,8 +92,7 @@ export function parsePartialTextStyle(v: unknown, at: string, fail: Fail): Parti
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const out: Partial<TextStyle> = {}
   if (v.fontFamily !== undefined) {
-    if (typeof v.fontFamily !== 'string' || v.fontFamily.length === 0)
-      fail(`${at}.fontFamily 必須是非空字串`)
+    if (typeof v.fontFamily !== 'string') fail(`${at}.fontFamily 必須是字串`)
     out.fontFamily = v.fontFamily
   }
   if (v.fontSizePx !== undefined) {
