@@ -87,27 +87,18 @@ describe('a text object stands where it was put', () => {
     )
   })
 
-  it('reads a page that names no anchor as measured from the centre', () => {
-    expect(firstText(parseManifest(raw(UPRIGHT))).anchor).toBe('center')
+  /**
+   * Which point of its frame the position names is derived from the object's
+   * alignment now, so a page that still carries the field opens without it.
+   */
+  it('opens a page that names a point of its own, ignoring the field', () => {
+    const parsed = firstText(parseManifest(raw({ ...UPRIGHT, anchor: 'bottom-right' })))
+    expect(parsed).not.toHaveProperty('anchor')
   })
 
-  it('carries a named anchor through', () => {
-    const parsed = parseManifest(raw({ ...UPRIGHT, anchor: 'bottom-right' }))
-    expect(firstText(parsed).anchor).toBe('bottom-right')
-  })
-
-  it('refuses an anchor that is not one of the nine', () => {
-    expect(() => parseManifest(raw({ ...UPRIGHT, anchor: 'middle' }))).toThrow(PageParseError)
-  })
-
-  it('leaves the centre out of the file rather than writing it on every object', () => {
-    const out = serializeManifest(manifestWith({ ...UPRIGHT, anchor: 'center' } as TextLayerEntry))
+  it('writes no such field', () => {
+    const out = serializeManifest(manifestWith(UPRIGHT as TextLayerEntry))
     expect(JSON.parse(out).layers[0]).not.toHaveProperty('anchor')
-  })
-
-  it('round trips an object anchored elsewhere', () => {
-    const out = serializeManifest(manifestWith({ ...UPRIGHT, anchor: 'top-left' } as TextLayerEntry))
-    expect(firstText(parseManifest(out)).anchor).toBe('top-left')
   })
 })
 
@@ -135,7 +126,6 @@ describe('the page the positions are measured against', () => {
     const object = {
       ...UPRIGHT,
       rotation: 0,
-      anchor: 'center',
       opacity: 1,
       blendMode: 'normal',
     } as TextLayerEntry
@@ -258,7 +248,6 @@ describe('parseManifest', () => {
             {
               ...UPRIGHT,
               rotation: 0,
-              anchor: 'center',
               opacity: 1,
               blendMode: 'normal',
             } as TextLayerEntry,
@@ -266,7 +255,6 @@ describe('parseManifest', () => {
               ...UPRIGHT,
               id: 'b',
               rotation: 0,
-              anchor: 'center',
               opacity: 1,
               blendMode: 'normal',
               lines: ['ゴゴゴ'],

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseTextStyle, serializeTextStyle } from './schema'
+import {
+  parsePartialTextStyle,
+  parseTextStyle,
+  serializePartialTextStyle,
+  serializeTextStyle,
+} from './schema'
 import { DEFAULT_TEXT_STYLE } from './types'
 
 const fail = (message: string): never => {
@@ -42,5 +47,40 @@ describe('parseTextStyle', () => {
   it('still refuses a family that is not a string', () => {
     const style = { ...serializeTextStyle(DEFAULT_TEXT_STYLE), fontFamily: 42 }
     expect(() => parseTextStyle(style, 'style', fail)).toThrow()
+  })
+
+  /**
+   * A project written before alignment existed keeps the look it had: every
+   * line began where the text begins, which is what `start` names.
+   */
+  it('reads a style that names no alignment as starting where the text does', () => {
+    const older = serializeTextStyle(DEFAULT_TEXT_STYLE)
+    delete older.align
+    expect(parseTextStyle(older, 'style', fail).align).toBe('start')
+  })
+
+  it('round-trips an alignment', () => {
+    const style = { ...DEFAULT_TEXT_STYLE, align: 'end' as const }
+    expect(parseTextStyle(serializeTextStyle(style), 'style', fail).align).toBe('end')
+  })
+
+  /**
+   * Named after the direction the text runs rather than after a side, so one
+   * value means the same thing set horizontally and vertically.
+   */
+  it('refuses an alignment named after an edge', () => {
+    const style = { ...serializeTextStyle(DEFAULT_TEXT_STYLE), align: 'left' }
+    expect(() => parseTextStyle(style, 'style', fail)).toThrow()
+  })
+})
+
+describe('parsePartialTextStyle', () => {
+  it('carries an alignment an override sets', () => {
+    const partial = serializePartialTextStyle({ align: 'center' })
+    expect(parsePartialTextStyle(partial, 'style', fail)).toEqual({ align: 'center' })
+  })
+
+  it('leaves an alignment an override does not set alone', () => {
+    expect(parsePartialTextStyle({}, 'style', fail)).not.toHaveProperty('align')
   })
 })

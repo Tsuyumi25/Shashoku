@@ -33,7 +33,6 @@ function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
     x: 0,
     y: 0,
     groupId: null,
-    anchor: 'center',
     rotation: 0,
     lines: [id],
   }

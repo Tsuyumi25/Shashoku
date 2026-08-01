@@ -21,7 +21,6 @@ function label(id: string, text = ''): TextLayerEntry {
     x: 200,
     y: 150,
     groupId: null,
-    anchor: 'center',
     rotation: 0,
     lines: linesOf(text),
   }

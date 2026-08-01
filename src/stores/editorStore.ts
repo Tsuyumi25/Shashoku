@@ -517,7 +517,6 @@ export const useEditorStore = defineStore('editor', () => {
       blendMode: 'normal',
       x,
       y,
-      anchor: 'center',
       groupId: activeGroupId.value,
       rotation: 0,
       lines: [''],

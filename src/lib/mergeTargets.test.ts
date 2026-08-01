@@ -43,7 +43,6 @@ function text(id: string): TextLayerEntry {
     x: 0,
     y: 0,
     groupId: null,
-    anchor: 'center',
     rotation: 0,
     lines: [id],
   }

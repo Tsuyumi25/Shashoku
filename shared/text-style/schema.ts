@@ -4,6 +4,7 @@
 import type {
   StrokeEffect,
   StrokePosition,
+  TextAlign,
   TextDirection,
   TextEffect,
   TextStyle,
@@ -18,6 +19,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function parseDirection(v: unknown, at: string, fail: Fail): TextDirection {
   if (v === 'horizontal' || v === 'vertical') return v
   fail(`${at} 必須是 'horizontal' | 'vertical'`)
+}
+
+function parseAlign(v: unknown, at: string, fail: Fail): TextAlign {
+  if (v === 'start' || v === 'center' || v === 'end') return v
+  fail(`${at} 必須是 'start' | 'center' | 'end'`)
 }
 
 function parseStrokePosition(v: unknown, at: string, fail: Fail): StrokePosition {
@@ -63,7 +69,7 @@ function serializeTextEffect(e: TextEffect): Record<string, unknown> {
 
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { fontFamily, fontSizePx, direction, color, leadingPercent, effects } = v
+  const { fontFamily, fontSizePx, direction, align, color, leadingPercent, effects } = v
   // Empty is a value: no family has been chosen yet. It is stored rather than
   // written as some placeholder name because a project file identifies a font
   // by family, and any name put here would be one a reader could go looking
@@ -81,6 +87,7 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     fontFamily,
     fontSizePx,
     direction: dir,
+    align: align === undefined ? 'start' : parseAlign(align, `${at}.align`, fail),
     color,
     leadingPercent,
     effects: parsedEffects,
@@ -101,6 +108,7 @@ export function parsePartialTextStyle(v: unknown, at: string, fail: Fail): Parti
     out.fontSizePx = v.fontSizePx
   }
   if (v.direction !== undefined) out.direction = parseDirection(v.direction, `${at}.direction`, fail)
+  if (v.align !== undefined) out.align = parseAlign(v.align, `${at}.align`, fail)
   if (v.color !== undefined) {
     if (typeof v.color !== 'string' || v.color.length === 0) fail(`${at}.color 必須是非空字串`)
     out.color = v.color
@@ -122,6 +130,7 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
     fontFamily: s.fontFamily,
     fontSizePx: s.fontSizePx,
     direction: s.direction,
+    align: s.align,
     color: s.color,
     leadingPercent: s.leadingPercent,
     effects: s.effects.map(serializeTextEffect),
@@ -134,6 +143,7 @@ export function serializePartialTextStyle(s: Partial<TextStyle>): Record<string,
   if (s.fontFamily !== undefined) out.fontFamily = s.fontFamily
   if (s.fontSizePx !== undefined) out.fontSizePx = s.fontSizePx
   if (s.direction !== undefined) out.direction = s.direction
+  if (s.align !== undefined) out.align = s.align
   if (s.color !== undefined) out.color = s.color
   if (s.leadingPercent !== undefined) out.leadingPercent = s.leadingPercent
   if (s.effects !== undefined) out.effects = s.effects.map(serializeTextEffect)

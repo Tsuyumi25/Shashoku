@@ -27,7 +27,6 @@ function page(): ProjectFile {
           x: 200,
           y: 150,
           groupId: null,
-          anchor: 'center',
           rotation: 0,
           lines: ['ふむ'],
         },

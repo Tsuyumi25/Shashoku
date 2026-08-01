@@ -13,21 +13,6 @@ export const OCR_SCHEMA_VERSION = 1
  */
 export const PASS_THROUGH = 'pass-through'
 
-export const TEXT_ANCHORS = [
-  'top-left',
-  'top-center',
-  'top-right',
-  'center-left',
-  'center',
-  'center-right',
-  'bottom-left',
-  'bottom-center',
-  'bottom-right',
-] as const
-
-export type TextAnchor = (typeof TEXT_ANCHORS)[number]
-
-
 export interface LayerEntryBase {
 
   id: string
@@ -90,22 +75,14 @@ export interface TextLayerEntry extends LayerEntryBase {
    * sees are a rasterization of outlines, so a whole number here would be a
    * property of that output written back onto the input, losing both the
    * precision and the fact that anything was lost.
+   *
+   * Which point of the object's frame this names is not stored: it follows from
+   * the style's alignment, since a block with no frame of its own has nothing
+   * between the edge its lines are aligned to and the edge of the block itself.
    */
   x: number
 
   y: number
-
-  /**
-   * Which point of the object's frame `x` / `y` names. Nine-valued after the
-   * reference point every layout tool offers — InDesign's
-   * `AutoSizingReferenceEnum` is the same set — rather than two-valued, because
-   * the corner cases someone actually asks for are edges and corners alike.
-   *
-   * Only `center` is reachable today: a label's size is an output of the
-   * typesetter, and anchoring it anywhere but the middle would walk the text
-   * out of the bubble it was placed in as it grows.
-   */
-  anchor: TextAnchor
 
   groupId: string | null
 

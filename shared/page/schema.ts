@@ -7,15 +7,9 @@ import type {
   OcrBlockPersisted,
   OcrJson,
   RasterLayerEntry,
-  TextAnchor,
   TextLayerEntry,
 } from './types'
-import {
-  MANIFEST_SCHEMA_VERSION,
-  OCR_SCHEMA_VERSION,
-  PASS_THROUGH,
-  TEXT_ANCHORS,
-} from './types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
 
 
@@ -170,19 +164,11 @@ function parseTextEntry(
     rotation = v.rotation
   }
 
-  let anchor: TextAnchor = 'center'
-  if (v.anchor !== undefined) {
-    if (typeof v.anchor !== 'string' || !(TEXT_ANCHORS as readonly string[]).includes(v.anchor))
-      fail(`${at}.anchor 必須是 ${TEXT_ANCHORS.join(' | ')} 之一`)
-    anchor = v.anchor as TextAnchor
-  }
-
   const entry: TextLayerEntry = {
     kind: 'text',
     ...base,
     x,
     y,
-    anchor,
     groupId: groupId as string | null,
     rotation,
     lines: parsedLines,
@@ -329,7 +315,6 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
     lines: l.lines,
   }
   if (l.rotation) out.rotation = l.rotation
-  if (l.anchor !== 'center') out.anchor = l.anchor
   if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
     out.styleOverride = serializePartialTextStyle(l.styleOverride)
   return out
