@@ -1,7 +1,7 @@
 import type { TextStyle } from '@shared/text-style/types'
 import { catalogByFamily, catalogLoaded } from './fontCatalog'
 import { sampleFor, type Sample } from './fontSampleCache'
-import { labelBoxSize, placeLabel, type Point } from './labelBox'
+import { labelBoxSize, placeLabel, quantizeRotation, type Point } from './labelBox'
 import { engineStrokeFor } from './textStyle'
 
 export interface LabelRaster {
@@ -43,7 +43,12 @@ const NOTHING: LabelRaster = { sample: null, missingFamily: null }
  * no second face is consulted, and the boxes say so rather than impersonating
  * the text (see ADR 0001).
  */
-export function rasterFor(text: string, style: TextStyle, phase: Point = NO_PHASE): LabelRaster {
+export function rasterFor(
+  text: string,
+  style: TextStyle,
+  phase: Point = NO_PHASE,
+  rotation = 0,
+): LabelRaster {
   if (text.length === 0) return NOTHING
 
   const entry = catalogByFamily.value.get(style.fontFamily) ?? null
@@ -58,6 +63,7 @@ export function rasterFor(text: string, style: TextStyle, phase: Point = NO_PHAS
     fillColor: style.color,
     stroke: engineStrokeFor(style),
     vertical: style.direction === 'vertical',
+    rotation,
     phaseX: phase.x,
     phaseY: phase.y,
   }
@@ -108,11 +114,20 @@ export interface DrawnLabel {
    * Null when there is nothing to draw — an empty label, or a catalogue that
    * has not answered yet. The frame still exists in both cases, which is what
    * keeps an empty label reachable instead of invisible.
+   *
+   * Already turned by the object's own angle. Its size is therefore the
+   * rectangle that turn needed, not `box`; draw it at its own dimensions.
    */
   sample: Sample | null
   /** Set when what got drawn is a notdef box rather than the object's text. */
   missingFamily: string | null
+  /**
+   * What the object measures standing upright, which is what the frame is
+   * drawn from — a turned frame is the same rectangle rotated, so grabbing it
+   * still grabs the object rather than the box its turn happens to fill.
+   */
   box: { w: number; h: number }
+  /** Where the bitmap's centre goes, so its corner lands on the page grid. */
   center: Point
 }
 
@@ -124,18 +139,37 @@ export interface DrawnLabel {
  * the canvas shows matching what exports is then a property of there being one
  * answer rather than a hope that two draw sites keep computing the same one.
  *
- * ⚠️ It rasterizes twice on a fresh label and once ever after. The frame is
- * measured from the bitmap and the phase is derived from the frame, so the
- * first pass is the measurement — which is sound because the phase moves the
- * run *inside* a bitmap whose size comes from the font's metrics and does not
- * follow it. Both passes land on the sample cache, and the phase is quantised,
- * so a label costs a handful of entries rather than one per frame of a drag.
+ * ⚠️ It rasterizes up to three times on a fresh label and none ever after, all
+ * of them landing on the sample cache. The passes answer different questions
+ * and cannot be collapsed:
+ *
+ * 1. Upright and unphased — what the object's own size is. The frame measures
+ *    this, so what you grab stays the object rather than the rectangle its
+ *    turn happens to need.
+ * 2. Turned and unphased — how big the bitmap that gets blitted is. The phase
+ *    is derived from that, since that is the thing landing on the grid.
+ * 3. Turned and phased — the bitmap to draw.
+ *
+ * At an angle of zero the first two are the same request, so an upright label
+ * costs exactly what it did before: two entries, and the phase is quantised so
+ * a drag adds a handful rather than one per frame.
  */
-export function drawnLabel(text: string, style: TextStyle, anchor: Point): DrawnLabel {
+export function drawnLabel(
+  text: string,
+  style: TextStyle,
+  anchor: Point,
+  rotation = 0,
+): DrawnLabel {
+  const turn = quantizeRotation(rotation)
+
   const measured = rasterFor(text, style)
   const box = labelBoxSize(style, measured.sample?.image ?? null)
-  const { center, phase } = placeLabel(anchor, box)
+  if (!measured.sample) return { ...measured, box, center: placeLabel(anchor, box, turn).center }
 
-  if (!measured.sample) return { ...measured, box, center }
-  return { ...rasterFor(text, style, phase), box, center }
+  const spun = turn === 0 ? measured : rasterFor(text, style, NO_PHASE, turn)
+  const blit = spun.sample
+    ? { w: spun.sample.image.width, h: spun.sample.image.height }
+    : box
+  const { center, phase } = placeLabel(anchor, blit, turn)
+  return { ...rasterFor(text, style, phase, turn), box, center }
 }

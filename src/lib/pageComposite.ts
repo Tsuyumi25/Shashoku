@@ -110,22 +110,20 @@ function drawTextWith(
   const text = textOf(label)
   if (text.length === 0) return
   const style = resolveTextStyle(label, input.groups, input.defaultStyle)
-  const drawn = drawnLabel(text, style, { x: label.x, y: label.y })
+  const drawn = drawnLabel(text, style, { x: label.x, y: label.y }, label.rotation)
   // A family this machine lacks draws notdef boxes rather than nothing, so the
   // only way to arrive here without a bitmap is a catalogue that never
   // answered. Exporting the page short one label silently would be worse than
   // stopping, since the file would look finished.
   if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${text}」`)
 
-  const { box } = drawn
+  // The engine already turned the outline, so there is nothing left to rotate
+  // here and nothing to resample: the bitmap lands one pixel per pixel.
+  const { width, height } = drawn.sample.image
   ctx.translate(drawn.center.x, drawn.center.y)
-  ctx.rotate(label.rotation)
   ctx.imageSmoothingEnabled = true
-  // The frame is the bitmap's own size, so the ratio is 1 by construction and a
-  // rotation is the only thing left here to resample. Still through the shared
-  // rule, so one bitmap cannot be filtered two ways.
   ctx.imageSmoothingQuality = smoothingQualityFor(1)
-  ctx.drawImage(sampleSource(drawn.sample), -box.w / 2, -box.h / 2, box.w, box.h)
+  ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
 }
 
 /**

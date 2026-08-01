@@ -17,6 +17,13 @@ export interface SampleRequest {
   /** Columns running right to left instead of rows. */
   vertical?: boolean
   /**
+   * The object's own turn, in radians, applied to the outline before any
+   * coverage is computed. Part of the identity of the bitmap, and the reason
+   * the caller has to quantise it: an unrounded angle would rasterize the
+   * whole run on every frame of a rotation.
+   */
+  rotation?: number
+  /**
    * How far into its own pixel the run starts, in bitmap pixels. Part of the
    * identity of the bitmap, so it is part of the key — and why the caller has
    * to round it to something coarse before asking.
@@ -73,6 +80,7 @@ function keyOf(req: SampleRequest): string {
     req.fillColor,
     stroke,
     req.vertical ? 'v' : 'h',
+    req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
     req.text,
   ].join('|')
@@ -111,6 +119,7 @@ function rasterize(req: SampleRequest): Sample {
       req.sizePx,
       padding,
       req.vertical,
+      req.rotation,
       req.fillColor,
       stroke,
       req.phaseX,
@@ -134,6 +143,7 @@ function rasterize(req: SampleRequest): Sample {
         req.text,
         req.sizePx,
         padding,
+        req.rotation,
         req.fillColor,
         stroke,
         req.phaseX,
@@ -144,6 +154,7 @@ function rasterize(req: SampleRequest): Sample {
         req.text,
         req.sizePx,
         padding,
+        req.rotation,
         req.fillColor,
         stroke,
         req.phaseX,

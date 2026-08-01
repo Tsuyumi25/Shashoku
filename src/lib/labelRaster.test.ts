@@ -22,6 +22,7 @@ const NOTDEF_EM = 32
 
 interface DrawCall {
   text: string
+  rotation?: number
   phaseX?: number
   phaseY?: number
 }
@@ -29,21 +30,33 @@ interface DrawCall {
 let calls: DrawCall[] = []
 let notdefCalls: DrawCall[] = []
 
+/**
+ * A quarter turn swaps the sides, as the engine's own does. Anything else is
+ * left alone: these tests are about what gets asked for, not about geometry
+ * the engine already has its own tests for.
+ */
+function turnedBitmap(size: { width: number; height: number }, rotation?: number) {
+  const quarter = Math.abs(Math.round((rotation ?? 0) / (Math.PI / 2))) % 2 === 1
+  return quarter ? { width: size.height, height: size.width } : size
+}
+
 function renderText(
   _font: EngineFontSource,
   text: string,
   _sizePx: number,
   _padding?: number,
+  rotation?: number,
   _fillColor?: string,
   _stroke?: EngineStrokeSpec,
   phaseX?: number,
   phaseY?: number,
 ): EngineBitmap {
-  calls.push({ text, phaseX, phaseY })
+  calls.push({ text, rotation, phaseX, phaseY })
+  const size = turnedBitmap(BITMAP, rotation)
   return {
-    ...BITMAP,
+    ...size,
     baseline: 0,
-    rgba: new Uint8Array(BITMAP.width * BITMAP.height * 4),
+    rgba: new Uint8Array(size.width * size.height * 4),
     clusters: [],
   }
 }
@@ -53,21 +66,25 @@ function renderNotdef(
   _sizePx: number,
   _padding?: number,
   vertical?: boolean,
+  rotation?: number,
   _fillColor?: string,
   _stroke?: EngineStrokeSpec,
   phaseX?: number,
   phaseY?: number,
 ): EngineBitmap {
-  notdefCalls.push({ text, phaseX, phaseY })
+  notdefCalls.push({ text, rotation, phaseX, phaseY })
   const lines = text.split('\n')
   const longest = Math.max(1, ...lines.map((line) => [...line].length))
   const across = vertical ? lines.length : longest
   const down = vertical ? longest : lines.length
+  const size = turnedBitmap(
+    { width: across * NOTDEF_EM, height: down * NOTDEF_EM },
+    rotation,
+  )
   return {
-    width: across * NOTDEF_EM,
-    height: down * NOTDEF_EM,
+    ...size,
     baseline: 0,
-    rgba: new Uint8Array(across * down * NOTDEF_EM * NOTDEF_EM * 4),
+    rgba: new Uint8Array(size.width * size.height * 4),
     clusters: [],
   }
 }
@@ -224,6 +241,68 @@ describe('drawnLabel', () => {
   it('words the two cases differently', () => {
     expect(missingFamilyLabel('')).not.toContain('「')
     expect(missingFamilyLabel('Absent')).toContain('Absent')
+  })
+
+  it("hands the object's angle to the engine rather than turning the bitmap after", () => {
+    const quarter = Math.PI / 2
+    drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, quarter)
+    expect(calls.at(-1)?.rotation).toBeCloseTo(quarter, 9)
+  })
+
+  it('asks upright once, so the frame measures the object and not its turn', () => {
+    const drawn = drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, Math.PI / 2)
+    // BITMAP is 41 x 20; a quarter turn makes the bitmap 20 x 41, but the box
+    // is what the object measures standing up.
+    expect(drawn.box).toEqual({ w: BITMAP.width, h: BITMAP.height })
+    expect(calls.some((call) => (call.rotation ?? 0) === 0)).toBe(true)
+  })
+
+  it('lands the turned bitmap on the grid, not the upright box', () => {
+    const drawn = drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, Math.PI / 2)
+    // The corner that gets blitted is the turned one, so it is that half-width
+    // which has to come out whole.
+    expect(Number.isInteger(drawn.center.x - BITMAP.height / 2)).toBe(true)
+  })
+
+  it('costs an upright label exactly what it did before', () => {
+    const text = uniqueText()
+    drawnLabel(text, styleWith(), { x: 100, y: 60 })
+    // Measure and draw. At zero the turned pass is the same request as the
+    // upright one, so it lands on the cache instead of the engine.
+    expect(calls).toHaveLength(2)
+  })
+
+  describe('the snapped axis follows the turn', () => {
+    /**
+     * Chosen so a quarter-step axis lands on a quarter and a whole-step one
+     * lands on zero, for both the upright 41x20 bitmap and the 20x41 a quarter
+     * turn makes of it. A phase of zero is only evidence of snapping if the
+     * fine step would not have produced one anyway.
+     */
+    const ANCHOR = { x: 100.25, y: 60.25 }
+
+    /** Which axis came back whole, which is the one that got snapped. */
+    function snapped(rotation: number) {
+      drawnLabel(uniqueText(), styleWith(), ANCHOR, rotation)
+      const call = calls.at(-1)
+      return { x: call?.phaseX === 0, y: call?.phaseY === 0 }
+    }
+
+    it('snaps Y upright, where the horizontal strokes lie along a row', () => {
+      expect(snapped(0)).toEqual({ x: false, y: true })
+    })
+
+    it('still snaps Y at a half turn, which leaves them lying along a row', () => {
+      expect(snapped(Math.PI)).toEqual({ x: false, y: true })
+    })
+
+    it('snaps X at a quarter turn, which stands them up into a column', () => {
+      expect(snapped(Math.PI / 2)).toEqual({ x: true, y: false })
+    })
+
+    it('snaps neither off the axes, where the strokes align with nothing', () => {
+      expect(snapped(Math.PI / 4)).toEqual({ x: false, y: false })
+    })
   })
 
   it('draws nothing while the catalogue is still being enumerated', () => {

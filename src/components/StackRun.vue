@@ -99,7 +99,10 @@ const drawnTexts = computed(() => {
   for (const node of props.nodes) {
     if (node.kind !== 'text') continue
     const entry = node.entry
-    out.set(entry.id, drawnLabel(textOf(entry), styleOf(entry), { x: entry.x, y: entry.y }))
+    out.set(
+      entry.id,
+      drawnLabel(textOf(entry), styleOf(entry), { x: entry.x, y: entry.y }, entry.rotation),
+    )
   }
   return out
 })
@@ -189,19 +192,20 @@ function paint() {
 }
 
 /**
- * The same three values the export draws from — centre, box and bitmap — taken
- * from the one function that decides them. Nothing about the corner or the
- * phase is worked out again here; doing so is how the two surfaces would come
- * to disagree by half a pixel.
+ * The centre and the bitmap the export draws from, taken from the one function
+ * that decides them. Nothing about the corner or the phase is worked out again
+ * here; doing so is how two surfaces come to disagree by half a pixel.
+ *
+ * No rotation: the engine turned the outline before rasterizing it, so the
+ * bitmap already stands at the object's angle and lands one pixel per pixel.
  */
 function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
   const drawn = drawnTexts.value.get(entry.id)
   if (!drawn?.sample) return
-  const { box } = drawn
+  const { width, height } = drawn.sample.image
   ctx.save()
   ctx.translate(drawn.center.x, drawn.center.y)
-  ctx.rotate(entry.rotation)
-  ctx.drawImage(sampleSource(drawn.sample), -box.w / 2, -box.h / 2, box.w, box.h)
+  ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
   ctx.restore()
 }
 

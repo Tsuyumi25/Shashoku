@@ -81,6 +81,54 @@ describe('placeLabel', () => {
     expect(phases.size).toBeLessThanOrEqual(4)
   })
 
+  /**
+   * Snapping one axis keeps the strokes that lie along it whole. Which axis
+   * that is was never a property of the page — it was a property of the text
+   * lying flat on it, so it has to follow the object round.
+   */
+  describe('the snapped axis follows the object round', () => {
+    const QUARTER = Math.PI / 2
+    /** Both axes land on a quarter, so a zero is evidence of snapping. */
+    const AT = { x: 100.25, y: 60.25 }
+
+    it('snaps Y upright, where horizontal strokes lie along a row', () => {
+      const p = placeLabel(AT, BOX, 0)
+      expect(p.phase).toEqual({ x: 0.25, y: 0 })
+    })
+
+    it('snaps Y at a half turn, which leaves them lying along a row', () => {
+      const p = placeLabel(AT, BOX, Math.PI)
+      expect(p.phase).toEqual({ x: 0.25, y: 0 })
+    })
+
+    it('snaps X at a quarter turn, which stands them up into a column', () => {
+      const p = placeLabel(AT, BOX, QUARTER)
+      expect(p.phase).toEqual({ x: 0, y: 0.25 })
+    })
+
+    it('snaps X at three quarters too, the column being what matters', () => {
+      const p = placeLabel(AT, BOX, 3 * QUARTER)
+      expect(p.phase).toEqual({ x: 0, y: 0.25 })
+    })
+
+    it('snaps neither off the axes, where the strokes align with nothing', () => {
+      const p = placeLabel(AT, BOX, Math.PI / 4)
+      expect(p.phase).toEqual({ x: 0.25, y: 0.25 })
+    })
+
+    it('reads a negative turn the same way, since an axis has no direction', () => {
+      const p = placeLabel(AT, BOX, -QUARTER)
+      expect(p.phase).toEqual({ x: 0, y: 0.25 })
+    })
+
+    it('does not call a near-miss a right angle', () => {
+      // A degree off is a degree of strokes crossing the grid, which is what
+      // snapping the wrong axis would bake in.
+      const p = placeLabel(AT, BOX, QUARTER - 0.02)
+      expect(p.phase).toEqual({ x: 0.25, y: 0.25 })
+    })
+  })
+
   it('works to the left of the page origin, where flooring and truncating differ', () => {
     const c = corner({ x: -0.3, y: -0.3 })
     expect(Number.isInteger(c.x)).toBe(true)

@@ -50,7 +50,17 @@ export interface EngineStrokeSpec {
   position?: StrokePosition;
 }
 
-/** Where one cluster of the input string landed on a rendered bitmap. */
+/**
+ * Where one cluster of the input string landed, in the unrotated space the
+ * text was laid out in.
+ *
+ * Not bitmap coordinates once an object carries an angle: layout accumulates
+ * these before the outline is turned, so they describe the run standing
+ * upright however the bitmap around them ended up. That is the useful frame —
+ * they answer where a caret goes and which character a click hit, both of
+ * which are questions in the object's own axes — and the caller that supplied
+ * the angle is the one that can turn an answer back.
+ */
 export interface EngineClusterRect {
   /** Byte offset of the cluster's first character in the input string. */
   cluster: number;
@@ -137,12 +147,21 @@ export interface ShashokuEngineApi {
    *
    * The bitmap's size does not follow, so a phase past the blank margin around
    * the run is clipped. Anything under a pixel always fits.
+   *
+   * `rotation` turns the outline before any coverage is computed, in radians,
+   * clockwise as the page's own axes run. Turning a finished bitmap instead
+   * would resample antialiasing that is already baked in, which softens every
+   * stem and cannot be filtered back; done here there is nothing to undo. The
+   * bitmap grows to the rectangle that encloses the turned layout box, so an
+   * angle changes the size that comes back — measure at zero to learn what the
+   * object's own size is.
    */
   renderText(
     font: EngineFontSource,
     text: string,
     sizePx: number,
     padding?: number,
+    rotation?: number,
     fillColor?: string,
     stroke?: EngineStrokeSpec,
     phaseX?: number,
@@ -153,6 +172,7 @@ export interface ShashokuEngineApi {
     text: string,
     sizePx: number,
     padding?: number,
+    rotation?: number,
     fillColor?: string,
     stroke?: EngineStrokeSpec,
     phaseX?: number,
@@ -182,6 +202,7 @@ export interface ShashokuEngineApi {
     sizePx: number,
     padding?: number,
     vertical?: boolean,
+    rotation?: number,
     fillColor?: string,
     stroke?: EngineStrokeSpec,
     phaseX?: number,

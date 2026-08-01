@@ -549,6 +549,56 @@ fn compose(layers: impl Fn(usize) -> (f32, f32), count: usize, fill: Rgba, ink: 
     rgba
 }
 
+/// The extent an axis needs, with the float noise a right angle leaves rounded
+/// off first — `cos(PI/2)` is not zero, and a bare ceiling would turn that into
+/// a whole extra pixel of blank margin.
+fn extent_of(v: f32) -> u32 {
+    ((v * 1024.0).round() / 1024.0).ceil().max(1.0) as u32
+}
+
+/// The run turned by its object's own angle, on a bitmap grown to hold it.
+///
+/// Done here, on the outline, rather than by rotating the finished bitmap: a
+/// rasterized glyph has its antialiasing already baked in, and resampling that
+/// softens every stem with no filter able to bring it back. Coverage computed
+/// from an already-turned outline has none of that to undo.
+///
+/// The size comes from the layout box rather than from the ink, which is what
+/// the upright size already was — so a turn cannot change what the frame is
+/// measuring, only which rectangle encloses it.
+///
+/// `baseline` and `clusters` stay in the unrotated layout space they were
+/// accumulated in. They answer questions about the text — where a caret goes,
+/// which character a click hit — and the caller that turned the object is the
+/// one that can turn those answers back.
+fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
+    if radians == 0.0 {
+        return run;
+    }
+    let (w, h) = (run.width as f32, run.height as f32);
+    let cos = radians.cos().abs();
+    let sin = radians.sin().abs();
+    let width = extent_of(w * cos + h * sin);
+    let height = extent_of(w * sin + h * cos);
+
+    // About the run's own middle, then out to the middle of the bitmap that
+    // now holds it, so the two centres coincide however far the box grew.
+    let turn = Transform::from_translate((width as f32 - w) * 0.5, (height as f32 - h) * 0.5)
+        .pre_concat(Transform::from_rotate_at(
+            radians.to_degrees(),
+            w * 0.5,
+            h * 0.5,
+        ));
+
+    BuiltRun {
+        path: run.path.and_then(|drawn| drawn.transform(turn)),
+        width,
+        height,
+        baseline: run.baseline,
+        clusters: run.clusters,
+    }
+}
+
 fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<TextBitmap, String> {
     let count = run.width as usize * run.height as usize;
 
@@ -602,12 +652,13 @@ pub fn render_text(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    rotation: f32,
     phase: Phase,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
     let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase)?;
-    paint_run(run, fill, stroke)
+    paint_run(spin(run, rotation), fill, stroke)
 }
 
 pub fn render_vertical(
@@ -616,12 +667,13 @@ pub fn render_vertical(
     size_px: f32,
     padding: u32,
     face_index: u32,
+    rotation: f32,
     phase: Phase,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
     let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase)?;
-    paint_run(run, fill, stroke)
+    paint_run(spin(run, rotation), fill, stroke)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -803,15 +855,13 @@ pub fn render_notdef(
     size_px: f32,
     padding: u32,
     vertical: bool,
+    rotation: f32,
     phase: Phase,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    paint_run(
-        build_notdef_path(text, size_px, padding, vertical, phase),
-        fill,
-        stroke,
-    )
+    let run = build_notdef_path(text, size_px, padding, vertical, phase);
+    paint_run(spin(run, rotation), fill, stroke)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -855,6 +905,116 @@ impl<'a> OutlinePen for BaselinePen<'a> {
 }
 
 #[cfg(test)]
+mod spin_tests {
+    use super::*;
+    use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
+    const SIDE: f32 = 64.0;
+    const PAD: u32 = 8;
+    const FILL: Rgba = Rgba(0, 0, 0, 255);
+
+    /// Notdef rather than a real face: its geometry is known exactly and it
+    /// needs no font file, so what is being measured here is only the turn.
+    fn turned(text: &str, radians: f32) -> TextBitmap {
+        render_notdef(text, SIDE, PAD, false, radians, Phase::default(), FILL, None).unwrap()
+    }
+
+    fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
+        bmp.rgba[((y * bmp.width + x) * 4 + 3) as usize]
+    }
+
+    /// The extent of everything carrying ink, which is what a turn moves.
+    fn ink_size(bmp: &TextBitmap) -> (u32, u32) {
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (u32::MAX, 0u32, u32::MAX, 0u32);
+        for y in 0..bmp.height {
+            for x in 0..bmp.width {
+                if alpha_at(bmp, x, y) > 0 {
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                }
+            }
+        }
+        (max_x + 1 - min_x, max_y + 1 - min_y)
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_the_sides_of_the_bitmap() {
+        let upright = turned("ab", 0.0);
+        let spun = turned("ab", FRAC_PI_2);
+        assert_eq!((spun.width, spun.height), (upright.height, upright.width));
+    }
+
+    #[test]
+    fn a_half_turn_leaves_the_bitmap_the_size_it_was() {
+        let upright = turned("ab", 0.0);
+        let spun = turned("ab", PI);
+        assert_eq!((spun.width, spun.height), (upright.width, upright.height));
+    }
+
+    #[test]
+    fn an_angle_off_the_axes_takes_the_rectangle_that_encloses_the_turn() {
+        let upright = turned("ab", 0.0);
+        let spun = turned("ab", FRAC_PI_4);
+        assert!(spun.width > upright.width);
+        assert!(spun.height > upright.height);
+        // Nothing may pass the diagonal, which is as wide as a turn ever gets.
+        let diagonal = ((upright.width * upright.width + upright.height * upright.height) as f32)
+            .sqrt()
+            .ceil() as u32;
+        assert!(spun.width <= diagonal && spun.height <= diagonal);
+    }
+
+    #[test]
+    fn the_ink_turns_with_the_object() {
+        // Two cells side by side are wider than they are tall; standing them
+        // up is exactly what a quarter turn does.
+        let (upright_w, upright_h) = ink_size(&turned("ab", 0.0));
+        let (spun_w, spun_h) = ink_size(&turned("ab", FRAC_PI_2));
+        assert!(upright_w > upright_h);
+        assert!(spun_h > spun_w);
+    }
+
+    #[test]
+    fn the_turn_is_rigid() {
+        // The ink keeps its own measurements; only which axis they run along
+        // has changed. A scale hiding in the transform would show up here.
+        let (upright_w, upright_h) = ink_size(&turned("ab", 0.0));
+        let (spun_w, spun_h) = ink_size(&turned("ab", FRAC_PI_2));
+        assert!(spun_w.abs_diff(upright_h) <= 1, "{spun_w} vs {upright_h}");
+        assert!(spun_h.abs_diff(upright_w) <= 1, "{spun_h} vs {upright_w}");
+    }
+
+    #[test]
+    fn a_turn_does_not_drop_the_ink_off_the_bitmap() {
+        let inked = |bmp: &TextBitmap| {
+            (0..bmp.width as usize * bmp.height as usize)
+                .filter(|i| bmp.rgba[i * 4 + 3] > 0)
+                .count()
+        };
+        // New diagonals antialias differently, so the count moves a little.
+        // Clipping a corner against the bitmap edge would not be a little.
+        let upright = inked(&turned("ab", 0.0));
+        let spun = inked(&turned("ab", FRAC_PI_4));
+        assert!(spun * 2 > upright, "ink collapsed: {upright} -> {spun}");
+    }
+
+    #[test]
+    fn the_clusters_stay_in_the_space_the_text_was_laid_out_in() {
+        // They answer where a caret goes and which character a click hit, in
+        // the object's own axes. Whoever turned the object turns those back.
+        let boxes = |bmp: &TextBitmap| {
+            bmp.clusters
+                .iter()
+                .map(|c| (c.x, c.y, c.width, c.height))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(boxes(&turned("ab", FRAC_PI_2)), boxes(&turned("ab", 0.0)));
+    }
+}
+
+#[cfg(test)]
 mod notdef_tests {
     use super::*;
 
@@ -868,7 +1028,7 @@ mod notdef_tests {
     }
 
     fn notdef(text: &str, vertical: bool) -> TextBitmap {
-        render_notdef(text, SIDE, PAD, vertical, Phase::default(), FILL, None).unwrap()
+        render_notdef(text, SIDE, PAD, vertical, 0.0, Phase::default(), FILL, None).unwrap()
     }
 
     fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1015,7 +1175,7 @@ mod notdef_tests {
         let (_, row) = box_centre(0, 0);
         let square = notdef("字", false);
         let shifted =
-            render_notdef("字", SIDE, PAD, false, Phase { x: 2.0, y: 0.0 }, FILL, None).unwrap();
+            render_notdef("字", SIDE, PAD, false, 0.0, Phase { x: 2.0, y: 0.0 }, FILL, None).unwrap();
 
         // Where the box starts, which is the cell edge plus its side bearing.
         let bearing = ((SIDE - SIDE * NOTDEF_BOX_EM) * 0.5) as u32;
@@ -1027,7 +1187,7 @@ mod notdef_tests {
     #[test]
     fn the_boxes_wear_the_fill_colour_they_were_given() {
         let red = Rgba(255, 0, 0, 255);
-        let bmp = render_notdef("字", SIDE, PAD, false, Phase::default(), red, None).unwrap();
+        let bmp = render_notdef("字", SIDE, PAD, false, 0.0, Phase::default(), red, None).unwrap();
         let (cx, cy) = box_centre(0, 0);
         // On the left rule of the box.
         let at = ((cy * bmp.width + cx - half_box() + 1) * 4) as usize;
@@ -1042,7 +1202,7 @@ mod notdef_tests {
         // Font size is clamped well above this upstream, but a rasterizer that
         // can return a zero-dimension bitmap hands the caller an ImageData that
         // throws on construction.
-        let bmp = render_notdef("字", 0.0, 0, false, Phase::default(), FILL, None).unwrap();
+        let bmp = render_notdef("字", 0.0, 0, false, 0.0, Phase::default(), FILL, None).unwrap();
         assert!(bmp.width >= 1 && bmp.height >= 1);
     }
 }
@@ -1296,7 +1456,7 @@ mod phase_tests {
     }
 
     fn draw(bytes: &[u8], face_index: u32, phase: Phase) -> TextBitmap {
-        render_text(bytes, TEXT, SIZE, PADDING, face_index, phase, BLACK, None).unwrap()
+        render_text(bytes, TEXT, SIZE, PADDING, face_index, 0.0, phase, BLACK, None).unwrap()
     }
 
     fn alpha(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1381,7 +1541,7 @@ mod phase_tests {
     fn a_vertical_run_moves_on_both_axes_too() {
         let Some((bytes, face)) = any_face() else { return };
         let at_rest =
-            render_vertical(&bytes, TEXT, SIZE, PADDING, face, Phase::default(), BLACK, None)
+            render_vertical(&bytes, TEXT, SIZE, PADDING, face, 0.0, Phase::default(), BLACK, None)
                 .unwrap();
         let moved = render_vertical(
             &bytes,
@@ -1389,6 +1549,7 @@ mod phase_tests {
             SIZE,
             PADDING,
             face,
+            0.0,
             Phase { x: 0.25, y: 0.5 },
             BLACK,
             None,
