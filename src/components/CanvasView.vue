@@ -54,7 +54,7 @@
           @select="onSelectObject(layer.entry.id, $event)"
           @drag="placement.moveBy(layer.entry.id, $event, view)"
           @scale="(ratio, pin) => placement.scaleTo(layer.entry.id, ratio, pin)"
-          @rotate="placement.rotateTo(layer.entry.id, $event)"
+          @rotate="(radians, pivot) => placement.rotateTo(layer.entry.id, radians, pivot)"
           @commit="onLayerCommit(layer.entry)"
         />
         <LabelBox
@@ -79,7 +79,7 @@
           @scale-start="beginLabelScale(object.id)"
           @scale="(fontSizePx, at) => scaleLabelTo(object.id, fontSizePx, at)"
           @scale-end="commitLabelScale(object.id)"
-          @rotate="rotateLabelTo(object.id, $event)"
+          @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
           @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
         />
       </div>
@@ -148,6 +148,7 @@ import {
   maskBrushModeOf,
   useEditorStore,
   type ScaledLabel,
+  type TurnedLabel,
 } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -318,12 +319,14 @@ function commitLabelScale(labelId: string) {
   scaledFrom = null
 }
 
-function rotateLabelTo(labelId: string, radians: number) {
+/** Both together, for the same reason a corner drag writes both. */
+function rotateLabelTo(labelId: string, radians: number, at: Anchor) {
   if (!editor.currentFilename || editor.isLayerLocked(labelId)) return
   project.rotateLabel(editor.currentFilename, labelId, radians)
+  project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
 }
 
-function commitLabelRotate(labelId: string, from: number, to: number) {
+function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) {
   if (!editor.currentFilename) return
   editor.cmdRotateLabel(editor.currentFilename, labelId, from, to)
 }

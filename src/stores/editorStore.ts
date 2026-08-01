@@ -34,6 +34,13 @@ export interface ScaledLabel {
   y: number
 }
 
+/** Everything the rotation handle leaves changed about one label. */
+export interface TurnedLabel {
+  rotation: number
+  x: number
+  y: number
+}
+
 /**
  * How far back the stack reaches.
  *
@@ -772,14 +779,29 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  function cmdRotateLabel(filename: string, labelId: string, from: number, to: number) {
-    if (from === to || isLayerLocked(labelId)) return
+  /**
+   * The angle and the position travel together, because a turn around anything
+   * but the object's own middle swings it across the page as well as spinning
+   * it — putting the angle back alone would leave it lying right and standing
+   * somewhere else.
+   */
+  function cmdRotateLabel(
+    filename: string,
+    labelId: string,
+    from: TurnedLabel,
+    to: TurnedLabel,
+  ) {
+    if (JSON.stringify(from) === JSON.stringify(to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
+    const apply = (state: TurnedLabel) => {
+      project.rotateLabel(filename, labelId, state.rotation)
+      project.moveLabel(filename, labelId, state.x, state.y)
+    }
     pushCommand(
       {
         label: `rotate-label ${labelId}`,
-        do: () => project.rotateLabel(filename, labelId, to),
-        undo: () => project.rotateLabel(filename, labelId, from),
+        do: () => apply(to),
+        undo: () => apply(from),
       },
       { alreadyApplied: true },
     )

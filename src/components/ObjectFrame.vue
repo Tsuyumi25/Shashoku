@@ -41,13 +41,28 @@
       >
         <div class="h-2.5 w-2.5 rounded-full border border-primary bg-background" />
       </div>
+
+      <div
+        class="absolute flex cursor-move items-center justify-center"
+        :style="referenceStyle"
+        @pointerdown.stop="onReferenceDown"
+        @pointermove="onReferenceMove"
+        @pointerup="onReferenceUp"
+        @pointercancel="onReferenceUp"
+      >
+        <div class="pointer-events-none absolute h-4 w-px bg-primary" />
+        <div class="pointer-events-none absolute h-px w-4 bg-primary" />
+        <div
+          class="pointer-events-none absolute h-2.5 w-2.5 rounded-full border border-primary bg-background"
+        />
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from 'vue'
-import type { Displacement } from '@/lib/coords'
+import { computed, ref, useTemplateRef, watch } from 'vue'
+import { turnedAround, type Displacement } from '@/lib/coords'
 import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/labelBox'
 
 /**
@@ -106,12 +121,14 @@ const emit = defineEmits<{
   dragEnd: [d: Displacement]
   /**
    * Once a corner drag turns out to be a drag, so the undo entry has a before.
-   * Carries which fractional point of the frame the drag is pinning — the
-   * handle across from the one taken hold of.
+   * Carries which fractional point of the frame the drag is pinning: the handle
+   * across from the one taken hold of, or the reference point under Alt.
    */
   scaleStart: [pin: Point]
   scale: [ratio: number]
   scaleEnd: []
+  /** Likewise, carrying the fractional point the turn is going round. */
+  rotateStart: [pivot: Point]
   rotate: [radians: number]
   rotateEnd: [from: number, to: number]
 }>()
@@ -222,16 +239,109 @@ function centerOnScreen(): Point {
  */
 function pointOnScreen(ratio: Point): Point {
   const c = centerOnScreen()
-  const dx = (ratio.x - 0.5) * props.box.width
-  const dy = (ratio.y - 0.5) * props.box.height
-  const cos = Math.cos(turn.value)
-  const sin = Math.sin(turn.value)
-  return { x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos }
+  const out = turnedAround(
+    ORIGIN,
+    { x: (ratio.x - 0.5) * props.box.width, y: (ratio.y - 0.5) * props.box.height },
+    turn.value,
+  )
+  return { x: c.x + out.x, y: c.y + out.y }
+}
+
+/** A screen movement as a fraction of the frame, in the frame's own axes. */
+function screenDeltaToFrame(dx: number, dy: number): Point {
+  if (props.box.width <= 0 || props.box.height <= 0) return ORIGIN
+  const d = turnedAround(ORIGIN, { x: dx, y: dy }, -turn.value)
+  return { x: d.x / props.box.width, y: d.y / props.box.height }
 }
 
 /** The handle across the frame from this one, which a drag on it pins. */
 function opposite(corner: Corner): Point {
   return { x: 1 - corner.kx, y: 1 - corner.ky }
+}
+
+const MIDDLE: Point = { x: 0.5, y: 0.5 }
+const ORIGIN: Point = { x: 0, y: 0 }
+
+/**
+ * The point transforms go around, as a fraction of the frame.
+ *
+ * A tool's state and not the object's: it is never stored, and it comes back to
+ * the middle whenever this frame becomes the one being worked on — which is
+ * what stops a reference point set for one edit from silently governing the
+ * next. Free to sit outside the frame, since a turn around something off to one
+ * side is a thing people ask for.
+ */
+const reference = ref<Point>(MIDDLE)
+
+watch(
+  () => props.selected,
+  (now) => {
+    if (now) reference.value = MIDDLE
+  },
+)
+
+/** Its own snap targets: the four corners, the four edge midpoints, the middle. */
+const REFERENCE_POINTS: Point[] = [0, 0.5, 1].flatMap((y) =>
+  [0, 0.5, 1].map((x) => ({ x, y })),
+)
+
+/** How close to one of them counts as on it, in screen pixels. */
+const REFERENCE_SNAP_PX = 8
+
+/** Transparent margin around the crosshair, so a 10px target is not a 10px target. */
+const REFERENCE_HIT_PX = 20
+
+/**
+ * Snapped on both axes at once rather than one at a time: what the frame offers
+ * is nine points, and an axis-by-axis snap would also hold a crosshair against
+ * an edge it was only passing.
+ */
+function snapReference(at: Point): Point {
+  const near = REFERENCE_POINTS.find(
+    (p) =>
+      Math.hypot((at.x - p.x) * props.box.width, (at.y - p.y) * props.box.height) <=
+      REFERENCE_SNAP_PX,
+  )
+  return near ?? at
+}
+
+/**
+ * Placed in the frame's own axes so it rides with the object, then turned back
+ * upright in place — a crosshair lying on its side reads as a shape rather than
+ * as a mark on a point.
+ */
+const referenceStyle = computed(() => ({
+  left: `${reference.value.x * 100}%`,
+  top: `${reference.value.y * 100}%`,
+  width: `${REFERENCE_HIT_PX}px`,
+  height: `${REFERENCE_HIT_PX}px`,
+  transform: `translate(-50%, -50%) rotate(${-turn.value}rad)`,
+}))
+
+const moveReference = { from: { x: 0, y: 0 }, at: MIDDLE }
+let movingReference = false
+
+function onReferenceDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  capture(e)
+  movingReference = true
+  moveReference.from = { x: e.clientX, y: e.clientY }
+  moveReference.at = reference.value
+}
+
+function onReferenceMove(e: PointerEvent) {
+  if (!movingReference) return
+  const d = screenDeltaToFrame(e.clientX - moveReference.from.x, e.clientY - moveReference.from.y)
+  reference.value = snapReference({
+    x: moveReference.at.x + d.x,
+    y: moveReference.at.y + d.y,
+  })
+}
+
+function onReferenceUp(e: PointerEvent) {
+  if (!movingReference) return
+  release(e)
+  movingReference = false
 }
 
 function capture(e: PointerEvent) {
@@ -297,7 +407,12 @@ function onUp(e: PointerEvent) {
  * a corner would otherwise pin a label's own font size at whatever it was
  * inheriting, silently cutting it off from the group it follows.
  */
-const scale = { pin: { x: 0, y: 0 }, pivot: { x: 0, y: 0 }, from: { x: 0, y: 0 } }
+const scale = {
+  corner: CORNERS[0],
+  pin: { x: 0, y: 0 },
+  pivot: { x: 0, y: 0 },
+  from: { x: 0, y: 0 },
+}
 let scaling = false
 let scaleEngaged = false
 
@@ -306,18 +421,24 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
   capture(e)
   scaling = true
   scaleEngaged = false
-  scale.pin = opposite(corner)
-  scale.pivot = pointOnScreen(scale.pin)
+  scale.corner = corner
   scale.from = { x: e.clientX, y: e.clientY }
   emit('select', false)
 }
 
+/**
+ * Alt is read once, where the gesture settles on what it is holding still.
+ * Reading it every frame would swap the pin under a drag already in progress
+ * and jump the object across the page.
+ */
 function onScaleMove(e: PointerEvent) {
   if (!scaling) return
   const to = { x: e.clientX, y: e.clientY }
   if (!scaleEngaged) {
     if (!travelled(e, scale.from)) return
     scaleEngaged = true
+    scale.pin = e.altKey ? reference.value : opposite(scale.corner)
+    scale.pivot = pointOnScreen(scale.pin)
     emit('scaleStart', scale.pin)
   }
   emit('scale', uniformScaleRatio(scale.pivot, scale.from, to))
@@ -335,6 +456,7 @@ function onScaleUp(e: PointerEvent) {
 const ROTATE_SNAP = Math.PI / 12
 
 const spin = {
+  /** The reference point on screen, which is what the turn goes round. */
   center: { x: 0, y: 0 },
   from: { x: 0, y: 0 },
   lastAngle: 0,
@@ -352,7 +474,7 @@ function onRotateDown(e: PointerEvent) {
   capture(e)
   spinning = true
   spinEngaged = false
-  spin.center = centerOnScreen()
+  spin.center = pointOnScreen(reference.value)
   spin.from = { x: e.clientX, y: e.clientY }
   spin.lastAngle = angleAround(spin.center, spin.from)
   spin.start = props.rotation
@@ -366,6 +488,7 @@ function onRotateMove(e: PointerEvent) {
   if (!spinEngaged) {
     if (!travelled(e, spin.from)) return
     spinEngaged = true
+    emit('rotateStart', reference.value)
   }
   const now = angleAround(spin.center, { x: e.clientX, y: e.clientY })
   // Accumulated rather than measured against the start, so a turn can pass half

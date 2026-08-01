@@ -161,6 +161,28 @@ export function centeredBoxOnScreen(
 }
 
 /**
+ * A point turned about another, clockwise as the page's own axes run — which is
+ * the direction an object's stored angle means, since Y grows downward.
+ *
+ * The one place the turn is written out. Everything below and every gesture
+ * that swings an object around something goes through here, so a sign cannot
+ * come out one way on the canvas and the other on export.
+ */
+export function turnedAround(
+  pivot: { x: number; y: number },
+  p: { x: number; y: number },
+  radians: number,
+): Anchor {
+  const dx = p.x - pivot.x
+  const dy = p.y - pivot.y
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  return { x: pivot.x + dx * cos - dy * sin, y: pivot.y + dx * sin + dy * cos }
+}
+
+const NOWHERE = { x: 0, y: 0 }
+
+/**
  * The page-axis vector between two fractional points of an upright frame.
  *
  * Turned with the object rather than measured in the page's axes, so a frame
@@ -172,11 +194,11 @@ function frameOffset(
   to: { x: number; y: number },
   rotation: number,
 ): Anchor {
-  const dx = box.w * (to.x - from.x)
-  const dy = box.h * (to.y - from.y)
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
-  return { x: dx * cos - dy * sin, y: dx * sin + dy * cos }
+  return turnedAround(
+    NOWHERE,
+    { x: box.w * (to.x - from.x), y: box.h * (to.y - from.y) },
+    rotation,
+  )
 }
 
 /** Where a fractional point of the object's frame lands on the page. */

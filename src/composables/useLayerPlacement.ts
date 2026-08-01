@@ -6,6 +6,7 @@ import {
   clamp,
   framePoint,
   positionHolding,
+  turnedAround,
   screenDeltaToContentPx,
   type Displacement,
   type ViewTransform,
@@ -94,7 +95,18 @@ export function useLayerPlacement() {
     set(id, { scale, dx: moved.x - center.x, dy: moved.y - center.y })
   }
 
-  const rotateTo = (id: string, rotation: number) => set(id, { rotation })
+  /**
+   * The placement turns about the frame's own middle, so a turn around anything
+   * else is that turn plus the displacement it leaves the middle at.
+   */
+  function rotateTo(id: string, rotation: number, pivot: { x: number; y: number }): void {
+    const entry = project.entryById(id)
+    if (entry === undefined || entry.kind !== 'raster') return
+    const center = frameCenter(entry)
+    const around = framePoint(center, { w: entry.w, h: entry.h }, MIDDLE, pivot)
+    const moved = turnedAround(around, center, rotation)
+    set(id, { rotation, dx: moved.x - center.x, dy: moved.y - center.y })
+  }
 
   /**
    * Dropped only once the entry has caught up. Clearing it the moment the

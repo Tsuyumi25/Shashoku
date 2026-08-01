@@ -13,7 +13,8 @@
     @scale-start="onScaleStart"
     @scale="onScale"
     @scale-end="emit('commit')"
-    @rotate="emit('rotate', $event)"
+    @rotate-start="onRotateStart"
+    @rotate="onRotate"
     @rotate-end="emit('commit')"
   />
 </template>
@@ -52,13 +53,15 @@ const emit = defineEmits<{
   drag: [d: Displacement]
   /** The ratio, and which fractional point of the frame the drag is pinning. */
   scale: [ratio: number, pin: { x: number; y: number }]
-  rotate: [radians: number]
+  /** The angle, and which fractional point of the frame the turn goes round. */
+  rotate: [radians: number, pivot: { x: number; y: number }]
   /** Whichever gesture it was has been let go, and now owes the pixels a pass. */
   commit: []
 }>()
 
-/** Which point of the frame the corner drag is holding still. */
+/** Which point of the frame the gesture in progress is working around. */
 let scalePin = { x: 0.5, y: 0.5 }
+let spinPivot = { x: 0.5, y: 0.5 }
 
 function onScaleStart(pin: { x: number; y: number }) {
   scalePin = pin
@@ -66,6 +69,14 @@ function onScaleStart(pin: { x: number; y: number }) {
 
 function onScale(ratio: number) {
   emit('scale', ratio, scalePin)
+}
+
+function onRotateStart(pivot: { x: number; y: number }) {
+  spinPivot = pivot
+}
+
+function onRotate(radians: number) {
+  emit('rotate', radians, spinPivot)
 }
 
 /**

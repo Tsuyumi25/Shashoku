@@ -448,11 +448,14 @@ describe('revealLabel', () => {
 })
 
 describe('cmdRotateLabel', () => {
+  /** Where `label('a')` stands, so a turn can be said to have moved it. */
+  const PUT = { x: 200, y: 150 }
+
   it('takes the object back to how it was lying', () => {
     const { project, editor } = openOnePage([label('a')])
     // A rotate drag writes through and only records on release, as a move does.
     project.rotateLabel(PAGE, 'a', 0.5)
-    editor.cmdRotateLabel(PAGE, 'a', 0, 0.5)
+    editor.cmdRotateLabel(PAGE, 'a', { rotation: 0, ...PUT }, { rotation: 0.5, ...PUT })
     expect(labelsOf(project)[0].rotation).toBe(0.5)
 
     editor.undo()
@@ -462,9 +465,25 @@ describe('cmdRotateLabel', () => {
     expect(labelsOf(project)[0].rotation).toBe(0.5)
   })
 
+  /**
+   * A turn around anything but the object's own middle swings it across the
+   * page, so the position is part of what a turn is and goes back with it.
+   */
+  it('puts the position back with the angle', () => {
+    const { project, editor } = openOnePage([label('a')])
+    project.rotateLabel(PAGE, 'a', 0.5)
+    project.moveLabel(PAGE, 'a', 260, 190)
+    editor.cmdRotateLabel(PAGE, 'a', { rotation: 0, ...PUT }, { rotation: 0.5, x: 260, y: 190 })
+
+    editor.undo()
+    const back = labelsOf(project)[0]
+    expect([back.x, back.y]).toEqual([PUT.x, PUT.y])
+  })
+
   it('keeps a turn that ended where it started out of the stack', () => {
     const { editor } = openOnePage([label('a')])
-    editor.cmdRotateLabel(PAGE, 'a', 0.25, 0.25)
+    const lying = { rotation: 0.25, ...PUT }
+    editor.cmdRotateLabel(PAGE, 'a', lying, { ...lying })
     expect(editor.canUndo).toBe(false)
   })
 })
@@ -642,7 +661,12 @@ describe('layer tree edits', () => {
       lock(project, 'a')
 
       editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 40, y: 30 })
-      editor.cmdRotateLabel(PAGE, 'a', 0, 1)
+      editor.cmdRotateLabel(
+        PAGE,
+        'a',
+        { rotation: 0, x: 200, y: 150 },
+        { rotation: 1, x: 200, y: 150 },
+      )
       editor.cmdScaleLabel(
         PAGE,
         'a',

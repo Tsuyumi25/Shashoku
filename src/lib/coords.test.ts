@@ -8,6 +8,7 @@ import {
   screenToContentPx,
   screenToPagePx,
   smoothingQualityFor,
+  turnedAround,
   type ViewTransform,
 } from './coords'
 
@@ -132,6 +133,26 @@ describe('centeredBoxOnScreen', () => {
     expect(box.centerY).toBeCloseTo(30, 6)
     expect(box.width).toBe(24)
     expect(box.height).toBe(12)
+  })
+})
+
+describe('turnedAround', () => {
+  const PIVOT = { x: 100, y: 100 }
+
+  it('leaves the pivot itself alone', () => {
+    expect(turnedAround(PIVOT, PIVOT, 1.3)).toEqual(PIVOT)
+  })
+
+  /** Clockwise as the page's axes run, Y growing downward. */
+  it('takes a quarter turn from pointing right to pointing down', () => {
+    const p = turnedAround(PIVOT, { x: 140, y: 100 }, Math.PI / 2)
+    expect(p.x).toBeCloseTo(100, 9)
+    expect(p.y).toBeCloseTo(140, 9)
+  })
+
+  it('keeps the distance it started at', () => {
+    const p = turnedAround(PIVOT, { x: 130, y: 140 }, 0.7)
+    expect(Math.hypot(p.x - PIVOT.x, p.y - PIVOT.y)).toBeCloseTo(50, 9)
   })
 })
 

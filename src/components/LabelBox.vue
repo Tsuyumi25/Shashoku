@@ -15,8 +15,9 @@
     @scale-start="onScaleStart"
     @scale="onScale"
     @scale-end="emit('scaleEnd')"
-    @rotate="emit('rotate', $event)"
-    @rotate-end="(from, to) => emit('rotateEnd', from, to)"
+    @rotate-start="onRotateStart"
+    @rotate="onRotate"
+    @rotate-end="onRotateEnd"
   >
     <template #default="{ counterTurn }">
       <div
@@ -39,10 +40,12 @@ import {
   framePoint,
   positionHolding,
   screenDeltaToContentPx,
+  turnedAround,
   type Anchor,
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
+import type { TurnedLabel } from '@/stores/editorStore'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 
@@ -86,8 +89,8 @@ const emit = defineEmits<{
   scaleStart: []
   scale: [fontSizePx: number, at: Anchor]
   scaleEnd: []
-  rotate: [radians: number]
-  rotateEnd: [from: number, to: number]
+  rotate: [radians: number, at: Anchor]
+  rotateEnd: [from: TurnedLabel, to: TurnedLabel]
 }>()
 
 // Turned, because where the frame's middle sits follows the object round once
@@ -190,6 +193,41 @@ function onScale(ratio: number) {
     fontSizePx,
     positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation),
   )
+}
+
+/**
+ * Where the object was lying and standing before the turn, and the page point
+ * the turn goes round.
+ *
+ * A turn about anything but the object's own middle moves it as well as
+ * spinning it, so the position has to travel with the angle — and the pivot is
+ * taken once, because reading it back from a frame that is already turning
+ * would chase its own tail.
+ */
+let spinFrom: TurnedLabel = { rotation: 0, x: 0, y: 0 }
+let spinTo: TurnedLabel = spinFrom
+let spinPivot: Anchor = { x: 0, y: 0 }
+
+function onRotateStart(pivot: Point) {
+  spinFrom = { rotation: props.rotation, x: props.x, y: props.y }
+  spinTo = spinFrom
+  spinPivot = framePoint(
+    { x: props.x, y: props.y },
+    drawn.value.box,
+    layoutOrigin(props.textStyle),
+    pivot,
+    props.rotation,
+  )
+}
+
+function onRotate(radians: number) {
+  const at = turnedAround(spinPivot, spinFrom, radians - spinFrom.rotation)
+  spinTo = { rotation: radians, x: at.x, y: at.y }
+  emit('rotate', radians, at)
+}
+
+function onRotateEnd() {
+  emit('rotateEnd', spinFrom, spinTo)
 }
 
 /**
