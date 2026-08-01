@@ -22,14 +22,14 @@ function raster(id: string, blendMode = 'normal', opacity = 1): StackNode {
   return { kind: 'raster', entry, opacity, blendMode }
 }
 
-function text(id: string): StackNode {
+function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
   const entry: TextLayerEntry = {
     kind: 'text',
     id,
     visible: true,
     locked: false,
-    opacity: 1,
-    blendMode: 'normal',
+    opacity,
+    blendMode,
     x: 0,
     y: 0,
     groupId: null,
@@ -37,7 +37,7 @@ function text(id: string): StackNode {
     rotation: 0,
     lines: [id],
   }
-  return { kind: 'text', entry, opacity: 1, blendMode: 'normal' }
+  return { kind: 'text', entry, opacity, blendMode }
 }
 
 describe('stackSegments', () => {
@@ -52,7 +52,7 @@ describe('stackSegments', () => {
   it('gathers neighbouring plain rasters onto one canvas', () => {
     const segments = stackSegments([raster('a'), raster('b'), raster('c')])
     expect(segments).toHaveLength(1)
-    expect(segments[0].kind === 'rasters' && segments[0].nodes.map((n) => n.entry.id)).toEqual([
+    expect(segments[0].kind === 'run' && segments[0].nodes.map((n) => n.entry.id)).toEqual([
       'a',
       'b',
       'c',
@@ -71,9 +71,9 @@ describe('stackSegments', () => {
    */
   it('gives a raster that blends a canvas of its own', () => {
     const segments = stackSegments([raster('a'), raster('b', 'multiply'), raster('c')])
-    expect(segments.map((s) => s.kind)).toEqual(['rasters', 'rasters', 'rasters'])
+    expect(segments.map((s) => s.kind)).toEqual(['run', 'run', 'run'])
     expect(segments.map((s) => s.blendMode)).toEqual(['normal', 'multiply', 'normal'])
-    expect(segments[1].kind === 'rasters' && segments[1].nodes).toHaveLength(1)
+    expect(segments[1].kind === 'run' && segments[1].nodes).toHaveLength(1)
   })
 
   it('does not gather two rasters that blend the same way', () => {
@@ -81,13 +81,40 @@ describe('stackSegments', () => {
     expect(segments).toHaveLength(2)
   })
 
-  it('breaks a run where a text object comes between', () => {
+  /**
+   * What drives the element count is the blend mode, not what kind of object
+   * it is: a shared canvas has no page in it, so only something that reads the
+   * backdrop needs an element CSS can blend. Text has no such need, and giving
+   * it one anyway cost a viewport-sized canvas per label.
+   */
+  it('gathers text into the run alongside the rasters around it', () => {
     const segments = stackSegments([raster('a'), text('t'), raster('b')])
-    expect(segments.map((s) => s.kind)).toEqual(['rasters', 'text', 'rasters'])
+    expect(segments).toHaveLength(1)
+    expect(segments[0].kind === 'run' && segments[0].nodes.map((n) => n.entry.id)).toEqual([
+      'a',
+      't',
+      'b',
+    ])
+  })
+
+  it('gives text that blends an element of its own, exactly as a raster gets one', () => {
+    const segments = stackSegments([raster('a'), text('t', 'multiply'), raster('b')])
+    expect(segments.map((s) => s.kind)).toEqual(['run', 'run', 'run'])
+    expect(segments.map((s) => s.blendMode)).toEqual(['normal', 'multiply', 'normal'])
+  })
+
+  it('keeps a fading text object in the run, since its opacity is drawn in', () => {
+    const segments = stackSegments([raster('a'), text('t', 'normal', 0.5)])
+    expect(segments).toHaveLength(1)
+  })
+
+  it('gathers text with text', () => {
+    const segments = stackSegments([text('s'), text('t')])
+    expect(segments).toHaveLength(1)
   })
 
   it('names each segment by its first entry, so the panel can key on it', () => {
-    const segments = stackSegments([raster('a'), raster('b'), text('t')])
+    const segments = stackSegments([raster('a'), raster('b'), text('t', 'multiply')])
     expect(segments.map((s) => s.key)).toEqual(['a', 't'])
   })
 
@@ -99,21 +126,21 @@ describe('stackSegments', () => {
      */
     it('gives the held layer an element of its own', () => {
       const segments = stackSegments([raster('a'), raster('b'), raster('c')], 'b')
-      expect(segments.map((s) => s.kind)).toEqual(['rasters', 'rasters', 'rasters'])
+      expect(segments.map((s) => s.kind)).toEqual(['run', 'run', 'run'])
       expect(segments.map((s) => s.key)).toEqual(['a', 'b', 'c'])
-      expect(segments[1].kind === 'rasters' && segments[1].nodes).toHaveLength(1)
+      expect(segments[1].kind === 'run' && segments[1].nodes).toHaveLength(1)
     })
 
     it("closes the run behind it, so what follows does not join the held layer", () => {
       const segments = stackSegments([raster('a'), raster('b')], 'a')
       expect(segments).toHaveLength(2)
-      expect(segments[0].kind === 'rasters' && segments[0].nodes).toHaveLength(1)
+      expect(segments[0].kind === 'run' && segments[0].nodes).toHaveLength(1)
     })
 
     it('leaves the rest of the page gathered as it was', () => {
       const segments = stackSegments([raster('a'), raster('b'), raster('c'), raster('d')], 'a')
       expect(segments).toHaveLength(2)
-      expect(segments[1].kind === 'rasters' && segments[1].nodes.map((n) => n.entry.id)).toEqual([
+      expect(segments[1].kind === 'run' && segments[1].nodes.map((n) => n.entry.id)).toEqual([
         'b',
         'c',
         'd',

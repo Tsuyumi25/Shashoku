@@ -3,26 +3,42 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
-import type { RasterStackNode } from '@shared/page/stack'
+import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
+import type { StyleGroup } from '@shared/project/types'
+import type { TextLayerEntry } from '@shared/page/types'
+import type { TextStyle } from '@shared/text-style/types'
+import { textOf } from '@shared/page/text'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
+import { sampleSource } from '@/lib/fontSampleCache'
+import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
+import type { RasterStackNode } from '@shared/page/stack'
+import type { RunStackNode } from '@/lib/stackSegments'
+import { resolveTextStyle } from '@/lib/textStyle'
 
 /**
- * A run of raster layers on one canvas, drawn in page coordinates under the
- * view's own transform — the same path the raw page underneath takes, so the
- * two cannot come out at different scales or drift apart when the view turns.
+ * A run of the page's objects on one canvas, drawn in page coordinates under
+ * the view's own transform — the same path the raw page underneath takes, so
+ * the two cannot come out at different scales or drift apart when the view
+ * turns.
  *
  * Sharing a canvas is what makes this affordable. One viewport-sized backing
- * store at a retina scale is tens of megabytes, and a page erased one region at
- * a time carries twenty layers; `stackSegments` decides which of them may share.
+ * store at a retina scale is tens of megabytes; `stackSegments` decides which
+ * objects may share, and everything that blends normally does.
+ *
+ * Rasters and text differ here only in where the bitmap comes from and who
+ * closes it. Everything after that — placement, alpha, filtering — is the same
+ * for both, which is the point: two draw paths would be two answers to what
+ * this page looks like.
  */
 const props = defineProps<{
-  nodes: readonly RasterStackNode[]
+  nodes: readonly RunStackNode[]
   /** Where this page's layer files live. */
   layersDir: string
   container: { w: number; h: number }
   view: ViewTransform
+  groups: readonly StyleGroup[]
+  defaultStyle: TextStyle
   /**
    * A gesture in progress, in page units and deliberately fractional — this is
    * the preview, and the layer's own whole-pixel frame is left alone until the
@@ -45,6 +61,10 @@ const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
  * unmounts every run on it, which is the whole of the eviction policy: a
  * decoded layer costs its frame in bytes, and holding a chapter's worth would
  * be the full-page-buffer bill the layer frame exists to avoid.
+ *
+ * Text needs none of this. Its bitmaps come from the sample cache, which is
+ * keyed on what was asked for rather than on who asked, and nothing here owns
+ * them.
  */
 const bitmaps = shallowRef<Map<string, ImageBitmap>>(new Map())
 
@@ -53,16 +73,42 @@ function releaseAll() {
   bitmaps.value = new Map()
 }
 
+function isRaster(node: RunStackNode): node is RasterStackNode {
+  return node.kind === 'raster'
+}
+
 /** A layer with no frame yet has nothing to draw and no file worth reading. */
 function drawable(node: RasterStackNode): boolean {
   return node.entry.w > 0 && node.entry.h > 0
 }
 
+function styleOf(entry: TextLayerEntry): TextStyle {
+  return resolveTextStyle(entry, props.groups, props.defaultStyle)
+}
+
+/**
+ * Every text object in this run, already typeset.
+ *
+ * A computed rather than work done inside `paint`, because `drawnLabel` reads
+ * the font catalogue — module state that is reactive. Called from a plain
+ * function nothing would track it, and the page would stay blank until some
+ * unrelated change happened to repaint it after the catalogue finished loading.
+ */
+const drawnTexts = computed(() => {
+  const out = new Map<string, DrawnLabel>()
+  for (const node of props.nodes) {
+    if (node.kind !== 'text') continue
+    const entry = node.entry
+    out.set(entry.id, drawnLabel(textOf(entry), styleOf(entry), { x: entry.x, y: entry.y }))
+  }
+  return out
+})
+
 let loadToken = 0
 
 async function loadBitmaps() {
   const token = ++loadToken
-  const wanted = [...new Set(props.nodes.filter(drawable).map((n) => n.entry.file))]
+  const wanted = [...new Set(props.nodes.filter(isRaster).filter(drawable).map((n) => n.entry.file))]
   const next = new Map<string, ImageBitmap>()
   /** Only what this run decoded — what it reused is still owned by `bitmaps`. */
   const fresh: ImageBitmap[] = []
@@ -116,12 +162,17 @@ function paint() {
   applyViewTransform(ctx, props.view, dpr)
 
   for (const node of props.nodes) {
-    const bitmap = bitmaps.value.get(node.entry.file)
-    if (!bitmap || !drawable(node)) continue
-    // Only a run of normally-blending layers shares a canvas, so drawing each
+    // Only a run of normally-blending objects shares a canvas, so drawing each
     // at its own alpha over the last is the same picture CSS would make of
     // them one at a time.
     ctx.globalAlpha = node.opacity
+    if (node.kind === 'text') {
+      drawText(ctx, node.entry)
+      continue
+    }
+    if (!drawable(node)) continue
+    const bitmap = bitmaps.value.get(node.entry.file)
+    if (!bitmap) continue
     const { x, y, w: fw, h: fh } = node.entry
     if (props.place) {
       // Around the layer's own middle, and undone afterwards so a preview can
@@ -137,6 +188,23 @@ function paint() {
   ctx.globalAlpha = 1
 }
 
+/**
+ * The same three values the export draws from — centre, box and bitmap — taken
+ * from the one function that decides them. Nothing about the corner or the
+ * phase is worked out again here; doing so is how the two surfaces would come
+ * to disagree by half a pixel.
+ */
+function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
+  const drawn = drawnTexts.value.get(entry.id)
+  if (!drawn?.sample) return
+  const { box } = drawn
+  ctx.save()
+  ctx.translate(drawn.center.x, drawn.center.y)
+  ctx.rotate(entry.rotation)
+  ctx.drawImage(sampleSource(drawn.sample), -box.w / 2, -box.h / 2, box.w, box.h)
+  ctx.restore()
+}
+
 let scheduled = false
 function schedulePaint() {
   if (scheduled) return
@@ -148,23 +216,30 @@ function schedulePaint() {
 }
 
 watch(
-  () => [props.layersDir, props.nodes.map((n) => n.entry.file).join(' ')] as const,
+  () => [props.layersDir, props.nodes.filter(isRaster).map((n) => n.entry.file).join(' ')] as const,
   loadBitmaps,
   { immediate: true },
 )
 
 /**
- * Everything this canvas draws with, read field by field so each one is
- * tracked. `pageStack` never looks at a frame, so a layer moved or grown hands
- * back the very same node and nothing above here would say it had changed.
+ * Everything a raster draws with, read field by field so each one is tracked.
+ * `pageStack` never looks at a frame, so a layer moved or grown hands back the
+ * very same node and nothing above here would say it had changed.
  */
 watch(
   () =>
     props.nodes
-      .map((n) => `${n.entry.x},${n.entry.y},${n.entry.w},${n.entry.h},${n.opacity}`)
+      .map((node) =>
+        node.kind === 'raster'
+          ? `${node.entry.x},${node.entry.y},${node.entry.w},${node.entry.h},${node.opacity}`
+          : `t${node.entry.id},${node.entry.rotation},${node.opacity}`,
+      )
       .join('|'),
   schedulePaint,
 )
+
+/** Typeset text already tracks its own inputs; this is only the repaint. */
+watch(drawnTexts, schedulePaint)
 
 watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 
