@@ -63,6 +63,7 @@ export function rasterFor(
     fillColor: style.color,
     stroke: engineStrokeFor(style),
     vertical: style.direction === 'vertical',
+    align: style.align,
     rotation,
     phaseX: phase.x,
     phaseY: phase.y,

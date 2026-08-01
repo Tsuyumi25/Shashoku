@@ -47,12 +47,56 @@ const engineApi: ShashokuEngineApi = {
   version: () => engine.engineVersion(),
   listFonts: (dirs, locales) => engine.listFonts(dirs, locales),
   uncoveredClusters: (font, text) => engine.uncoveredClusters(font, text),
-  renderText: (font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY) =>
-    engine.renderText(font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY),
-  renderVertical: (font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY) =>
-    engine.renderVertical(font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY),
-  renderNotdef: (text, sizePx, padding, vertical, rotation, fillColor, stroke, phaseX, phaseY) =>
-    engine.renderNotdef(text, sizePx, padding, vertical, rotation, fillColor, stroke, phaseX, phaseY),
+  renderText: (font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY, align) =>
+    engine.renderText(
+      font,
+      text,
+      sizePx,
+      padding,
+      rotation,
+      fillColor,
+      stroke,
+      phaseX,
+      phaseY,
+      align,
+    ),
+  renderVertical: (
+    font,
+    text,
+    sizePx,
+    padding,
+    rotation,
+    fillColor,
+    stroke,
+    phaseX,
+    phaseY,
+    align,
+  ) =>
+    engine.renderVertical(
+      font,
+      text,
+      sizePx,
+      padding,
+      rotation,
+      fillColor,
+      stroke,
+      phaseX,
+      phaseY,
+      align,
+    ),
+  renderNotdef: (text, sizePx, padding, vertical, rotation, fillColor, stroke, phaseX, phaseY, align) =>
+    engine.renderNotdef(
+      text,
+      sizePx,
+      padding,
+      vertical,
+      rotation,
+      fillColor,
+      stroke,
+      phaseX,
+      phaseY,
+      align,
+    ),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };
 

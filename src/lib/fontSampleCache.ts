@@ -1,5 +1,6 @@
 import type { EngineClusterRect, EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
+import type { TextAlign } from '@shared/text-style/types'
 import { engineSourceFor } from './fontCatalog'
 
 export interface SampleRequest {
@@ -16,6 +17,8 @@ export interface SampleRequest {
   stroke?: EngineStrokeSpec
   /** Columns running right to left instead of rows. */
   vertical?: boolean
+  /** Where a line short of the longest one sits. Part of what got drawn. */
+  align?: TextAlign
   /**
    * The object's own turn, in radians, applied to the outline before any
    * coverage is computed. Part of the identity of the bitmap, and the reason
@@ -80,6 +83,7 @@ function keyOf(req: SampleRequest): string {
     req.fillColor,
     stroke,
     req.vertical ? 'v' : 'h',
+    req.align ?? 'start',
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
     req.text,
@@ -124,6 +128,7 @@ function rasterize(req: SampleRequest): Sample {
       stroke,
       req.phaseX,
       req.phaseY,
+      req.align,
     )
     // No marks: coverage is a question about a face, and there is no face.
     return {
@@ -148,6 +153,7 @@ function rasterize(req: SampleRequest): Sample {
         stroke,
         req.phaseX,
         req.phaseY,
+        req.align,
       )
     : window.engine.renderText(
         drawWith,
@@ -159,6 +165,7 @@ function rasterize(req: SampleRequest): Sample {
         stroke,
         req.phaseX,
         req.phaseY,
+        req.align,
       )
 
   const missing = new Set(uncovered)

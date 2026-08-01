@@ -1,4 +1,4 @@
-import type { StrokePosition } from "../text-style/types";
+import type { StrokePosition, TextAlign } from "../text-style/types";
 
 /**
  * The renderer-facing shape of the native engine. It is not an IPC surface:
@@ -155,6 +155,10 @@ export interface ShashokuEngineApi {
    * bitmap grows to the rectangle that encloses the turned layout box, so an
    * angle changes the size that comes back — measure at zero to learn what the
    * object's own size is.
+   *
+   * `align` places a line short of the longest one inside the block, along the
+   * direction the text runs. It cannot change the size that comes back: the
+   * block is as wide as its longest line and that line has no slack to spend.
    */
   renderText(
     font: EngineFontSource,
@@ -166,6 +170,7 @@ export interface ShashokuEngineApi {
     stroke?: EngineStrokeSpec,
     phaseX?: number,
     phaseY?: number,
+    align?: TextAlign,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -177,6 +182,7 @@ export interface ShashokuEngineApi {
     stroke?: EngineStrokeSpec,
     phaseX?: number,
     phaseY?: number,
+    align?: TextAlign,
   ): EngineBitmap;
   /**
    * One box with an X through it per character — what there is to draw when
@@ -207,6 +213,7 @@ export interface ShashokuEngineApi {
     stroke?: EngineStrokeSpec,
     phaseX?: number,
     phaseY?: number,
+    align?: TextAlign,
   ): EngineBitmap;
   /**
    * A composited page as file bytes. Takes straight RGBA because the

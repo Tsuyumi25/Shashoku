@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { EngineBitmap, EngineFontSource, EngineStrokeSpec } from '@shared/engine/types'
-import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
+import { DEFAULT_TEXT_STYLE, type TextAlign, type TextStyle } from '@shared/text-style/types'
 import { catalog, catalogLoaded } from './fontCatalog'
 import { drawnLabel, missingFamilyLabel } from './labelRaster'
 
@@ -25,6 +25,7 @@ interface DrawCall {
   rotation?: number
   phaseX?: number
   phaseY?: number
+  align?: TextAlign
 }
 
 let calls: DrawCall[] = []
@@ -50,8 +51,9 @@ function renderText(
   _stroke?: EngineStrokeSpec,
   phaseX?: number,
   phaseY?: number,
+  align?: TextAlign,
 ): EngineBitmap {
-  calls.push({ text, rotation, phaseX, phaseY })
+  calls.push({ text, rotation, phaseX, phaseY, align })
   const size = turnedBitmap(BITMAP, rotation)
   return {
     ...size,
@@ -71,8 +73,9 @@ function renderNotdef(
   _stroke?: EngineStrokeSpec,
   phaseX?: number,
   phaseY?: number,
+  align?: TextAlign,
 ): EngineBitmap {
-  notdefCalls.push({ text, rotation, phaseX, phaseY })
+  notdefCalls.push({ text, rotation, phaseX, phaseY, align })
   const lines = text.split('\n')
   const longest = Math.max(1, ...lines.map((line) => [...line].length))
   const across = vertical ? lines.length : longest
@@ -141,6 +144,17 @@ describe('drawnLabel', () => {
 
     expect(drawn.center.x - drawn.box.w / 2).toBe(79)
     expect(calls.at(-1)?.phaseX).toBe(0.75)
+  })
+
+  it('asks the engine to set the text the way the style says', () => {
+    drawnLabel(uniqueText(), styleWith({ align: 'end' }), { x: 100, y: 60 })
+    expect(calls.at(-1)?.align).toBe('end')
+  })
+
+  it('asks for the same alignment when there is no face to set it with', () => {
+    catalog.value = []
+    drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100, y: 60 })
+    expect(notdefCalls.at(-1)?.align).toBe('center')
   })
 
   it('snaps the baseline, so nothing is asked for on the axis that stays whole', () => {

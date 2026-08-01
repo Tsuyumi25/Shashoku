@@ -44,6 +44,29 @@ pub struct Phase {
     pub y: f32,
 }
 
+/// Where a line short of the longest one sits inside the block.
+///
+/// Named for the direction the text runs rather than for a side of the bitmap,
+/// so one value means the same thing set horizontally and set vertically.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
+impl Align {
+    /// How much of a short line's slack sits ahead of it.
+    fn share(self) -> f32 {
+        match self {
+            Align::Start => 0.0,
+            Align::Center => 0.5,
+            Align::End => 1.0,
+        }
+    }
+}
+
 /// No join or cap: the band is grown from the filled shape rather than swept
 /// along its outline, so every corner it turns is round by construction — the
 /// same reason a Photoshop layer-style stroke offers neither.
@@ -327,6 +350,7 @@ fn build_horizontal_path(
     padding: u32,
     face_index: u32,
     phase: Phase,
+    align: Align,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -350,10 +374,11 @@ fn build_horizontal_path(
     // the whole string.
     let lines: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, false);
 
-    let max_width: f32 = lines
+    let widths: Vec<f32> = lines
         .iter()
         .map(|(_, glyphs)| glyphs.iter().map(|g| g.x_advance).sum::<f32>())
-        .fold(0.0, f32::max);
+        .collect();
+    let max_width: f32 = widths.iter().copied().fold(0.0, f32::max);
     let n_lines = lines.len();
 
     let content_h = line_height * n_lines as f32;
@@ -367,7 +392,8 @@ fn build_horizontal_path(
 
     for (line_idx, (line_offset, glyphs)) in lines.iter().enumerate() {
         let baseline_y = padding as f32 + phase.y + ascent + line_idx as f32 * line_height;
-        let mut pen_x = padding as f32 + phase.x;
+        let mut pen_x =
+            padding as f32 + phase.x + (max_width - widths[line_idx]) * align.share();
         for g in glyphs {
             let gid = GlyphId::new(g.gid);
             if let Some(glyph) = outlines.get(gid) {
@@ -407,6 +433,7 @@ fn build_vertical_path(
     padding: u32,
     face_index: u32,
     phase: Phase,
+    align: Align,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -424,10 +451,11 @@ fn build_vertical_path(
     let columns: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, true);
 
     let column_width = size_px * 1.2;
-    let max_height: f32 = columns
+    let heights: Vec<f32> = columns
         .iter()
         .map(|(_, glyphs)| glyphs.iter().map(|g| -g.y_advance).sum::<f32>())
-        .fold(0.0, f32::max);
+        .collect();
+    let max_height: f32 = heights.iter().copied().fold(0.0, f32::max);
     let n_cols = columns.len();
 
     let content_w = column_width * n_cols as f32;
@@ -444,11 +472,12 @@ fn build_vertical_path(
         // Column 0 sits at the right edge, later columns walk leftward.
         let col_center_x = (w as f32) - padding as f32 + phase.x - column_width * 0.5
             - (col_idx as f32) * column_width;
+        let col_origin_y = origin_y + (max_height - heights[col_idx]) * align.share();
         let mut pen_x = 0.0f32;
         let mut pen_y = 0.0f32;
         for g in glyphs {
             let baseline_x = col_center_x + pen_x + g.x_offset;
-            let baseline_y = origin_y + pen_y - g.y_offset;
+            let baseline_y = col_origin_y + pen_y - g.y_offset;
 
             let gid = GlyphId::new(g.gid);
             if let Some(glyph) = outlines.get(gid) {
@@ -464,7 +493,7 @@ fn build_vertical_path(
             clusters.push(ClusterRect {
                 cluster: col_offset + g.cluster,
                 x: col_center_x - column_width * 0.5,
-                y: origin_y + pen_y,
+                y: col_origin_y + pen_y,
                 width: column_width,
                 height: -g.y_advance,
             });
@@ -654,10 +683,11 @@ pub fn render_text(
     face_index: u32,
     rotation: f32,
     phase: Phase,
+    align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase)?;
+    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
     paint_run(spin(run, rotation), fill, stroke)
 }
 
@@ -669,10 +699,11 @@ pub fn render_vertical(
     face_index: u32,
     rotation: f32,
     phase: Phase,
+    align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase)?;
+    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
     paint_run(spin(run, rotation), fill, stroke)
 }
 
@@ -740,6 +771,7 @@ fn build_notdef_path(
     padding: u32,
     vertical: bool,
     phase: Phase,
+    align: Align,
 ) -> BuiltRun {
     let em = size_px.max(1.0);
     // Floored at a pixel so the rule survives at small sizes, where a
@@ -774,18 +806,22 @@ fn build_notdef_path(
     let mut offset = 0usize;
 
     for (line_idx, line) in lines.iter().enumerate() {
+        // The cells are uniform on the em, so a line's slack is the characters
+        // it is short by — which is why the grid does not shift sideways the
+        // moment a real face arrives and the advances stop being guesses.
+        let slack = (longest - line.chars().count() as f32) * em * align.share();
         for (cell_idx, ch) in line.chars().enumerate() {
             let (cell_x, cell_y, cell_w, cell_h) = if vertical {
                 // Column 0 sits at the right edge, later columns walk leftward.
                 (
                     w as f32 - padding as f32 + phase.x - lead * (line_idx as f32 + 1.0),
-                    padding as f32 + phase.y + em * cell_idx as f32,
+                    padding as f32 + phase.y + slack + em * cell_idx as f32,
                     lead,
                     em,
                 )
             } else {
                 (
-                    padding as f32 + phase.x + em * cell_idx as f32,
+                    padding as f32 + phase.x + slack + em * cell_idx as f32,
                     padding as f32 + phase.y + lead * line_idx as f32,
                     em,
                     lead,
@@ -857,10 +893,11 @@ pub fn render_notdef(
     vertical: bool,
     rotation: f32,
     phase: Phase,
+    align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
 ) -> Result<TextBitmap, String> {
-    let run = build_notdef_path(text, size_px, padding, vertical, phase);
+    let run = build_notdef_path(text, size_px, padding, vertical, phase, align);
     paint_run(spin(run, rotation), fill, stroke)
 }
 
@@ -916,7 +953,17 @@ mod spin_tests {
     /// Notdef rather than a real face: its geometry is known exactly and it
     /// needs no font file, so what is being measured here is only the turn.
     fn turned(text: &str, radians: f32) -> TextBitmap {
-        render_notdef(text, SIDE, PAD, false, radians, Phase::default(), FILL, None).unwrap()
+        render_notdef(
+            text,
+            SIDE,
+            PAD,
+            false,
+            radians,
+            Phase::default(),
+            Align::default(),
+            FILL,
+            None,
+        ).unwrap()
     }
 
     fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1028,7 +1075,17 @@ mod notdef_tests {
     }
 
     fn notdef(text: &str, vertical: bool) -> TextBitmap {
-        render_notdef(text, SIDE, PAD, vertical, 0.0, Phase::default(), FILL, None).unwrap()
+        render_notdef(
+            text,
+            SIDE,
+            PAD,
+            vertical,
+            0.0,
+            Phase::default(),
+            Align::default(),
+            FILL,
+            None,
+        ).unwrap()
     }
 
     fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1037,9 +1094,9 @@ mod notdef_tests {
 
     /// Centre of the box drawn for a given column and row of the horizontal
     /// grid — the same point as the cell's centre, since the box is centred.
-    fn box_centre(col: u32, row: u32) -> (u32, u32) {
+    fn box_centre(col: f32, row: u32) -> (u32, u32) {
         (
-            (PAD as f32 + SIDE * (col as f32 + 0.5)) as u32,
+            (PAD as f32 + SIDE * (col + 0.5)) as u32,
             (PAD as f32 + SIDE * NOTDEF_LINE_EM * (row as f32 + 0.5)) as u32,
         )
     }
@@ -1085,7 +1142,7 @@ mod notdef_tests {
     fn every_character_gets_its_own_box() {
         let bmp = notdef("ab", false);
         for col in 0..2 {
-            let (x, y) = box_centre(col, 0);
+            let (x, y) = box_centre(col as f32, 0);
             assert_eq!(alpha_at(&bmp, x, y), 255, "column {col} has no cross");
         }
     }
@@ -1094,7 +1151,7 @@ mod notdef_tests {
     fn a_second_line_draws_below_the_first() {
         let bmp = notdef("a\nb", false);
         for row in 0..2 {
-            let (x, y) = box_centre(0, row);
+            let (x, y) = box_centre(0.0, row);
             assert_eq!(alpha_at(&bmp, x, y), 255, "row {row} has no cross");
         }
     }
@@ -1102,7 +1159,7 @@ mod notdef_tests {
     #[test]
     fn the_boxes_stop_short_of_their_cells_so_they_do_not_run_together() {
         let bmp = notdef("ab", false);
-        let (_, cy) = box_centre(0, 0);
+        let (_, cy) = box_centre(0.0, 0);
         // The boundary between the two cells, level with their centres.
         assert_eq!(
             alpha_at(&bmp, PAD + SIDE as u32, cy),
@@ -1110,14 +1167,14 @@ mod notdef_tests {
             "the boxes met at the cell edge"
         );
         // And the gap above the first row, inside the padding-free area.
-        let (cx, _) = box_centre(0, 0);
+        let (cx, _) = box_centre(0.0, 0);
         assert_eq!(alpha_at(&bmp, cx, PAD + 1), 0, "the box reached the row edge");
     }
 
     #[test]
     fn the_frame_is_drawn_around_the_box() {
         let bmp = notdef("字", false);
-        let (cx, cy) = box_centre(0, 0);
+        let (cx, cy) = box_centre(0.0, 0);
         let half = half_box();
         // Just inside the left rule, level with the centre.
         assert!(alpha_at(&bmp, cx - half + 1, cy) > 0);
@@ -1128,7 +1185,7 @@ mod notdef_tests {
     #[test]
     fn the_quadrants_the_cross_cuts_out_stay_clear() {
         let bmp = notdef("字", false);
-        let (cx, cy) = box_centre(0, 0);
+        let (cx, cy) = box_centre(0.0, 0);
         let quarter = half_box() / 2;
         // Centres of the four triangles the X leaves behind.
         assert_eq!(alpha_at(&bmp, cx, cy - quarter), 0);
@@ -1142,11 +1199,11 @@ mod notdef_tests {
         let bmp = notdef("a b", false);
         assert_eq!(bmp.width, SIDE as u32 * 3 + PAD * 2);
 
-        let (gap_x, gap_y) = box_centre(1, 0);
+        let (gap_x, gap_y) = box_centre(1.0, 0);
         assert_eq!(alpha_at(&bmp, gap_x, gap_y), 0, "the space drew a box");
         // The character after it still lands in the third cell, so the space
         // took up room rather than being skipped.
-        let (after_x, after_y) = box_centre(2, 0);
+        let (after_x, after_y) = box_centre(2.0, 0);
         assert_eq!(alpha_at(&bmp, after_x, after_y), 255);
     }
 
@@ -1172,10 +1229,20 @@ mod notdef_tests {
 
     #[test]
     fn the_phase_moves_the_grid_without_resizing_the_bitmap() {
-        let (_, row) = box_centre(0, 0);
+        let (_, row) = box_centre(0.0, 0);
         let square = notdef("字", false);
         let shifted =
-            render_notdef("字", SIDE, PAD, false, 0.0, Phase { x: 2.0, y: 0.0 }, FILL, None).unwrap();
+            render_notdef(
+            "字",
+            SIDE,
+            PAD,
+            false,
+            0.0,
+            Phase { x: 2.0, y: 0.0 },
+            Align::default(),
+            FILL,
+            None,
+        ).unwrap();
 
         // Where the box starts, which is the cell edge plus its side bearing.
         let bearing = ((SIDE - SIDE * NOTDEF_BOX_EM) * 0.5) as u32;
@@ -1187,8 +1254,18 @@ mod notdef_tests {
     #[test]
     fn the_boxes_wear_the_fill_colour_they_were_given() {
         let red = Rgba(255, 0, 0, 255);
-        let bmp = render_notdef("字", SIDE, PAD, false, 0.0, Phase::default(), red, None).unwrap();
-        let (cx, cy) = box_centre(0, 0);
+        let bmp = render_notdef(
+            "字",
+            SIDE,
+            PAD,
+            false,
+            0.0,
+            Phase::default(),
+            Align::default(),
+            red,
+            None,
+        ).unwrap();
+        let (cx, cy) = box_centre(0.0, 0);
         // On the left rule of the box.
         let at = ((cy * bmp.width + cx - half_box() + 1) * 4) as usize;
         assert_eq!(
@@ -1202,8 +1279,163 @@ mod notdef_tests {
         // Font size is clamped well above this upstream, but a rasterizer that
         // can return a zero-dimension bitmap hands the caller an ImageData that
         // throws on construction.
-        let bmp = render_notdef("字", 0.0, 0, false, 0.0, Phase::default(), FILL, None).unwrap();
+        let bmp = render_notdef(
+            "字",
+            0.0,
+            0,
+            false,
+            0.0,
+            Phase::default(),
+            Align::default(),
+            FILL,
+            None,
+        ).unwrap();
         assert!(bmp.width >= 1 && bmp.height >= 1);
+    }
+}
+
+#[cfg(test)]
+mod align_tests {
+    use super::*;
+
+    const SIDE: f32 = 64.0;
+    const PAD: u32 = 8;
+    const FILL: Rgba = Rgba(0, 0, 0, 255);
+
+    /// Notdef rather than a real face: its cells are square and uniform on the
+    /// em, so where a short line ought to land can be stated exactly and
+    /// without a font file. That the grid holds without a font is also the
+    /// point of it — the same offset has to reach it.
+    fn aligned(text: &str, vertical: bool, align: Align) -> TextBitmap {
+        render_notdef(
+            text,
+            SIDE,
+            PAD,
+            vertical,
+            0.0,
+            Phase::default(),
+            align,
+            FILL,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
+        bmp.rgba[((y * bmp.width + x) * 4 + 3) as usize]
+    }
+
+    /// Centre of the box drawn `cell` cells along the second row.
+    fn second_row_centre(cell: f32) -> (u32, u32) {
+        (
+            (PAD as f32 + SIDE * (cell + 0.5)) as u32,
+            (PAD as f32 + SIDE * NOTDEF_LINE_EM * 1.5) as u32,
+        )
+    }
+
+    /// Centre of the box drawn `cell` cells down the second column, which sits
+    /// to the left of the first since columns run right to left.
+    fn second_column_centre(bmp: &TextBitmap, cell: f32) -> (u32, u32) {
+        let lead = SIDE * NOTDEF_LINE_EM;
+        (
+            (bmp.width as f32 - PAD as f32 - lead * 1.5) as u32,
+            (PAD as f32 + SIDE * (cell + 0.5)) as u32,
+        )
+    }
+
+    /// A block two cells wide whose second line fills one, so there is exactly
+    /// one cell of slack for the alignment to spend.
+    const SHORT_SECOND_LINE: &str = "ab\nc";
+
+    #[test]
+    fn a_short_line_starts_where_the_block_does() {
+        let bmp = aligned(SHORT_SECOND_LINE, false, Align::Start);
+        let (x, y) = second_row_centre(0.0);
+        assert_eq!(alpha_at(&bmp, x, y), 255);
+    }
+
+    #[test]
+    fn a_short_line_takes_half_the_slack_when_centred() {
+        let bmp = aligned(SHORT_SECOND_LINE, false, Align::Center);
+        let (x, y) = second_row_centre(0.5);
+        assert_eq!(alpha_at(&bmp, x, y), 255);
+    }
+
+    #[test]
+    fn a_short_line_ends_where_the_block_does() {
+        let bmp = aligned(SHORT_SECOND_LINE, false, Align::End);
+        let (x, y) = second_row_centre(1.0);
+        assert_eq!(alpha_at(&bmp, x, y), 255);
+    }
+
+    #[test]
+    fn a_short_column_starts_where_the_block_does() {
+        let bmp = aligned(SHORT_SECOND_LINE, true, Align::Start);
+        let (x, y) = second_column_centre(&bmp, 0.0);
+        assert_eq!(alpha_at(&bmp, x, y), 255);
+    }
+
+    #[test]
+    fn a_short_column_ends_where_the_block_does() {
+        let bmp = aligned(SHORT_SECOND_LINE, true, Align::End);
+        let (x, y) = second_column_centre(&bmp, 1.0);
+        assert_eq!(alpha_at(&bmp, x, y), 255);
+    }
+
+    /// The block is as wide as its longest line, and that line has no slack to
+    /// spend — so there is nothing an alignment could resize.
+    #[test]
+    fn an_alignment_does_not_change_the_size_of_the_bitmap() {
+        let size = |align| {
+            let bmp = aligned(SHORT_SECOND_LINE, false, align);
+            (bmp.width, bmp.height)
+        };
+        assert_eq!(size(Align::Start), size(Align::Center));
+        assert_eq!(size(Align::Start), size(Align::End));
+    }
+
+    /// What a short line is short by is what it measures, not how many
+    /// characters it holds — the two agree on the notdef grid, whose cells are
+    /// uniform on the em, and part ways the moment real advances arrive.
+    #[test]
+    fn a_short_line_of_real_glyphs_is_offset_by_what_it_measures() {
+        use super::installed_face::{PADDING, SIZE, drawing};
+        const TEXT: &str = "WWW\nW";
+        let Some((bytes, face)) = drawing(TEXT) else {
+            eprintln!("no font on this machine — the real-face align test did not run");
+            return;
+        };
+        let run = |align| {
+            build_horizontal_path(&bytes, TEXT, SIZE, PADDING, face, Phase::default(), align)
+                .unwrap()
+        };
+        let put = run(Align::Start);
+        let moved = run(Align::End);
+
+        // The second line's only cluster; the first line is three glyphs.
+        let slack = moved.clusters[3].x - put.clusters[3].x;
+        let block = put.width as f32 - PADDING as f32 * 2.0;
+        assert!(slack > 0.0, "the shorter line had no slack to take");
+        assert!(
+            (slack - (block - put.clusters[3].width)).abs() < 1.0,
+            "{slack} is not {block} less the line's own width"
+        );
+        // The line that set the block's width has none to take.
+        assert_eq!(moved.clusters[0].x, put.clusters[0].x);
+    }
+
+    /// The rects are what a caret and a click are resolved against, so a line
+    /// whose ink moved and whose rects did not would put the caret where there
+    /// is no text.
+    #[test]
+    fn the_cluster_rects_move_with_the_ink() {
+        let moved = aligned(SHORT_SECOND_LINE, false, Align::End);
+        let put = aligned(SHORT_SECOND_LINE, false, Align::Start);
+        // The third cluster is the second line's only character.
+        assert_eq!(moved.clusters[2].x - put.clusters[2].x, SIDE);
+        assert_eq!(moved.clusters[2].y, put.clusters[2].y);
+        // The long line has no slack, so nothing about it moved.
+        assert_eq!(moved.clusters[0].x, put.clusters[0].x);
     }
 }
 
@@ -1422,21 +1654,20 @@ mod stroke_tests {
     }
 }
 
-/// The phase is a property of a real run of glyphs, so these draw one. There is
-/// no font in this repository to draw it with, and vendoring one to test a
-/// translation would be a poor trade — so they take whatever face the machine
-/// has and say so when it has none, rather than passing on a machine where they
-/// never ran.
+/// A face this machine happens to have, for the properties that only a real run
+/// of glyphs has. There is no font in this repository to draw one with, and
+/// vendoring one to test a translation would be a poor trade — so these take
+/// whatever is installed and say so when there is nothing, rather than passing
+/// on a machine where they never ran.
 #[cfg(test)]
-mod phase_tests {
+mod installed_face {
     use super::*;
     use crate::enumerate;
 
-    const SIZE: f32 = 32.0;
-    const PADDING: u32 = 4;
-    const TEXT: &str = "Hg";
+    pub const SIZE: f32 = 32.0;
+    pub const PADDING: u32 = 4;
 
-    fn any_face() -> Option<(Vec<u8>, u32)> {
+    pub fn drawing(text: &str) -> Option<(Vec<u8>, u32)> {
         let faces = enumerate::scan(&enumerate::default_dirs(), &[]);
         faces.into_iter().find_map(|face| {
             let bytes = std::fs::read(&face.path).ok()?;
@@ -1444,19 +1675,44 @@ mod phase_tests {
             // actually draws is any use here.
             let run = build_horizontal_path(
                 &bytes,
-                TEXT,
+                text,
                 SIZE,
                 PADDING,
                 face.face_index,
                 Phase::default(),
+                Align::default(),
             )
             .ok()?;
             run.path.is_some().then_some((bytes, face.face_index))
         })
     }
+}
+
+#[cfg(test)]
+mod phase_tests {
+    use super::installed_face::{PADDING, SIZE, drawing};
+    use super::*;
+
+    const TEXT: &str = "Hg";
+
+    fn any_face() -> Option<(Vec<u8>, u32)> {
+        drawing(TEXT)
+    }
 
     fn draw(bytes: &[u8], face_index: u32, phase: Phase) -> TextBitmap {
-        render_text(bytes, TEXT, SIZE, PADDING, face_index, 0.0, phase, BLACK, None).unwrap()
+        render_text(
+            bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face_index,
+            0.0,
+            phase,
+            Align::default(),
+            BLACK,
+            None,
+        )
+        .unwrap()
     }
 
     fn alpha(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1541,8 +1797,19 @@ mod phase_tests {
     fn a_vertical_run_moves_on_both_axes_too() {
         let Some((bytes, face)) = any_face() else { return };
         let at_rest =
-            render_vertical(&bytes, TEXT, SIZE, PADDING, face, 0.0, Phase::default(), BLACK, None)
-                .unwrap();
+            render_vertical(
+                &bytes,
+                TEXT,
+                SIZE,
+                PADDING,
+                face,
+                0.0,
+                Phase::default(),
+                Align::default(),
+                BLACK,
+                None,
+            )
+            .unwrap();
         let moved = render_vertical(
             &bytes,
             TEXT,
@@ -1551,6 +1818,7 @@ mod phase_tests {
             face,
             0.0,
             Phase { x: 0.25, y: 0.5 },
+            Align::default(),
             BLACK,
             None,
         )

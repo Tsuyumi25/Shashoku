@@ -12,7 +12,7 @@ mod enumerate;
 mod render;
 mod stroke;
 
-use render::{BLACK, Phase, StrokePosition, StrokeSpec, parse_hex_rgba};
+use render::{Align, BLACK, Phase, StrokePosition, StrokeSpec, parse_hex_rgba};
 
 #[napi]
 pub fn engine_version() -> String {
@@ -212,6 +212,17 @@ fn phase_from_opt(x: Option<f64>, y: Option<f64>) -> Phase {
     }
 }
 
+fn align_from_opt(align: Option<String>) -> napi::Result<Align> {
+    match align.as_deref().unwrap_or("start") {
+        "start" => Ok(Align::Start),
+        "center" => Ok(Align::Center),
+        "end" => Ok(Align::End),
+        other => Err(napi::Error::from_reason(format!(
+            "align must be start|center|end, got {other:?}"
+        ))),
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Enumeration
 
@@ -296,6 +307,7 @@ pub fn render_text(
     stroke: Option<StrokeInput>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
+    align: Option<String>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -308,6 +320,7 @@ pub fn render_text(
         face_index,
         rotation.unwrap_or(0.0) as f32,
         phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
         fill,
         stroke_spec,
     )
@@ -398,6 +411,7 @@ pub fn render_vertical(
     stroke: Option<StrokeInput>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
+    align: Option<String>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -410,6 +424,7 @@ pub fn render_vertical(
         face_index,
         rotation.unwrap_or(0.0) as f32,
         phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
         fill,
         stroke_spec,
     )
@@ -437,6 +452,7 @@ pub fn render_notdef(
     stroke: Option<StrokeInput>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
+    align: Option<String>,
 ) -> napi::Result<TextBitmap> {
     let fill = fill_from_opt(fill_color)?;
     let stroke_spec = stroke_input_to_spec(stroke)?;
@@ -447,6 +463,7 @@ pub fn render_notdef(
         vertical.unwrap_or(false),
         rotation.unwrap_or(0.0) as f32,
         phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
         fill,
         stroke_spec,
     )
