@@ -35,6 +35,23 @@
       <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
     </ToggleGroupRoot>
 
+    <label class="text-muted-foreground">對齊</label>
+    <ToggleGroupRoot
+      type="single"
+      class="seg w-full"
+      :model-value="value.align"
+      @update:model-value="onAlign"
+    >
+      <ToggleGroupItem
+        v-for="choice in alignChoices"
+        :key="choice.value"
+        :value="choice.value"
+        class="seg-item"
+      >
+        {{ choice.label }}
+      </ToggleGroupItem>
+    </ToggleGroupRoot>
+
     <label class="text-muted-foreground">文字色</label>
     <div class="flex items-center gap-1.5">
       <input
@@ -118,7 +135,13 @@
 import { computed } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
-import type { StrokeEffect, StrokePosition, TextStyle } from '@shared/text-style/types'
+import type {
+  StrokeEffect,
+  StrokePosition,
+  TextAlign,
+  TextDirection,
+  TextStyle,
+} from '@shared/text-style/types'
 import { useFontPicker } from '@/composables/useFontPicker'
 
 const props = defineProps<{
@@ -164,6 +187,30 @@ function onDirection(v: unknown) {
   if (v !== 'horizontal' && v !== 'vertical') return
   if (v === props.value.direction) return
   emit('patch', { direction: v })
+}
+
+/**
+ * What each alignment is called, which follows the direction the text runs
+ * while the value stored does not. Somebody setting a vertical block is asking
+ * for the top, not for "start" — and the same file read the other way round has
+ * to keep meaning the same thing, which is why only the wording turns.
+ */
+const ALIGN_LABELS: Record<TextDirection, Record<TextAlign, string>> = {
+  horizontal: { start: '左', center: '中', end: '右' },
+  vertical: { start: '上', center: '中', end: '下' },
+}
+
+const alignChoices = computed(() =>
+  (['start', 'center', 'end'] as const).map((value) => ({
+    value,
+    label: ALIGN_LABELS[props.value.direction][value],
+  })),
+)
+
+function onAlign(v: unknown) {
+  if (v !== 'start' && v !== 'center' && v !== 'end') return
+  if (v === props.value.align) return
+  emit('patch', { align: v })
 }
 
 function onColor(e: Event) {
