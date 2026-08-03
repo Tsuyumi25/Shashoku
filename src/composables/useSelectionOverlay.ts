@@ -4,11 +4,10 @@ import {
   ANTS_DASH,
   antsPath,
   openPath,
-  quickMaskImage,
+  paintMaskRegion,
   strokeAnts,
   strokeBuildingPath,
 } from '@/lib/selection/overlay'
-import type { Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
@@ -31,7 +30,8 @@ const ANTS_ANIMATION_LIMIT = 50_000
  * ants would rub out whatever else the frame had in it.
  */
 interface OverlayFrame {
-  wash: { image: OffscreenCanvas; at: Rect } | null
+  /** Page-sized and in page coordinates, so it lands at the page origin. */
+  wash: OffscreenCanvas | null
   ants: Path2D | null
   shape: Path2D | null
   building: Path2D | null
@@ -64,9 +64,19 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
   let crawlRaf = 0
   let paintScheduled = false
 
+  /**
+   * The wash lives at page size and is kept between frames, so a brush stamp
+   * repaints the few thousand pixels it dirtied instead of the whole selection.
+   *
+   * `washMask` is held to compare by identity rather than to read: a gesture in
+   * progress is shown from a scratch buffer, and patching one from the other's
+   * regions would paint the wrong pixels. Anything but the same array on the
+   * same page falls back to a full repaint.
+   */
   let washImage: OffscreenCanvas | null = null
+  let washCtx: OffscreenCanvasRenderingContext2D | null = null
+  let washMask: Uint8ClampedArray | null = null
   let washAt = -1
-  let washRect: Rect | null = null
 
   function stopCrawl(): void {
     if (crawlRaf) cancelAnimationFrame(crawlRaf)
@@ -87,12 +97,23 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
       if (selection.quickMask) {
         // The mask only changes when the revision does, so a still selection is
         // drawn from an image built once however much the view moves over it.
-        if (washImage === null || washAt !== selection.revision) {
-          washAt = selection.revision
-          washRect = shown.bounds
-          washImage = quickMaskImage(shown.mask, shown.w, shown.bounds)
+        if (washImage === null || washImage.width !== shown.w || washImage.height !== shown.h) {
+          washImage = new OffscreenCanvas(shown.w, shown.h)
+          washCtx = washImage.getContext('2d')
+          washMask = null
         }
-        if (washImage !== null && washRect !== null) wash = { image: washImage, at: washRect }
+        if (washCtx !== null && washAt !== selection.revision) {
+          const patch = washMask === shown.mask ? selection.dirtySince(washAt) : null
+          if (patch === null) {
+            washCtx.clearRect(0, 0, shown.w, shown.h)
+            paintMaskRegion(washCtx, shown.mask, shown.w, shown.bounds)
+          } else {
+            paintMaskRegion(washCtx, shown.mask, shown.w, patch)
+          }
+          washMask = shown.mask
+          washAt = selection.revision
+        }
+        if (washCtx !== null) wash = washImage
       } else {
         const loops = selection.outlinesFor(page)
         if (loops.length > 0) {
@@ -133,7 +154,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
 
     if (frame.wash !== null) {
       applyViewTransform(ctx, view, dpr)
-      ctx.drawImage(frame.wash.image, frame.wash.at.x, frame.wash.at.y)
+      ctx.drawImage(frame.wash, 0, 0)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
     }
     if (frame.ants !== null) strokeAnts(ctx, frame.ants, phase)

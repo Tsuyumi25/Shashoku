@@ -557,6 +557,38 @@ export const useSelectionStore = defineStore('selection', () => {
     strokeTo(at)
   }
 
+  /**
+   * Which rectangle each of the last few revisions touched, for readers that
+   * can repaint a part instead of the whole mask.
+   *
+   * Only the brush writes here, because it is the only mutation that reports a
+   * region and the only one fast enough to outrun a full repaint. Every other
+   * revision leaves a gap in this log, and a gap is what `dirtySince` reads as
+   * "you cannot patch your way to this state" — so a reader that misses one is
+   * wrong slowly rather than silently.
+   */
+  const dirtyLog: { rev: number; rect: Rect }[] = []
+  const DIRTY_LOG_LIMIT = 512
+
+  /**
+   * What has changed since revision `seen`, or null when that cannot be
+   * answered from a region — the caller then has to rebuild from the mask.
+   */
+  function dirtySince(seen: number): Rect | null {
+    if (seen === revision.value) return EMPTY_RECT
+    if (seen > revision.value) return null
+    let out = EMPTY_RECT
+    let want = seen + 1
+    for (const entry of dirtyLog) {
+      if (entry.rev < want) continue
+      // A revision nobody logged sits between the two states: not patchable.
+      if (entry.rev !== want) return null
+      out = unionRect(out, entry.rect)
+      want++
+    }
+    return want === revision.value + 1 ? out : null
+  }
+
   function strokeTo(at: Point): void {
     const s = stroke
     if (s === null || mask === null) return
@@ -574,6 +606,8 @@ export const useSelectionStore = defineStore('selection', () => {
     s.dirty = unionRect(s.dirty, dirty)
     refreshBounds(unionRect(bounds.value ?? EMPTY_RECT, dirty))
     revision.value++
+    dirtyLog.push({ rev: revision.value, rect: dirty })
+    if (dirtyLog.length > DIRTY_LOG_LIMIT) dirtyLog.shift()
   }
 
   function endStroke(): void {
@@ -750,6 +784,7 @@ export const useSelectionStore = defineStore('selection', () => {
     maskPatchOf,
     heldPage,
     displayFor,
+    dirtySince,
     outlinesFor,
     shapeOutlinesFor,
     buildingPathFor,

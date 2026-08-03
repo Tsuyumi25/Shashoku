@@ -92,34 +92,38 @@ export function strokeBuildingPath(ctx: CanvasRenderingContext2D, path: Path2D):
 }
 
 /**
- * The mask itself as a red wash, at page resolution and only over its own
- * bounding box — a page-sized image would be rebuilt in full every time the
- * brush moved.
+ * The mask as a red wash, painted straight into a page-sized canvas at the page
+ * coordinates it belongs to.
  *
  * Red marks what *is* selected, which is the opposite of Photoshop's default
  * and the same as its other setting. Here the mask being built is the thing
  * about to be erased, so showing it directly is what the person is looking at;
  * shading everything else instead would put the ink under the wash.
+ *
+ * Takes the region to paint rather than working it out, because a brush stamp
+ * dirties a few thousand pixels while the selection it belongs to covers
+ * millions: this loop costs about 60ms per megapixel, so repainting the whole
+ * selection for one stamp was the whole of the stall it used to cause.
+ * `putImageData` replaces rather than blends, which is what lets an erase
+ * stroke patch the same way a paint stroke does.
  */
-export function quickMaskImage(
+export function paintMaskRegion(
+  ctx: OffscreenCanvasRenderingContext2D,
   mask: Uint8ClampedArray,
   pageWidth: number,
-  bounds: Rect,
-): OffscreenCanvas | null {
-  const canvas = new OffscreenCanvas(bounds.w, bounds.h)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  const image = ctx.createImageData(bounds.w, bounds.h)
+  region: Rect,
+): void {
+  if (region.w <= 0 || region.h <= 0) return
+  const image = ctx.createImageData(region.w, region.h)
   const out = image.data
-  for (let row = 0; row < bounds.h; row++) {
-    const from = (bounds.y + row) * pageWidth + bounds.x
-    for (let i = 0; i < bounds.w; i++) {
-      const at = (row * bounds.w + i) * 4
+  for (let row = 0; row < region.h; row++) {
+    const from = (region.y + row) * pageWidth + region.x
+    for (let i = 0; i < region.w; i++) {
+      const at = (row * region.w + i) * 4
       out[at] = 255
       // Half strength, as Quick Mask is, so the artwork stays readable under it.
       out[at + 3] = mask[from + i] >> 1
     }
   }
-  ctx.putImageData(image, 0, 0)
-  return canvas
+  ctx.putImageData(image, region.x, region.y)
 }

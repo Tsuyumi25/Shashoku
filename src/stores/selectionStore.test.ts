@@ -615,3 +615,61 @@ describe('outlines', () => {
     expect(sel.outlinesFor(PAGE_A.page)).toEqual([])
   })
 })
+
+/**
+ * What lets the Quick Mask wash repaint one stamp instead of the whole
+ * selection. Answering it wrongly paints the wrong pixels and nothing
+ * downstream would notice, so the cases that must refuse matter more than the
+ * one that returns a rectangle.
+ */
+describe('dirtySince', () => {
+  it('reports nothing changed when the caller is already up to date', () => {
+    const sel = useSelectionStore()
+    expect(sel.dirtySince(sel.revision)).toEqual({ x: 0, y: 0, w: 0, h: 0 })
+  })
+
+  /** Room for the default brush to land without every stamp clipping to it. */
+  const WIDE: MaskTarget = { page: 'p003.png', w: 400, h: 300 }
+
+  it('unions the stamps a stroke laid down since the caller last looked', () => {
+    const sel = useSelectionStore()
+    sel.beginStroke(WIDE, 'paint', { x: 100, y: 100 })
+    const from = sel.revision
+    sel.strokeTo({ x: 140, y: 100 })
+    sel.strokeTo({ x: 180, y: 100 })
+
+    const dirty = sel.dirtySince(from)
+    expect(dirty).not.toBeNull()
+    expect(dirty!.x).toBeLessThanOrEqual(140)
+    expect(dirty!.x + dirty!.w).toBeGreaterThanOrEqual(180)
+    // Bounded by the stroke, not by the page: this is the whole point of it.
+    expect(dirty!.w).toBeLessThan(WIDE.w)
+    expect(dirty!.h).toBeLessThan(WIDE.h)
+  })
+
+  it('refuses when a change that reported no region came in between', () => {
+    const sel = useSelectionStore()
+    sel.beginStroke(PAGE_A, 'paint', { x: 6, y: 6 })
+    const from = sel.revision
+    sel.strokeTo({ x: 12, y: 6 })
+    // Select-all rewrites the whole mask and logs no region. The gap it leaves
+    // is the only thing between a stale wash and a wrong one.
+    sel.selectAll(PAGE_A)
+    expect(sel.dirtySince(from)).toBeNull()
+  })
+
+  it('refuses when the caller last looked before the log began', () => {
+    const sel = useSelectionStore()
+    sel.selectAll(PAGE_A)
+    const stale = sel.revision
+    sel.deselect()
+    sel.beginStroke(PAGE_A, 'paint', { x: 6, y: 6 })
+    sel.strokeTo({ x: 12, y: 6 })
+    expect(sel.dirtySince(stale)).toBeNull()
+  })
+
+  it('refuses a revision it has not reached', () => {
+    const sel = useSelectionStore()
+    expect(sel.dirtySince(sel.revision + 1)).toBeNull()
+  })
+})
