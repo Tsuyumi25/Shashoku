@@ -26,6 +26,14 @@
       >
         {{ index }}
       </div>
+
+      <div
+        v-if="tagCaption"
+        class="absolute max-w-40 truncate rounded bg-black/70 px-1 py-px text-[10px] leading-tight text-white select-none"
+        :style="captionStyle(counterTurn)"
+      >
+        {{ tagCaption }}
+      </div>
     </template>
   </ObjectFrame>
 </template>
@@ -66,15 +74,22 @@ import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 const props = defineProps<{
   index: number
   text: string
-  /** Already resolved down the default → group → override chain. */
+  /** The object's own complete style. */
   textStyle: TextStyle
   /** Label anchor, in page pixels. */
   x: number
   y: number
   /** The object's own turn on the page, in radians. */
   rotation: number
-  /** The label group's colour, worn by the number badge. */
+  /** The colour of whichever known tag sits highest, worn by the number badge. */
   color: string
+  /**
+   * What the object is, spelled out over the page. Empty unless the workspace
+   * has been asked to show semantics — the page is the thing being judged, and
+   * an editor that always draws its own bookkeeping over it answers a question
+   * nobody asked while typesetting.
+   */
+  tagCaption?: string
   natural: { w: number; h: number }
   view: ViewTransform
   selected: boolean
@@ -249,6 +264,14 @@ const MARKER_CORNER_OFFSET_PX = 16
  * is lying. No scale is undone because the frame is already sized in screen
  * pixels.
  */
+function captionStyle(counterTurn: number) {
+  return {
+    left: '0px',
+    top: '0px',
+    transform: `translate(calc(-50% - ${MARKER_CORNER_OFFSET_PX}px), calc(${MARKER_CORNER_OFFSET_PX}px)) rotate(${counterTurn}rad)`,
+  }
+}
+
 function markerStyle(counterTurn: number) {
   const out = `-50% - ${MARKER_CORNER_OFFSET_PX}px`
   return {

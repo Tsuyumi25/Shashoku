@@ -47,6 +47,7 @@ import {
   Lasso,
   LassoSelect,
   MousePointer2,
+  MousePointerClick,
   Paintbrush,
   SquareDashed,
   Type,
@@ -79,6 +80,7 @@ interface RailTool {
 
 const tools = computed<RailTool[]>(() => [
   { tool: 'select', icon: MousePointer2, title: '選取工具（V）' },
+  { tool: 'select-text', icon: MousePointerClick, title: '文字選取工具（Shift+V）' },
   { tool: 'text', icon: Type, title: '文字工具（T）' },
   { tool: 'marquee-rect', icon: SquareDashed, title: '矩形選區（M）', opensGroup: true },
   { tool: 'marquee-ellipse', icon: CircleDashed, title: '橢圓選區（Shift+M）' },

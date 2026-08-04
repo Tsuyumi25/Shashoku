@@ -115,7 +115,16 @@
         <span class="text-xs font-medium text-muted-foreground">標記</span>
         <button
           type="button"
-          class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          class="ml-auto flex h-5 w-5 items-center justify-center rounded hover:bg-secondary"
+          :class="editor.showTags ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          title="在畫布上顯示語意（文字選取工具下才畫）"
+          @click="editor.showTags = !editor.showTags"
+        >
+          <Eye :size="14" />
+        </button>
+        <button
+          type="button"
+          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           title="新增標記"
           :disabled="!project.isOpen"
           @click="onAddTag"
@@ -146,6 +155,7 @@ import { computed } from 'vue'
 import {
   Combine,
   Copy,
+  Eye,
   FilePlus,
   FolderPlus,
   Layers,

@@ -71,6 +71,7 @@
           :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
           :locked="object.locked"
+          :tag-caption="object.caption"
           @select="onSelectObject(object.id, $event)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -81,6 +82,12 @@
           @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
         />
       </div>
+
+      <div
+        v-if="objectMarquee"
+        class="pointer-events-none absolute border border-primary bg-primary/10"
+        :style="objectMarqueeStyle"
+      />
 
       <!--
         The brush, drawn in screen coordinates over everything else. Rotating
@@ -133,14 +140,17 @@ import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import { applyViewTransform, screenToPagePx, type Anchor } from '@/lib/coords'
+import { applyViewTransform, centeredBoxOnScreen, screenToPagePx, type Anchor } from '@/lib/coords'
+import { drawnLabel } from '@/lib/labelRaster'
+import { marqueeRect } from '@/lib/selection/marquee'
+import { obbIntersectsRect, type Obb } from '@/lib/selection/obb'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
   resetRotationDirection,
   trackRotationDirection,
 } from '@/lib/rotateDirection'
-import { primaryTag, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
+import { primaryTag, tagsInRegistryOrder, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
 import { applyStylePatch } from '@shared/text-style/batch'
 import {
   isSelectionTool,
@@ -199,8 +209,16 @@ const objects = computed(() => {
     rotation: label.rotation,
     color: colorOf(label.tags),
     style: label.style,
+    caption: showingTags.value ? tagsInRegistryOrder(label.tags, project.header.tags).join('、') : '',
   }))
 })
+
+/**
+ * Semantics are drawn over the page only under the tool whose subject they
+ * are. Off any other tool the page is what is being judged, and bookkeeping
+ * painted over it answers a question nobody asked.
+ */
+const showingTags = computed(() => editor.showTags && editor.tool === 'select-text')
 
 /**
  * The raster layers wearing a frame, which is only the ones selected.
@@ -351,6 +369,72 @@ const imageReady = ref(false)
 
 /** Whichever tool is up decides whether a drag on bare page builds a selection. */
 const selecting = computed(() => isSelectionTool(editor.tool))
+
+/**
+ * A drag on bare page under the text move tool, in page pixels.
+ *
+ * Deliberately not the pixel-selection path: that one rasterizes into a mask,
+ * and what this is after is a set of objects. They share `marqueeRect` and
+ * nothing else.
+ */
+const objectMarquee = ref<{ origin: Anchor; current: Anchor; additive: boolean } | null>(null)
+
+const objectMarqueeRect = computed(() =>
+  objectMarquee.value === null
+    ? null
+    : marqueeRect({
+        origin: objectMarquee.value.origin,
+        current: objectMarquee.value.current,
+        constrain: false,
+        fromCenter: false,
+      }),
+)
+
+const objectMarqueeStyle = computed(() => {
+  const rect = objectMarqueeRect.value
+  if (!rect) return {}
+  const box = centeredBoxOnScreen(
+    { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+    { w: rect.w, h: rect.h },
+    view,
+  )
+  return {
+    left: `${box.centerX}px`,
+    top: `${box.centerY}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    transform: `translate(-50%, -50%) rotate(${view.rotate}rad)`,
+  }
+})
+
+/**
+ * Touch and it counts, rather than enclose and it counts. Sweeping a column of
+ * dialogue means dragging down its middle, and the enclose rule would take
+ * nothing at all unless the drag also reached past both ends of the widest
+ * line — which is most of the page.
+ *
+ * The frames are measured exactly, turn included, rather than by their upright
+ * bounds: a long label at 45° has bounds far bigger than the label, and a
+ * marquee near one of those corners would sweep in an object it never touched.
+ */
+function sweepObjects() {
+  const rect = objectMarqueeRect.value
+  const drag = objectMarquee.value
+  if (!rect || !drag || !currentFile.value) return
+  const hit: string[] = []
+  for (const object of objects.value) {
+    if (object.locked) continue
+    const drawn = drawnLabel(object.text, object.style, { x: object.x, y: object.y }, object.rotation)
+    const box: Obb = {
+      center: drawn.center,
+      w: drawn.box.w,
+      h: drawn.box.h,
+      rotation: object.rotation,
+    }
+    if (obbIntersectsRect(box, rect)) hit.push(object.id)
+  }
+  editor.selectMany(hit, drag.additive)
+}
 
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => imageReady.value)
 const selectionTool = useSelectionTool(containerRef, imgRef, () => imageReady.value)
@@ -606,7 +690,8 @@ const canvasCursor = computed(() => {
   // The ring is the cursor while it is up; a second mark would only be one more
   // thing to aim with.
   if (showBrushRing.value) return 'cursor-none'
-  if (editor.tool === 'text' || selecting.value) return 'cursor-crosshair'
+  if (editor.tool === 'text' || editor.tool === 'select-text' || selecting.value)
+    return 'cursor-crosshair'
   return 'cursor-default'
 })
 
@@ -666,6 +751,13 @@ function onPointerDown(e: PointerEvent) {
     editor.addLabelAt(p.x, p.y)
     return
   }
+  if (editor.tool === 'select-text') {
+    el.setPointerCapture(e.pointerId)
+    const rect = containerRef.value.getBoundingClientRect()
+    const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
+    objectMarquee.value = { origin: p, current: p, additive: e.shiftKey }
+    return
+  }
   editor.selectOnly(null)
 }
 
@@ -698,6 +790,17 @@ function onPointerMove(e: PointerEvent) {
     panLast = { x: e.clientX, y: e.clientY }
     return
   }
+  if (objectMarquee.value !== null && containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    objectMarquee.value.current = screenToPagePx(
+      e.clientX,
+      e.clientY,
+      rect,
+      view,
+      editor.viewContentSize,
+    )
+    return
+  }
   if (selecting.value) selectionTool.onPointerMove(e)
 }
 
@@ -710,6 +813,11 @@ function onPointerUp(e: PointerEvent) {
   }
   // Rotating and panning take the pointer for themselves, so a selection tool
   // only hears about a release that was not one of theirs.
+  if (objectMarquee.value !== null) {
+    sweepObjects()
+    objectMarquee.value = null
+    return
+  }
   if (!rotating.value && !panning.value && selecting.value) selectionTool.onPointerUp(e)
   rotating.value = false
   panning.value = false
@@ -743,7 +851,7 @@ useEventListener(window, 'keydown', (e) => {
   } else if (key === 't') {
     editor.setTool('text')
   } else if (key === 'v') {
-    editor.setTool('select')
+    editor.setTool(e.shiftKey ? 'select-text' : 'select')
   } else if (key === 'm') {
     // Shift on a tool key reaches the other tool behind it, as it does in
     // Photoshop, where one slot of the rail holds a pair.

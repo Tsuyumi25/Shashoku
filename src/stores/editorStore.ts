@@ -64,12 +64,20 @@ export const UNDO_LIMIT = 100
  * bottom bar has to say which tool is up — a cursor shape is gone the moment
  * the pointer leaves the canvas.
  *
- * The tool is also the mode. A drag on bare page can mean select a region or
- * place a text box, and that collision is the only thing that would otherwise
- * force separate workspaces; picking a tool answers it.
+ * The tool is also the mode. A drag on bare page can mean select a region,
+ * sweep up text objects, or place a text box, and that collision is the only
+ * thing that would otherwise force separate workspaces; picking a tool answers
+ * it.
+ *
+ * `select` and `select-text` are two move tools side by side, both with the
+ * same feel: click to take hold, drag to move. What is text's alone lives on
+ * the second one — sweeping a marquee over objects, and drawing what they mean
+ * over the page — because a general move tool that grew those would be
+ * answering questions about text while somebody is nudging an erase patch.
  */
 export type CanvasTool =
   | 'select'
+  | 'select-text'
   | 'text'
   | 'marquee-rect'
   | 'marquee-ellipse'
@@ -201,6 +209,25 @@ export const useEditorStore = defineStore('editor', () => {
    * panel is showing — which the caller passes in, because what counts as a
    * range is the list's question and not this store's.
    */
+  /**
+   * What a sweep leaves selected, in one step. Adding them one at a time would
+   * move the cursor — and with it the page the canvas turns to — once per
+   * object caught, so a drag over a dozen would walk the view across all of
+   * them before landing.
+   */
+  function selectMany(ids: readonly string[], additive: boolean) {
+    const last = ids[ids.length - 1]
+    if (last === undefined) {
+      if (!additive) selectOnly(null)
+      return
+    }
+    const next = additive ? new Set(selectedIds.value) : new Set<string>()
+    for (const id of ids) next.add(id)
+    selectedIds.value = next
+    cursorId.value = last
+    anchorId.value = last
+  }
+
   function extendSelectionTo(id: string, sequence: readonly string[]) {
     const to = sequence.indexOf(id)
     if (to === -1) return
@@ -1284,6 +1311,7 @@ export const useEditorStore = defineStore('editor', () => {
     selectOnly,
     isSelected,
     toggleSelected,
+    selectMany,
     extendSelectionTo,
     collapsedLayerIds,
     labelQuery,
