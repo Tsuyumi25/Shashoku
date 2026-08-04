@@ -143,8 +143,11 @@
           <TagList />
         </SplitterPanel>
         <ResizeHandle vertical />
-        <SplitterPanel :order="2" :default-size="55" :min-size="20" class="min-h-0">
-          <StylePanel />
+        <SplitterPanel :order="2" :default-size="55" :min-size="20" class="flex min-h-0 flex-col">
+          <div class="flex h-7 shrink-0 items-center border-b border-border pl-2 select-none">
+            <span class="text-xs font-medium text-muted-foreground">文字樣式</span>
+          </div>
+          <LabelStyleEditor class="min-h-0 flex-1" />
         </SplitterPanel>
       </SplitterGroup>
     </SplitterPanel>
@@ -172,9 +175,9 @@ import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import TagList from '@/components/TagList.vue'
 import BucketList from '@/components/BucketList.vue'
 import LabelList from '@/components/LabelList.vue'
+import LabelStyleEditor from '@/components/LabelStyleEditor.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
-import StylePanel from '@/components/StylePanel.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'

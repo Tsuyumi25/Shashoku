@@ -676,11 +676,6 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  function updateSeedStyle(patch: Partial<TextStyle>) {
-    projectMeta.value.seedStyle = { ...projectMeta.value.seedStyle, ...patch }
-    markMetaDirty()
-  }
-
   function updateComment(text: string) {
     if (projectMeta.value.comment === text) return
     projectMeta.value.comment = text
@@ -780,7 +775,6 @@ export const useProjectStore = defineStore('project', () => {
     moveTag,
     setTagColor,
     renameTag,
-    updateSeedStyle,
     updateComment,
     markMetaDirty,
   }
