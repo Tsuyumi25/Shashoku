@@ -1,7 +1,7 @@
-import type { TextStyle } from '../text-style/types'
+import type { TextStyle, TextStyleProvenance } from '../text-style/types'
 
 
-export const MANIFEST_SCHEMA_VERSION = 5
+export const MANIFEST_SCHEMA_VERSION = 6
 
 export const OCR_SCHEMA_VERSION = 1
 
@@ -84,7 +84,20 @@ export interface TextLayerEntry extends LayerEntryBase {
 
   y: number
 
-  groupId: string | null
+  /**
+   * What this object is, semantically — 框内, 心聲, 角色/ゆみ. A set, not a
+   * list: the order it arrives in carries nothing, and the stored form is
+   * sorted so two objects meaning the same thing look the same on disk.
+   *
+   * Any string is a legal tag. `project.tags` colours the ones it knows and
+   * says nothing about the rest; a name it has never heard is still data the
+   * user typed, and dropping it would be losing their work to a lookup miss.
+   *
+   * A facet — the `角色/` in `角色/ゆみ` — is a convention inside the string,
+   * with nothing in the schema to hold it. How finely to cut the vocabulary is
+   * a translation decision, and the file format has no business making it.
+   */
+  tags: string[]
 
   /**
    * The object's own turn on the page, in radians, clockwise. Concrete here
@@ -96,7 +109,21 @@ export interface TextLayerEntry extends LayerEntryBase {
   /** One entry per line; an embedded newline is refused at parse. */
   lines: string[]
 
-  styleOverride?: Partial<TextStyle>
+  /**
+   * The whole style, held by value — no group to inherit from and no override
+   * layered on top. Two objects that look alike are two objects that hold the
+   * same seven fields, and nothing changes what one of them looks like except
+   * writing to it.
+   *
+   * The cost is that making a hundred objects agree means writing to a hundred
+   * objects. That is what the batch operations are for, and it is paid on
+   * purpose: it buys back the case a shared style cannot express, where an
+   * object needs to leave the group it belongs to without leaving what it means.
+   */
+  style: TextStyle
+
+  /** Empty when every field is the user's own hand. */
+  provenance: TextStyleProvenance
 }
 
 

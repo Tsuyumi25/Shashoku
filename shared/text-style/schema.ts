@@ -8,9 +8,27 @@ import type {
   TextDirection,
   TextEffect,
   TextStyle,
+  TextStyleProvenance,
 } from './types'
 
 type Fail = (message: string) => never
+
+/**
+ * Every field of a style, in the order a panel shows them. Anything that walks
+ * a style field by field reads this, so adding an eighth field is one edit and
+ * not a hunt for the places that enumerated seven.
+ */
+export const TEXT_STYLE_FIELDS = [
+  'fontFamily',
+  'fontSizePx',
+  'direction',
+  'align',
+  'color',
+  'leadingPercent',
+  'effects',
+] as const satisfies readonly (keyof TextStyle)[]
+
+export type TextStyleField = (typeof TEXT_STYLE_FIELDS)[number]
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -95,36 +113,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
 }
 
 
-export function parsePartialTextStyle(v: unknown, at: string, fail: Fail): Partial<TextStyle> {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const out: Partial<TextStyle> = {}
-  if (v.fontFamily !== undefined) {
-    if (typeof v.fontFamily !== 'string') fail(`${at}.fontFamily 必須是字串`)
-    out.fontFamily = v.fontFamily
-  }
-  if (v.fontSizePx !== undefined) {
-    if (typeof v.fontSizePx !== 'number' || !Number.isFinite(v.fontSizePx) || v.fontSizePx <= 0)
-      fail(`${at}.fontSizePx 必須是正數`)
-    out.fontSizePx = v.fontSizePx
-  }
-  if (v.direction !== undefined) out.direction = parseDirection(v.direction, `${at}.direction`, fail)
-  if (v.align !== undefined) out.align = parseAlign(v.align, `${at}.align`, fail)
-  if (v.color !== undefined) {
-    if (typeof v.color !== 'string' || v.color.length === 0) fail(`${at}.color 必須是非空字串`)
-    out.color = v.color
-  }
-  if (v.leadingPercent !== undefined) {
-    if (typeof v.leadingPercent !== 'number' || !Number.isFinite(v.leadingPercent) || v.leadingPercent <= 0)
-      fail(`${at}.leadingPercent 必須是正數`)
-    out.leadingPercent = v.leadingPercent
-  }
-  if (v.effects !== undefined) {
-    out.effects = parseEffectsArray(v.effects, `${at}.effects`, fail)
-  }
-  return out
-}
-
-
 export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
   return {
     fontFamily: s.fontFamily,
@@ -138,14 +126,31 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
 }
 
 
-export function serializePartialTextStyle(s: Partial<TextStyle>): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  if (s.fontFamily !== undefined) out.fontFamily = s.fontFamily
-  if (s.fontSizePx !== undefined) out.fontSizePx = s.fontSizePx
-  if (s.direction !== undefined) out.direction = s.direction
-  if (s.align !== undefined) out.align = s.align
-  if (s.color !== undefined) out.color = s.color
-  if (s.leadingPercent !== undefined) out.leadingPercent = s.leadingPercent
-  if (s.effects !== undefined) out.effects = s.effects.map(serializeTextEffect)
+export function parseTextStyleProvenance(
+  v: unknown,
+  at: string,
+  fail: Fail,
+): TextStyleProvenance {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const out: TextStyleProvenance = {}
+  for (const field of TEXT_STYLE_FIELDS) {
+    const label = v[field]
+    if (label === undefined) continue
+    if (typeof label !== 'string' || label.length === 0)
+      fail(`${at}.${field} 必須是非空字串(批次操作的名稱)`)
+    out[field] = label
+  }
   return out
 }
+
+
+export function serializeTextStyleProvenance(p: TextStyleProvenance): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const field of TEXT_STYLE_FIELDS) {
+    const label = p[field]
+    if (label !== undefined) out[field] = label
+  }
+  return out
+}
+
+

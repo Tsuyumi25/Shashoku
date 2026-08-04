@@ -30,6 +30,9 @@ export default defineConfig({
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
+        // The published bundle is built against an older Vue 3 and drags in its
+        // own copy; the source entry compiles against ours.
+        vuedraggable: "vuedraggable/src/vuedraggable.js",
         ...sharedAlias,
       },
     },

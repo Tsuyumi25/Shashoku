@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { StackNode } from '@shared/page/stack'
 import { stackSegments } from '@/lib/stackSegments'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function raster(id: string, blendMode = 'normal', opacity = 1): StackNode {
   const entry: RasterLayerEntry = {
@@ -32,9 +33,11 @@ function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
     blendMode,
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
   }
   return { kind: 'text', entry, opacity, blendMode }
 }

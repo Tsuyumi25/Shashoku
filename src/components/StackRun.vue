@@ -4,9 +4,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
-import type { StyleGroup } from '@shared/project/types'
 import type { TextLayerEntry } from '@shared/page/types'
-import type { TextStyle } from '@shared/text-style/types'
 import { textOf } from '@shared/page/text'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -14,7 +12,6 @@ import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
-import { resolveTextStyle } from '@/lib/textStyle'
 
 /**
  * A run of the page's objects on one canvas, drawn in page coordinates under
@@ -37,8 +34,6 @@ const props = defineProps<{
   layersDir: string
   container: { w: number; h: number }
   view: ViewTransform
-  groups: readonly StyleGroup[]
-  defaultStyle: TextStyle
   /**
    * A gesture in progress, in page units and deliberately fractional — this is
    * the preview, and the layer's own whole-pixel frame is left alone until the
@@ -82,10 +77,6 @@ function drawable(node: RasterStackNode): boolean {
   return node.entry.w > 0 && node.entry.h > 0
 }
 
-function styleOf(entry: TextLayerEntry): TextStyle {
-  return resolveTextStyle(entry, props.groups, props.defaultStyle)
-}
-
 /**
  * Every text object in this run, already typeset.
  *
@@ -101,7 +92,7 @@ const drawnTexts = computed(() => {
     const entry = node.entry
     out.set(
       entry.id,
-      drawnLabel(textOf(entry), styleOf(entry), { x: entry.x, y: entry.y }, entry.rotation),
+      drawnLabel(textOf(entry), entry.style, { x: entry.x, y: entry.y }, entry.rotation),
     )
   }
   return out

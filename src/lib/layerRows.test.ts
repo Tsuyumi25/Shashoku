@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string, visible = true): TextLayerEntry {
   return {
@@ -13,9 +14,11 @@ function text(id: string, visible = true): TextLayerEntry {
     blendMode: 'normal',
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
   }
 }
 

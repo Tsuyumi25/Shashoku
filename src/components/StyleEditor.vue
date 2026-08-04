@@ -4,10 +4,13 @@
     <button
       type="button"
       class="flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded border border-input bg-background px-1.5 text-left hover:border-primary"
-      :title="value.fontFamily || '選擇字型'"
+      :title="isMixed('fontFamily') ? MIXED_TEXT : value.fontFamily || '選擇字型'"
       @click="openFont"
     >
-      <span class="min-w-0 truncate">{{ value.fontFamily || '選擇字型' }}</span>
+      <span
+        class="min-w-0 truncate"
+        :class="isMixed('fontFamily') && 'text-muted-foreground/60'"
+      >{{ isMixed('fontFamily') ? MIXED_TEXT : value.fontFamily || '選擇字型' }}</span>
       <ChevronDown :size="12" class="shrink-0 text-muted-foreground" />
     </button>
 
@@ -18,7 +21,8 @@
         min="1"
         step="1"
         class="h-6 w-16 rounded border border-input bg-background px-1.5"
-        :value="value.fontSizePx"
+        :value="isMixed('fontSizePx') ? '' : value.fontSizePx"
+        :placeholder="isMixed('fontSizePx') ? MIXED_TEXT : ''"
         @change="onNumber('fontSizePx', $event)"
       />
       <span class="text-muted-foreground">px</span>
@@ -28,7 +32,7 @@
     <ToggleGroupRoot
       type="single"
       class="seg w-full"
-      :model-value="value.direction"
+      :model-value="isMixed('direction') ? undefined : value.direction"
       @update:model-value="onDirection"
     >
       <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
@@ -39,7 +43,7 @@
     <ToggleGroupRoot
       type="single"
       class="seg w-full"
-      :model-value="value.align"
+      :model-value="isMixed('align') ? undefined : value.align"
       @update:model-value="onAlign"
     >
       <ToggleGroupItem
@@ -60,7 +64,10 @@
         :value="value.color"
         @change="onColor($event)"
       />
-      <span class="font-mono text-muted-foreground">{{ value.color }}</span>
+      <span
+        class="font-mono"
+        :class="isMixed('color') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
+      >{{ isMixed('color') ? MIXED_TEXT : value.color }}</span>
     </div>
 
     <label class="text-muted-foreground">行距</label>
@@ -70,7 +77,8 @@
         min="1"
         step="10"
         class="h-6 w-16 rounded border border-input bg-background px-1.5"
-        :value="value.leadingPercent"
+        :value="isMixed('leadingPercent') ? '' : value.leadingPercent"
+        :placeholder="isMixed('leadingPercent') ? MIXED_TEXT : ''"
         @change="onNumber('leadingPercent', $event)"
       />
       <span class="text-muted-foreground">%</span>
@@ -83,15 +91,19 @@
     <label class="text-muted-foreground">描邊</label>
     <div class="flex items-center gap-1.5">
       <input
+        ref="strokeToggleEl"
         type="checkbox"
         class="h-3.5 w-3.5 accent-primary"
         :checked="stroke !== null"
         @change="onToggleStroke($event)"
       />
-      <span v-if="stroke === null" class="text-[10px] text-muted-foreground/60">關閉</span>
+      <span v-if="isMixed('effects')" class="text-[10px] text-muted-foreground/60">
+        {{ MIXED_TEXT }}
+      </span>
+      <span v-else-if="stroke === null" class="text-[10px] text-muted-foreground/60">關閉</span>
     </div>
 
-    <template v-if="stroke !== null">
+    <template v-if="stroke !== null && !isMixed('effects')">
       <label class="pl-3 text-muted-foreground">├ 寬度</label>
       <div class="flex items-center gap-1">
         <input
@@ -132,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef, watchEffect } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import type {
@@ -145,8 +157,32 @@ import type {
 import { useFontPicker } from '@/composables/useFontPicker'
 
 const props = defineProps<{
+  /**
+   * One style standing for the whole selection. Fields named in `mixed` are
+   * the ones the selection disagrees on, and what `value` holds for those is
+   * an arbitrary member's — never shown, never sent back untouched.
+   */
   value: TextStyle
+  /**
+   * Which fields the selection disagrees on. A control here shows that it has
+   * no single answer rather than picking one, because a panel that showed 24
+   * for a selection also holding 48s would turn a glance into an edit.
+   */
+  mixed?: readonly (keyof TextStyle)[]
 }>()
+
+const MIXED_TEXT = '多個值'
+
+function isMixed(field: keyof TextStyle): boolean {
+  return props.mixed?.includes(field) ?? false
+}
+
+const strokeToggleEl = useTemplateRef<HTMLInputElement>('strokeToggleEl')
+
+// Neither on nor off, which no attribute can say — only the DOM property can.
+watchEffect(() => {
+  if (strokeToggleEl.value) strokeToggleEl.value.indeterminate = isMixed('effects')
+})
 
 const emit = defineEmits<{
   patch: [patch: Partial<TextStyle>]
@@ -168,7 +204,7 @@ async function openFont() {
             position: stroke.value.position,
           },
   })
-  if (chosen === null || chosen === props.value.fontFamily) return
+  if (chosen === null || (!isMixed('fontFamily') && chosen === props.value.fontFamily)) return
   emit('patch', { fontFamily: chosen })
 }
 
@@ -179,13 +215,13 @@ const stroke = computed<StrokeEffect | null>(
 function onNumber(key: 'fontSizePx' | 'leadingPercent', e: Event) {
   const raw = (e.target as HTMLInputElement).valueAsNumber
   if (!Number.isFinite(raw) || raw <= 0) return
-  if (raw === props.value[key]) return
+  if (!isMixed(key) && raw === props.value[key]) return
   emit('patch', { [key]: raw })
 }
 
 function onDirection(v: unknown) {
   if (v !== 'horizontal' && v !== 'vertical') return
-  if (v === props.value.direction) return
+  if (!isMixed('direction') && v === props.value.direction) return
   emit('patch', { direction: v })
 }
 
@@ -209,13 +245,13 @@ const alignChoices = computed(() =>
 
 function onAlign(v: unknown) {
   if (v !== 'start' && v !== 'center' && v !== 'end') return
-  if (v === props.value.align) return
+  if (!isMixed('align') && v === props.value.align) return
   emit('patch', { align: v })
 }
 
 function onColor(e: Event) {
   const v = (e.target as HTMLInputElement).value
-  if (v === props.value.color) return
+  if (!isMixed('color') && v === props.value.color) return
   emit('patch', { color: v })
 }
 

@@ -10,7 +10,14 @@ import type {
   TextLayerEntry,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
-import { parsePartialTextStyle, serializePartialTextStyle } from '../text-style/schema'
+import {
+  parseTextStyle,
+  parseTextStyleProvenance,
+  serializeTextStyle,
+  serializeTextStyleProvenance,
+} from '../text-style/schema'
+import { normalizeTagSet } from '../tags/set'
+import { RESERVED_TAG_NAMES } from '../ssk/constants'
 
 
 export const BLEND_MODE_ALLOWLIST = [
@@ -135,21 +142,29 @@ function parseRasterEntry(v: Record<string, unknown>, at: string): RasterLayerEn
   }
 }
 
-function parseTextEntry(
-  v: Record<string, unknown>,
-  at: string,
-  validGroupIds: readonly string[] | null,
-): TextLayerEntry {
+/**
+ * Deliberately not checked against `project.tags`: the registry is advisory, so
+ * a name it does not know is a tag the user typed and not a broken reference.
+ */
+function parseTags(v: unknown, at: string): string[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail(`${at} 必須是字串陣列`)
+  v.forEach((tag, i) => {
+    if (typeof tag !== 'string' || tag.trim().length === 0)
+      fail(`${at}[${i}] 必須是非空字串`)
+    if (RESERVED_TAG_NAMES.includes(tag.trim()))
+      fail(`${at}[${i}]「${tag}」是保留字(${RESERVED_TAG_NAMES.join('、')})`)
+  })
+  return normalizeTagSet(v as string[])
+}
+
+function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry {
   const base = parseLayerBase(v, at, 'text')
-  const { x, y, groupId, lines } = v
+  const { x, y, lines } = v
   // Deliberately not integer-checked, unlike a raster layer's frame: what lands
   // on whole pixels is the rasterizer's output, not this.
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字(頁面像素)`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字(頁面像素)`)
-  if (groupId !== null && typeof groupId !== 'string')
-    fail(`${at}.groupId 必須是 string(對應 project.groups[].id)或 null`)
-  if (validGroupIds !== null && typeof groupId === 'string' && !validGroupIds.includes(groupId))
-    fail(`${at}.groupId「${groupId}」不在目前 project.groups 內`)
   if (!Array.isArray(lines)) fail(`${at}.lines 必須是字串陣列`)
   const parsedLines = lines.map((line, j) => {
     if (typeof line !== 'string') fail(`${at}.lines[${j}] 必須是字串`)
@@ -164,46 +179,37 @@ function parseTextEntry(
     rotation = v.rotation
   }
 
-  const entry: TextLayerEntry = {
+  return {
     kind: 'text',
     ...base,
     x,
     y,
-    groupId: groupId as string | null,
+    tags: parseTags(v.tags, `${at}.tags`),
     rotation,
     lines: parsedLines,
+    style: parseTextStyle(v.style, `${at}.style`, fail),
+    provenance:
+      v.provenance === undefined
+        ? {}
+        : parseTextStyleProvenance(v.provenance, `${at}.provenance`, fail),
   }
-  if (v.styleOverride !== undefined) {
-    entry.styleOverride = parsePartialTextStyle(v.styleOverride, `${at}.styleOverride`, fail)
-  }
-  return entry
 }
 
-function parseGroupEntry(
-  v: Record<string, unknown>,
-  at: string,
-  validGroupIds: readonly string[] | null,
-): GroupLayerEntry {
+function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
   const base = parseLayerBase(v, at, 'group')
   const name = parseName(v, at)
   const { children } = v
   if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
-  const parsedChildren = children.map((c, i) =>
-    parseLayerEntry(c, `${at}.children[${i}]`, validGroupIds),
-  )
+  const parsedChildren = children.map((c, i) => parseLayerEntry(c, `${at}.children[${i}]`))
   return { kind: 'group', ...base, name, children: parsedChildren }
 }
 
-function parseLayerEntry(
-  v: unknown,
-  at: string,
-  validGroupIds: readonly string[] | null,
-): LayerEntry {
+function parseLayerEntry(v: unknown, at: string): LayerEntry {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const kind = v.kind
   if (kind === 'raster') return parseRasterEntry(v, at)
-  if (kind === 'text') return parseTextEntry(v, at, validGroupIds)
-  if (kind === 'group') return parseGroupEntry(v, at, validGroupIds)
+  if (kind === 'text') return parseTextEntry(v, at)
+  if (kind === 'group') return parseGroupEntry(v, at)
   fail(`${at}.kind 必須是 raster | text | group 之一(取得 ${JSON.stringify(kind)})`)
 }
 
@@ -241,10 +247,7 @@ function parsePageSize(data: Record<string, unknown>): { width?: number; height?
  * the repair layer's question, not this one — a page whose order has drifted is
  * still readable, and refusing to open it would be the worse answer.
  */
-export function parseManifest(
-  raw: string,
-  validGroupIds: readonly string[] | null = null,
-): ManifestJson {
+export function parseManifest(raw: string): ManifestJson {
   const data = parseJson(raw, 'manifest.json')
   if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
 
@@ -274,7 +277,7 @@ export function parseManifest(
 
   const layersRaw = data.layers
   if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`, validGroupIds))
+  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`))
 
   const files: string[] = []
   collectRasterFiles(layers, files)
@@ -311,18 +314,37 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
     ...base,
     x: l.x,
     y: l.y,
-    groupId: l.groupId,
     lines: l.lines,
   }
+  if (l.tags.length > 0) out.tags = normalizeTagSet(l.tags)
   if (l.rotation) out.rotation = l.rotation
-  if (l.styleOverride !== undefined && Object.keys(l.styleOverride).length > 0)
-    out.styleOverride = serializePartialTextStyle(l.styleOverride)
+  out.style = serializeTextStyle(l.style)
+  if (Object.keys(l.provenance).length > 0)
+    out.provenance = serializeTextStyleProvenance(l.provenance)
   return out
 }
 
-/** The drawn part of a page, on its own — what a thumbnail's identity is made of. */
+/**
+ * The drawn part of a page, on its own — what a thumbnail's identity is made
+ * of.
+ *
+ * A text object's tags and its provenance are dropped here: they say what an
+ * object means and which batch last wrote it, neither of which moves a pixel.
+ * Keeping them would throw away every thumbnail in the chapter for a
+ * classification pass that changed nothing anybody can see.
+ */
 export function serializeLayers(layers: readonly LayerEntry[]): string {
-  return JSON.stringify(layers.map(serializeLayerEntry))
+  const drawn = (entry: LayerEntry): Record<string, unknown> => {
+    const out = serializeLayerEntry(entry)
+    if (entry.kind === 'text') {
+      delete out.tags
+      delete out.provenance
+    } else if (entry.kind === 'group') {
+      out.children = entry.children.map(drawn)
+    }
+    return out
+  }
+  return JSON.stringify(layers.map(drawn))
 }
 
 export function serializeManifest(m: ManifestJson): string {

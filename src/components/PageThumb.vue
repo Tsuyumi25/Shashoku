@@ -107,13 +107,13 @@ function revoke() {
 }
 
 async function bytesFor(): Promise<Uint8Array> {
-  const key = await thumbnailKey(props.file, project.projectMeta)
+  const key = await thumbnailKey(props.file)
   const cached = await window.api.readThumbnail(key)
   if (cached) return cached
 
   return inRenderSlot(async () => {
     const raw = await window.api.readImage(rawsDirOf(project.rootPath ?? ''), props.file.filename)
-    const png = await renderThumbnail(raw, props.file, project.projectMeta)
+    const png = await renderThumbnail(raw, props.file)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})
     return png

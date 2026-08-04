@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { validatePage } from './validate'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string): TextLayerEntry {
   return {
@@ -13,9 +14,11 @@ function text(id: string): TextLayerEntry {
     blendMode: 'normal',
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
   }
 }
 

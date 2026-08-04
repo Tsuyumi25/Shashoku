@@ -6,8 +6,6 @@
       :layers-dir="layersDir"
       :container="container"
       :view="view"
-      :groups="groups"
-      :default-style="defaultStyle"
       :place="placeFor(segment)"
     />
     <PageStack
@@ -16,8 +14,6 @@
       :layers-dir="layersDir"
       :container="container"
       :view="view"
-      :groups="groups"
-      :default-style="defaultStyle"
       :held="held"
     />
   </div>
@@ -26,8 +22,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
-import type { StyleGroup } from '@shared/project/types'
-import type { TextStyle } from '@shared/text-style/types'
 import type { StackNode } from '@shared/page/stack'
 import StackRun from '@/components/StackRun.vue'
 import { stackSegments, type StackSegment } from '@/lib/stackSegments'
@@ -51,8 +45,6 @@ const props = defineProps<{
   /** The viewport, which is what a raster canvas is sized to. */
   container: { w: number; h: number }
   view: ViewTransform
-  groups: readonly StyleGroup[]
-  defaultStyle: TextStyle
   /**
    * The layer a gesture is on and where that gesture has taken it. It is held
    * out of its run so the transform reaches it alone, and it goes back into

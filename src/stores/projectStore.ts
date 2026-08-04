@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
-import type { ProjectJson, StyleGroup } from '@shared/project/types'
+import type { ProjectJson } from '@shared/project/types'
+import type { TagDefinition } from '@shared/tags/types'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import {
-  defaultColorForGroupIndex,
+  defaultColorForTagIndex,
   defaultProjectJson,
   parseProjectJson,
   serializeProjectJson,
@@ -32,15 +33,9 @@ import { assertDistinctFolders } from '@shared/export/profile'
 import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { DIR_RAWS, SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
-import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
+import type { TextStyle, TextStyleProvenance } from '@shared/text-style/types'
+import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
-
-function generateGroupId(): string {
-  const c = globalThis.crypto
-  if (c?.randomUUID) return c.randomUUID()
-  return `grp-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
-}
-
 
 /**
  * Where a text object sits, in both senses at once: its place in the tree,
@@ -89,8 +84,8 @@ export const useProjectStore = defineStore('project', () => {
   const isOpen = computed(() => rootPath.value !== null)
   const folderPath = computed(() => rootPath.value)
   const header = computed<ProjectHeader>(() => ({
-    groups: projectMeta.value.groups,
-    defaultStyle: projectMeta.value.defaultStyle,
+    tags: projectMeta.value.tags,
+    seedStyle: projectMeta.value.seedStyle,
     comment: projectMeta.value.comment,
   }))
   const dirty = computed(() => metaDirty.value || dirtyFilenames.value.length > 0)
@@ -150,7 +145,6 @@ export const useProjectStore = defineStore('project', () => {
     // which is what makes it land where it came from.
     await autosave.flush()
     const meta = parseProjectJson(projectMetaRaw)
-    const groupIds = meta.groups.map((g) => g.id)
     const loaded: ProjectFile[] = []
     // A page whose reading order had drifted is put right here and queued to be
     // written back, so the fix is made once rather than recomputed every open.
@@ -159,7 +153,7 @@ export const useProjectStore = defineStore('project', () => {
       let page = defaultManifest()
       try {
         const raw = await window.api.readPage(p.pageDir)
-        const repair = repairPage(parseManifest(raw.manifestRaw, groupIds))
+        const repair = repairPage(parseManifest(raw.manifestRaw))
         page = repair.manifest
         if (repair.repaired.length > 0) mended.push(p.filename)
       } catch {
@@ -585,77 +579,105 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
-  function updateLabelGroupId(filename: string, labelId: string, groupId: string | null) {
+  function setLabelTags(filename: string, labelId: string, tags: readonly string[]) {
     const label = labelById(filename, labelId)
     if (!label) return
-    label.groupId = groupId
+    label.tags = normalizeTagSet(tags)
     markPageDirty(filename)
   }
 
-
-  function updateLabelStyleOverride(
+  /**
+   * Style and provenance move together — a field's value and the note saying
+   * which batch wrote it are one fact, and undo restoring half of it would
+   * leave the group-by-value view describing an operation that no longer
+   * happened.
+   */
+  function setLabelStyle(
     filename: string,
     labelId: string,
-    styleOverride: TextLayerEntry['styleOverride'],
+    style: TextStyle,
+    provenance: TextStyleProvenance,
   ) {
     const label = labelById(filename, labelId)
     if (!label) return
-    if (styleOverride === undefined || Object.keys(styleOverride).length === 0)
-      delete label.styleOverride
-    else label.styleOverride = styleOverride
+    label.style = { ...style }
+    label.provenance = { ...provenance }
     markPageDirty(filename)
   }
 
-  
-
-  
-  function addGroup(name: string): StyleGroup | null {
-    const groups = projectMeta.value.groups
-    if (groups.some((g) => g.name === name)) return null
-    const group: StyleGroup = {
-      id: generateGroupId(),
-      name,
-      color: defaultColorForGroupIndex(groups.length),
-      style: { ...DEFAULT_TEXT_STYLE },
+  /** Every text object in the chapter, with the page each one came from. */
+  function allTextObjects(): { filename: string; label: TextLayerEntry }[] {
+    const out: { filename: string; label: TextLayerEntry }[] = []
+    for (const file of files.value) {
+      for (const label of textObjects(file.page.layers)) out.push({ filename: file.filename, label })
     }
-    groups.push(group)
-    markMetaDirty()
-    return group
+    return out
   }
 
-  function renameGroup(index: number, name: string) {
-    const groups = projectMeta.value.groups
-    if (index < 0 || index >= groups.length) return
-    groups[index].name = name
+
+  function addTag(name: string, color?: string): TagDefinition | null {
+    const tags = projectMeta.value.tags
+    if (tags.some((t) => t.name === name)) return null
+    const tag: TagDefinition = { name, color: color ?? defaultColorForTagIndex(tags.length) }
+    tags.push(tag)
     markMetaDirty()
+    return tag
   }
 
-  
-  function updateGroupStyle(index: number, patch: Partial<TextStyle>) {
-    const groups = projectMeta.value.groups
-    if (index < 0 || index >= groups.length) return
-    groups[index].style = { ...groups[index].style, ...patch }
+  function insertTagAt(index: number, tag: TagDefinition): void {
+    projectMeta.value.tags.splice(index, 0, { ...tag })
     markMetaDirty()
   }
 
-  
-  function updateDefaultStyle(patch: Partial<TextStyle>) {
-    projectMeta.value.defaultStyle = { ...projectMeta.value.defaultStyle, ...patch }
+  /** Takes away a colour and a place in the order. The tag itself stays on
+   * every object still carrying it, which is what makes the registry advisory. */
+  function removeTagAt(index: number): TagDefinition | null {
+    const tags = projectMeta.value.tags
+    if (index < 0 || index >= tags.length) return null
+    const [removed] = tags.splice(index, 1)
+    markMetaDirty()
+    return removed ?? null
+  }
+
+  function moveTag(from: number, to: number): void {
+    const tags = projectMeta.value.tags
+    if (from < 0 || from >= tags.length || to < 0 || to >= tags.length || from === to) return
+    const [moved] = tags.splice(from, 1)
+    if (moved) tags.splice(to, 0, moved)
     markMetaDirty()
   }
 
-  
-  function removeLastGroup(): StyleGroup | null {
-    const groups = projectMeta.value.groups
-    if (groups.length === 0) return null
-    const removed = groups.pop() ?? null
+  function setTagColor(index: number, color: string): void {
+    const tags = projectMeta.value.tags
+    if (index < 0 || index >= tags.length) return
+    tags[index].color = color
     markMetaDirty()
-    return removed
   }
 
-  
-  function restoreLastGroup(group: StyleGroup): void {
-    projectMeta.value.groups.push(group)
+  /**
+   * Renaming reaches every object carrying the old name — the name *is* the
+   * reference, so leaving them behind would strand them under a word the user
+   * just said they no longer use. Refused when the new name is already taken,
+   * which also keeps the inverse well defined: renaming back cannot collide.
+   */
+  function renameTag(from: string, to: string): boolean {
+    const tags = projectMeta.value.tags
+    const index = tags.findIndex((t) => t.name === from)
+    if (index === -1 || from === to) return false
+    if (tags.some((t) => t.name === to)) return false
+    tags[index].name = to
+    markMetaDirty()
+    for (const { filename, label } of allTextObjects()) {
+      if (!label.tags.includes(from)) continue
+      label.tags = normalizeTagSet(label.tags.map((t) => (t === from ? to : t)))
+      markPageDirty(filename)
+    }
+    return true
+  }
+
+
+  function updateSeedStyle(patch: Partial<TextStyle>) {
+    projectMeta.value.seedStyle = { ...projectMeta.value.seedStyle, ...patch }
     markMetaDirty()
   }
 
@@ -732,8 +754,9 @@ export const useProjectStore = defineStore('project', () => {
     moveLabel,
     rotateLabel,
     updateLabelText,
-    updateLabelGroupId,
-    updateLabelStyleOverride,
+    setLabelTags,
+    setLabelStyle,
+    allTextObjects,
     setLayerVisible,
     setLayerLocked,
     placeLayer,
@@ -751,12 +774,13 @@ export const useProjectStore = defineStore('project', () => {
     addLayer,
     dissolveFolder,
     restoreFolder,
-    addGroup,
-    renameGroup,
-    updateGroupStyle,
-    updateDefaultStyle,
-    removeLastGroup,
-    restoreLastGroup,
+    addTag,
+    insertTagAt,
+    removeTagAt,
+    moveTag,
+    setTagColor,
+    renameTag,
+    updateSeedStyle,
     updateComment,
     markMetaDirty,
   }

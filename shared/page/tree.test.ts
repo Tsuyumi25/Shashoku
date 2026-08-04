@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import {
@@ -27,9 +28,11 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     blendMode: 'normal',
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
     ...extra,
   }
 }

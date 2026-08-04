@@ -10,29 +10,35 @@
 
 
 import type { ExportProfile } from '../export/types'
+import type { TagDefinition } from '../tags/types'
 import type { TextStyle } from '../text-style/types'
 
-export const PROJECT_SCHEMA_VERSION = 2
+export const PROJECT_SCHEMA_VERSION = 3
 
 
 export type Glossary = Record<string, string>
 
 
-export interface StyleGroup {
-  id: string
-  name: string
-  color: string
-  style: TextStyle
-}
-
-
 export interface ProjectJson {
   schemaVersion: typeof PROJECT_SCHEMA_VERSION
-  
-  groups: StyleGroup[]
-  
-  defaultStyle: TextStyle
-  
+
+  /**
+   * Every tag this project has been told about, in the order the user put them.
+   * Position is priority: an object carrying several of these draws in the
+   * colour of whichever sits highest.
+   *
+   * Advisory only — see `TagDefinition`. Removing an entry takes away a colour,
+   * not the tag itself.
+   */
+  tags: TagDefinition[]
+
+  /**
+   * What a new text object starts out looking like. A seed, not a default: once
+   * an object exists it carries its own complete style, and changing this never
+   * reaches back to anything already placed.
+   */
+  seedStyle: TextStyle
+
   comment: string
   
   glossary?: Glossary

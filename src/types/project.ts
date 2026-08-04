@@ -1,5 +1,5 @@
 import type { TextStyle } from '@shared/text-style/types'
-import type { StyleGroup } from '@shared/project/types'
+import type { TagDefinition } from '@shared/tags/types'
 import type { ManifestJson } from '@shared/page/types'
 
 export interface ProjectFile {
@@ -15,8 +15,8 @@ export interface ProjectFile {
 
 export interface ProjectHeader {
 
-  groups: StyleGroup[]
+  tags: TagDefinition[]
 
-  defaultStyle: TextStyle
+  seedStyle: TextStyle
   comment: string
 }

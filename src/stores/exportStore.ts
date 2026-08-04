@@ -142,8 +142,6 @@ export const useExportStore = defineStore('export', () => {
           page = await compositePage({
             raw,
             page: file.page,
-            groups: project.projectMeta.groups,
-            defaultStyle: project.projectMeta.defaultStyle,
             loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
           })
         } catch (err) {

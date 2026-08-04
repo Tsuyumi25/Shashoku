@@ -1,15 +1,15 @@
 <template>
   <TabsRoot v-model="tab" class="flex h-full min-h-0 flex-col">
     <TabsList class="flex h-7 shrink-0 items-center border-b border-border select-none">
-      <TabsTrigger value="group" class="style-tab">群組樣式</TabsTrigger>
       <TabsTrigger value="label" class="style-tab">文字樣式</TabsTrigger>
+      <TabsTrigger value="seed" class="style-tab">新物件</TabsTrigger>
     </TabsList>
 
-    <TabsContent value="group" class="min-h-0 flex-1 focus:outline-none">
-      <GroupStyleEditor />
-    </TabsContent>
     <TabsContent value="label" class="min-h-0 flex-1 focus:outline-none">
       <LabelStyleEditor />
+    </TabsContent>
+    <TabsContent value="seed" class="min-h-0 flex-1 focus:outline-none">
+      <SeedStyleEditor />
     </TabsContent>
   </TabsRoot>
 </template>
@@ -17,20 +17,13 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
-import GroupStyleEditor from '@/components/GroupStyleEditor.vue'
 import LabelStyleEditor from '@/components/LabelStyleEditor.vue'
+import SeedStyleEditor from '@/components/SeedStyleEditor.vue'
 import { useEditorStore } from '@/stores/editorStore'
 
 const editor = useEditorStore()
 
-const tab = ref('group')
-
-watch(
-  () => editor.activeGroupId,
-  () => {
-    tab.value = 'group'
-  },
-)
+const tab = ref('label')
 
 let lastFilename = editor.currentFilename
 watch(

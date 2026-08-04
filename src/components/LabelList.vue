@@ -92,8 +92,8 @@
           </span>
           <span
             class="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-            :style="{ backgroundColor: colorOf((rows[vrow.index] as LabelRow).label.groupId) }"
-            :title="nameOf((rows[vrow.index] as LabelRow).label.groupId)"
+            :style="{ backgroundColor: colorOf((rows[vrow.index] as LabelRow).label.tags) }"
+            :title="nameOf((rows[vrow.index] as LabelRow).label.tags)"
           />
 
           <!--
@@ -137,6 +137,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
+import { primaryTag, tagsInRegistryOrder, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
 import {
   buildLabelRows,
   dropIntoReadingOrder,
@@ -412,14 +413,14 @@ watch(
   },
 )
 
-function colorOf(groupId: string | null): string {
-  if (!groupId) return 'rgb(128, 128, 128)'
-  return project.header.groups.find((g) => g.id === groupId)?.color ?? 'rgb(128, 128, 128)'
+/** The dot takes whichever known tag sits highest; the tooltip says them all. */
+function colorOf(tags: readonly string[]): string {
+  return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
 }
 
-function nameOf(groupId: string | null): string {
-  if (!groupId) return '未分組'
-  return project.header.groups.find((g) => g.id === groupId)?.name ?? '未分組'
+function nameOf(tags: readonly string[]): string {
+  const ordered = tagsInRegistryOrder(tags, project.header.tags)
+  return ordered.length === 0 ? '未標記' : ordered.join('、')
 }
 </script>
 

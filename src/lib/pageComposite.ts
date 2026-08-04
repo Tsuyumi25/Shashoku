@@ -1,5 +1,3 @@
-import type { StyleGroup } from '@shared/project/types'
-import type { TextStyle } from '@shared/text-style/types'
 import type { ManifestJson } from '@shared/page/types'
 import {
   pageStack,
@@ -11,7 +9,6 @@ import { textOf } from '@shared/page/text'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { sampleSource } from '@/lib/fontSampleCache'
-import { resolveTextStyle } from '@/lib/textStyle'
 
 /**
  * A page that cannot be drawn faithfully. Never swallowed: the whole point of
@@ -24,8 +21,6 @@ export interface CompositeInput {
   /** The raw page as it sits in the project's own copy. */
   raw: Uint8Array
   page: ManifestJson
-  groups: readonly StyleGroup[]
-  defaultStyle: TextStyle
   /**
    * One raster layer's PNG, by the file name the manifest holds. A loader
    * rather than a bag of bytes so that the caller only has to say where layers
@@ -101,16 +96,11 @@ export async function decodeLayerBitmaps(
   return decoded
 }
 
-function drawTextWith(
-  ctx: OffscreenCanvasRenderingContext2D,
-  node: TextStackNode,
-  input: CompositeInput,
-): void {
+function drawTextWith(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void {
   const label = node.entry
   const text = textOf(label)
   if (text.length === 0) return
-  const style = resolveTextStyle(label, input.groups, input.defaultStyle)
-  const drawn = drawnLabel(text, style, { x: label.x, y: label.y }, label.rotation)
+  const drawn = drawnLabel(text, label.style, { x: label.x, y: label.y }, label.rotation)
   // A family this machine lacks draws notdef boxes rather than nothing, so the
   // only way to arrive here without a bitmap is a catalogue that never
   // answered. Exporting the page short one label silently would be worse than
@@ -185,7 +175,7 @@ export function drawStack(
  * text burnt in, at the raw's own size.
  *
  * Deliberately built from the same stacking order, the same rasterizer, the
- * same resolved style and the same box geometry the canvas draws with, so what
+ * same style each object carries and the same box geometry the canvas draws with, so what
  * comes out of here matching what is on screen is a property of the code rather
  * than something anyone has to keep true. Resizing is a separate step for the
  * same reason — one clean downsample of the finished page, rather than a second
@@ -206,7 +196,7 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
     drawStack(ctx, stack, {
       page: size,
       rasters,
-      drawText: (target, node) => drawTextWith(target, node, input),
+      drawText: drawTextWith,
     })
     return canvas
   } finally {

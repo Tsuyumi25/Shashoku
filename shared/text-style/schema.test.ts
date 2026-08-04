@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  parsePartialTextStyle,
   parseTextStyle,
-  serializePartialTextStyle,
+  parseTextStyleProvenance,
   serializeTextStyle,
+  serializeTextStyleProvenance,
 } from './schema'
 import { DEFAULT_TEXT_STYLE } from './types'
 
@@ -74,13 +74,19 @@ describe('parseTextStyle', () => {
   })
 })
 
-describe('parsePartialTextStyle', () => {
-  it('carries an alignment an override sets', () => {
-    const partial = serializePartialTextStyle({ align: 'center' })
-    expect(parsePartialTextStyle(partial, 'style', fail)).toEqual({ align: 'center' })
+describe('parseTextStyleProvenance', () => {
+  it('round-trips the labels it was given', () => {
+    const provenance = { fontFamily: '換字體', effects: '套用描邊' }
+    const written = serializeTextStyleProvenance(provenance)
+    expect(parseTextStyleProvenance(written, 'provenance', fail)).toEqual(provenance)
   })
 
-  it('leaves an alignment an override does not set alone', () => {
-    expect(parsePartialTextStyle({}, 'style', fail)).not.toHaveProperty('align')
+  /** Absent is "the user's own hand", which is not something to store. */
+  it('leaves a field nobody batched out', () => {
+    expect(parseTextStyleProvenance({}, 'provenance', fail)).not.toHaveProperty('color')
+  })
+
+  it('refuses a label that is not a string', () => {
+    expect(() => parseTextStyleProvenance({ color: 7 }, 'provenance', fail)).toThrow()
   })
 })

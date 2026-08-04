@@ -157,7 +157,6 @@ import LayerBlending from '@/components/LayerBlending.vue'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
-import { resolveTextStyle } from '@/lib/textStyle'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -180,14 +179,12 @@ const collapsed = computed(() => editor.collapsedLayerIds)
 /**
  * The family a text row asked for and this machine does not have, or null.
  *
- * Read here rather than off the object because a text style is inherited —
- * the name that turns out to be missing may be written on the project or on a
- * group rather than on the row showing it.
+ * The family is the object's own, so what a row reports missing is what that
+ * row would draw with and nothing inherited from elsewhere.
  */
 function missingFamilyOf(entry: LayerEntry): string | null {
   if (entry.kind !== 'text') return null
-  const style = resolveTextStyle(entry, project.header.groups, project.header.defaultStyle)
-  return familyIsMissing(style.fontFamily) ? style.fontFamily : null
+  return familyIsMissing(entry.style.fontFamily) ? entry.style.fontFamily : null
 }
 
 const rows = computed(() =>

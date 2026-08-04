@@ -1,5 +1,5 @@
 
-export const DEFAULT_GROUPS = ['框内', '框外']
+export const DEFAULT_TAGS = ['框内', '框外']
 
 
 export const CATEGORY_COLORS = [
@@ -15,7 +15,7 @@ export const CATEGORY_COLORS = [
 ] as const
 
 
-export const RESERVED_GROUP_NAMES = ['_Label', '_start', '_end']
+export const RESERVED_TAG_NAMES = ['_Label', '_start', '_end']
 
 
 export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.webp']

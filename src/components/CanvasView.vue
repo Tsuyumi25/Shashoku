@@ -34,8 +34,6 @@
           :layers-dir="layersDirOf(currentFile.pageDir)"
           :container="editor.viewContainerSize"
           :view="view"
-          :groups="project.header.groups"
-          :default-style="project.header.defaultStyle"
           :held="heldLayer"
         />
       </div>
@@ -142,7 +140,8 @@ import {
   resetRotationDirection,
   trackRotationDirection,
 } from '@/lib/rotateDirection'
-import { resolveTextStyle } from '@/lib/textStyle'
+import { primaryTag, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
+import { applyStylePatch } from '@shared/text-style/batch'
 import {
   isSelectionTool,
   maskBrushModeOf,
@@ -198,8 +197,8 @@ const objects = computed(() => {
     x: label.x,
     y: label.y,
     rotation: label.rotation,
-    color: colorOf(label.groupId),
-    style: resolveTextStyle(label, project.header.groups, project.header.defaultStyle),
+    color: colorOf(label.tags),
+    style: label.style,
   }))
 })
 
@@ -281,15 +280,19 @@ function labelById(labelId: string): TextLayerEntry | undefined {
 }
 
 /**
- * A corner drag writes an override on top of whatever the label already had,
- * so the before has to be taken once at the start rather than reconstructed
- * afterwards: a label that was inheriting its size has no `fontSizePx` to put
- * back, and undo has to remove the key, not restore a value.
+ * The before is taken once at the start rather than reconstructed afterwards:
+ * a drag writes every frame, so by the time it ends there is nothing left on
+ * the object saying where it began.
  */
 let scaledFrom: ScaledLabel | null = null
 
 function scaledState(label: TextLayerEntry): ScaledLabel {
-  return { styleOverride: label.styleOverride, x: label.x, y: label.y }
+  return {
+    style: { ...label.style },
+    provenance: { ...label.provenance },
+    x: label.x,
+    y: label.y,
+  }
 }
 
 function beginLabelScale(labelId: string) {
@@ -305,10 +308,14 @@ function beginLabelScale(labelId: string) {
 function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentFilename || editor.isLayerLocked(labelId)) return
-  project.updateLabelStyleOverride(editor.currentFilename, labelId, {
-    ...(label.styleOverride ?? {}),
-    fontSizePx,
-  })
+  // A hand on a corner owns the size it lands on, so whatever batch last set
+  // it stops claiming it.
+  const next = applyStylePatch(
+    { style: label.style, provenance: label.provenance },
+    { fontSizePx },
+    null,
+  )
+  project.setLabelStyle(editor.currentFilename, labelId, next.style, next.provenance)
   project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
 }
 
@@ -331,10 +338,9 @@ function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) 
   editor.cmdRotateLabel(editor.currentFilename, labelId, from, to)
 }
 
-function colorOf(groupId: string | null): string {
-  if (!groupId) return 'rgb(128, 128, 128)'
-  const g = project.header.groups.find((gg) => gg.id === groupId)
-  return g?.color ?? 'rgb(128, 128, 128)'
+/** Whichever known tag sits highest in the project's order decides the marker. */
+function colorOf(tags: readonly string[]): string {
+  return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
 }
 
 const containerRef = useTemplateRef('containerRef')

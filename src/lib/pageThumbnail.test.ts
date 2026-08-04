@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { defaultExportProfile } from '@shared/export/types'
-import { defaultProjectJson } from '@shared/project/schema'
-import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
 
 function page(): ProjectFile {
@@ -26,89 +24,71 @@ function page(): ProjectFile {
           blendMode: 'normal',
           x: 200,
           y: 150,
-          groupId: null,
+          tags: [],
           rotation: 0,
           lines: ['ふむ'],
+          style: { ...DEFAULT_TEXT_STYLE },
+          provenance: {},
         },
       ],
     },
   }
 }
 
+const textOn = (file: ProjectFile) => file.page.layers[0] as TextLayerEntry
+
 /** What a thumbnail is a picture of, and nothing else, decides its key. */
 describe('thumbnailKey', () => {
-  it('is unchanged by what a delivery looks like', async () => {
-    const before: ProjectJson = defaultProjectJson()
-    const after: ProjectJson = {
-      ...before,
-      exportProfiles: [{ ...defaultExportProfile(), format: 'jpeg', maxBytes: 2_000_000 }],
-    }
-
-    expect(await thumbnailKey(page(), after)).toBe(await thumbnailKey(page(), before))
-  })
-
-  it('is unchanged by a group being renamed or recoloured', async () => {
-    const before: ProjectJson = defaultProjectJson()
-    const after: ProjectJson = {
-      ...before,
-      groups: before.groups.map((g, i) =>
-        i === 0 ? { ...g, name: '框外', color: '#ff0000' } : g,
-      ),
-    }
-
-    expect(await thumbnailKey(page(), after)).toBe(await thumbnailKey(page(), before))
-  })
-
-  it('changes when a group restyles the text it lays over', async () => {
-    const before: ProjectJson = defaultProjectJson()
-    const after: ProjectJson = {
-      ...before,
-      groups: before.groups.map((g, i) =>
-        i === 0 ? { ...g, style: { ...g.style, fontSizePx: g.style.fontSizePx + 1 } } : g,
-      ),
-    }
-
-    expect(await thumbnailKey(page(), after)).not.toBe(await thumbnailKey(page(), before))
-  })
-
-  it('changes when the default style moves', async () => {
-    const before: ProjectJson = defaultProjectJson()
-    const after: ProjectJson = {
-      ...before,
-      defaultStyle: { ...before.defaultStyle, fontSizePx: before.defaultStyle.fontSizePx + 1 },
-    }
-
-    expect(await thumbnailKey(page(), after)).not.toBe(await thumbnailKey(page(), before))
-  })
-
   it('changes when the page is retyped', async () => {
-    const meta = defaultProjectJson()
     const edited = page()
-    ;(edited.page.layers[0] as TextLayerEntry).lines = ['なるほど']
+    textOn(edited).lines = ['なるほど']
 
-    expect(await thumbnailKey(edited, meta)).not.toBe(await thumbnailKey(page(), meta))
+    expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
+  })
+
+  it('changes when an object is restyled', async () => {
+    const edited = page()
+    textOn(edited).style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
+
+    expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
+  })
+
+  /**
+   * A tag says what an object means, not what it looks like. Hashing it would
+   * throw away every thumbnail in the chapter for a classification pass that
+   * changed no pixel.
+   */
+  it('is unchanged by an object being tagged', async () => {
+    const tagged = page()
+    textOn(tagged).tags = ['心聲']
+
+    expect(await thumbnailKey(tagged)).toBe(await thumbnailKey(page()))
+  })
+
+  /** Provenance records which batch wrote a field, not what the field is. */
+  it('is unchanged by a batch leaving its mark', async () => {
+    const marked = page()
+    textOn(marked).provenance = { fontSizePx: '批次改字級' }
+
+    expect(await thumbnailKey(marked)).toBe(await thumbnailKey(page()))
   })
 
   // Reading order decides which object comes first in the label list, never
   // what the page looks like.
   it('is unchanged by the page being reordered for reading', async () => {
-    const meta = defaultProjectJson()
     const reordered = page()
     reordered.page.readingOrder = ['zz', 'a']
 
-    expect(await thumbnailKey(reordered, meta)).toBe(await thumbnailKey(page(), meta))
+    expect(await thumbnailKey(reordered)).toBe(await thumbnailKey(page()))
   })
 
   it('separates pages that hold the same labels', async () => {
-    const meta = defaultProjectJson()
     const other = { ...page(), pageDir: '/p/.shashoku/pages/002' }
 
-    expect(await thumbnailKey(other, meta)).not.toBe(await thumbnailKey(page(), meta))
+    expect(await thumbnailKey(other)).not.toBe(await thumbnailKey(page()))
   })
 
   it('separates the sizes it is asked to draw', async () => {
-    const meta = defaultProjectJson()
-
-    expect(await thumbnailKey(page(), meta, 320)).not.toBe(await thumbnailKey(page(), meta, 640))
+    expect(await thumbnailKey(page(), 320)).not.toBe(await thumbnailKey(page(), 640))
   })
 })

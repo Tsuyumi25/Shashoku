@@ -112,13 +112,13 @@
       class="flex min-w-0 flex-col bg-card"
     >
       <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-2 select-none">
-        <span class="text-xs font-medium text-muted-foreground">分組</span>
+        <span class="text-xs font-medium text-muted-foreground">標記</span>
         <button
           type="button"
           class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-          title="新增群組"
+          title="新增標記"
           :disabled="!project.isOpen"
-          @click="onAddGroup"
+          @click="onAddTag"
         >
           <Plus :size="14" />
         </button>
@@ -126,11 +126,11 @@
       <SplitterGroup
         direction="vertical"
         class="min-h-0 flex-1"
-        auto-save-id="translate:groups"
+        auto-save-id="translate:tags"
         :storage="preferences.panelStorage"
       >
         <SplitterPanel :order="1" :default-size="45" :min-size="20" class="min-h-0">
-          <GroupList />
+          <TagList />
         </SplitterPanel>
         <ResizeHandle vertical />
         <SplitterPanel :order="2" :default-size="55" :min-size="20" class="min-h-0">
@@ -157,7 +157,7 @@ import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
-import GroupList from '@/components/GroupList.vue'
+import TagList from '@/components/TagList.vue'
 import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
@@ -251,11 +251,8 @@ function onAddLayer() {
   editor.cmdAddRasterLayer(page, layer, at)
 }
 
-function onAddGroup() {
-  const taken = new Set(project.header.groups.map((g) => g.name))
-  const before = project.header.groups.length
-  if (!editor.cmdAddGroup(nextAutoName(taken, '群組'))) return
-  const added = project.header.groups[before]
-  if (added) editor.activeGroupId = added.id
+function onAddTag() {
+  const taken = new Set(project.header.tags.map((t) => t.name))
+  editor.cmdAddTag(nextAutoName(taken, '標記'))
 }
 </script>

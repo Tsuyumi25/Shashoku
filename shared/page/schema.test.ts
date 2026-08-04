@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PageParseError, parseManifest, serializeManifest } from './schema'
 import type { ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION } from './types'
+import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 
 const UPRIGHT = {
   kind: 'text',
@@ -10,8 +11,10 @@ const UPRIGHT = {
   locked: false,
   x: 512,
   y: 300,
-  groupId: null,
+  tags: [],
   lines: ['hi'],
+  style: DEFAULT_TEXT_STYLE,
+  provenance: {},
 }
 
 const PATCH = {
@@ -48,6 +51,11 @@ function manifestWith(entry: TextLayerEntry): ManifestJson {
 
 const firstText = (m: ManifestJson): TextLayerEntry => m.layers[0] as TextLayerEntry
 
+/** `UPRIGHT` as the parser hands it back, for the tests that write one out. */
+function textEntry(extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
+  return { ...(UPRIGHT as unknown as TextLayerEntry), rotation: 0, opacity: 1, blendMode: 'normal', ...extra }
+}
+
 describe('text object rotation', () => {
   it('reads a page written before objects could be turned as upright', () => {
     expect(firstText(parseManifest(raw(UPRIGHT))).rotation).toBe(0)
@@ -64,12 +72,12 @@ describe('text object rotation', () => {
   })
 
   it('leaves upright objects out of the file rather than writing a zero on each', () => {
-    const out = serializeManifest(manifestWith({ ...UPRIGHT, rotation: 0 } as TextLayerEntry))
+    const out = serializeManifest(manifestWith(textEntry()))
     expect(JSON.parse(out).layers[0]).not.toHaveProperty('rotation')
   })
 
   it('round trips a turned object', () => {
-    const out = serializeManifest(manifestWith({ ...UPRIGHT, rotation: 1.25 } as TextLayerEntry))
+    const out = serializeManifest(manifestWith(textEntry({ rotation: 1.25 })))
     expect(firstText(parseManifest(out)).rotation).toBe(1.25)
   })
 })
@@ -97,7 +105,7 @@ describe('a text object stands where it was put', () => {
   })
 
   it('writes no such field', () => {
-    const out = serializeManifest(manifestWith(UPRIGHT as TextLayerEntry))
+    const out = serializeManifest(manifestWith(textEntry()))
     expect(JSON.parse(out).layers[0]).not.toHaveProperty('anchor')
   })
 })
@@ -123,18 +131,12 @@ describe('the page the positions are measured against', () => {
   })
 
   it('round trips a measured size', () => {
-    const object = {
-      ...UPRIGHT,
-      rotation: 0,
-      opacity: 1,
-      blendMode: 'normal',
-    } as TextLayerEntry
-    const source = { ...manifestWith(object), width: 800, height: 1200 }
+    const source = { ...manifestWith(textEntry()), width: 800, height: 1200 }
     expect(parseManifest(serializeManifest(source))).toEqual(source)
   })
 
   it('writes no size for a page nobody has measured', () => {
-    const out = serializeManifest(manifestWith(UPRIGHT as TextLayerEntry))
+    const out = serializeManifest(manifestWith(textEntry()))
     expect(JSON.parse(out)).not.toHaveProperty('width')
   })
 
@@ -187,15 +189,14 @@ describe('opacity and blend mode', () => {
   })
 
   it('leaves both out of the file rather than writing a default on every entry', () => {
-    const plain = { ...UPRIGHT, rotation: 0, opacity: 1, blendMode: 'normal' }
-    const out = serializeManifest(manifestWith(plain as TextLayerEntry))
+    const out = serializeManifest(manifestWith(textEntry()))
     expect(JSON.parse(out).layers[0]).not.toHaveProperty('opacity')
     expect(JSON.parse(out).layers[0]).not.toHaveProperty('blendMode')
   })
 
   it('round trips a faded object', () => {
-    const faded = { ...UPRIGHT, rotation: 0, opacity: 0.4, blendMode: 'multiply' }
-    const parsed = firstEntry(parseManifest(serializeManifest(manifestWith(faded as TextLayerEntry))))
+    const faded = textEntry({ opacity: 0.4, blendMode: 'multiply' })
+    const parsed = firstEntry(parseManifest(serializeManifest(manifestWith(faded))))
     expect(parsed.opacity).toBe(0.4)
     expect(parsed.blendMode).toBe('multiply')
   })
@@ -245,20 +246,8 @@ describe('parseManifest', () => {
           opacity: 1,
           blendMode: 'pass-through',
           children: [
-            {
-              ...UPRIGHT,
-              rotation: 0,
-              opacity: 1,
-              blendMode: 'normal',
-            } as TextLayerEntry,
-            {
-              ...UPRIGHT,
-              id: 'b',
-              rotation: 0,
-              opacity: 1,
-              blendMode: 'normal',
-              lines: ['ゴゴゴ'],
-            } as TextLayerEntry,
+            textEntry(),
+            textEntry({ id: 'b', lines: ['ゴゴゴ'] }),
           ],
         },
       ],
@@ -283,9 +272,45 @@ describe('parseManifest', () => {
     expect(() => parseManifest(v4)).toThrow(PageParseError)
   })
 
-  it('refuses a text object whose group the project does not have', () => {
-    const entry = { ...UPRIGHT, groupId: 'g-gone' }
-    expect(() => parseManifest(raw(entry), ['g-in'])).toThrow(PageParseError)
+  /**
+   * The registry is advisory, so a name it has never heard is data the user
+   * typed rather than a dangling reference — refusing the page would lose it.
+   */
+  it('opens a page carrying a tag no registry names', () => {
+    const parsed = firstText(parseManifest(raw({ ...UPRIGHT, tags: ['角色/ゆみ'] })))
+    expect(parsed.tags).toEqual(['角色/ゆみ'])
+  })
+
+  it('refuses a tag that is not a non-empty string', () => {
+    expect(() => parseManifest(raw({ ...UPRIGHT, tags: [7] }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw({ ...UPRIGHT, tags: ['  '] }))).toThrow(PageParseError)
+  })
+
+  /**
+   * `parseTextEntry` and `serializeLayerEntry` are two pieces of hand-written
+   * code that happen to agree; the types cannot check that they do. Nothing
+   * downstream would notice if they stopped — a set that came back reordered
+   * or with a duplicate restored still typechecks, and only the group-by-value
+   * view would show it, as drift that is not there.
+   */
+  it('writes a tag set in one canonical order and reads it back the same', () => {
+    const messy = { ...UPRIGHT, tags: ['心聲', '框内', '心聲', ' 框内 '] }
+    const written = JSON.parse(serializeManifest(parseManifest(raw(messy))))
+    expect(written.layers[0].tags).toEqual(['心聲', '框内'])
+
+    const reordered = { ...UPRIGHT, tags: ['框内', '心聲'] }
+    expect(serializeManifest(parseManifest(raw(reordered)))).toBe(
+      serializeManifest(parseManifest(raw(messy))),
+    )
+  })
+
+  it('round trips an object carrying tags and a batch note', () => {
+    const marked = textEntry({
+      tags: ['心聲', '框内'],
+      style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 },
+      provenance: { fontSizePx: '批次改字級' },
+    })
+    expect(parseManifest(serializeManifest(manifestWith(marked)))).toEqual(manifestWith(marked))
   })
 
   it('refuses a line with a newline inside it, since lines are the breaks', () => {

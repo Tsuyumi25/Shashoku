@@ -1,6 +1,4 @@
-import type { ProjectJson } from '@shared/project/types'
 import type { ProjectFile } from '@/types/project'
-import { serializeTextStyle } from '@shared/text-style/schema'
 import { serializeLayers } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
@@ -14,33 +12,18 @@ async function digest(text: string): Promise<string> {
 }
 
 /**
- * The part of a project that reaches the page: the styles a label resolves
- * through, which is `defaultStyle` and what each group lays over it. Identity
- * comes along because that is what a label names its group by.
- *
- * Everything else in the document is left out on purpose. A group's name and
- * colour belong to the sidebar, and the export profiles decide what a
- * delivered file is, not what the page looks like — hashing the document whole
- * made a nudge to a delivery setting throw away every thumbnail in the chapter.
- */
-function drawingStyles(meta: ProjectJson): unknown {
-  return [
-    serializeTextStyle(meta.defaultStyle),
-    meta.groups.map((g) => [g.id, serializeTextStyle(g.style)]),
-  ]
-}
-
-/**
  * Names everything that went into drawing the page, so a re-typeset one cannot
  * come back showing what it used to look like. The raws copy is written once
  * and never again, so the page's identity is enough to stand for its pixels;
- * the labels and the styles they resolve through are what actually move.
+ * the objects on it are what actually move.
+ *
+ * Nothing from the project document is hashed, because nothing in it reaches
+ * the page any more: each object carries its whole style, so the serialized
+ * tree already names every pixel decision. That also ends an old annoyance —
+ * a nudge to a delivery setting used to throw away every thumbnail in the
+ * chapter, back when the key hashed the document to catch the styles inside it.
  */
-export function thumbnailKey(
-  file: ProjectFile,
-  meta: ProjectJson,
-  edge: number = THUMBNAIL_EDGE,
-): Promise<string> {
+export function thumbnailKey(file: ProjectFile, edge: number = THUMBNAIL_EDGE): Promise<string> {
   return digest(
     // JSON rather than a joined string: one of these parts is itself a
     // serialized document full of whatever separator would be picked, and a
@@ -54,7 +37,6 @@ export function thumbnailKey(
       // object comes first in the label list, never what the page looks like,
       // and hashing it would throw the picture away for a reordering.
       serializeLayers(file.page.layers),
-      drawingStyles(meta),
     ]),
   )
 }
@@ -138,14 +120,11 @@ export async function renderCover(
 export async function renderThumbnail(
   raw: Uint8Array,
   file: ProjectFile,
-  meta: ProjectJson,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<Uint8Array> {
   const full = await compositePage({
     raw,
     page: file.page,
-    groups: meta.groups,
-    defaultStyle: meta.defaultStyle,
     loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
   })
   const size = fitWithin({ w: full.width, h: full.height }, edge)

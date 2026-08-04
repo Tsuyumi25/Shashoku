@@ -19,6 +19,9 @@ import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
+import type { TextStyle } from '@shared/text-style/types'
+import { applyStylePatch, type StyledState } from '@shared/text-style/batch'
+import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 
 export interface Command {
 
@@ -28,8 +31,7 @@ export interface Command {
 }
 
 /** Everything a corner drag leaves changed about one label. */
-export interface ScaledLabel {
-  styleOverride: TextLayerEntry['styleOverride']
+export interface ScaledLabel extends StyledState {
   x: number
   y: number
 }
@@ -242,9 +244,13 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const foreground = ref('#000000')
 
-  const activeGroupId = ref<string | null>(null)
-  
-  const showGroups = ref(false)
+  /**
+   * Whether the canvas says what its objects mean — tag colours and names on
+   * top of the picture. Off by default: the page is the thing being judged, and
+   * an editor that always draws its own bookkeeping over it answers a question
+   * nobody asked while typesetting.
+   */
+  const showTags = ref(false)
   
   const fontSize = ref(14)
 
@@ -517,10 +523,15 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A new label is empty and joins the active group, so a run of them can be
-   * placed first and typed later.
+   * A new label is empty and carries no tags at all, so a run of them can be
+   * placed first and both typed and classified later.
+   *
+   * Deliberately not inheriting whatever was last selected: a tag put on by the
+   * tool rather than by the user is a tag nobody checked, and the batch
+   * operations exist precisely so that tagging afterwards is cheap.
    */
   function addLabelAt(x: number, y: number) {
+    const project = useProjectStore()
     if (!currentFilename.value) return
     cmdAddLabel(currentFilename.value, {
       kind: 'text',
@@ -531,9 +542,11 @@ export const useEditorStore = defineStore('editor', () => {
       blendMode: 'normal',
       x,
       y,
-      groupId: activeGroupId.value,
+      tags: [],
       rotation: 0,
       lines: [''],
+      style: { ...project.header.seedStyle },
+      provenance: {},
     })
   }
 
@@ -828,7 +841,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
-      project.updateLabelStyleOverride(filename, labelId, state.styleOverride)
+      project.setLabelStyle(filename, labelId, state.style, state.provenance)
       project.moveLabel(filename, labelId, state.x, state.y)
     }
     pushCommand(
@@ -1106,47 +1119,160 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  function cmdUpdateLabelGroupId(
-    filename: string,
-    labelId: string,
-    oldGroupId: string | null,
-    newGroupId: string | null,
-  ) {
-    if (oldGroupId === newGroupId || isLayerLocked(labelId)) return
+  /** Every selected text object a change is allowed to reach, with its page. */
+  function selectedTextObjects(): { filename: string; label: TextLayerEntry }[] {
     const project = useProjectStore()
+    const out: { filename: string; label: TextLayerEntry }[] = []
+    for (const id of unlockedSelection()) {
+      const filename = project.pageOfEntry(id)
+      if (filename === null) continue
+      const label = project.labelById(filename, id)
+      if (label) out.push({ filename, label })
+    }
+    return out
+  }
+
+  /**
+   * How far a batch reaches, for the sentence shown before it runs. The
+   * selection crosses pages and most of it may be somewhere nobody can see, so
+   * an operation about to change forty objects on six pages has to say so.
+   */
+  const batchScope = computed(() => {
+    const objects = selectedTextObjects()
+    const pages = new Set(objects.map((o) => o.filename))
+    return {
+      objects: objects.length,
+      pages: pages.size,
+      offPage: [...pages].some((p) => p !== currentFilename.value),
+    }
+  })
+
+  /**
+   * One act, however many objects it touched. Undoing a batch has to put every
+   * one of them back at once — anything else would leave the selection half
+   * changed, which is a state the user never asked for and cannot see.
+   */
+  function cmdApplyStyleToSelection(patch: Partial<TextStyle>, source: string | null) {
+    const project = useProjectStore()
+    const targets = selectedTextObjects()
+    if (targets.length === 0 || Object.keys(patch).length === 0) return
+    const before = targets.map(({ filename, label }) => ({
+      filename,
+      id: label.id,
+      state: { style: { ...label.style }, provenance: { ...label.provenance } },
+    }))
+    const after = before.map((entry) => ({
+      ...entry,
+      state: applyStylePatch(entry.state, patch, source),
+    }))
+    const write = (states: typeof before) => {
+      for (const { filename, id, state } of states)
+        project.setLabelStyle(filename, id, state.style, state.provenance)
+    }
     pushCommand({
-      label: `update-groupId ${labelId}`,
-      do: () => project.updateLabelGroupId(filename, labelId, newGroupId),
-      undo: () => project.updateLabelGroupId(filename, labelId, oldGroupId),
+      label: `${source ?? 'style'} ${targets.length}`,
+      do: () => write(after),
+      undo: () => write(before),
     })
   }
 
-  
-  function cmdAddGroup(name: string): boolean {
+  /**
+   * Turning a tag on for a selection that already partly carries it means
+   * putting it on the rest, not flipping each object separately: a control
+   * showing one state has to end in one state, or a second click would undo
+   * what the first appeared to do.
+   */
+  function cmdToggleTagOnSelection(tag: string) {
     const project = useProjectStore()
-    const added = project.addGroup(name)
+    const targets = selectedTextObjects()
+    if (targets.length === 0) return
+    const adding = !targets.every(({ label }) => label.tags.includes(tag))
+    const before = targets.map(({ filename, label }) => ({
+      filename,
+      id: label.id,
+      tags: [...label.tags],
+    }))
+    const after = before.map((entry) => ({
+      ...entry,
+      tags: adding ? withTag(entry.tags, tag) : withoutTag(entry.tags, tag),
+    }))
+    const write = (states: typeof before) => {
+      for (const { filename, id, tags } of states) project.setLabelTags(filename, id, tags)
+    }
+    pushCommand({
+      label: `${adding ? 'tag' : 'untag'} ${tag} ${targets.length}`,
+      do: () => write(after),
+      undo: () => write(before),
+    })
+  }
+
+  function cmdSetLabelTags(filename: string, labelId: string, from: string[], to: string[]) {
+    if (sameTagSet(from, to) || isLayerLocked(labelId)) return
+    const project = useProjectStore()
+    pushCommand({
+      label: `set-tags ${labelId}`,
+      do: () => project.setLabelTags(filename, labelId, to),
+      undo: () => project.setLabelTags(filename, labelId, from),
+    })
+  }
+
+  function cmdAddTag(name: string): boolean {
+    const project = useProjectStore()
+    const added = project.addTag(name)
     if (added === null) return false
+    const index = project.header.tags.length - 1
     pushCommand(
       {
-        label: `add-group ${name}`,
-        do: () => project.restoreLastGroup(added),
-        undo: () => {
-          
-          project.removeLastGroup()
-        },
+        label: `add-tag ${name}`,
+        do: () => project.insertTagAt(index, added),
+        undo: () => project.removeTagAt(index),
       },
       { alreadyApplied: true },
     )
     return true
   }
 
-  function cmdRenameGroup(index: number, oldName: string, newName: string) {
-    if (oldName === newName) return
+  /**
+   * Dropping a registry entry takes away a colour and nothing else. Every
+   * object keeps the tag, so this is not a delete anybody has to be warned
+   * about — putting the entry back restores exactly what was lost.
+   */
+  function cmdRemoveTag(index: number) {
+    const project = useProjectStore()
+    const removed = project.removeTagAt(index)
+    if (removed === null) return
+    pushCommand(
+      {
+        label: `remove-tag ${removed.name}`,
+        do: () => project.removeTagAt(index),
+        undo: () => project.insertTagAt(index, removed),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /** Reaches every object carrying the old name — see `projectStore.renameTag`. */
+  function cmdRenameTag(from: string, to: string): boolean {
+    const project = useProjectStore()
+    if (!project.renameTag(from, to)) return false
+    pushCommand(
+      {
+        label: `rename-tag ${from}`,
+        do: () => project.renameTag(from, to),
+        undo: () => project.renameTag(to, from),
+      },
+      { alreadyApplied: true },
+    )
+    return true
+  }
+
+  function cmdMoveTag(from: number, to: number) {
+    if (from === to) return
     const project = useProjectStore()
     pushCommand({
-      label: `rename-group ${index}`,
-      do: () => project.renameGroup(index, newName),
-      undo: () => project.renameGroup(index, oldName),
+      label: `move-tag ${from}`,
+      do: () => project.moveTag(from, to),
+      undo: () => project.moveTag(to, from),
     })
   }
 
@@ -1164,8 +1290,7 @@ export const useEditorStore = defineStore('editor', () => {
     tool,
     setTool,
     foreground,
-    activeGroupId,
-    showGroups,
+    showTags,
     fontSize,
     adjustFontSize,
     view,
@@ -1216,8 +1341,14 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetLayerBlendMode,
     layersToBlend,
     cmdUpdateLabelText,
-    cmdUpdateLabelGroupId,
-    cmdAddGroup,
-    cmdRenameGroup,
+    selectedTextObjects,
+    batchScope,
+    cmdApplyStyleToSelection,
+    cmdToggleTagOnSelection,
+    cmdSetLabelTags,
+    cmdAddTag,
+    cmdRemoveTag,
+    cmdRenameTag,
+    cmdMoveTag,
   }
 })

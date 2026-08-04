@@ -3,6 +3,7 @@ import type { ProjectFile } from '@/types/project'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { buildLabelRows, chapterStops, dropIntoReadingOrder } from '@/lib/labelRows'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string): TextLayerEntry {
   return {
@@ -14,9 +15,11 @@ function text(id: string): TextLayerEntry {
     blendMode: 'normal',
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
   }
 }
 

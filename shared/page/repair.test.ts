@@ -4,6 +4,7 @@ import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { repairPage } from './repair'
 import { validatePage } from './validate'
 import { textObjects } from './tree'
+import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string): TextLayerEntry {
   return {
@@ -15,9 +16,11 @@ function text(id: string): TextLayerEntry {
     blendMode: 'normal',
     x: 0,
     y: 0,
-    groupId: null,
+    tags: [],
     rotation: 0,
     lines: [id],
+    style: { ...DEFAULT_TEXT_STYLE },
+    provenance: {},
   }
 }
 
