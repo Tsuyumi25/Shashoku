@@ -25,16 +25,16 @@
     >
       <div class="flex h-7 shrink-0 items-center border-b border-border pr-1 pl-1 select-none">
         <button
+          v-for="choice in panelChoices"
+          :key="choice.panel"
           type="button"
-          class="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :title="showingLabels ? '改看圖層樹（本頁）' : '改看標籤清單（整章）'"
-          @click="ui.togglePanel()"
+          class="flex h-5 w-5 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
+          :class="ui.panel === choice.panel ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'"
+          :title="choice.title"
+          @click="ui.setPanel(choice.panel)"
         >
-          <component :is="showingLabels ? List : Layers" :size="14" />
+          <component :is="choice.icon" :size="14" />
         </button>
-        <span class="ml-1 text-xs font-medium text-muted-foreground">
-          {{ showingLabels ? '標籤' : '圖層' }}
-        </span>
         <span v-if="showingLabels" class="ml-auto text-xs text-muted-foreground">
           {{ labelCount }} 條
         </span>
@@ -100,6 +100,7 @@
         </button>
       </div>
       <LabelList v-if="showingLabels" />
+      <BucketList v-else-if="ui.panel === 'buckets'" />
       <LayerTree v-else />
     </SplitterPanel>
 
@@ -160,6 +161,7 @@ import {
   FolderPlus,
   Layers,
   List,
+  Boxes,
   PaintBucket,
   Plus,
 } from '@lucide/vue'
@@ -168,6 +170,7 @@ import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import TagList from '@/components/TagList.vue'
+import BucketList from '@/components/BucketList.vue'
 import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
@@ -178,7 +181,7 @@ import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { useUiStore } from '@/stores/uiStore'
+import { useUiStore, type WorkbenchPanel } from '@/stores/uiStore'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
 import { allEntries, pathOf } from '@shared/page/tree'
@@ -193,6 +196,12 @@ const { canFill, fillSelection } = useFillSelection()
 const { canMerge, canDuplicate, mergeBySelection, duplicateLayer } = useMergeLayers()
 
 const showingLabels = computed(() => ui.panel === 'labels')
+
+const panelChoices = [
+  { panel: 'labels', icon: List, title: '標籤清單（整章）' },
+  { panel: 'layers', icon: Layers, title: '圖層樹（本頁）' },
+  { panel: 'buckets', icon: Boxes, title: '按語意分堆' },
+] as const satisfies readonly { panel: WorkbenchPanel; icon: unknown; title: string }[]
 
 function onFill() {
   void fillSelection().catch((err: unknown) => console.error('fill failed', err))
