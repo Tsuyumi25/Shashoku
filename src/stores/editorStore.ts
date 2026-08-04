@@ -1081,11 +1081,6 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
-  /**
-   * `renameGroup` below is the text style groups, which are a different thing
-   * entirely — the two have lived under confusingly close names since the tree
-   * arrived, and this is the one that acts on the tree.
-   */
   function cmdRenameLayer(filename: string, layerId: string, from: string, to: string) {
     if (from === to || isLayerLocked(layerId)) return
     const project = useProjectStore()
