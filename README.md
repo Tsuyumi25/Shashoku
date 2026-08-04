@@ -5,7 +5,7 @@
 ## 致謝
 
 - [LabelPlus](https://github.com/LabelPlus/LabelPlus)——漫畫翻譯標記工具的開創者，本專案翻譯工作流的設計源頭與致敬對象
-- [BitMappery](https://github.com/igorski/bitmappery)——瀏覽器像素編輯器的技術棧參考（圖層合成架構的範本）
+- [BitMappery](https://github.com/igorski/bitmappery)——瀏覽器像素編輯器的技術棧參考（圖層儲存與復原記錄的先行實作）
 - [koharu](https://github.com/mayocream/koharu)——文字引擎技術棧的參考
 
 ## 授權
