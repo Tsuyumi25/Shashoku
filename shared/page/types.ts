@@ -1,4 +1,4 @@
-import type { TextStyle, TextStyleProvenance } from '../text-style/types'
+import type { TextStyle } from '../text-style/types'
 
 
 export const MANIFEST_SCHEMA_VERSION = 6
@@ -121,9 +121,6 @@ export interface TextLayerEntry extends LayerEntryBase {
    * object needs to leave the group it belongs to without leaving what it means.
    */
   style: TextStyle
-
-  /** Empty when every field is the user's own hand. */
-  provenance: TextStyleProvenance
 }
 
 

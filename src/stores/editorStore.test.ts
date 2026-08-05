@@ -25,7 +25,6 @@ function label(id: string, text = ''): TextLayerEntry {
     rotation: 0,
     lines: linesOf(text),
     style: { ...DEFAULT_TEXT_STYLE },
-    provenance: {},
   }
 }
 
@@ -519,12 +518,12 @@ describe('cmdScaleLabel', () => {
 
   it('undoes back to the size the object had before the drag', () => {
     const { project, editor } = openOnePage([label('a')])
-    project.setLabelStyle(PAGE, 'a', sized(48), {})
+    project.setLabelStyle(PAGE, 'a', sized(48))
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      { style: sized(24), provenance: {}, ...PUT },
-      { style: sized(48), provenance: {}, ...PUT },
+      { style: sized(24), ...PUT },
+      { style: sized(48), ...PUT },
     )
 
     editor.undo()
@@ -534,35 +533,16 @@ describe('cmdScaleLabel', () => {
   it('leaves the fields the drag did not touch alone', () => {
     const { project, editor } = openOnePage([label('a')])
     const before: TextStyle = { ...DEFAULT_TEXT_STYLE, color: '#ff0000' }
-    project.setLabelStyle(PAGE, 'a', { ...before, fontSizePx: 48 }, {})
+    project.setLabelStyle(PAGE, 'a', { ...before, fontSizePx: 48 })
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      { style: before, provenance: {}, ...PUT },
-      { style: { ...before, fontSizePx: 48 }, provenance: {}, ...PUT },
+      { style: before, ...PUT },
+      { style: { ...before, fontSizePx: 48 }, ...PUT },
     )
 
     editor.undo()
     expect(labelsOf(project)[0].style).toEqual(before)
-  })
-
-  /**
-   * A hand on a corner owns the size it lands on, so undoing the drag has to
-   * hand the field back to whichever batch had claimed it.
-   */
-  it('puts a batch note back when the drag that cleared it is undone', () => {
-    const { project, editor } = openOnePage([label('a')])
-    const wasBatched = { fontSizePx: '批次改字級' }
-    project.setLabelStyle(PAGE, 'a', sized(48), {})
-    editor.cmdScaleLabel(
-      PAGE,
-      'a',
-      { style: sized(24), provenance: wasBatched, ...PUT },
-      { style: sized(48), provenance: {}, ...PUT },
-    )
-
-    editor.undo()
-    expect(labelsOf(project)[0].provenance).toEqual(wasBatched)
   })
 
   /**
@@ -572,13 +552,13 @@ describe('cmdScaleLabel', () => {
    */
   it('puts the position back with the size', () => {
     const { project, editor } = openOnePage([label('a')])
-    project.setLabelStyle(PAGE, 'a', sized(48), {})
+    project.setLabelStyle(PAGE, 'a', sized(48))
     project.moveLabel(PAGE, 'a', 260, 190)
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      { style: sized(24), provenance: {}, ...PUT },
-      { style: sized(48), provenance: {}, x: 260, y: 190 },
+      { style: sized(24), ...PUT },
+      { style: sized(48), x: 260, y: 190 },
     )
 
     editor.undo()
@@ -589,7 +569,7 @@ describe('cmdScaleLabel', () => {
 
   it('keeps a corner nudged and put back out of the stack', () => {
     const { editor } = openOnePage([label('a')])
-    const held = { style: sized(24), provenance: {}, ...PUT }
+    const held = { style: sized(24), ...PUT }
     editor.cmdScaleLabel(PAGE, 'a', held, { ...held })
     expect(editor.canUndo).toBe(false)
   })
@@ -713,8 +693,8 @@ describe('layer tree edits', () => {
       editor.cmdScaleLabel(
         PAGE,
         'a',
-        { style: { ...DEFAULT_TEXT_STYLE }, provenance: {}, x: 200, y: 150 },
-        { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 }, provenance: {}, x: 200, y: 150 },
+        { style: { ...DEFAULT_TEXT_STYLE }, x: 200, y: 150 },
+        { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 }, x: 200, y: 150 },
       )
 
       expect(editor.canUndo).toBe(false)

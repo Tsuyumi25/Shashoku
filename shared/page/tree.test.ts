@@ -32,7 +32,6 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     rotation: 0,
     lines: [id],
     style: { ...DEFAULT_TEXT_STYLE },
-    provenance: {},
     ...extra,
   }
 }

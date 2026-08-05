@@ -39,7 +39,6 @@ export function useSeriesObjects() {
           filename: `${folderName(rootPath)}/${page.filename}`,
           tags: label.tags,
           style: label.style,
-          provenance: label.provenance,
         })
       }
     }

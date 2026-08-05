@@ -18,7 +18,6 @@ function text(id: string, visible = true): TextLayerEntry {
     rotation: 0,
     lines: [id],
     style: { ...DEFAULT_TEXT_STYLE },
-    provenance: {},
   }
 }
 

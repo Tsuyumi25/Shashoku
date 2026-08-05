@@ -1,38 +1,4 @@
-import { TEXT_STYLE_FIELDS } from './schema'
-import type { TextStyle, TextStyleProvenance } from './types'
-
-/** A style and the note saying where each of its fields came from. */
-export interface StyledState {
-  style: TextStyle
-  provenance: TextStyleProvenance
-}
-
-/**
- * Write some fields and say who wrote them. `source` is the label the operation
- * showed the user; `null` means a hand edit, which drops the note rather than
- * writing one — a field somebody touched directly is theirs, and claiming a
- * batch still owns it would make the group-by-value view lie about why a
- * hundred objects agree.
- *
- * Only the fields in `patch` are touched. That is the whole point of the
- * per-field shape: changing everyone's font must not also flatten the sizes
- * somebody set one at a time.
- */
-export function applyStylePatch(
-  before: StyledState,
-  patch: Partial<TextStyle>,
-  source: string | null,
-): StyledState {
-  const style: TextStyle = { ...before.style, ...patch }
-  const provenance: TextStyleProvenance = { ...before.provenance }
-  for (const field of TEXT_STYLE_FIELDS) {
-    if (patch[field] === undefined) continue
-    if (source === null) delete provenance[field]
-    else provenance[field] = source
-  }
-  return { style, provenance }
-}
-
+import type { TextStyle } from './types'
 
 /**
  * What a panel shows for one field across a selection: the value when everyone
@@ -53,22 +19,4 @@ export function sharedValue<K extends keyof TextStyle>(
     if (JSON.stringify(style[field]) !== encoded) return { kind: 'many' }
   }
   return { kind: 'one', value: first }
-}
-
-/**
- * How many of a bunch of objects carry a batch's mark on a given field, and
- * which batch. Used to say "12 of these were written by 換字體" without
- * letting that fact take part in deciding what a bunch *is*.
- */
-export function provenanceTally(
-  states: readonly TextStyleProvenance[],
-  field: keyof TextStyle,
-): Map<string, number> {
-  const tally = new Map<string, number>()
-  for (const provenance of states) {
-    const label = provenance[field]
-    if (label === undefined) continue
-    tally.set(label, (tally.get(label) ?? 0) + 1)
-  }
-  return tally
 }

@@ -92,16 +92,7 @@
             />
           </span>
 
-          <span class="min-w-0 flex-1">
-            <span class="block truncate">{{ describe(bucket.style) }}</span>
-            <span
-              v-for="source in bucket.sources"
-              :key="source.label"
-              class="block truncate text-[10px] text-muted-foreground"
-            >
-              {{ source.count }} 個來自「{{ source.label }}」
-            </span>
-          </span>
+          <span class="min-w-0 flex-1 truncate">{{ describe(bucket.style) }}</span>
 
           <span class="shrink-0 tabular-nums text-muted-foreground">{{ bucket.ids.length }}</span>
         </button>
@@ -159,7 +150,6 @@ function flatten(filename: string, layers: Parameters<typeof textObjects>[0]): B
     filename,
     tags: label.tags,
     style: label.style,
-    provenance: label.provenance,
   }))
 }
 

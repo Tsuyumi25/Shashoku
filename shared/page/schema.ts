@@ -10,12 +10,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
-import {
-  parseTextStyle,
-  parseTextStyleProvenance,
-  serializeTextStyle,
-  serializeTextStyleProvenance,
-} from '../text-style/schema'
+import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
 
@@ -188,10 +183,6 @@ function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry 
     rotation,
     lines: parsedLines,
     style: parseTextStyle(v.style, `${at}.style`, fail),
-    provenance:
-      v.provenance === undefined
-        ? {}
-        : parseTextStyleProvenance(v.provenance, `${at}.provenance`, fail),
   }
 }
 
@@ -319,8 +310,6 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
   if (l.tags.length > 0) out.tags = normalizeTagSet(l.tags)
   if (l.rotation) out.rotation = l.rotation
   out.style = serializeTextStyle(l.style)
-  if (Object.keys(l.provenance).length > 0)
-    out.provenance = serializeTextStyleProvenance(l.provenance)
   return out
 }
 
@@ -328,17 +317,15 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
  * The drawn part of a page, on its own — what a thumbnail's identity is made
  * of.
  *
- * A text object's tags and its provenance are dropped here: they say what an
- * object means and which batch last wrote it, neither of which moves a pixel.
- * Keeping them would throw away every thumbnail in the chapter for a
- * classification pass that changed nothing anybody can see.
+ * A text object's tags are dropped here: they say what an object means, which
+ * moves no pixel. Keeping them would throw away every thumbnail in the chapter
+ * for a classification pass that changed nothing anybody can see.
  */
 export function serializeLayers(layers: readonly LayerEntry[]): string {
   const drawn = (entry: LayerEntry): Record<string, unknown> => {
     const out = serializeLayerEntry(entry)
     if (entry.kind === 'text') {
       delete out.tags
-      delete out.provenance
     } else if (entry.kind === 'group') {
       out.children = entry.children.map(drawn)
     }

@@ -37,7 +37,6 @@ function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
     rotation: 0,
     lines: [id],
     style: { ...DEFAULT_TEXT_STYLE },
-    provenance: {},
   }
   return { kind: 'text', entry, opacity, blendMode }
 }

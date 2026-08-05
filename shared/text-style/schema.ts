@@ -8,7 +8,6 @@ import type {
   TextDirection,
   TextEffect,
   TextStyle,
-  TextStyleProvenance,
 } from './types'
 
 type Fail = (message: string) => never
@@ -27,8 +26,6 @@ export const TEXT_STYLE_FIELDS = [
   'leadingPercent',
   'effects',
 ] as const satisfies readonly (keyof TextStyle)[]
-
-export type TextStyleField = (typeof TEXT_STYLE_FIELDS)[number]
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -126,31 +123,5 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
 }
 
 
-export function parseTextStyleProvenance(
-  v: unknown,
-  at: string,
-  fail: Fail,
-): TextStyleProvenance {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const out: TextStyleProvenance = {}
-  for (const field of TEXT_STYLE_FIELDS) {
-    const label = v[field]
-    if (label === undefined) continue
-    if (typeof label !== 'string' || label.length === 0)
-      fail(`${at}.${field} 必須是非空字串(批次操作的名稱)`)
-    out[field] = label
-  }
-  return out
-}
-
-
-export function serializeTextStyleProvenance(p: TextStyleProvenance): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const field of TEXT_STYLE_FIELDS) {
-    const label = p[field]
-    if (label !== undefined) out[field] = label
-  }
-  return out
-}
 
 

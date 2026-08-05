@@ -8,18 +8,12 @@ const registry: TagDefinition[] = [
   { name: '心聲', color: '#0000ff' },
 ]
 
-function object(
-  id: string,
-  tags: string[],
-  style: Partial<TextStyle> = {},
-  provenance: BucketObject['provenance'] = {},
-): BucketObject {
+function object(id: string, tags: string[], style: Partial<TextStyle> = {}): BucketObject {
   return {
     id,
     filename: '001.png',
     tags,
     style: { ...DEFAULT_TEXT_STYLE, ...style },
-    provenance,
   }
 }
 
@@ -75,37 +69,6 @@ describe('groupByValue', () => {
       registry,
     )
     expect(groups[0].buckets.map((b) => b.ids.length)).toEqual([2, 1])
-  })
-
-  /**
-   * The one thing provenance must not do. Two objects holding the same values
-   * are one bucket even if different batches wrote them — splitting there would
-   * report drift that is not there, which is the failure this view cannot have.
-   */
-  it('keeps objects with the same values together however they got them', () => {
-    const groups = groupByValue(
-      [
-        object('a', ['框内'], { fontSizePx: 48 }, { fontSizePx: '批次改字級' }),
-        object('b', ['框内'], { fontSizePx: 48 }),
-      ],
-      ALL,
-      registry,
-    )
-    expect(groups[0].drifting).toBe(false)
-    expect(groups[0].buckets[0].ids).toEqual(['a', 'b'])
-  })
-
-  it('says which batches wrote the bucket, and on how many objects', () => {
-    const groups = groupByValue(
-      [
-        object('a', ['框内'], { fontSizePx: 48 }, { fontSizePx: '批次改字級' }),
-        object('b', ['框内'], { fontSizePx: 48 }, { fontSizePx: '批次改字級' }),
-        object('c', ['框内'], { fontSizePx: 48 }),
-      ],
-      ['fontSizePx'],
-      registry,
-    )
-    expect(groups[0].buckets[0].sources).toEqual([{ label: '批次改字級', count: 2 }])
   })
 
   it('lists drifting groups first, since they are the only ones to act on', () => {

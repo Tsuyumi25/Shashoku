@@ -151,7 +151,6 @@ import {
   trackRotationDirection,
 } from '@/lib/rotateDirection'
 import { primaryTag, tagsInRegistryOrder, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
-import { applyStylePatch } from '@shared/text-style/batch'
 import {
   isSelectionTool,
   maskBrushModeOf,
@@ -305,12 +304,7 @@ function labelById(labelId: string): TextLayerEntry | undefined {
 let scaledFrom: ScaledLabel | null = null
 
 function scaledState(label: TextLayerEntry): ScaledLabel {
-  return {
-    style: { ...label.style },
-    provenance: { ...label.provenance },
-    x: label.x,
-    y: label.y,
-  }
+  return { style: { ...label.style }, x: label.x, y: label.y }
 }
 
 function beginLabelScale(labelId: string) {
@@ -326,14 +320,7 @@ function beginLabelScale(labelId: string) {
 function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentFilename || editor.isLayerLocked(labelId)) return
-  // A hand on a corner owns the size it lands on, so whatever batch last set
-  // it stops claiming it.
-  const next = applyStylePatch(
-    { style: label.style, provenance: label.provenance },
-    { fontSizePx },
-    null,
-  )
-  project.setLabelStyle(editor.currentFilename, labelId, next.style, next.provenance)
+  project.setLabelStyle(editor.currentFilename, labelId, { ...label.style, fontSizePx })
   project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
 }
 

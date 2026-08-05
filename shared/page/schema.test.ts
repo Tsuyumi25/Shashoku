@@ -14,7 +14,6 @@ const UPRIGHT = {
   tags: [],
   lines: ['hi'],
   style: DEFAULT_TEXT_STYLE,
-  provenance: {},
 }
 
 const PATCH = {
@@ -304,11 +303,10 @@ describe('parseManifest', () => {
     )
   })
 
-  it('round trips an object carrying tags and a batch note', () => {
+  it('round trips an object carrying tags and a style of its own', () => {
     const marked = textEntry({
       tags: ['心聲', '框内'],
       style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 },
-      provenance: { fontSizePx: '批次改字級' },
     })
     expect(parseManifest(serializeManifest(manifestWith(marked)))).toEqual(manifestWith(marked))
   })

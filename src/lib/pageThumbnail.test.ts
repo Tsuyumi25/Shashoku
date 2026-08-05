@@ -28,7 +28,6 @@ function page(): ProjectFile {
           rotation: 0,
           lines: ['ふむ'],
           style: { ...DEFAULT_TEXT_STYLE },
-          provenance: {},
         },
       ],
     },
@@ -63,14 +62,6 @@ describe('thumbnailKey', () => {
     textOn(tagged).tags = ['心聲']
 
     expect(await thumbnailKey(tagged)).toBe(await thumbnailKey(page()))
-  })
-
-  /** Provenance records which batch wrote a field, not what the field is. */
-  it('is unchanged by a batch leaving its mark', async () => {
-    const marked = page()
-    textOn(marked).provenance = { fontSizePx: '批次改字級' }
-
-    expect(await thumbnailKey(marked)).toBe(await thumbnailKey(page()))
   })
 
   // Reading order decides which object comes first in the label list, never

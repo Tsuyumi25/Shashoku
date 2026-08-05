@@ -33,7 +33,7 @@ import { assertDistinctFolders } from '@shared/export/profile'
 import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { DIR_RAWS, SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
-import type { TextStyle, TextStyleProvenance } from '@shared/text-style/types'
+import type { TextStyle } from '@shared/text-style/types'
 import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
 
@@ -586,22 +586,10 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
-  /**
-   * Style and provenance move together — a field's value and the note saying
-   * which batch wrote it are one fact, and undo restoring half of it would
-   * leave the group-by-value view describing an operation that no longer
-   * happened.
-   */
-  function setLabelStyle(
-    filename: string,
-    labelId: string,
-    style: TextStyle,
-    provenance: TextStyleProvenance,
-  ) {
+  function setLabelStyle(filename: string, labelId: string, style: TextStyle) {
     const label = labelById(filename, labelId)
     if (!label) return
     label.style = { ...style }
-    label.provenance = { ...provenance }
     markPageDirty(filename)
   }
 

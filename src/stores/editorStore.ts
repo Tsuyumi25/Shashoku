@@ -20,7 +20,6 @@ import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
-import { applyStylePatch, type StyledState } from '@shared/text-style/batch'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 
 export interface Command {
@@ -31,7 +30,8 @@ export interface Command {
 }
 
 /** Everything a corner drag leaves changed about one label. */
-export interface ScaledLabel extends StyledState {
+export interface ScaledLabel {
+  style: TextStyle
   x: number
   y: number
 }
@@ -586,7 +586,6 @@ export const useEditorStore = defineStore('editor', () => {
       rotation: 0,
       lines: [''],
       style: { ...project.header.seedStyle },
-      provenance: {},
     })
   }
 
@@ -881,7 +880,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
-      project.setLabelStyle(filename, labelId, state.style, state.provenance)
+      project.setLabelStyle(filename, labelId, state.style)
       project.moveLabel(filename, labelId, state.x, state.y)
     }
     pushCommand(
@@ -1187,25 +1186,21 @@ export const useEditorStore = defineStore('editor', () => {
    * one of them back at once — anything else would leave the selection half
    * changed, which is a state the user never asked for and cannot see.
    */
-  function cmdApplyStyleToSelection(patch: Partial<TextStyle>, source: string | null) {
+  function cmdApplyStyleToSelection(patch: Partial<TextStyle>) {
     const project = useProjectStore()
     const targets = selectedTextObjects()
     if (targets.length === 0 || Object.keys(patch).length === 0) return
     const before = targets.map(({ filename, label }) => ({
       filename,
       id: label.id,
-      state: { style: { ...label.style }, provenance: { ...label.provenance } },
+      style: { ...label.style },
     }))
-    const after = before.map((entry) => ({
-      ...entry,
-      state: applyStylePatch(entry.state, patch, source),
-    }))
+    const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const write = (states: typeof before) => {
-      for (const { filename, id, state } of states)
-        project.setLabelStyle(filename, id, state.style, state.provenance)
+      for (const { filename, id, style } of states) project.setLabelStyle(filename, id, style)
     }
     pushCommand({
-      label: `${source ?? 'style'} ${targets.length}`,
+      label: `style ${targets.length}`,
       do: () => write(after),
       undo: () => write(before),
     })

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  parseTextStyle,
-  parseTextStyleProvenance,
-  serializeTextStyle,
-  serializeTextStyleProvenance,
-} from './schema'
+import { parseTextStyle, serializeTextStyle } from './schema'
 import { DEFAULT_TEXT_STYLE } from './types'
 
 const fail = (message: string): never => {
@@ -71,22 +66,5 @@ describe('parseTextStyle', () => {
   it('refuses an alignment named after an edge', () => {
     const style = { ...serializeTextStyle(DEFAULT_TEXT_STYLE), align: 'left' }
     expect(() => parseTextStyle(style, 'style', fail)).toThrow()
-  })
-})
-
-describe('parseTextStyleProvenance', () => {
-  it('round-trips the labels it was given', () => {
-    const provenance = { fontFamily: '換字體', effects: '套用描邊' }
-    const written = serializeTextStyleProvenance(provenance)
-    expect(parseTextStyleProvenance(written, 'provenance', fail)).toEqual(provenance)
-  })
-
-  /** Absent is "the user's own hand", which is not something to store. */
-  it('leaves a field nobody batched out', () => {
-    expect(parseTextStyleProvenance({}, 'provenance', fail)).not.toHaveProperty('color')
-  })
-
-  it('refuses a label that is not a string', () => {
-    expect(() => parseTextStyleProvenance({ color: 7 }, 'provenance', fail)).toThrow()
   })
 })

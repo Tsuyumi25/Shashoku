@@ -58,19 +58,6 @@ export interface TextStyle {
 }
 
 
-/**
- * Which batch operation last wrote each field, by the label that operation
- * showed the user. A field nobody has batched — or one edited by hand since —
- * is absent, which is how a hand edit says "this one is mine now".
- *
- * The label is stored rather than an id pointing at an operation log: the log
- * would need a lifetime of its own (kept after an undo? after a reopen?), and
- * every question it raises is one this field exists to avoid. A person reading
- * the manifest can also see what happened without a second file to join against.
- */
-export type TextStyleProvenance = Partial<Record<keyof TextStyle, string>>
-
-
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: '',
   fontSizePx: 24,

@@ -1,5 +1,5 @@
 import type { TagRegistry } from '@shared/tags/types'
-import type { TextStyle, TextStyleProvenance } from '@shared/text-style/types'
+import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 
@@ -9,7 +9,6 @@ export interface BucketObject {
   filename: string
   tags: string[]
   style: TextStyle
-  provenance: TextStyleProvenance
 }
 
 export interface StyleBucket {
@@ -17,8 +16,6 @@ export interface StyleBucket {
   ids: string[]
   /** Every member agrees on the compared fields, so any of them will do. */
   style: TextStyle
-  /** Which batches wrote the compared fields here, and on how many objects. */
-  sources: { label: string; count: number }[]
 }
 
 export interface TagGroup {
@@ -46,11 +43,6 @@ function styleKey(style: TextStyle, fields: readonly (keyof TextStyle)[]): strin
  * `fields` narrows what counts as looking alike, so "who is not using the
  * dialogue font" is one question and "who disagrees about anything at all" is
  * another, asked of the same list.
- *
- * Provenance is carried but never compared. Which batch last wrote a field
- * explains why a bucket holds what it holds; letting it decide membership
- * would split a bucket whose objects agree on every value, which is the one
- * thing this view exists to say is fine.
  */
 export function groupByValue(
   objects: readonly BucketObject[],
@@ -76,23 +68,11 @@ export function groupByValue(
       else byStyle.set(sk, [object])
     }
 
-    const buckets: StyleBucket[] = [...byStyle].map(([sk, bucketMembers]) => {
-      const tally = new Map<string, number>()
-      for (const object of bucketMembers) {
-        for (const field of compared) {
-          const label = object.provenance[field]
-          if (label !== undefined) tally.set(label, (tally.get(label) ?? 0) + 1)
-        }
-      }
-      return {
-        key: `${key}|${sk}`,
-        ids: bucketMembers.map((o) => o.id),
-        style: bucketMembers[0].style,
-        sources: [...tally]
-          .map(([label, count]) => ({ label, count }))
-          .sort((a, b) => b.count - a.count),
-      }
-    })
+    const buckets: StyleBucket[] = [...byStyle].map(([sk, bucketMembers]) => ({
+      key: `${key}|${sk}`,
+      ids: bucketMembers.map((o) => o.id),
+      style: bucketMembers[0].style,
+    }))
     buckets.sort((a, b) => b.ids.length - a.ids.length)
 
     out.push({
