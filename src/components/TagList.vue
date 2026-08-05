@@ -45,7 +45,6 @@
             class="min-w-0 flex-1 truncate text-left font-medium"
             :title="applyHint(element.name)"
             @click="editor.cmdToggleTagOnSelection(element.name)"
-            @dblclick="startRename(element.name)"
           >
             {{ element.name }}
           </button>
@@ -53,6 +52,23 @@
           <span class="shrink-0 tabular-nums text-muted-foreground">{{
             counts.get(element.name) ?? 0
           }}</span>
+
+          <!--
+            Renaming has a control of its own rather than living on a double
+            click of the name. A double click sends two clicks first, and the
+            name's click applies the tag to the selection — on a selection where
+            some objects carry it and some do not, the pair would add it to all
+            of them and then take it off all of them, quietly stripping the ones
+            that had it.
+          -->
+          <button
+            type="button"
+            class="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+            title="改名（會一併改掉所有物件上的這個標記）"
+            @click="startRename(element.name)"
+          >
+            <Pencil :size="11" />
+          </button>
 
           <button
             type="button"
@@ -105,7 +121,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import Draggable from 'vuedraggable'
-import { GripVertical, Plus, X } from '@lucide/vue'
+import { GripVertical, Pencil, Plus, X } from '@lucide/vue'
 import type { TagDefinition } from '@shared/tags/types'
 import { RESERVED_TAG_NAMES } from '@shared/ssk/constants'
 import { useEditorStore } from '@/stores/editorStore'
