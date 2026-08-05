@@ -71,6 +71,7 @@ export function rasterFor(
     stroke: engineStrokeFor(style),
     vertical: style.direction === 'vertical',
     align: style.align,
+    weightPx: style.weightPx,
     rotation,
     phaseX: phase.x,
     phaseY: phase.y,

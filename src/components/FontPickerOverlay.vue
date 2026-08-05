@@ -49,6 +49,19 @@
       <span class="w-10 shrink-0 text-right tabular-nums">
         {{ preferences.prefs.fontSamplePx }}px
       </span>
+
+      <span class="shrink-0">字粗</span>
+      <input
+        type="range"
+        :min="WEIGHT_MIN"
+        :max="WEIGHT_MAX"
+        step="0.25"
+        :value="weightPx"
+        class="w-24 shrink-0 accent-[var(--primary)]"
+        @input="onWeight($event)"
+        @dblclick="weightPx = 0"
+      />
+      <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
       <button
         type="button"
         class="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-secondary"
@@ -225,6 +238,7 @@
                 :fill-color="fillColor"
                 :stroke="stroke"
                 :vertical="vertical"
+                :weight-px="weightPx"
                 :mark="markMissing"
                 :editing="editingFamily === entry.family"
                 :start-at="editingFamily === entry.family ? editingAt : undefined"
@@ -236,7 +250,7 @@
             <button
               type="button"
               class="absolute bottom-1.5 right-1.5 rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 group-hover/cell:opacity-100"
-              @click="picker.select(entry.family)"
+              @click="picker.select(entry.family, weightPx)"
             >
               選擇
             </button>
@@ -376,7 +390,7 @@ const minCellWidth = computed(() => {
   const body = vertical.value
     ? Math.ceil(size * VERTICAL_COLUMN_EM * sampleLines.value.length)
     : size * sampleLines.value.reduce((most, line) => Math.max(most, advanceEm(line)), 1)
-  return Math.ceil(body + samplePadding(stroke.value) * 2 + CELL_SIDE_PADDING_PX)
+  return Math.ceil(body + samplePadding(stroke.value, weightPx.value) * 2 + CELL_SIDE_PADDING_PX)
 })
 
 /**
@@ -415,6 +429,30 @@ function onMarkMissing(e: Event) {
 const markMissing = computed(
   () => preferences.prefs.markMissingGlyphs && !hidingUndrawable.value,
 )
+
+/**
+ * Asymmetric for the same reason the style panel's is: thinning holds its shape
+ * all the way down, thickening welds neighbouring strokes together early on CJK.
+ */
+const WEIGHT_MIN = -6
+const WEIGHT_MAX = 3
+
+/**
+ * Local to this opening, seeded from the style that asked. Held here rather
+ * than written straight back so that closing without choosing leaves the object
+ * alone — the grid is a place to try weights, and trying is not deciding.
+ */
+const weightPx = ref(0)
+watch(picker.request, (req) => (weightPx.value = req.weightPx ?? 0), { immediate: true })
+
+const weightLabel = computed(() =>
+  weightPx.value === 0 ? '0' : `${weightPx.value > 0 ? '+' : ''}${weightPx.value}`,
+)
+
+function onWeight(e: Event) {
+  const raw = (e.target as HTMLInputElement).valueAsNumber
+  if (Number.isFinite(raw)) weightPx.value = raw
+}
 
 const currentFamily = computed(() => picker.request.value.current)
 const fillColor = computed(() => picker.request.value.fillColor)

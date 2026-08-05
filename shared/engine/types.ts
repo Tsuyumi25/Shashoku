@@ -171,6 +171,7 @@ export interface ShashokuEngineApi {
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
+    weightPx?: number,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -183,6 +184,7 @@ export interface ShashokuEngineApi {
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
+    weightPx?: number,
   ): EngineBitmap;
   /**
    * One box with an X through it per character — what there is to draw when
@@ -214,6 +216,7 @@ export interface ShashokuEngineApi {
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
+    weightPx?: number,
   ): EngineBitmap;
   /**
    * A composited page as file bytes. Takes straight RGBA because the

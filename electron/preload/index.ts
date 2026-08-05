@@ -47,7 +47,19 @@ const engineApi: ShashokuEngineApi = {
   version: () => engine.engineVersion(),
   listFonts: (dirs, locales) => engine.listFonts(dirs, locales),
   uncoveredClusters: (font, text) => engine.uncoveredClusters(font, text),
-  renderText: (font, text, sizePx, padding, rotation, fillColor, stroke, phaseX, phaseY, align) =>
+  renderText: (
+    font,
+    text,
+    sizePx,
+    padding,
+    rotation,
+    fillColor,
+    stroke,
+    phaseX,
+    phaseY,
+    align,
+    weightPx,
+  ) =>
     engine.renderText(
       font,
       text,
@@ -59,6 +71,7 @@ const engineApi: ShashokuEngineApi = {
       phaseX,
       phaseY,
       align,
+      weightPx,
     ),
   renderVertical: (
     font,
@@ -71,6 +84,7 @@ const engineApi: ShashokuEngineApi = {
     phaseX,
     phaseY,
     align,
+    weightPx,
   ) =>
     engine.renderVertical(
       font,
@@ -83,8 +97,21 @@ const engineApi: ShashokuEngineApi = {
       phaseX,
       phaseY,
       align,
+      weightPx,
     ),
-  renderNotdef: (text, sizePx, padding, vertical, rotation, fillColor, stroke, phaseX, phaseY, align) =>
+  renderNotdef: (
+    text,
+    sizePx,
+    padding,
+    vertical,
+    rotation,
+    fillColor,
+    stroke,
+    phaseX,
+    phaseY,
+    align,
+    weightPx,
+  ) =>
     engine.renderNotdef(
       text,
       sizePx,
@@ -96,6 +123,7 @@ const engineApi: ShashokuEngineApi = {
       phaseX,
       phaseY,
       align,
+      weightPx,
     ),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };

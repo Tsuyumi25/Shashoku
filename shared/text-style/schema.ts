@@ -24,6 +24,7 @@ export const TEXT_STYLE_FIELDS = [
   'align',
   'color',
   'leadingPercent',
+  'weightPx',
   'effects',
 ] as const satisfies readonly (keyof TextStyle)[]
 
@@ -84,7 +85,8 @@ function serializeTextEffect(e: TextEffect): Record<string, unknown> {
 
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { fontFamily, fontSizePx, direction, align, color, leadingPercent, effects } = v
+  const { fontFamily, fontSizePx, direction, align, color, leadingPercent, weightPx, effects } =
+    v
   // Empty is a value: no family has been chosen yet. It is stored rather than
   // written as some placeholder name because a project file identifies a font
   // by family, and any name put here would be one a reader could go looking
@@ -98,6 +100,10 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     fail(`${at}.leadingPercent 必須是正數`)
   const parsedEffects =
     effects === undefined ? [] : parseEffectsArray(effects, `${at}.effects`, fail)
+  // Absent means the face is drawn as it was designed, which is what every
+  // file written before this field existed meant.
+  if (weightPx !== undefined && (typeof weightPx !== 'number' || !Number.isFinite(weightPx)))
+    fail(`${at}.weightPx 必須是有限數`)
   return {
     fontFamily,
     fontSizePx,
@@ -105,6 +111,7 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     align: align === undefined ? 'start' : parseAlign(align, `${at}.align`, fail),
     color,
     leadingPercent,
+    weightPx: weightPx === undefined ? 0 : weightPx,
     effects: parsedEffects,
   }
 }
@@ -118,6 +125,7 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
     align: s.align,
     color: s.color,
     leadingPercent: s.leadingPercent,
+    weightPx: s.weightPx,
     effects: s.effects.map(serializeTextEffect),
   }
 }

@@ -628,7 +628,20 @@ fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
     }
 }
 
-fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<TextBitmap, String> {
+/// `weight` moves the fill's own edge, in pixels, positive outward. It is the
+/// same distance-field offset a stroke band is read at, which is why thinning
+/// costs no more than thickening and needs nothing painted underneath: the
+/// glyph is rasterized once and the boundary is asked for somewhere else.
+///
+/// A stroke's boundaries are relative to the shape's edge, so they move with
+/// it — a stroke on a thinned glyph hugs the thinned outline rather than
+/// hanging where the untouched outline used to be.
+fn paint_run(
+    run: BuiltRun,
+    fill: Rgba,
+    stroke: Option<StrokeSpec>,
+    weight: f32,
+) -> Result<TextBitmap, String> {
     let count = run.width as usize * run.height as usize;
 
     let Some(path) = run.path else {
@@ -644,23 +657,30 @@ fn paint_run(run: BuiltRun, fill: Rgba, stroke: Option<StrokeSpec>) -> Result<Te
 
     let coverage = coverage_of(&path, run.width, run.height)?;
 
+    let inked = stroke
+        .as_ref()
+        .is_some_and(|spec| spec.width > 0.0 && spec.color.3 != 0);
+    let field = (inked || weight != 0.0)
+        .then(|| signed_distance_field(&coverage, run.width as usize, run.height as usize));
+
+    // The rasterizer's own coverage beats anything read back off the distance
+    // field, so it stands wherever the boundary asked for is the shape's own.
+    let layer = |offset: f32, i: usize| match &field {
+        Some(field) if offset != 0.0 => coverage_at(field[i], offset),
+        _ => coverage[i],
+    };
+
     let rgba = match stroke {
-        Some(spec) if spec.width > 0.0 && spec.color.3 != 0 => {
-            let field = signed_distance_field(&coverage, run.width as usize, run.height as usize);
+        Some(spec) if inked => {
             let (outer, inner) = band_offsets(spec.position, spec.width);
-            // The rasterizer's own coverage beats anything read back off the
-            // distance field, so it stands wherever the boundary asked for is
-            // the shape's own.
-            let layer = |offset: f32, i: usize| {
-                if offset == 0.0 {
-                    coverage[i]
-                } else {
-                    coverage_at(field[i], offset)
-                }
-            };
-            compose(|i| (layer(inner, i), layer(outer, i)), count, fill, spec.color)
+            compose(
+                |i| (layer(inner + weight, i), layer(outer + weight, i)),
+                count,
+                fill,
+                spec.color,
+            )
         }
-        _ => compose(|i| (coverage[i], 0.0), count, fill, fill),
+        _ => compose(|i| (layer(weight, i), 0.0), count, fill, fill),
     };
 
     Ok(TextBitmap {
@@ -686,9 +706,10 @@ pub fn render_text(
     align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
+    weight: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
-    paint_run(spin(run, rotation), fill, stroke)
+    paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
 pub fn render_vertical(
@@ -702,9 +723,10 @@ pub fn render_vertical(
     align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
+    weight: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
-    paint_run(spin(run, rotation), fill, stroke)
+    paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -896,9 +918,10 @@ pub fn render_notdef(
     align: Align,
     fill: Rgba,
     stroke: Option<StrokeSpec>,
+    weight: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_notdef_path(text, size_px, padding, vertical, phase, align);
-    paint_run(spin(run, rotation), fill, stroke)
+    paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -963,6 +986,7 @@ mod spin_tests {
             Align::default(),
             FILL,
             None,
+            0.0,
         ).unwrap()
     }
 
@@ -1085,6 +1109,7 @@ mod notdef_tests {
             Align::default(),
             FILL,
             None,
+            0.0,
         ).unwrap()
     }
 
@@ -1242,6 +1267,7 @@ mod notdef_tests {
             Align::default(),
             FILL,
             None,
+            0.0,
         ).unwrap();
 
         // Where the box starts, which is the cell edge plus its side bearing.
@@ -1264,6 +1290,7 @@ mod notdef_tests {
             Align::default(),
             red,
             None,
+            0.0,
         ).unwrap();
         let (cx, cy) = box_centre(0.0, 0);
         // On the left rule of the box.
@@ -1289,6 +1316,7 @@ mod notdef_tests {
             Align::default(),
             FILL,
             None,
+            0.0,
         ).unwrap();
         assert!(bmp.width >= 1 && bmp.height >= 1);
     }
@@ -1317,6 +1345,7 @@ mod align_tests {
             align,
             FILL,
             None,
+            0.0,
         )
         .unwrap()
     }
@@ -1497,7 +1526,7 @@ mod stroke_tests {
 
     #[test]
     fn a_light_fill_keeps_its_colour_where_the_edge_is_soft() {
-        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), None).unwrap();
+        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), None, 0.0).unwrap();
         let soft = soft_edge_colours(&bmp);
         assert!(soft.len() > 50, "no soft edge to look at");
         assert!(
@@ -1517,7 +1546,8 @@ mod stroke_tests {
                 color: Rgba(255, 255, 255, 255),
                 position: StrokePosition::Outside,
             }),
-        )
+            0.0,
+)
         .unwrap();
         // The fill's own edge is buried under the band, so every soft pixel
         // left belongs to the stroke.
@@ -1534,7 +1564,7 @@ mod stroke_tests {
     fn a_pen_wider_than_the_shape_still_fills_solid() {
         // The case the path stroker cannot do: the pen reaches past the far
         // side of the contour, so its inner offset inverts on itself.
-        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside))).unwrap();
+        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside)), 0.0).unwrap();
         for step in 0..10 {
             for angle in ANGLES {
                 let (alpha, _) = probe(&bmp, step as f32, angle);
@@ -1550,7 +1580,8 @@ mod stroke_tests {
             disc_run(radius),
             FILL,
             Some(spec(pen, StrokePosition::Outside)),
-        )
+            0.0,
+)
         .unwrap();
         for angle in ANGLES {
             let (inner_alpha, inner_is_ink) = probe(&bmp, radius - 2.0, angle);
@@ -1573,7 +1604,8 @@ mod stroke_tests {
             disc_run(radius),
             FILL,
             Some(spec(pen, StrokePosition::Inside)),
-        )
+            0.0,
+)
         .unwrap();
         for angle in ANGLES {
             let (past_alpha, _) = probe(&bmp, radius + 2.0, angle);
@@ -1595,7 +1627,8 @@ mod stroke_tests {
             disc_run(radius),
             FILL,
             Some(spec(pen, StrokePosition::Center)),
-        )
+            0.0,
+)
         .unwrap();
         for angle in ANGLES {
             let (outer_alpha, outer_is_ink) = probe(&bmp, radius + pen / 4.0, angle);
@@ -1632,7 +1665,7 @@ mod stroke_tests {
             clusters: Vec::new(),
         };
 
-        let bmp = paint_run(run, FILL, Some(spec(10.0, StrokePosition::Outside))).unwrap();
+        let bmp = paint_run(run, FILL, Some(spec(10.0, StrokePosition::Outside)), 0.0).unwrap();
         for step in 0..4 {
             for angle in ANGLES {
                 let (alpha, is_ink) = probe(&bmp, step as f32, angle);
@@ -1644,7 +1677,8 @@ mod stroke_tests {
 
     #[test]
     fn a_stroke_of_no_width_is_just_the_fill() {
-        let bmp = paint_run(disc_run(20.0), FILL, Some(spec(0.0, StrokePosition::Outside))).unwrap();
+        let bmp =
+            paint_run(disc_run(20.0), FILL, Some(spec(0.0, StrokePosition::Outside)), 0.0).unwrap();
         for angle in ANGLES {
             let (_, is_ink) = probe(&bmp, 10.0, angle);
             assert!(!is_ink);
@@ -1711,6 +1745,7 @@ mod phase_tests {
             Align::default(),
             BLACK,
             None,
+            0.0,
         )
         .unwrap()
     }
@@ -1808,6 +1843,7 @@ mod phase_tests {
                 Align::default(),
                 BLACK,
                 None,
+                0.0,
             )
             .unwrap();
         let moved = render_vertical(
@@ -1821,6 +1857,7 @@ mod phase_tests {
             Align::default(),
             BLACK,
             None,
+            0.0,
         )
         .unwrap();
 

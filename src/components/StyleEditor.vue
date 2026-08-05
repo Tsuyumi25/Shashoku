@@ -84,6 +84,24 @@
       <span class="text-muted-foreground">%</span>
     </div>
 
+    <label class="text-muted-foreground">字粗</label>
+    <div class="flex items-center gap-1.5">
+      <input
+        type="range"
+        :min="WEIGHT_MIN"
+        :max="WEIGHT_MAX"
+        step="0.25"
+        class="h-6 min-w-0 flex-1 accent-primary"
+        :value="isMixed('weightPx') ? 0 : value.weightPx"
+        @input="onWeight($event)"
+        @dblclick="onWeightReset"
+      />
+      <span
+        class="w-10 shrink-0 text-right font-mono tabular-nums"
+        :class="isMixed('weightPx') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
+      >{{ isMixed('weightPx') ? '—' : weightLabel }}</span>
+    </div>
+
     <div class="col-span-2 mt-1 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
       效果
     </div>
@@ -195,6 +213,7 @@ async function openFont() {
     current: props.value.fontFamily,
     fillColor: props.value.color,
     vertical: props.value.direction === 'vertical',
+    weightPx: isMixed('weightPx') ? 0 : props.value.weightPx,
     stroke:
       stroke.value === null
         ? undefined
@@ -204,8 +223,16 @@ async function openFont() {
             position: stroke.value.position,
           },
   })
-  if (chosen === null || (!isMixed('fontFamily') && chosen === props.value.fontFamily)) return
-  emit('patch', { fontFamily: chosen })
+  if (chosen === null) return
+  const patch: Partial<TextStyle> = {}
+  if (isMixed('fontFamily') || chosen.family !== props.value.fontFamily)
+    patch.fontFamily = chosen.family
+  // The picker carries a weight slider, so a visit can change the thickness
+  // without changing the family — and then the family being the same one is
+  // not a reason to drop the answer.
+  if (isMixed('weightPx') || chosen.weightPx !== props.value.weightPx)
+    patch.weightPx = chosen.weightPx
+  if (Object.keys(patch).length > 0) emit('patch', patch)
 }
 
 const stroke = computed<StrokeEffect | null>(
@@ -253,6 +280,33 @@ function onColor(e: Event) {
   const v = (e.target as HTMLInputElement).value
   if (!isMixed('color') && v === props.value.color) return
   emit('patch', { color: v })
+}
+
+/**
+ * Asymmetric on purpose. Thinning holds its shape as far down as the strokes
+ * survive, while thickening welds neighbouring strokes into a blob early on
+ * CJK, so the slider is given less room in the direction that stops behaving.
+ */
+const WEIGHT_MIN = -6
+const WEIGHT_MAX = 3
+
+const weightLabel = computed(() => {
+  const v = props.value.weightPx
+  return v === 0 ? '0' : `${v > 0 ? '+' : ''}${v}`
+})
+
+// On input rather than on change: the whole point of a slider here is watching
+// the letter answer while it is being dragged.
+function onWeight(e: Event) {
+  const raw = (e.target as HTMLInputElement).valueAsNumber
+  if (!Number.isFinite(raw)) return
+  if (!isMixed('weightPx') && raw === props.value.weightPx) return
+  emit('patch', { weightPx: raw })
+}
+
+function onWeightReset() {
+  if (!isMixed('weightPx') && props.value.weightPx === 0) return
+  emit('patch', { weightPx: 0 })
 }
 
 function nonStrokeEffects() {

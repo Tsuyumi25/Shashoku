@@ -16,6 +16,18 @@ export interface FontPickerRequest {
    * to whatever direction was left selected last time.
    */
   vertical?: boolean
+  /** Signed pixels the strokes move by, so the grid previews what is set. */
+  weightPx?: number
+}
+
+/**
+ * Both halves of the answer. The weight rides along because the picker owns a
+ * slider for it: someone who found the right thickness while browsing would
+ * otherwise watch it reset the moment they chose a family.
+ */
+export interface FontPickerResult {
+  family: string
+  weightPx: number
 }
 
 const isOpen = ref(false)
@@ -28,20 +40,20 @@ const isOpen = ref(false)
  */
 const request = shallowRef<FontPickerRequest>({ current: '', fillColor: '#000000' })
 
-let resolver: ((family: string | null) => void) | null = null
+let resolver: ((result: FontPickerResult | null) => void) | null = null
 
-function settle(family: string | null) {
+function settle(result: FontPickerResult | null) {
   isOpen.value = false
   const resolve = resolver
   resolver = null
-  resolve?.(family)
+  resolve?.(result)
 }
 
 export function useFontPicker() {
   return {
     isOpen,
     request,
-    open(req: FontPickerRequest): Promise<string | null> {
+    open(req: FontPickerRequest): Promise<FontPickerResult | null> {
       // Reopening while a request is outstanding would otherwise leave the
       // earlier caller awaiting a promise nobody can settle.
       settle(null)
@@ -51,8 +63,8 @@ export function useFontPicker() {
         resolver = resolve
       })
     },
-    select(family: string) {
-      settle(family)
+    select(family: string, weightPx: number) {
+      settle({ family, weightPx })
     },
     cancel() {
       settle(null)

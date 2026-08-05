@@ -308,6 +308,9 @@ pub fn render_text(
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
+    // Moves the fill's own edge, in pixels, positive outward. Thins the
+    // strokes when negative, which is the direction a large size needs.
+    weight_px: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -323,6 +326,7 @@ pub fn render_text(
         align_from_opt(align)?,
         fill,
         stroke_spec,
+        weight_px.unwrap_or(0.0) as f32,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -412,6 +416,9 @@ pub fn render_vertical(
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
+    // Moves the fill's own edge, in pixels, positive outward. Thins the
+    // strokes when negative, which is the direction a large size needs.
+    weight_px: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -427,6 +434,7 @@ pub fn render_vertical(
         align_from_opt(align)?,
         fill,
         stroke_spec,
+        weight_px.unwrap_or(0.0) as f32,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -453,6 +461,9 @@ pub fn render_notdef(
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
+    // Moves the fill's own edge, in pixels, positive outward. Thins the
+    // strokes when negative, which is the direction a large size needs.
+    weight_px: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let fill = fill_from_opt(fill_color)?;
     let stroke_spec = stroke_input_to_spec(stroke)?;
@@ -466,6 +477,7 @@ pub fn render_notdef(
         align_from_opt(align)?,
         fill,
         stroke_spec,
+        weight_px.unwrap_or(0.0) as f32,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {

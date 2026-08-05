@@ -33,6 +33,12 @@ export interface SampleRequest {
    */
   phaseX?: number
   phaseY?: number
+  /**
+   * Signed pixels the strokes move by. Part of the identity of the bitmap, so
+   * part of the key — two objects agreeing on everything but this are not
+   * looking at the same picture.
+   */
+  weightPx?: number
 }
 
 export interface Sample {
@@ -58,10 +64,12 @@ const CACHE_LIMIT = 240
 
 /**
  * Blank margin around a sample. An outside stroke grows the glyph past its
- * advance box; without room for it the sample comes back clipped.
+ * advance box; without room for it the sample comes back clipped. Thickening
+ * grows it the same way, so it buys margin too — thinning does not, since it
+ * only ever pulls the edge inward.
  */
-export function samplePadding(stroke?: EngineStrokeSpec): number {
-  return 4 + Math.ceil(stroke?.width ?? 0)
+export function samplePadding(stroke?: EngineStrokeSpec, weightPx = 0): number {
+  return 4 + Math.ceil(stroke?.width ?? 0) + Math.ceil(Math.max(0, weightPx))
 }
 
 const cache = new Map<string, Sample>()
@@ -86,6 +94,7 @@ function keyOf(req: SampleRequest): string {
     req.align ?? 'start',
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
+    req.weightPx ?? 0,
     req.text,
   ].join('|')
 }
@@ -105,7 +114,7 @@ export function coverageFor(entry: FontEntry, text: string): number[] {
 }
 
 function rasterize(req: SampleRequest): Sample {
-  const padding = samplePadding(req.stroke)
+  const padding = samplePadding(req.stroke, req.weightPx)
   // Everything crossing contextBridge has to be structured-cloneable, and a
   // Vue reactive proxy is not — hence the explicit plain copy rather than
   // trusting every caller to hand over raw objects.
@@ -129,6 +138,7 @@ function rasterize(req: SampleRequest): Sample {
       req.phaseX,
       req.phaseY,
       req.align,
+      req.weightPx,
     )
     // No marks: coverage is a question about a face, and there is no face.
     return {
@@ -154,6 +164,7 @@ function rasterize(req: SampleRequest): Sample {
         req.phaseX,
         req.phaseY,
         req.align,
+        req.weightPx,
       )
     : window.engine.renderText(
         drawWith,
@@ -166,6 +177,7 @@ function rasterize(req: SampleRequest): Sample {
         req.phaseX,
         req.phaseY,
         req.align,
+        req.weightPx,
       )
 
   const missing = new Set(uncovered)

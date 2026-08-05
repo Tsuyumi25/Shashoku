@@ -12,5 +12,6 @@ export const TEXT_STYLE_FIELD_NAMES: Record<keyof TextStyle, string> = {
   align: '對齊',
   color: '文字色',
   leadingPercent: '行距',
+  weightPx: '字粗',
   effects: '效果',
 }

@@ -42,6 +42,8 @@ const props = defineProps<{
   stroke?: EngineStrokeSpec
   /** Columns running right to left instead of rows. */
   vertical?: boolean
+  /** Signed pixels the strokes move by. */
+  weightPx?: number
   /** Outline the characters this family has no glyph for. */
   mark?: boolean
   /** Puts a caret in this cell. Only one cell may hold it at a time. */
@@ -75,6 +77,9 @@ const request = computed<SampleRequest>(() => ({
   fillColor: props.fillColor,
   stroke: props.stroke,
   vertical: props.vertical,
+  // Scaled with the size: the sample is drawn at device resolution and shown
+  // back down, so an unscaled offset would read thinner than it will typeset.
+  weightPx: (props.weightPx ?? 0) * dpr,
 }))
 
 const boxStyle = computed(() =>
