@@ -3,28 +3,11 @@ import { defineStore } from "pinia";
 
 export type AppView = "translate" | "project-manager";
 
-/**
- * The ways of looking at the same objects. One slot rather than three panels:
- * each answers a different question at a different scale — the list reads the
- * chapter, the tree stacks the page, the buckets gather objects by what they
- * mean and ask whether they still look alike — and nobody needs two answers at
- * once.
- *
- * Chosen rather than cycled. A flip between two was a shortcut worth having;
- * with a third it becomes a guess about which one comes next.
- */
-export type WorkbenchPanel = "labels" | "layers" | "buckets";
-
 export const useUiStore = defineStore("ui", () => {
   const view = ref<AppView>("project-manager");
-  const panel = ref<WorkbenchPanel>("labels");
 
   function setView(v: AppView) {
     view.value = v;
-  }
-
-  function setPanel(p: WorkbenchPanel) {
-    panel.value = p;
   }
 
   /**
@@ -51,8 +34,6 @@ export const useUiStore = defineStore("ui", () => {
   return {
     view,
     setView,
-    panel,
-    setPanel,
     reviewedBuckets,
     toggleReviewed,
     clearReviewed,

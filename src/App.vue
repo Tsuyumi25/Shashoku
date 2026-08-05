@@ -26,8 +26,17 @@
         :min-size="10"
         class="flex min-w-0 flex-col border-r border-border bg-card"
       >
+        <!--
+          The header stands; what is under it is whichever view is up. Both
+          stay mounted rather than swapping, for the same reason the workbench
+          does: the buckets hold a series read off disk, and the library holds
+          a scan, and neither is worth doing again for a trip to the other side.
+        -->
         <SidebarHeader />
-        <ProjectLibrary />
+        <div v-show="ui.view === 'translate'" class="flex min-h-0 flex-1 flex-col">
+          <TranslateSidebar />
+        </div>
+        <ProjectLibrary v-show="ui.view === 'project-manager'" />
       </SplitterPanel>
 
       <ResizeHandle />
@@ -84,6 +93,7 @@ import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerLayout from '@/modes/ProjectManagerLayout.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
+import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -210,9 +220,22 @@ useEventListener(window, 'keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (ownsKeyboard(document.activeElement)) return
 
+  /**
+   * Both lists are on screen at once, so which one the arrows walk is decided
+   * by what the cursor is standing on rather than by which panel is up. Landing
+   * on a raster layer or a folder means the tree is what is being worked, and
+   * anything else — a text object, or nothing selected yet — means the
+   * translations are.
+   *
+   * A text object is in both lists, so one reached through the tree still hands
+   * the arrows to the label list. That is the right way round: the tree's order
+   * is stacking and the list's is reading order, and stepping through
+   * translations is what stepping through text is for.
+   */
   const byRow = (offset: number) => {
     e.preventDefault()
-    if (ui.panel === 'layers') editor.selectLayerBy(offset)
+    const under = editor.cursorId ? project.entryById(editor.cursorId) : undefined
+    if (under && under.kind !== 'text') editor.selectLayerBy(offset)
     else editor.selectLabelBy(offset)
   }
 
