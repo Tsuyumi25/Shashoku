@@ -136,19 +136,35 @@ describe('selection', () => {
     expect(setOf(editor)).toEqual([])
   })
 
-  // The invariant the whole model rests on: there is one selection, and the
-  // cursor is a position inside it rather than a second selection of its own.
-  it('keeps the cursor inside the selection through a page turn', () => {
+  /**
+   * A selection reaches across pages, which is what the batch operations act
+   * on. Turning to the next page to check something must not cost the set a
+   * sweep just built.
+   */
+  it('leaves the selection alone through a page turn', () => {
     const project = useProjectStore()
     project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
     const editor = useEditorStore()
-    editor.selectFile('001.png')
+    editor.startOnPage('001.png')
     expect(setOf(editor)).toEqual(['a'])
 
     editor.pageBy(1)
 
-    expect(editor.cursorId).toBe('c')
-    expect(setOf(editor)).toEqual(['c'])
+    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.cursorId).toBe('a')
+    expect(setOf(editor)).toEqual(['a'])
+  })
+
+  it('picks a page from the bar without disturbing the selection either', () => {
+    const project = useProjectStore()
+    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
+    const editor = useEditorStore()
+    editor.startOnPage('001.png')
+
+    editor.showPage('002.png')
+
+    expect(editor.currentFilename).toBe('002.png')
+    expect(setOf(editor)).toEqual(['a'])
   })
 
   it('leaves the cursor in the selection after the one it pointed at is deleted', () => {

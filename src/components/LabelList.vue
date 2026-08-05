@@ -44,7 +44,7 @@
             rows[vrow.index].filename === editor.currentFilename && 'text-foreground',
             isHere(rows[vrow.index]) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
           ]"
-          @mousedown="editor.selectFile(rows[vrow.index].filename)"
+          @mousedown="editor.showPage(rows[vrow.index].filename)"
           @dragover.prevent.stop="onDragOver(rows[vrow.index], $event)"
           @drop.prevent.stop="onDrop"
         >

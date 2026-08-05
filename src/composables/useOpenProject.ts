@@ -26,7 +26,7 @@ export function useOpenProject() {
     // goes the same way, since two projects can hold a page of the same name.
     editor.clearHistory()
     selection.reset()
-    editor.selectFile(project.files[0]?.filename ?? null)
+    editor.startOnPage(project.files[0]?.filename ?? null)
     await library.refresh()
   }
 

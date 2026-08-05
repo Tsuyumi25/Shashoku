@@ -56,8 +56,9 @@ const percentFormat = new Intl.NumberFormat(undefined, {
 })
 const scalePercent = computed(() => percentFormat.format(editor.view.scale))
 
+/** The same act as the arrows beside it, so it leaves the selection alone too. */
 function onSelect(e: Event) {
-  editor.selectFile((e.target as HTMLSelectElement).value)
+  editor.showPage((e.target as HTMLSelectElement).value)
 }
 </script>
 

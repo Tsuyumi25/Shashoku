@@ -177,10 +177,14 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Turn to a page without touching what is selected on it — what an undo needs
-   * when the command it is taking back happened somewhere you have since navigated
-   * away from. `selectFile` lands on the page's first object, which would make
-   * undoing a change on page 3 also move the cursor.
+   * Turn to a page and leave the selection alone. Every way of getting to
+   * another page goes through here — the arrows, the page bar, a heading in the
+   * list, an undo landing somewhere you have since navigated away from.
+   *
+   * A selection reaches across pages on purpose, since that is what the batch
+   * operations act on. Turning a page is a move of the eyes, and one that
+   * dropped the selection would make looking at page 3 to check something cost
+   * the set you spent a sweep building.
    */
   function showPage(filename: string) {
     if (filename === currentFilename.value) return
@@ -320,26 +324,36 @@ export const useEditorStore = defineStore('editor', () => {
   const canUndo = computed(() => undoStack.value.length > 0)
   const canRedo = computed(() => redoStack.value.length > 0)
 
-  function selectFile(filename: string | null) {
+  /**
+   * Where a freshly opened project starts: on this page, on its first object.
+   *
+   * Deliberately not named for turning a page, and deliberately not what
+   * anything else calls. Every other way to another page keeps the selection —
+   * this one is the case where there is nothing yet to keep.
+   */
+  function startOnPage(filename: string | null) {
     commitTextEdit()
     currentFilename.value = filename
-    
     const project = useProjectStore()
     selectOnly(filename ? (project.labelsOf(filename)[0]?.id ?? null) : null)
   }
 
   
-  function pageBy(offset: number, landOn: 'first' | 'last' = 'first') {
+  /**
+   * Turn the page and leave the selection where it is.
+   *
+   * Paging is a move of the eyes, not of the hand. A selection reaches across
+   * pages on purpose — it is what the batch operations act on — so a turn that
+   * dropped it would make looking at the next page to check something cost the
+   * set you had spent a sweep building, with nothing having said so.
+   */
+  function pageBy(offset: number) {
     const project = useProjectStore()
     if (project.files.length === 0) return
     const index = project.files.findIndex((f) => f.filename === currentFilename.value)
     const next = index === -1 ? 0 : index + offset
     if (next < 0 || next >= project.files.length) return
-    selectFile(project.files[next].filename)
-    if (landOn === 'last') {
-      const labels = project.labelsOf(project.files[next].filename)
-      selectOnly(labels[labels.length - 1]?.id ?? null)
-    }
+    showPage(project.files[next].filename)
   }
 
   /**
@@ -404,11 +418,10 @@ export const useEditorStore = defineStore('editor', () => {
    *
    * The view is left alone on purpose: the list is read at the scale of the
    * chapter, and a canvas that scrolled and zoomed itself on every click would
-   * make reading down it unbearable. `selectFile` lands on the page's first
-   * object, so the one asked for has to be put back after the turn.
+   * make reading down it unbearable.
    */
   function revealLabel(filename: string, labelId: string) {
-    if (currentFilename.value !== filename) selectFile(filename)
+    showPage(filename)
     selectOnly(labelId)
   }
 
@@ -459,7 +472,7 @@ export const useEditorStore = defineStore('editor', () => {
    * actually translated in, and the reason it is worth a key of its own.
    *
    * Commits before moving: staying on the same page does not go through
-   * selectFile, so nothing else would close the visit, and the session would
+   * `showPage`, so nothing else would close the visit, and the session would
    * follow the cursor onto a row it was never opened on.
    */
   function editBy(offset: number) {
@@ -1328,7 +1341,7 @@ export const useEditorStore = defineStore('editor', () => {
     rotateTo,
     canUndo,
     canRedo,
-    selectFile,
+    startOnPage,
     pageBy,
     selectLabelBy,
     selectLayerBy,
