@@ -21,133 +21,133 @@
       </button>
     </div>
 
+  <!--
+    Every row rendered, not a window onto them. A chapter's translations are
+    hundreds of rows, not an unbounded feed, and dragging needs the real list:
+    a virtualizer positions rows absolutely and swaps them under the pointer,
+    which is exactly what Sortable measures against.
+  -->
   <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
     <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
       {{ emptyNote }}
     </div>
 
-    <div v-else class="relative w-full" :style="{ height: `${totalSize}px` }">
+    <template v-for="group in pageGroups" :key="group.page.key">
       <div
-        v-for="vrow in virtualRows"
-        :key="rows[vrow.index].key"
-        :ref="measureRow"
-        :data-index="vrow.index"
-        class="absolute top-0 left-0 w-full"
-        :style="{ transform: `translateY(${vrow.start}px)` }"
+        tabindex="0"
+        :data-page-id="group.page.filename"
+        class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+        :class="[
+          group.page.filename === editor.currentFilename && 'text-foreground',
+          isHere(group.page) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
+        ]"
+        @mousedown="editor.showPage(group.page.filename)"
       >
-        <div
-          v-if="rows[vrow.index].kind === 'page'"
-          tabindex="0"
-          :data-page-id="rows[vrow.index].filename"
-          class="relative flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
-          :class="[
-            rows[vrow.index].filename === editor.currentFilename && 'text-foreground',
-            isHere(rows[vrow.index]) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
-          ]"
-          @mousedown="editor.showPage(rows[vrow.index].filename)"
-          @dragover.prevent.stop="onDragOver(rows[vrow.index], $event)"
-          @drop.prevent.stop="onDrop"
-        >
-          <span
-            v-if="hover?.key === rows[vrow.index].key"
-            class="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-primary"
-          />
-          <span class="min-w-0 truncate text-xs font-medium">
-            {{ rows[vrow.index].filename }}
-          </span>
-          <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-            {{ (rows[vrow.index] as PageRow).count }}
-          </span>
-        </div>
-
-        <div
-          v-else
-          tabindex="0"
-          :draggable="
-            !isEditing(rows[vrow.index] as LabelRow) &&
-            !filtering &&
-            !isRowLocked(rows[vrow.index] as LabelRow)
-          "
-          :data-row-id="(rows[vrow.index] as LabelRow).label.id"
-          class="relative flex items-start gap-1.5 border-b border-border/40 px-2 py-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
-          :class="[
-            isSelected(rows[vrow.index] as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
-            !isEditing(rows[vrow.index] as LabelRow) && 'select-none',
-          ]"
-          @mousedown="onPick(rows[vrow.index] as LabelRow, $event)"
-          @dblclick="onEdit(rows[vrow.index] as LabelRow)"
-          @keydown="onRowKey(rows[vrow.index] as LabelRow, $event)"
-          @dragstart="onDragStart(rows[vrow.index] as LabelRow, $event)"
-          @dragover.prevent.stop="onDragOver(rows[vrow.index], $event)"
-          @drop.prevent.stop="onDrop"
-          @dragend="clearDrag"
-        >
-          <span
-            v-if="hover?.key === rows[vrow.index].key"
-            class="pointer-events-none absolute inset-x-0 h-0.5 bg-primary"
-            :class="hover.zone === 'above' ? 'top-0' : 'bottom-0'"
-          />
-          <span class="w-5 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
-            {{ (rows[vrow.index] as LabelRow).index }}
-          </span>
-          <!--
-            Unlike visibility, a lock is worth showing on a flat list: it says
-            this row will refuse, which is otherwise only discoverable by trying
-            to type into it. Where the lock was put on is the tree's to answer.
-          -->
-          <Lock
-            v-if="isRowLocked(rows[vrow.index] as LabelRow)"
-            :size="11"
-            class="mt-1 shrink-0 text-muted-foreground/60"
-            aria-label="已鎖定"
-          />
-
-          <!--
-            The translation keeps the full width and what the object means goes
-            underneath it. A tag is a string of the user's own length, and a
-            column that shared a line with one would give the row's whole point
-            away to a name — so the row grows instead, which costs nothing here
-            because these heights are measured rather than assumed.
-          -->
-          <div class="flex min-w-0 flex-1 flex-col">
-            <textarea
-              v-if="isEditing(rows[vrow.index] as LabelRow)"
-              :ref="takeFocus"
-              rows="1"
-              spellcheck="false"
-              placeholder="(未翻譯)"
-              class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
-              :value="textOf((rows[vrow.index] as LabelRow).label)"
-              @input="onInput(rows[vrow.index] as LabelRow, $event)"
-              @keydown="onInputKey($event)"
-              @blur="onInputBlur(rows[vrow.index] as LabelRow)"
-            />
-            <span
-              v-else
-              class="text-sm leading-snug whitespace-pre-wrap"
-              :class="isBlank(rows[vrow.index] as LabelRow) && 'text-muted-foreground/50'"
-            >{{ preview(rows[vrow.index] as LabelRow) }}</span>
-
-            <div
-              v-if="(rows[vrow.index] as LabelRow).label.tags.length > 0"
-              class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
-            >
-              <span
-                v-for="tag in orderedTags((rows[vrow.index] as LabelRow).label.tags)"
-                :key="tag"
-                class="flex min-w-0 items-center gap-1"
-              >
-                <span
-                  class="h-1.5 w-1.5 shrink-0 rounded-full"
-                  :style="{ backgroundColor: tagColor(tag, project.header.tags) }"
-                />
-                <span class="min-w-0 truncate">{{ tag }}</span>
-              </span>
-            </div>
-          </div>
-        </div>
+        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.filename }}</span>
+        <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+          {{ group.page.count }}
+        </span>
       </div>
-    </div>
+
+      <!--
+        Two columns that are not two subtrees pretending to line up: both the
+        gutter and the list disappear from the layout, so their children become
+        cells of this one grid and the nth number shares a row with the nth
+        translation. Row height then follows the translation, as it must, and
+        nothing has to be measured for the two to agree.
+      -->
+      <div class="page-body">
+        <div class="gutter">
+          <div
+            v-for="row in group.rows"
+            :key="row.key"
+            class="gutter-cell border-b border-border/40 pt-1 pr-1 text-right text-xs text-muted-foreground tabular-nums select-none"
+            :class="isSelected(row) && 'bg-accent/50'"
+          >{{ row.index }}</div>
+        </div>
+
+        <Draggable
+          :model-value="group.rows"
+          item-key="key"
+          :group="LABEL_GROUP"
+          :disabled="filtering"
+          :class="group.rows.length === 0 ? 'rows-empty' : 'rows'"
+          @change="onChanged(group, $event)"
+        >
+          <template #item="{ element }">
+            <div
+              tabindex="0"
+              :data-row-id="(element as LabelRow).label.id"
+              class="row-content flex min-w-0 items-start gap-1.5 border-b border-border/40 py-1 pr-2 pl-1.5 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+              :class="[
+                isSelected(element as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
+                !isEditing(element as LabelRow) && 'select-none',
+                !isEditing(element as LabelRow) && !filtering && 'cursor-grab',
+              ]"
+              @mousedown="onPick(element as LabelRow, $event)"
+              @dblclick="onEdit(element as LabelRow)"
+              @keydown="onRowKey(element as LabelRow, $event)"
+            >
+              <!--
+                Unlike visibility, a lock is worth showing on a flat list: it
+                says this row will refuse, which is otherwise only discoverable
+                by trying to type into it. Where the lock was put on is the
+                tree's to answer.
+              -->
+              <Lock
+                v-if="isRowLocked(element as LabelRow)"
+                :size="11"
+                class="mt-1 shrink-0 text-muted-foreground/60"
+                aria-label="已鎖定"
+              />
+
+              <!--
+                The translation keeps the full width and what the object means
+                goes underneath it. A tag is a string of the user's own length,
+                and a column that shared a line with one would give the row's
+                whole point away to a name.
+              -->
+              <div class="flex min-w-0 flex-1 flex-col">
+                <textarea
+                  v-if="isEditing(element as LabelRow)"
+                  :ref="takeFocus"
+                  rows="1"
+                  spellcheck="false"
+                  placeholder="(未翻譯)"
+                  class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
+                  :value="textOf((element as LabelRow).label)"
+                  @input="onInput(element as LabelRow, $event)"
+                  @keydown="onInputKey($event)"
+                  @blur="onInputBlur(element as LabelRow)"
+                />
+                <span
+                  v-else
+                  class="text-sm leading-snug whitespace-pre-wrap"
+                  :class="isBlank(element as LabelRow) && 'text-muted-foreground/50'"
+                >{{ preview(element as LabelRow) }}</span>
+
+                <div
+                  v-if="(element as LabelRow).label.tags.length > 0"
+                  class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
+                >
+                  <span
+                    v-for="tag in orderedTags((element as LabelRow).label.tags)"
+                    :key="tag"
+                    class="flex min-w-0 items-center gap-1"
+                  >
+                    <span
+                      class="h-1.5 w-1.5 shrink-0 rounded-full"
+                      :style="{ backgroundColor: tagColor(tag, project.header.tags) }"
+                    />
+                    <span class="min-w-0 truncate">{{ tag }}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </Draggable>
+      </div>
+    </template>
   </div>
   </div>
 </template>
@@ -155,17 +155,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import Draggable from 'vuedraggable'
 import { textOf } from '@shared/page/text'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   buildLabelRows,
-  dropIntoReadingOrder,
+  dropAt,
   type ChapterRow,
   type LabelRow,
   type PageRow,
 } from '@/lib/labelRows'
-import { zoneAt, type DropZone } from '@/lib/rowDrop'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEventListener } from '@vueuse/core'
@@ -198,6 +197,21 @@ const emptyNote = computed(() => {
   return filtering.value ? '沒有符合的譯文' : '本章沒有頁面'
 })
 
+/**
+ * The chapter folded into pages, since each page's translations are one another's
+ * siblings and a drag rearranges siblings. A heading is no longer one of them —
+ * it stands outside the lists entirely, which is why nothing has to be told to
+ * leave it alone any more.
+ */
+const pageGroups = computed(() => {
+  const out: { page: PageRow; rows: LabelRow[] }[] = []
+  for (const row of rows.value) {
+    if (row.kind === 'page') out.push({ page: row, rows: [] })
+    else out[out.length - 1]?.rows.push(row)
+  }
+  return out
+})
+
 /** What a range reaches over, in the order the panel is showing it. */
 const sequence = computed(() =>
   rows.value.filter((r): r is LabelRow => r.kind === 'label').map((r) => r.label.id),
@@ -205,23 +219,6 @@ const sequence = computed(() =>
 
 const scrollEl = ref<HTMLElement | null>(null)
 const searchEl = ref<HTMLInputElement | null>(null)
-
-// Rows are as tall as the translation in them, so the estimate is only a
-// starting point and measureElement corrects each one as it renders.
-const virtualizer = useVirtualizer(
-  computed(() => ({
-    count: rows.value.length,
-    getScrollElement: () => scrollEl.value,
-    estimateSize: () => 30,
-    overscan: 8,
-  })),
-)
-const virtualRows = computed(() => virtualizer.value.getVirtualItems())
-const totalSize = computed(() => virtualizer.value.getTotalSize())
-
-function measureRow(el: unknown) {
-  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
-}
 
 /** Its own lock or a folder's above it, which this list has no way to tell apart. */
 function isRowLocked(row: LabelRow): boolean {
@@ -295,46 +292,44 @@ function onRowKey(row: LabelRow, e: KeyboardEvent) {
   onEdit(row)
 }
 
-const dragging = ref<string[]>([])
-const hover = ref<{ key: string; zone: DropZone } | null>(null)
+/**
+ * One list per page, all sharing this — which is what lets a translation be
+ * dragged out of one page and into another.
+ */
+const LABEL_GROUP = { name: 'labels' }
 
 /**
+ * Where a translation came to rest, read off the page that received it.
+ *
+ * Both a move inside a page and an arrival from another one are the same
+ * question once the receiving page's list is rebuilt: what ends up above it.
+ * Nothing above means the head of the page — which is also the answer for a
+ * page with nothing on it, since its heading is what stands there instead.
+ *
+ * Only the arrival is listened to. The page it left fires its own event for the
+ * same gesture, and acting on both would put two entries on the undo stack for
+ * one move.
+ *
  * One row at a time, as in the layer tree. Carrying a whole selection is a
  * capability neither panel has, and having it here alone would make the same
  * gesture mean different things in two lists side by side.
- *
- * Nothing about the selection is touched here. The press that began the drag
- * already settled it, and changing it now would redraw the row under the
- * pointer mid-gesture — which Chromium answers by abandoning the drag.
  */
-function onDragStart(row: LabelRow, e: DragEvent) {
-  dragging.value = [row.label.id]
-  // Without a payload Chromium refuses to start the drag at all, even though
-  // the drop is resolved from component state rather than from what is carried.
-  e.dataTransfer?.setData('text/plain', row.label.id)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-}
+function onChanged(
+  group: { page: PageRow; rows: LabelRow[] },
+  evt: {
+    moved?: { element: LabelRow; oldIndex: number; newIndex: number }
+    added?: { element: LabelRow; newIndex: number }
+  },
+) {
+  const change = evt.moved ?? evt.added
+  if (!change) return
 
-function onDragOver(row: ChapterRow, e: DragEvent) {
-  if (dragging.value.length === 0) return
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  hover.value = { key: row.key, zone: zoneAt(rect, e.clientY, false) }
-}
+  const next = [...group.rows]
+  if (evt.moved) next.splice(evt.moved.oldIndex, 1)
+  next.splice(change.newIndex, 0, change.element)
 
-function onDrop() {
-  const ids = dragging.value
-  const over = hover.value
-  clearDrag()
-  if (ids.length === 0 || over === null) return
-  const row = rows.value.find((r) => r.key === over.key)
-  if (row === undefined) return
-  const target = dropIntoReadingOrder(row, over.zone)
-  editor.moveObjectsTo(ids, target.page, target.index)
-}
-
-function clearDrag() {
-  dragging.value = []
-  hover.value = null
+  const target = dropAt(next[change.newIndex - 1] ?? group.page, true)
+  editor.moveObjectsTo([change.element.label.id], target.page, target.index)
 }
 
 /**
@@ -422,10 +417,10 @@ watch(
     // next Enter would open a row nobody is looking at.
     const held = scrollEl.value?.contains(document.activeElement) ?? false
 
-    if (!virtualRows.value.some((v) => v.index === index)) {
-      await nextTick()
-      virtualizer.value.scrollToIndex(index, { align: 'center' })
-    }
+    await nextTick()
+    scrollEl.value
+      ?.querySelector<HTMLElement>(selector)
+      ?.scrollIntoView({ block: 'nearest' })
     if (held && editor.pendingTextEdit === null) {
       await nextTick()
       focusIn(selector)
@@ -445,5 +440,39 @@ function orderedTags(tags: readonly string[]): string[] {
  */
 .label-input {
   field-sizing: content;
+}
+
+/*
+ * The gutter and the list both vanish from the layout, so their children are
+ * cells of this grid rather than of two separate boxes — which is what makes a
+ * number and a translation share a row without either being measured.
+ *
+ * Dense packing because every number is laid down before the first translation:
+ * the sparse cursor only ever moves forward, so each translation would land
+ * below the last number instead of beside the first.
+ */
+.page-body {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  grid-auto-flow: row dense;
+}
+.gutter,
+.page-body :deep(.rows) {
+  display: contents;
+}
+.gutter-cell {
+  grid-column: 1;
+}
+.row-content {
+  grid-column: 2;
+}
+
+/*
+ * A page with nothing on it has no children to hand Sortable a shape to aim at,
+ * so this one keeps a box of its own.
+ */
+.page-body :deep(.rows-empty) {
+  grid-column: 2;
+  min-height: 1.5rem;
 }
 </style>

@@ -2,7 +2,6 @@ import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry } from '@shared/page/types'
 import { textObjectsInReadingOrder } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
-import type { DropZone } from '@/lib/rowDrop'
 
 export interface PageRow {
   kind: 'page'
@@ -88,17 +87,18 @@ export interface ReadingOrderDrop {
 }
 
 /**
- * What a drop on a row of the label list means.
+ * Where a dragged object has come to rest, from the row it was dropped onto and
+ * which half of it the pointer was in.
  *
- * The mirror image of the layer tree: this list is not reversed, so above a row
- * on screen is before it in the order, and no correction is needed to translate
- * between the two.
+ * A heading takes anything dropped on it to the head of its page — the only way
+ * onto a page with nothing on it, which is exactly the page most likely to be
+ * missing an object.
  *
- * A heading takes anything dropped on it to the head of its page. That is the
- * only way onto a page with nothing on it — which is exactly the page most
- * likely to be missing an object.
+ * The index is against the order as it stood, still counting the object being
+ * moved, which is what `moveObjectsTo` takes: it knows what is leaving from
+ * above the target and subtracts it there.
  */
-export function dropIntoReadingOrder(row: ChapterRow, zone: DropZone): ReadingOrderDrop {
+export function dropAt(row: ChapterRow, after: boolean): ReadingOrderDrop {
   if (row.kind === 'page') return { page: row.filename, index: 0 }
-  return { page: row.filename, index: zone === 'below' ? row.index : row.index - 1 }
+  return { page: row.filename, index: after ? row.index : row.index - 1 }
 }
