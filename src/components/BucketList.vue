@@ -59,16 +59,23 @@
       <div v-for="group in groups" :key="group.key" class="mb-2">
         <button
           type="button"
-          class="flex w-full min-w-0 items-center gap-1 rounded px-0.5 py-0.5 text-left text-xs hover:bg-secondary/50"
+          class="flex w-full min-w-0 items-center gap-2 rounded px-0.5 py-0.5 text-left text-xs hover:bg-secondary/50"
           :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件`"
           @click="selectIds(group.buckets.flatMap((b) => b.ids))"
         >
+          <span v-if="group.tags.length === 0" class="truncate text-muted-foreground">
+            未標記
+          </span>
           <span
-            class="h-2 w-2 shrink-0 rounded-full"
-            :style="{ backgroundColor: colorOf(group.tags) }"
-          />
-          <span class="min-w-0 truncate font-medium">
-            {{ group.tags.length === 0 ? '未標記' : group.tags.join('、') }}
+            v-for="tag in group.tags"
+            :key="tag"
+            class="flex min-w-0 items-center gap-1"
+          >
+            <span
+              class="h-2 w-2 shrink-0 rounded-full"
+              :style="{ backgroundColor: tagColor(tag, project.header.tags) }"
+            />
+            <span class="min-w-0 truncate font-medium">{{ tag }}</span>
           </span>
           <span
             v-if="group.manyStyles"
@@ -129,7 +136,7 @@ import { computed, ref, watch } from 'vue'
 import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
-import { primaryTag, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
+import { tagColor } from '@shared/tags/set'
 import { textObjects } from '@shared/page/tree'
 import { groupByValue, type BucketObject, type StyleBucket } from '@/lib/valueBuckets'
 import { TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
@@ -224,10 +231,6 @@ const scopeNote = computed(() => {
   const read = `另外讀了 ${series.chapters.value} 話`
   return skipped.length === 0 ? read : `${read}；讀不開：${skipped.join('、')}`
 })
-
-function colorOf(tags: readonly string[]): string {
-  return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
-}
 
 /**
  * Whichever field is being compared first — never a fixed one. A row carrying

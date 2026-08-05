@@ -90,12 +90,6 @@
           <span class="w-5 shrink-0 pt-0.5 text-right text-xs text-muted-foreground tabular-nums">
             {{ (rows[vrow.index] as LabelRow).index }}
           </span>
-          <span
-            class="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-            :style="{ backgroundColor: colorOf((rows[vrow.index] as LabelRow).label.tags) }"
-            :title="nameOf((rows[vrow.index] as LabelRow).label.tags)"
-          />
-
           <!--
             Unlike visibility, a lock is worth showing on a flat list: it says
             this row will refuse, which is otherwise only discoverable by trying
@@ -108,23 +102,49 @@
             aria-label="已鎖定"
           />
 
-          <textarea
-            v-if="isEditing(rows[vrow.index] as LabelRow)"
-            :ref="takeFocus"
-            rows="1"
-            spellcheck="false"
-            placeholder="(未翻譯)"
-            class="label-input min-w-0 flex-1 resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
-            :value="textOf((rows[vrow.index] as LabelRow).label)"
-            @input="onInput(rows[vrow.index] as LabelRow, $event)"
-            @keydown="onInputKey($event)"
-            @blur="onInputBlur(rows[vrow.index] as LabelRow)"
-          />
-          <span
-            v-else
-            class="min-w-0 flex-1 text-sm leading-snug whitespace-pre-wrap"
-            :class="isBlank(rows[vrow.index] as LabelRow) && 'text-muted-foreground/50'"
-          >{{ preview(rows[vrow.index] as LabelRow) }}</span>
+          <!--
+            The translation keeps the full width and what the object means goes
+            underneath it. A tag is a string of the user's own length, and a
+            column that shared a line with one would give the row's whole point
+            away to a name — so the row grows instead, which costs nothing here
+            because these heights are measured rather than assumed.
+          -->
+          <div class="flex min-w-0 flex-1 flex-col">
+            <textarea
+              v-if="isEditing(rows[vrow.index] as LabelRow)"
+              :ref="takeFocus"
+              rows="1"
+              spellcheck="false"
+              placeholder="(未翻譯)"
+              class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
+              :value="textOf((rows[vrow.index] as LabelRow).label)"
+              @input="onInput(rows[vrow.index] as LabelRow, $event)"
+              @keydown="onInputKey($event)"
+              @blur="onInputBlur(rows[vrow.index] as LabelRow)"
+            />
+            <span
+              v-else
+              class="text-sm leading-snug whitespace-pre-wrap"
+              :class="isBlank(rows[vrow.index] as LabelRow) && 'text-muted-foreground/50'"
+            >{{ preview(rows[vrow.index] as LabelRow) }}</span>
+
+            <div
+              v-if="(rows[vrow.index] as LabelRow).label.tags.length > 0"
+              class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
+            >
+              <span
+                v-for="tag in orderedTags((rows[vrow.index] as LabelRow).label.tags)"
+                :key="tag"
+                class="flex min-w-0 items-center gap-1"
+              >
+                <span
+                  class="h-1.5 w-1.5 shrink-0 rounded-full"
+                  :style="{ backgroundColor: tagColor(tag, project.header.tags) }"
+                />
+                <span class="min-w-0 truncate">{{ tag }}</span>
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -137,7 +157,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { textOf } from '@shared/page/text'
-import { primaryTag, tagsInRegistryOrder, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
+import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   buildLabelRows,
   dropIntoReadingOrder,
@@ -413,14 +433,8 @@ watch(
   },
 )
 
-/** The dot takes whichever known tag sits highest; the tooltip says them all. */
-function colorOf(tags: readonly string[]): string {
-  return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
-}
-
-function nameOf(tags: readonly string[]): string {
-  const ordered = tagsInRegistryOrder(tags, project.header.tags)
-  return ordered.length === 0 ? '未標記' : ordered.join('、')
+function orderedTags(tags: readonly string[]): string[] {
+  return tagsInRegistryOrder(tags, project.header.tags)
 }
 </script>
 
