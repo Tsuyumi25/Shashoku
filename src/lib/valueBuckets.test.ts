@@ -17,7 +17,15 @@ function object(id: string, tags: string[], style: Partial<TextStyle> = {}): Buc
   }
 }
 
-const ALL: (keyof TextStyle)[] = []
+const ALL: (keyof TextStyle)[] = [
+  'fontFamily',
+  'fontSizePx',
+  'direction',
+  'align',
+  'color',
+  'leadingPercent',
+  'effects',
+]
 
 describe('groupByValue', () => {
   it('gathers objects that mean the same thing, however their tags were written', () => {
@@ -37,25 +45,25 @@ describe('groupByValue', () => {
 
   it('calls a group that agrees with itself settled', () => {
     const groups = groupByValue([object('a', ['框内']), object('b', ['框内'])], ALL, registry)
-    expect(groups[0].drifting).toBe(false)
+    expect(groups[0].manyStyles).toBe(false)
     expect(groups[0].buckets).toHaveLength(1)
   })
 
-  it('calls a group whose objects disagree drifting', () => {
+  it('calls a group whose objects disagree more than one style', () => {
     const groups = groupByValue(
       [object('a', ['框内']), object('b', ['框内'], { fontSizePx: 48 })],
       ALL,
       registry,
     )
-    expect(groups[0].drifting).toBe(true)
+    expect(groups[0].manyStyles).toBe(true)
     expect(groups[0].buckets.map((b) => b.ids)).toEqual([['a'], ['b']])
   })
 
   /** "Who is not using the dialogue font" is a narrower question than "who disagrees". */
   it('only looks at the fields it was asked about', () => {
     const objects = [object('a', ['框内']), object('b', ['框内'], { fontSizePx: 48 })]
-    expect(groupByValue(objects, ['fontFamily'], registry)[0].drifting).toBe(false)
-    expect(groupByValue(objects, ['fontSizePx'], registry)[0].drifting).toBe(true)
+    expect(groupByValue(objects, ['fontFamily'], registry)[0].manyStyles).toBe(false)
+    expect(groupByValue(objects, ['fontSizePx'], registry)[0].manyStyles).toBe(true)
   })
 
   it('puts the biggest bucket first, so the odd one out is the short row', () => {
@@ -71,7 +79,7 @@ describe('groupByValue', () => {
     expect(groups[0].buckets.map((b) => b.ids.length)).toEqual([2, 1])
   })
 
-  it('lists drifting groups first, since they are the only ones to act on', () => {
+  it('lists split meanings first, since they are the only ones to act on', () => {
     const groups = groupByValue(
       [
         object('a', ['框内']),
@@ -82,6 +90,20 @@ describe('groupByValue', () => {
       registry,
     )
     expect(groups.map((g) => g.tags[0])).toEqual(['心聲', '框内'])
+  })
+
+  /**
+   * Comparing on nothing is what the caller asked for, not a signal to compare
+   * everything instead — every meaning becomes one bucket.
+   */
+  it('gathers a group into one bucket when nothing is being compared', () => {
+    const groups = groupByValue(
+      [object('a', ['框内']), object('b', ['框内'], { fontSizePx: 48 })],
+      [],
+      registry,
+    )
+    expect(groups[0].buckets).toHaveLength(1)
+    expect(groups[0].manyStyles).toBe(false)
   })
 
   /** A different job from asking whether a group agrees with itself. */

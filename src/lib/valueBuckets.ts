@@ -1,7 +1,6 @@
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
-import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 
 /** One text object, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
@@ -25,11 +24,11 @@ export interface TagGroup {
   count: number
   buckets: StyleBucket[]
   /**
-   * Objects that mean the same thing do not look the same. The whole point of
-   * the view: with the styles held by value there is nothing keeping a group
-   * consistent, so the way to find out is to look.
+   * More than one style under one meaning. The whole point of the view: with
+   * the styles held by value there is nothing keeping a group consistent, so
+   * the way to find out is to look.
    */
-  drifting: boolean
+  manyStyles: boolean
 }
 
 function styleKey(style: TextStyle, fields: readonly (keyof TextStyle)[]): string {
@@ -40,16 +39,17 @@ function styleKey(style: TextStyle, fields: readonly (keyof TextStyle)[]): strin
  * The objects gathered twice: first by what they mean, then by what they look
  * like. A group holding more than one bucket is drift.
  *
- * `fields` narrows what counts as looking alike, so "who is not using the
+ * `fields` is exactly what counts as looking alike, so "who is not using the
  * dialogue font" is one question and "who disagrees about anything at all" is
- * another, asked of the same list.
+ * another, asked of the same list. Comparing on nothing is a legal answer and
+ * gathers each meaning into a single bucket — it is what the caller asked for,
+ * not a signal to compare everything instead.
  */
 export function groupByValue(
   objects: readonly BucketObject[],
   fields: readonly (keyof TextStyle)[],
   registry: TagRegistry,
 ): TagGroup[] {
-  const compared = fields.length > 0 ? fields : TEXT_STYLE_FIELDS
   const groups = new Map<string, BucketObject[]>()
   for (const object of objects) {
     const key = tagSetKey(object.tags)
@@ -62,7 +62,7 @@ export function groupByValue(
   for (const [key, members] of groups) {
     const byStyle = new Map<string, BucketObject[]>()
     for (const object of members) {
-      const sk = styleKey(object.style, compared)
+      const sk = styleKey(object.style, fields)
       const bucket = byStyle.get(sk)
       if (bucket) bucket.push(object)
       else byStyle.set(sk, [object])
@@ -80,16 +80,16 @@ export function groupByValue(
       tags: tagsInRegistryOrder(members[0].tags, registry),
       count: members.length,
       buckets,
-      drifting: buckets.length > 1,
+      manyStyles: buckets.length > 1,
     })
   }
 
-  // Drift first: it is the only thing here anybody has to act on. Untagged
-  // objects last, since "what have I not classified yet" is a different job
-  // from "does this group agree with itself".
+  // A split meaning first: it is the only thing here anybody has to act on.
+  // Untagged objects last, since "what have I not classified yet" is a
+  // different job from "does this group agree with itself".
   const rank = (group: TagGroup) => registry.findIndex((tag) => group.tags.includes(tag.name))
   out.sort((a, b) => {
-    if (a.drifting !== b.drifting) return a.drifting ? -1 : 1
+    if (a.manyStyles !== b.manyStyles) return a.manyStyles ? -1 : 1
     if (a.tags.length === 0 || b.tags.length === 0) return a.tags.length === 0 ? 1 : -1
     const ra = rank(a)
     const rb = rank(b)

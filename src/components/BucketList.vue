@@ -30,17 +30,22 @@
         </button>
       </div>
 
-      <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center gap-1">
         <span class="text-muted-foreground">比較</span>
-        <select
-          v-model="field"
-          class="h-5 min-w-0 flex-1 rounded border border-input bg-background px-1"
+        <button
+          v-for="f in TEXT_STYLE_FIELDS"
+          :key="f"
+          type="button"
+          class="rounded px-1.5 py-0.5"
+          :class="
+            fields.has(f)
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+          "
+          @click="toggleField(f)"
         >
-          <option value="">所有欄位</option>
-          <option v-for="f in TEXT_STYLE_FIELDS" :key="f" :value="f">
-            {{ TEXT_STYLE_FIELD_NAMES[f] }}
-          </option>
-        </select>
+          {{ TEXT_STYLE_FIELD_NAMES[f] }}
+        </button>
       </div>
 
       <p v-if="scopeNote" class="text-[10px] text-muted-foreground">{{ scopeNote }}</p>
@@ -52,7 +57,12 @@
       </p>
 
       <div v-for="group in groups" :key="group.key" class="mb-2">
-        <div class="flex min-w-0 items-center gap-1 px-0.5 text-xs">
+        <button
+          type="button"
+          class="flex w-full min-w-0 items-center gap-1 rounded px-0.5 py-0.5 text-left text-xs hover:bg-secondary/50"
+          :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件`"
+          @click="selectIds(group.buckets.flatMap((b) => b.ids))"
+        >
           <span
             class="h-2 w-2 shrink-0 rounded-full"
             :style="{ backgroundColor: colorOf(group.tags) }"
@@ -61,41 +71,54 @@
             {{ group.tags.length === 0 ? '未標記' : group.tags.join('、') }}
           </span>
           <span
-            v-if="group.drifting"
+            v-if="group.manyStyles"
             class="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-500"
-            title="意思相同，但看起來不一樣"
+            title="意思相同，但分成好幾種樣式"
           >
-            漂移 {{ group.buckets.length }}
+            樣式群 {{ group.buckets.length }}
           </span>
           <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{ group.count }}</span>
-        </div>
-
-        <button
-          v-for="bucket in group.buckets"
-          :key="bucket.key"
-          type="button"
-          class="mt-0.5 flex w-full min-w-0 items-start gap-1.5 rounded px-1 py-1 text-left text-xs hover:bg-secondary/50"
-          :class="ui.reviewedBuckets.has(bucket.key) && 'opacity-50'"
-          :title="`選中這一堆的 ${bucket.ids.length} 個物件`"
-          @click="selectBucket(bucket)"
-        >
-          <span
-            class="mt-px shrink-0 rounded p-0.5 hover:bg-secondary"
-            :title="ui.reviewedBuckets.has(bucket.key) ? '取消「看過了」' : '標記為看過了'"
-            @click.stop="ui.toggleReviewed(bucket.key)"
-          >
-            <Check
-              :size="11"
-              :class="
-                ui.reviewedBuckets.has(bucket.key) ? 'text-primary' : 'text-muted-foreground/40'
-              "
-            />
-          </span>
-
-          <span class="min-w-0 flex-1 truncate">{{ describe(bucket.style) }}</span>
-
-          <span class="shrink-0 tabular-nums text-muted-foreground">{{ bucket.ids.length }}</span>
         </button>
+
+        <template v-for="bucket in group.buckets" :key="bucket.key">
+          <div
+            class="mt-0.5 flex w-full min-w-0 items-center gap-1 rounded text-xs hover:bg-secondary/50"
+          >
+            <button
+              type="button"
+              class="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+              :title="expanded.has(bucket.key) ? '收合' : '展開其餘欄位'"
+              @click="toggleExpanded(bucket.key)"
+            >
+              <ChevronRight
+                :size="11"
+                class="transition-transform"
+                :class="expanded.has(bucket.key) && 'rotate-90'"
+              />
+            </button>
+
+            <button
+              type="button"
+              class="min-w-0 flex-1 truncate py-1 text-left"
+              :title="`選中這一堆的 ${bucket.ids.length} 個物件`"
+              @click="selectIds(bucket.ids)"
+            >
+              {{ bucketTitle(bucket) }}
+            </button>
+
+            <span class="shrink-0 pr-1 tabular-nums text-muted-foreground">
+              {{ bucket.ids.length }}
+            </span>
+          </div>
+
+          <div
+            v-if="expanded.has(bucket.key)"
+            class="mb-0.5 ml-5 flex flex-col text-[10px] text-muted-foreground"
+          >
+            <span v-for="line in details(bucket)" :key="line" class="truncate">{{ line }}</span>
+            <span v-if="details(bucket).length === 0">沒有其他比較中的欄位</span>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -103,7 +126,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Check, RefreshCw } from '@lucide/vue'
+import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { primaryTag, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
@@ -113,7 +136,6 @@ import { TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
 import { useSeriesObjects } from '@/composables/useSeriesObjects'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { useUiStore } from '@/stores/uiStore'
 
 type Scope = 'page' | 'chapter' | 'series'
 
@@ -123,26 +145,49 @@ const SCOPES = [
   { scope: 'series', label: '全書', title: '同一層資料夾下的其他話，從磁碟讀' },
 ] as const satisfies readonly { scope: Scope; label: string; title: string }[]
 
+/**
+ * Size is off to begin with. It is the field that legitimately differs inside
+ * one meaning — a line squeezed to fit its bubble is not a different kind of
+ * text — so comparing on it out of the box would split nearly every group and
+ * bury the disagreements that do matter.
+ */
+const UNCOMPARED_BY_DEFAULT: readonly (keyof TextStyle)[] = ['fontSizePx']
+
 const project = useProjectStore()
 const editor = useEditorStore()
-const ui = useUiStore()
 const series = useSeriesObjects()
 
 const scope = ref<Scope>('chapter')
-const field = ref<'' | keyof TextStyle>('')
+const fields = ref(
+  new Set<keyof TextStyle>(TEXT_STYLE_FIELDS.filter((f) => !UNCOMPARED_BY_DEFAULT.includes(f))),
+)
+const expanded = ref(new Set<string>())
 
 function chooseScope(next: Scope) {
   scope.value = next
   if (next === 'series' && series.loadedFor.value !== project.rootPath) void series.load()
 }
 
+function toggleField(field: keyof TextStyle) {
+  const next = new Set(fields.value)
+  if (!next.delete(field)) next.add(field)
+  fields.value = next
+}
+
+function toggleExpanded(key: string) {
+  const next = new Set(expanded.value)
+  if (!next.delete(key)) next.add(key)
+  expanded.value = next
+}
+
 /**
- * A verdict is about a bucket, and a bucket's identity is the values its
- * members hold. Narrowing what counts as looking alike rebuilds every one of
- * them, so the marks left on the old buckets are about groupings that no
- * longer exist.
+ * A bucket's identity is the values its members hold, so narrowing what counts
+ * as looking alike rebuilds every one of them — and what was open was open on
+ * groupings that no longer exist.
  */
-watch([scope, field], () => ui.clearReviewed())
+watch([scope, fields], () => {
+  expanded.value = new Set()
+})
 
 function flatten(filename: string, layers: Parameters<typeof textObjects>[0]): BucketObject[] {
   return textObjects(layers).map((label) => ({
@@ -166,12 +211,10 @@ const objects = computed<BucketObject[]>(() => {
   return [...chapterObjects.value, ...series.objects.value]
 })
 
+const comparedFields = computed(() => TEXT_STYLE_FIELDS.filter((f) => fields.value.has(f)))
+
 const groups = computed(() =>
-  groupByValue(
-    objects.value,
-    field.value === '' ? [] : [field.value],
-    project.header.tags,
-  ),
+  groupByValue(objects.value, comparedFields.value, project.header.tags),
 )
 
 const scopeNote = computed(() => {
@@ -186,10 +229,25 @@ function colorOf(tags: readonly string[]): string {
   return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
 }
 
-/** What tells one bucket from another, in the terms the panel above uses. */
-function describe(style: TextStyle): string {
-  const shown = field.value === '' ? TEXT_STYLE_FIELDS : [field.value]
-  return shown.map((f) => `${TEXT_STYLE_FIELD_NAMES[f]} ${valueText(style, f)}`).join(' · ')
+/**
+ * Whichever field is being compared first — never a fixed one. A row carrying
+ * all seven was unreadable in a sidebar this wide, but leading with a field
+ * nobody is comparing would say something that has nothing to do with what
+ * makes this bucket a bucket.
+ */
+const titleField = computed<keyof TextStyle | null>(() => comparedFields.value[0] ?? null)
+
+function bucketTitle(bucket: StyleBucket): string {
+  const field = titleField.value
+  if (field === null) return '未比較任何欄位'
+  return `${TEXT_STYLE_FIELD_NAMES[field]} ${valueText(bucket.style, field)}`
+}
+
+/** Everything else being compared, which is what opening the row is for. */
+function details(bucket: StyleBucket): string[] {
+  return comparedFields.value
+    .filter((f) => f !== titleField.value)
+    .map((f) => `${TEXT_STYLE_FIELD_NAMES[f]} ${valueText(bucket.style, f)}`)
 }
 
 function valueText(style: TextStyle, f: keyof TextStyle): string {
@@ -208,9 +266,8 @@ function valueText(style: TextStyle, f: keyof TextStyle): string {
  * scope reaches into chapters that are not open, and selecting an id from one
  * of those would name something nothing on screen can show.
  */
-function selectBucket(bucket: StyleBucket) {
+function selectIds(ids: readonly string[]) {
   const here = new Set(chapterObjects.value.map((o) => o.id))
-  const reachable = bucket.ids.filter((id) => here.has(id))
-  editor.selectMany(reachable, false)
+  editor.selectMany(ids.filter((id) => here.has(id)), false)
 }
 </script>
