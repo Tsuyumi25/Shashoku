@@ -311,7 +311,7 @@ import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { canEditInCell } from '@/lib/editContext'
-import { catalog, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
+import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
@@ -537,12 +537,19 @@ const displayed = computed(() => {
  * Which of its faces each family's cell is showing, per opening. Unset means
  * the face the object being styled names, or failing that the family's
  * representative — so a cell starts where the user already is.
+ *
+ * Held as the face's key rather than its position: the list being walked is
+ * the filtered one, and a filter change — new sample text, 隱藏缺字 — would
+ * quietly re-aim a stored position at whichever face slid into it.
  */
-const shownIndex = ref(new Map<string, number>())
+const shownKey = ref(new Map<string, string>())
 
 function shownFace(faces: FontEntry[]): FontEntry {
-  const held = shownIndex.value.get(faces[0]!.family)
-  if (held !== undefined && held < faces.length) return faces[held]!
+  const held = shownKey.value.get(faces[0]!.family)
+  if (held !== undefined) {
+    const face = faces.find((f) => faceKey(f) === held)
+    if (face) return face
+  }
   const wanted = picker.request.value.currentFace
   const current = wanted ? faces.findIndex((f) => f.postscriptName === wanted) : -1
   if (current >= 0) return faces[current]!
@@ -551,13 +558,12 @@ function shownFace(faces: FontEntry[]): FontEntry {
 }
 
 function cycleFace(faces: FontEntry[], step: number) {
-  const family = faces[0]!.family
   const at = faces.indexOf(shownFace(faces))
-  const next = (at + step + faces.length) % faces.length
-  shownIndex.value.set(family, next)
+  const next = faces[(at + step + faces.length) % faces.length]!
+  shownKey.value.set(faces[0]!.family, faceKey(next))
   // A Map mutation is invisible to a shallow structure; replacing it is what
   // repaints the cell.
-  shownIndex.value = new Map(shownIndex.value)
+  shownKey.value = new Map(shownKey.value)
 }
 
 /** What the weight row calls a face that names no style. */
@@ -679,7 +685,7 @@ watch(
     search.value = ''
     editingFamily.value = null
     // Fresh per opening, so every cell starts from the face the object names.
-    shownIndex.value = new Map()
+    shownKey.value = new Map()
     vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical
     await nextTick()
     requestAnimationFrame(revealCurrentFamily)
