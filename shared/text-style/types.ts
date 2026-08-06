@@ -41,9 +41,32 @@ export type TextEffect = StrokeEffect
 
 
 export interface TextStyle {
-  
+
   fontFamily: string
-  
+
+  /**
+   * The face this object is set in — a PostScript name, and the only one of
+   * the three font strings that resolution compares. One per face, so a
+   * weight is nameable; ASCII by specification, so it cannot arrive
+   * unreadable the way a family name can.
+   *
+   * Named for what it holds a name *of* rather than for the current naming
+   * scheme: a stronger identity would change what the field holds without
+   * changing what it means.
+   *
+   * Empty when no face has been chosen, in which case resolution falls back
+   * to the family's representative.
+   */
+  fontFace: string
+
+  /**
+   * The weight as a reader calls it — "Medium", "W7". Never compared; it
+   * earns its bytes on the machine that lacks the face, which can then say
+   * "missing: 思源黑體 Medium" rather than a bare family name with no clue
+   * which weight.
+   */
+  fontStyleName: string
+
   fontSizePx: number
   
   direction: TextDirection
@@ -83,6 +106,8 @@ export interface TextStyle {
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: '',
+  fontFace: '',
+  fontStyleName: '',
   fontSizePx: 24,
   direction: 'horizontal',
   align: 'start',

@@ -1,5 +1,6 @@
 import { ref, shallowRef } from 'vue'
 import type { EngineStrokeSpec } from '@shared/engine/types'
+import type { FontEntry } from '@shared/fonts/types'
 
 export interface FontPickerRequest {
   /** Current family; prefills the search box so the user starts from it. */
@@ -23,10 +24,10 @@ export interface FontPickerRequest {
 /**
  * Both halves of the answer. The weight rides along because the picker owns a
  * slider for it: someone who found the right thickness while browsing would
- * otherwise watch it reset the moment they chose a family.
+ * otherwise watch it reset the moment they chose a face.
  */
 export interface FontPickerResult {
-  family: string
+  face: FontEntry
   weightPx: number
 }
 
@@ -63,8 +64,8 @@ export function useFontPicker() {
         resolver = resolve
       })
     },
-    select(family: string, weightPx: number) {
-      settle({ family, weightPx })
+    select(face: FontEntry, weightPx: number) {
+      settle({ face, weightPx })
     },
     cancel() {
       settle(null)

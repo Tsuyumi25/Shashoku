@@ -250,7 +250,7 @@
             <button
               type="button"
               class="absolute bottom-1.5 right-1.5 rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 group-hover/cell:opacity-100"
-              @click="picker.select(entry.family, weightPx)"
+              @click="picker.select(entry, weightPx)"
             >
               選擇
             </button>

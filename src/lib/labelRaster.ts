@@ -1,5 +1,5 @@
 import type { TextStyle } from '@shared/text-style/types'
-import { catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
+import { catalogByFace, catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
 import { sampleFor, type Sample } from './fontSampleCache'
 import {
   frameCenter,
@@ -37,6 +37,20 @@ const NO_PHASE: Point = { x: 0, y: 0 }
 const NOTHING: LabelRaster = { sample: null, missingFamily: null }
 
 /**
+ * The resolution chain of ADR 0001: the named face, then the family's
+ * representative, then nothing — which the caller draws as notdef. Only
+ * `fontFace` is ever compared; the family is a fallback for objects that
+ * predate choosing one, or whose exact face this machine lacks while a
+ * sibling weight is present.
+ */
+function resolveFace(style: TextStyle) {
+  const exact = style.fontFace ? catalogByFace.value.get(style.fontFace) : undefined
+  if (exact) return exact
+  const faces = catalogByFamily.value.get(style.fontFamily)
+  return faces ? representativeOf(faces) : null
+}
+
+/**
  * One label's bitmap. Shared because the frame is sized from what the text
  * actually came out as, and a frame that measured a second rasterization of its
  * own would be a mismatch waiting to happen. Reads module state rather than
@@ -58,8 +72,7 @@ export function rasterFor(
 ): LabelRaster {
   if (text.length === 0) return NOTHING
 
-  const faces = catalogByFamily.value.get(style.fontFamily)
-  const entry = faces ? representativeOf(faces) : null
+  const entry = resolveFace(style)
   // Nothing to say while the catalogue is still being enumerated: the family
   // is not missing yet, it is unanswered — and a box drawn on every start
   // would say the wrong one.

@@ -225,8 +225,13 @@ async function openFont() {
   })
   if (chosen === null) return
   const patch: Partial<TextStyle> = {}
-  if (isMixed('fontFamily') || chosen.family !== props.value.fontFamily)
-    patch.fontFamily = chosen.family
+  // The three names travel together: a face left over from another family
+  // would keep drawing that family, whatever fontFamily now says.
+  if (isMixed('fontFamily') || chosen.face.postscriptName !== props.value.fontFace) {
+    patch.fontFamily = chosen.face.family
+    patch.fontFace = chosen.face.postscriptName
+    patch.fontStyleName = chosen.face.style
+  }
   // The picker carries a weight slider, so a visit can change the thickness
   // without changing the family — and then the family being the same one is
   // not a reason to drop the answer.

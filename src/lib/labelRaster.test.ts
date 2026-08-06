@@ -26,6 +26,8 @@ interface DrawCall {
   phaseX?: number
   phaseY?: number
   align?: TextAlign
+  /** Which face got asked for, which is what resolution decides. */
+  postscriptName?: string
 }
 
 let calls: DrawCall[] = []
@@ -42,7 +44,7 @@ function turnedBitmap(size: { width: number; height: number }, rotation?: number
 }
 
 function renderText(
-  _font: EngineFontSource,
+  font: EngineFontSource,
   text: string,
   _sizePx: number,
   _padding?: number,
@@ -53,7 +55,7 @@ function renderText(
   phaseY?: number,
   align?: TextAlign,
 ): EngineBitmap {
-  calls.push({ text, rotation, phaseX, phaseY, align })
+  calls.push({ text, rotation, phaseX, phaseY, align, postscriptName: font.postscriptName })
   const size = turnedBitmap(BITMAP, rotation)
   return {
     ...size,
@@ -239,6 +241,39 @@ describe('drawnLabel', () => {
     expect(drawn.sample).toBeNull()
     expect(drawn.missingFamily).toBeNull()
     expect(Number.isInteger(drawn.center.x - drawn.box.w / 2)).toBe(true)
+  })
+
+  it('draws the face the object names rather than the family representative', () => {
+    catalog.value = [
+      ...catalog.value,
+      {
+        family: FAMILY,
+        displayName: FAMILY,
+        style: 'Bold',
+        postscriptName: 'TestFace-Bold',
+        weight: 700,
+        width: 100,
+        slant: 0,
+        origin: { kind: 'system', path: '/fonts/test-bold.ttf', faceIndex: 0 },
+      },
+    ]
+    drawnLabel(
+      uniqueText(),
+      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }),
+      { x: 10, y: 10 },
+    )
+    expect(calls.at(-1)?.postscriptName).toBe('TestFace-Bold')
+  })
+
+  it('falls back to the family where the named face is absent, not to boxes', () => {
+    const drawn = drawnLabel(
+      uniqueText(),
+      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }),
+      { x: 10, y: 10 },
+    )
+    expect(drawn.missingFamily).toBeNull()
+    expect(calls.at(-1)?.postscriptName).toBe('TestFace-Regular')
+    expect(notdefCalls).toHaveLength(0)
   })
 
   it('draws boxes for a family this machine does not have, and names the family', () => {

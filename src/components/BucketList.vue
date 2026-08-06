@@ -158,7 +158,9 @@ const SCOPES = [
  * text — so comparing on it out of the box would split nearly every group and
  * bury the disagreements that do matter.
  */
-const UNCOMPARED_BY_DEFAULT: readonly (keyof TextStyle)[] = ['fontSizePx']
+// fontFace is an identity, not a readable property — comparing it would split
+// buckets the reader sees as identical whenever two names reach one face.
+const UNCOMPARED_BY_DEFAULT: readonly (keyof TextStyle)[] = ['fontSizePx', 'fontFace']
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -255,7 +257,8 @@ function details(bucket: StyleBucket): string[] {
 
 function valueText(style: TextStyle, f: keyof TextStyle): string {
   const value = style[f]
-  if (f === 'fontFamily') return (value as string) || '未指定'
+  if (f === 'fontFamily' || f === 'fontFace' || f === 'fontStyleName')
+    return (value as string) || '未指定'
   if (f === 'fontSizePx') return `${value as number}px`
   if (f === 'leadingPercent') return `${value as number}%`
   if (f === 'direction') return value === 'vertical' ? '直排' : '橫排'

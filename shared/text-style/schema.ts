@@ -19,6 +19,8 @@ type Fail = (message: string) => never
  */
 export const TEXT_STYLE_FIELDS = [
   'fontFamily',
+  'fontFace',
+  'fontStyleName',
   'fontSizePx',
   'direction',
   'align',
@@ -85,13 +87,28 @@ function serializeTextEffect(e: TextEffect): Record<string, unknown> {
 
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { fontFamily, fontSizePx, direction, align, color, leadingPercent, weightPx, effects } =
-    v
+  const {
+    fontFamily,
+    fontFace,
+    fontStyleName,
+    fontSizePx,
+    direction,
+    align,
+    color,
+    leadingPercent,
+    weightPx,
+    effects,
+  } = v
   // Empty is a value: no family has been chosen yet. It is stored rather than
   // written as some placeholder name because a project file identifies a font
-  // by family, and any name put here would be one a reader could go looking
+  // by name, and any name put here would be one a reader could go looking
   // for. What draws is the same either way — nothing in the catalogue matches.
   if (typeof fontFamily !== 'string') fail(`${at}.fontFamily 必須是字串`)
+  // Required rather than defaulted: a style parsed without them would silently
+  // resolve through the family, which is exactly the lottery the field exists
+  // to end. Old files are refused by the schema version before reaching here.
+  if (typeof fontFace !== 'string') fail(`${at}.fontFace 必須是字串`)
+  if (typeof fontStyleName !== 'string') fail(`${at}.fontStyleName 必須是字串`)
   if (typeof fontSizePx !== 'number' || !Number.isFinite(fontSizePx) || fontSizePx <= 0)
     fail(`${at}.fontSizePx 必須是正數`)
   const dir = parseDirection(direction, `${at}.direction`, fail)
@@ -106,6 +123,8 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     fail(`${at}.weightPx 必須是有限數`)
   return {
     fontFamily,
+    fontFace,
+    fontStyleName,
     fontSizePx,
     direction: dir,
     align: align === undefined ? 'start' : parseAlign(align, `${at}.align`, fail),
@@ -120,6 +139,8 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
 export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
   return {
     fontFamily: s.fontFamily,
+    fontFace: s.fontFace,
+    fontStyleName: s.fontStyleName,
     fontSizePx: s.fontSizePx,
     direction: s.direction,
     align: s.align,

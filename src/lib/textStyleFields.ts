@@ -7,6 +7,8 @@ import type { TextStyle } from '@shared/text-style/types'
  */
 export const TEXT_STYLE_FIELD_NAMES: Record<keyof TextStyle, string> = {
   fontFamily: '字型',
+  fontFace: '字款',
+  fontStyleName: '字重',
   fontSizePx: '字級',
   direction: '方向',
   align: '對齊',

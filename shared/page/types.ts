@@ -1,7 +1,7 @@
 import type { TextStyle } from '../text-style/types'
 
 
-export const MANIFEST_SCHEMA_VERSION = 6
+export const MANIFEST_SCHEMA_VERSION = 7
 
 export const OCR_SCHEMA_VERSION = 1
 

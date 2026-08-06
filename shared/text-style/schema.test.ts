@@ -44,6 +44,32 @@ describe('parseTextStyle', () => {
     expect(() => parseTextStyle(style, 'style', fail)).toThrow()
   })
 
+  it('round-trips the face and the style name beside the family', () => {
+    const style = {
+      ...DEFAULT_TEXT_STYLE,
+      fontFamily: '思源黑體',
+      fontFace: 'SourceHanSansTC-Medium',
+      fontStyleName: 'Medium',
+    }
+    const parsed = parseTextStyle(serializeTextStyle(style), 'style', fail)
+    expect(parsed.fontFace).toBe('SourceHanSansTC-Medium')
+    expect(parsed.fontStyleName).toBe('Medium')
+  })
+
+  /**
+   * Required rather than defaulted: a style parsed without a face would
+   * silently resolve through the family, which is the lottery the field
+   * exists to end. Files old enough to lack it are refused by the schema
+   * version before parsing reaches a style.
+   */
+  it('refuses a style that carries no face at all', () => {
+    for (const field of ['fontFace', 'fontStyleName']) {
+      const style = serializeTextStyle(DEFAULT_TEXT_STYLE)
+      delete style[field]
+      expect(() => parseTextStyle(style, 'style', fail)).toThrow()
+    }
+  })
+
   /**
    * A project written before alignment existed keeps the look it had: every
    * line began where the text begins, which is what `start` names.
