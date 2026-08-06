@@ -1,6 +1,6 @@
 import type { TextStyle } from '@shared/text-style/types'
 import { catalogByFace, catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
-import { sampleFor, type Sample } from './fontSampleCache'
+import { measureFor, sampleFor, type Sample } from './fontSampleCache'
 import {
   frameCenter,
   labelBoxSize,
@@ -64,6 +64,21 @@ function resolveFace(style: TextStyle) {
  * no second face is consulted, and the boxes say so rather than impersonating
  * the text (see ADR 0001).
  */
+function requestFor(text: string, style: TextStyle, phase: Point, rotation: number) {
+  return {
+    text,
+    sizePx: style.fontSizePx,
+    fillColor: style.color,
+    stroke: engineStrokeFor(style),
+    vertical: style.direction === 'vertical',
+    align: style.align,
+    weightPx: style.weightPx,
+    rotation,
+    phaseX: phase.x,
+    phaseY: phase.y,
+  }
+}
+
 export function rasterFor(
   text: string,
   style: TextStyle,
@@ -78,18 +93,7 @@ export function rasterFor(
   // would say the wrong one.
   if (!entry && !catalogLoaded.value) return NOTHING
 
-  const req = {
-    text,
-    sizePx: style.fontSizePx,
-    fillColor: style.color,
-    stroke: engineStrokeFor(style),
-    vertical: style.direction === 'vertical',
-    align: style.align,
-    weightPx: style.weightPx,
-    rotation,
-    phaseX: phase.x,
-    phaseY: phase.y,
-  }
+  const req = requestFor(text, style, phase, rotation)
 
   if (entry) {
     try {
@@ -101,6 +105,34 @@ export function rasterFor(
     }
   }
   return { sample: sampleFor({ ...req, entry: null }), missingFamily: style.fontFamily }
+}
+
+/**
+ * The frame `rasterFor` would draw in, through the same resolution chain and
+ * the same fallbacks, with nothing painted. Null exactly when `rasterFor`
+ * would have no sample — the answer that decides is the same one.
+ */
+function measured(
+  text: string,
+  style: TextStyle,
+  rotation = 0,
+): { width: number; height: number } | null {
+  if (text.length === 0) return null
+
+  const entry = resolveFace(style)
+  if (!entry && !catalogLoaded.value) return null
+
+  const req = requestFor(text, style, NO_PHASE, rotation)
+
+  if (entry) {
+    try {
+      return measureFor({ ...req, entry })
+    } catch {
+      // Catalogued but undrawable, as in rasterFor: measure the notdef grid
+      // that will end up drawn instead.
+    }
+  }
+  return measureFor({ ...req, entry: null })
 }
 
 /**
@@ -166,20 +198,19 @@ export interface DrawnLabel {
  * the canvas shows matching what exports is then a property of there being one
  * answer rather than a hope that two draw sites keep computing the same one.
  *
- * ⚠️ It rasterizes up to three times on a fresh label and none ever after, all
- * of them landing on the sample cache. The passes answer different questions
- * and cannot be collapsed:
+ * It asks the engine three questions and only the last one paints:
  *
- * 1. Upright and unphased — what the object's own size is. The frame measures
- *    this, so what you grab stays the object rather than the rectangle its
- *    turn happens to need.
- * 2. Turned and unphased — how big the bitmap that gets blitted is. The phase
- *    is derived from that, since that is the thing landing on the grid.
- * 3. Turned and phased — the bitmap to draw.
+ * 1. Upright and unphased, measured — what the object's own size is. The frame
+ *    takes this, so what you grab stays the object rather than the rectangle
+ *    its turn happens to need.
+ * 2. Turned and unphased, measured — how big the bitmap that gets blitted is.
+ *    The phase is derived from that, since that is the thing landing on the
+ *    grid. At an angle of zero this is the first question again.
+ * 3. Turned and phased, rasterized — the bitmap to draw.
  *
- * At an angle of zero the first two are the same request, so an upright label
- * costs exactly what it did before: two entries, and the phase is quantised so
- * a drag adds a handful rather than one per frame.
+ * The measures cost a fraction of a percent of a raster, so a fresh label
+ * costs one rasterization however it is turned; the phase is quantised so a
+ * drag adds a handful rather than one per frame.
  */
 export function drawnLabel(
   text: string,
@@ -189,17 +220,17 @@ export function drawnLabel(
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
 
-  const measured = rasterFor(text, style)
-  const box = labelBoxSize(style, measured.sample?.image ?? null)
+  const upright = measured(text, style)
+  const box = labelBoxSize(style, upright)
   // The turned bitmap holds the run at its own middle, so both rectangles share
   // one centre and the frame is the same point as the ink.
   const middle = frameCenter(at, box, layoutOrigin(style), turn)
-  if (!measured.sample) return { ...measured, box, center: placeLabel(middle, box, turn).center }
+  if (!upright) {
+    return { sample: null, missingFamily: null, box, center: placeLabel(middle, box, turn).center }
+  }
 
-  const spun = turn === 0 ? measured : rasterFor(text, style, NO_PHASE, turn)
-  const blit = spun.sample
-    ? { w: spun.sample.image.width, h: spun.sample.image.height }
-    : box
+  const spun = turn === 0 ? upright : measured(text, style, turn)
+  const blit = spun ? { w: spun.width, h: spun.height } : box
   const { center, phase } = placeLabel(middle, blit, turn)
   return { ...rasterFor(text, style, phase, turn), box, center }
 }

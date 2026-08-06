@@ -1,4 +1,4 @@
-import type { EngineClusterRect, EngineStrokeSpec } from '@shared/engine/types'
+import type { EngineClusterRect, EngineMeasure, EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextAlign } from '@shared/text-style/types'
 import { engineSourceFor, faceKey } from './fontCatalog'
@@ -63,6 +63,12 @@ export interface Sample {
 const CACHE_LIMIT = 240
 
 /**
+ * A measure is a few numbers and a cluster table, so the frames of everything
+ * on a page fit for less than one bitmap costs.
+ */
+const MEASURE_CACHE_LIMIT = 1024
+
+/**
  * Blank margin around a sample. An outside stroke grows the glyph past its
  * advance box; without room for it the sample comes back clipped. Thickening
  * grows it the same way, so it buys margin too — thinning does not, since it
@@ -73,7 +79,26 @@ export function samplePadding(stroke?: EngineStrokeSpec, weightPx = 0): number {
 }
 
 const cache = new Map<string, Sample>()
+const measures = new Map<string, EngineMeasure>()
 const coverage = new Map<string, number[]>()
+
+/** LRU by re-insertion, which Map iteration order makes exact. */
+function remembered<V>(held: Map<string, V>, key: string, limit: number, make: () => V): V {
+  const hit = held.get(key)
+  if (hit !== undefined) {
+    held.delete(key)
+    held.set(key, hit)
+    return hit
+  }
+  const made = make()
+  held.set(key, made)
+  while (held.size > limit) {
+    const oldest = held.keys().next().value
+    if (oldest === undefined) break
+    held.delete(oldest)
+  }
+  return made
+}
 
 function coverageKey(entry: FontEntry, text: string): string {
   return `${faceKey(entry)}|${text}`
@@ -210,21 +235,71 @@ export function sampleSource(sample: Sample): OffscreenCanvas {
 }
 
 export function sampleFor(req: SampleRequest): Sample {
-  const key = keyOf(req)
+  return remembered(cache, keyOf(req), CACHE_LIMIT, () => rasterize(req))
+}
 
-  const hit = cache.get(key)
-  if (hit) {
-    cache.delete(key)
-    cache.set(key, hit)
-    return hit
-  }
+/**
+ * Geometry only, so the paint fields stay out of the key: colours cannot move
+ * the frame, and the stroke and weight only reach it through the padding.
+ */
+function measureKeyOf(req: SampleRequest, padding: number): string {
+  return [
+    req.entry ? `f${faceKey(req.entry)}` : 'n',
+    req.sizePx,
+    padding,
+    req.vertical ? 'v' : 'h',
+    req.align ?? 'start',
+    req.rotation ?? 0,
+    `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
+    req.text,
+  ].join('|')
+}
 
-  const sample = rasterize(req)
-  cache.set(key, sample)
-  while (cache.size > CACHE_LIMIT) {
-    const oldest = cache.keys().next().value
-    if (oldest === undefined) break
-    cache.delete(oldest)
+function measure(req: SampleRequest, padding: number): EngineMeasure {
+  if (!req.entry) {
+    return window.engine.measureNotdef(
+      req.text,
+      req.sizePx,
+      padding,
+      req.vertical,
+      req.rotation,
+      req.phaseX,
+      req.phaseY,
+      req.align,
+    )
   }
-  return sample
+  const drawWith = engineSourceFor(req.entry)
+  return req.vertical
+    ? window.engine.measureVertical(
+        drawWith,
+        req.text,
+        req.sizePx,
+        padding,
+        req.rotation,
+        req.phaseX,
+        req.phaseY,
+        req.align,
+      )
+    : window.engine.measureText(
+        drawWith,
+        req.text,
+        req.sizePx,
+        padding,
+        req.rotation,
+        req.phaseX,
+        req.phaseY,
+        req.align,
+      )
+}
+
+/**
+ * The frame `sampleFor` would come back in, for the callers that only size or
+ * place things: the same request, none of the painting. Takes the full request
+ * so a caller cannot hand the two calls different geometry by accident.
+ */
+export function measureFor(req: SampleRequest): EngineMeasure {
+  const padding = samplePadding(req.stroke, req.weightPx)
+  return remembered(measures, measureKeyOf(req, padding), MEASURE_CACHE_LIMIT, () =>
+    measure(req, padding),
+  )
 }

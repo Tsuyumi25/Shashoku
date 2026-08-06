@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { EngineBitmap, EngineFontSource, EngineStrokeSpec } from '@shared/engine/types'
+import type {
+  EngineBitmap,
+  EngineFontSource,
+  EngineMeasure,
+  EngineStrokeSpec,
+} from '@shared/engine/types'
 import { DEFAULT_TEXT_STYLE, type TextAlign, type TextStyle } from '@shared/text-style/types'
 import { catalog, catalogLoaded } from './fontCatalog'
 import { drawnLabel, missingFamilyLabel } from './labelRaster'
@@ -32,6 +37,8 @@ interface DrawCall {
 
 let calls: DrawCall[] = []
 let notdefCalls: DrawCall[] = []
+let measureCalls: DrawCall[] = []
+let notdefMeasureCalls: DrawCall[] = []
 
 /**
  * A quarter turn swaps the sides, as the engine's own does. Anything else is
@@ -65,6 +72,14 @@ function renderText(
   }
 }
 
+function notdefSize(text: string, vertical?: boolean, rotation?: number) {
+  const lines = text.split('\n')
+  const longest = Math.max(1, ...lines.map((line) => [...line].length))
+  const across = vertical ? lines.length : longest
+  const down = vertical ? longest : lines.length
+  return turnedBitmap({ width: across * NOTDEF_EM, height: down * NOTDEF_EM }, rotation)
+}
+
 function renderNotdef(
   text: string,
   _sizePx: number,
@@ -78,20 +93,41 @@ function renderNotdef(
   align?: TextAlign,
 ): EngineBitmap {
   notdefCalls.push({ text, rotation, phaseX, phaseY, align })
-  const lines = text.split('\n')
-  const longest = Math.max(1, ...lines.map((line) => [...line].length))
-  const across = vertical ? lines.length : longest
-  const down = vertical ? longest : lines.length
-  const size = turnedBitmap(
-    { width: across * NOTDEF_EM, height: down * NOTDEF_EM },
-    rotation,
-  )
+  const size = notdefSize(text, vertical, rotation)
   return {
     ...size,
     baseline: 0,
     rgba: new Uint8Array(size.width * size.height * 4),
     clusters: [],
   }
+}
+
+function measureText(
+  font: EngineFontSource,
+  text: string,
+  _sizePx: number,
+  _padding?: number,
+  rotation?: number,
+  phaseX?: number,
+  phaseY?: number,
+  align?: TextAlign,
+): EngineMeasure {
+  measureCalls.push({ text, rotation, phaseX, phaseY, align, postscriptName: font.postscriptName })
+  return { ...turnedBitmap(BITMAP, rotation), baseline: 0, clusters: [] }
+}
+
+function measureNotdef(
+  text: string,
+  _sizePx: number,
+  _padding?: number,
+  vertical?: boolean,
+  rotation?: number,
+  phaseX?: number,
+  phaseY?: number,
+  align?: TextAlign,
+): EngineMeasure {
+  notdefMeasureCalls.push({ text, rotation, phaseX, phaseY, align })
+  return { ...notdefSize(text, vertical, rotation), baseline: 0, clusters: [] }
 }
 
 class StubImageData {
@@ -109,6 +145,9 @@ Object.assign(globalThis, {
       renderText,
       renderVertical: renderText,
       renderNotdef,
+      measureText,
+      measureVertical: measureText,
+      measureNotdef,
       uncoveredClusters: () => [],
     },
   },
@@ -129,6 +168,8 @@ describe('drawnLabel', () => {
   beforeEach(() => {
     calls = []
     notdefCalls = []
+    measureCalls = []
+    notdefMeasureCalls = []
     catalog.value = [
       {
         family: FAMILY,
@@ -224,9 +265,8 @@ describe('drawnLabel', () => {
 
     for (let i = 0; i < 40; i++) drawnLabel(text, style, { x: 100 + i / 40, y: 60 })
 
-    // Four phases on the free axis, one of which the measuring pass already
-    // rasterized.
-    expect(calls.length - afterFirst).toBeLessThanOrEqual(4)
+    // Four phases on the free axis, of which the first call already drew one.
+    expect(calls.length - afterFirst).toBeLessThanOrEqual(3)
   })
 
   it('hands the phase to the engine in page pixels, unconverted', () => {
@@ -349,7 +389,7 @@ describe('drawnLabel', () => {
     // BITMAP is 41 x 20; a quarter turn makes the bitmap 20 x 41, but the box
     // is what the object measures standing up.
     expect(drawn.box).toEqual({ w: BITMAP.width, h: BITMAP.height })
-    expect(calls.some((call) => (call.rotation ?? 0) === 0)).toBe(true)
+    expect(measureCalls.some((call) => (call.rotation ?? 0) === 0)).toBe(true)
   })
 
   it('lands the turned bitmap on the grid, not the upright box', () => {
@@ -359,12 +399,20 @@ describe('drawnLabel', () => {
     expect(Number.isInteger(drawn.center.x - BITMAP.height / 2)).toBe(true)
   })
 
-  it('costs an upright label exactly what it did before', () => {
+  it('rasterizes only the bitmap it draws; the frame is measured', () => {
     const text = uniqueText()
     drawnLabel(text, styleWith(), { x: 100.25, y: 60 })
-    // Measure and draw. At zero the turned pass is the same request as the
-    // upright one, so it lands on the cache instead of the engine.
-    expect(calls).toHaveLength(2)
+    // At zero the turned pass is the same question as the upright one, so one
+    // measure answers both.
+    expect(calls).toHaveLength(1)
+    expect(measureCalls).toHaveLength(1)
+  })
+
+  it('rasterizes once even turned, where the turn used to cost two more', () => {
+    drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 }, Math.PI / 3)
+    expect(calls).toHaveLength(1)
+    // Upright for the frame, turned for the blit.
+    expect(measureCalls).toHaveLength(2)
   })
 
   describe('the snapped axis follows the turn', () => {
