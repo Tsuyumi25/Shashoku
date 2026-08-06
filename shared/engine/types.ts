@@ -70,6 +70,23 @@ export interface EngineClusterRect {
   height: number;
 }
 
+/**
+ * The frame a render call would come back in, without the pixels. Costs
+ * shaping and outlining only — a fraction of a percent of rendering — so a
+ * caller sizing a frame need not paint a bitmap it will never draw.
+ */
+export interface EngineMeasure {
+  width: number;
+  height: number;
+  /**
+   * Horizontal: distance from the top edge to the baseline.
+   * Vertical:   distance from the left edge to the column center X.
+   */
+  baseline: number;
+  /** Position of every cluster, as the render call would report it. */
+  clusters: EngineClusterRect[];
+}
+
 export interface EngineBitmap {
   width: number;
   height: number;
@@ -193,6 +210,32 @@ export interface ShashokuEngineApi {
     weightPx?: number,
   ): EngineBitmap;
   /**
+   * The render call stopped where painting would start. Takes only the
+   * arguments that shape the frame — colours, stroke and weight cannot move
+   * it, though the padding sized for them can, and that stays the caller's to
+   * pass.
+   */
+  measureText(
+    font: EngineFontSource,
+    text: string,
+    sizePx: number,
+    padding?: number,
+    rotation?: number,
+    phaseX?: number,
+    phaseY?: number,
+    align?: TextAlign,
+  ): EngineMeasure;
+  measureVertical(
+    font: EngineFontSource,
+    text: string,
+    sizePx: number,
+    padding?: number,
+    rotation?: number,
+    phaseX?: number,
+    phaseY?: number,
+    align?: TextAlign,
+  ): EngineMeasure;
+  /**
    * One box with an X through it per character — what there is to draw when
    * the family a text object names is not on this machine.
    *
@@ -224,6 +267,16 @@ export interface ShashokuEngineApi {
     align?: TextAlign,
     weightPx?: number,
   ): EngineBitmap;
+  measureNotdef(
+    text: string,
+    sizePx: number,
+    padding?: number,
+    vertical?: boolean,
+    rotation?: number,
+    phaseX?: number,
+    phaseY?: number,
+    align?: TextAlign,
+  ): EngineMeasure;
   /**
    * A composited page as file bytes. Takes straight RGBA because the
    * compositing happens on a canvas in the renderer — the engine never

@@ -23,6 +23,17 @@ pub struct TextBitmap {
     pub clusters: Vec<ClusterRect>,
 }
 
+/// What a render call reports about the bitmap, without the bitmap. Everything
+/// here is settled by layout — the paint that follows can only fill the frame
+/// these describe — so a caller that only wants the frame gets it for the cost
+/// of shaping and outlining, which is a fraction of a percent of painting.
+pub struct TextMeasure {
+    pub width: u32,
+    pub height: u32,
+    pub baseline: f32,
+    pub clusters: Vec<ClusterRect>,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
@@ -729,6 +740,47 @@ pub fn render_vertical(
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
+/// The outline was built for the metrics its glyphs settle; nothing here will
+/// paint it, so the spin need not carry it either.
+fn measure_run(mut run: BuiltRun, rotation: f32) -> TextMeasure {
+    run.path = None;
+    let run = spin(run, rotation);
+    TextMeasure {
+        width: run.width,
+        height: run.height,
+        baseline: run.baseline,
+        clusters: run.clusters,
+    }
+}
+
+pub fn measure_text(
+    font_bytes: &[u8],
+    text: &str,
+    size_px: f32,
+    padding: u32,
+    face_index: u32,
+    rotation: f32,
+    phase: Phase,
+    align: Align,
+) -> Result<TextMeasure, String> {
+    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    Ok(measure_run(run, rotation))
+}
+
+pub fn measure_vertical(
+    font_bytes: &[u8],
+    text: &str,
+    size_px: f32,
+    padding: u32,
+    face_index: u32,
+    rotation: f32,
+    phase: Phase,
+    align: Align,
+) -> Result<TextMeasure, String> {
+    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    Ok(measure_run(run, rotation))
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Notdef — what there is to draw when there is no face to draw with
 
@@ -922,6 +974,21 @@ pub fn render_notdef(
 ) -> Result<TextBitmap, String> {
     let run = build_notdef_path(text, size_px, padding, vertical, phase, align);
     paint_run(spin(run, rotation), fill, stroke, weight)
+}
+
+pub fn measure_notdef(
+    text: &str,
+    size_px: f32,
+    padding: u32,
+    vertical: bool,
+    rotation: f32,
+    phase: Phase,
+    align: Align,
+) -> TextMeasure {
+    measure_run(
+        build_notdef_path(text, size_px, padding, vertical, phase, align),
+        rotation,
+    )
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1719,6 +1786,111 @@ mod installed_face {
             .ok()?;
             run.path.is_some().then_some((bytes, face.face_index))
         })
+    }
+}
+
+#[cfg(test)]
+mod measure_tests {
+    use super::installed_face::{PADDING, SIZE, drawing};
+    use super::*;
+
+    const TURNS: [f32; 3] = [0.0, 0.6, std::f32::consts::FRAC_PI_2];
+    const PHASE: Phase = Phase { x: 0.75, y: 0.25 };
+
+    /// A stroke and a weight on the render side, to pin down that paint options
+    /// cannot move the frame — the padding that makes room for them is the
+    /// caller's, and it is an input to both calls.
+    fn spec() -> Option<StrokeSpec> {
+        Some(StrokeSpec {
+            width: 3.0,
+            color: Rgba(255, 0, 0, 255),
+            position: StrokePosition::Outside,
+        })
+    }
+
+    fn agree(measured: &TextMeasure, rendered: &TextBitmap) {
+        assert_eq!(measured.width, rendered.width);
+        assert_eq!(measured.height, rendered.height);
+        assert_eq!(measured.baseline, rendered.baseline);
+        assert_eq!(measured.clusters, rendered.clusters);
+    }
+
+    #[test]
+    fn a_measured_run_is_the_frame_its_render_comes_back_in() {
+        let Some((bytes, face)) = drawing("Hg\ngh") else {
+            eprintln!("no font on this machine — measure tests did not run");
+            return;
+        };
+        for turn in TURNS {
+            let m = measure_text(&bytes, "Hg\ngh", SIZE, PADDING, face, turn, PHASE, Align::Center)
+                .unwrap();
+            let r = render_text(
+                &bytes,
+                "Hg\ngh",
+                SIZE,
+                PADDING,
+                face,
+                turn,
+                PHASE,
+                Align::Center,
+                BLACK,
+                spec(),
+                -1.0,
+            )
+            .unwrap();
+            agree(&m, &r);
+        }
+    }
+
+    #[test]
+    fn a_measured_column_is_the_frame_its_render_comes_back_in() {
+        let Some((bytes, face)) = drawing("Hg\ngh") else {
+            eprintln!("no font on this machine — measure tests did not run");
+            return;
+        };
+        for turn in TURNS {
+            let m =
+                measure_vertical(&bytes, "Hg\ngh", SIZE, PADDING, face, turn, PHASE, Align::End)
+                    .unwrap();
+            let r = render_vertical(
+                &bytes,
+                "Hg\ngh",
+                SIZE,
+                PADDING,
+                face,
+                turn,
+                PHASE,
+                Align::End,
+                BLACK,
+                spec(),
+                -1.0,
+            )
+            .unwrap();
+            agree(&m, &r);
+        }
+    }
+
+    #[test]
+    fn a_measured_notdef_grid_is_the_frame_its_render_comes_back_in() {
+        for vertical in [false, true] {
+            for turn in TURNS {
+                let m = measure_notdef("ab\nc", SIZE, PADDING, vertical, turn, PHASE, Align::Center);
+                let r = render_notdef(
+                    "ab\nc",
+                    SIZE,
+                    PADDING,
+                    vertical,
+                    turn,
+                    PHASE,
+                    Align::Center,
+                    BLACK,
+                    spec(),
+                    -1.0,
+                )
+                .unwrap();
+                agree(&m, &r);
+            }
+        }
     }
 }
 

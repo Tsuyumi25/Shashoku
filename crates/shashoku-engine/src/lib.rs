@@ -149,6 +149,29 @@ pub struct TextBitmap {
     pub clusters: Vec<ClusterRect>,
 }
 
+/// The frame a render call would come back in, without the pixels. Costs
+/// shaping and outlining only — a fraction of a percent of rendering — so a
+/// caller sizing a frame need not paint a bitmap it will never draw.
+#[napi(object)]
+pub struct TextMeasure {
+    pub width: u32,
+    pub height: u32,
+    /// Horizontal: distance from top to baseline.
+    /// Vertical:   distance from left to column center X.
+    pub baseline: f64,
+    /// Position of every cluster, as `render_text` would report it.
+    pub clusters: Vec<ClusterRect>,
+}
+
+fn to_text_measure(m: render::TextMeasure) -> TextMeasure {
+    TextMeasure {
+        width: m.width,
+        height: m.height,
+        baseline: m.baseline as f64,
+        clusters: to_cluster_rects(m.clusters),
+    }
+}
+
 fn to_cluster_rects(rects: Vec<render::ClusterRect>) -> Vec<ClusterRect> {
     rects
         .into_iter()
@@ -347,6 +370,35 @@ pub fn render_text(
     })
 }
 
+/// `render_text` stopped where painting would start. Takes only the arguments
+/// that shape the frame — colours, stroke and weight cannot move it, though the
+/// padding sized for them can, and that stays the caller's to pass.
+#[napi]
+pub fn measure_text(
+    font: FontSource,
+    text: String,
+    size_px: f64,
+    padding: Option<u32>,
+    rotation: Option<f64>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
+    align: Option<String>,
+) -> napi::Result<TextMeasure> {
+    let (data, face_index) = resolve_font(font)?;
+    let m = render::measure_text(
+        data.as_slice(),
+        &text,
+        size_px as f32,
+        padding.unwrap_or(4),
+        face_index,
+        rotation.unwrap_or(0.0) as f32,
+        phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(to_text_measure(m))
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Delivery encoding
 
@@ -455,6 +507,33 @@ pub fn render_vertical(
     })
 }
 
+/// `render_vertical` stopped where painting would start.
+#[napi]
+pub fn measure_vertical(
+    font: FontSource,
+    text: String,
+    size_px: f64,
+    padding: Option<u32>,
+    rotation: Option<f64>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
+    align: Option<String>,
+) -> napi::Result<TextMeasure> {
+    let (data, face_index) = resolve_font(font)?;
+    let m = render::measure_vertical(
+        data.as_slice(),
+        &text,
+        size_px as f32,
+        padding.unwrap_or(4),
+        face_index,
+        rotation.unwrap_or(0.0) as f32,
+        phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(to_text_measure(m))
+}
+
 /// A grid of boxes to draw where a text object names a family this machine has
 /// no face for. Takes the text but no font: the characters and line breaks are
 /// still known, and they are what the grid is shaped by.
@@ -496,4 +575,28 @@ pub fn render_notdef(
         rgba: bmp.rgba.into(),
         clusters: to_cluster_rects(bmp.clusters),
     })
+}
+
+/// `render_notdef` stopped where painting would start.
+#[napi]
+pub fn measure_notdef(
+    text: String,
+    size_px: f64,
+    padding: Option<u32>,
+    vertical: Option<bool>,
+    rotation: Option<f64>,
+    phase_x: Option<f64>,
+    phase_y: Option<f64>,
+    align: Option<String>,
+) -> napi::Result<TextMeasure> {
+    let m = render::measure_notdef(
+        &text,
+        size_px as f32,
+        padding.unwrap_or(4),
+        vertical.unwrap_or(false),
+        rotation.unwrap_or(0.0) as f32,
+        phase_from_opt(phase_x, phase_y),
+        align_from_opt(align)?,
+    );
+    Ok(to_text_measure(m))
 }

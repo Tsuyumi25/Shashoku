@@ -125,6 +125,12 @@ const engineApi: ShashokuEngineApi = {
       align,
       weightPx,
     ),
+  measureText: (font, text, sizePx, padding, rotation, phaseX, phaseY, align) =>
+    engine.measureText(font, text, sizePx, padding, rotation, phaseX, phaseY, align),
+  measureVertical: (font, text, sizePx, padding, rotation, phaseX, phaseY, align) =>
+    engine.measureVertical(font, text, sizePx, padding, rotation, phaseX, phaseY, align),
+  measureNotdef: (text, sizePx, padding, vertical, rotation, phaseX, phaseY, align) =>
+    engine.measureNotdef(text, sizePx, padding, vertical, rotation, phaseX, phaseY, align),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };
 
