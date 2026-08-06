@@ -193,12 +193,18 @@
             gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
           }"
         >
-          <div v-for="entry in rows[vrow.index]" :key="faceKey(entry)" class="font-cell group/cell">
+          <div
+            v-for="faces in rows[vrow.index]"
+            :key="faces[0]!.family"
+            class="font-cell group/cell"
+          >
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
-                <span class="truncate text-[11px] text-muted-foreground">{{ entry.displayName }}</span>
+                <span class="truncate text-[11px] text-muted-foreground">{{
+                  faces[0]!.displayName
+                }}</span>
                 <span
-                  v-if="entry.family === currentFamily"
+                  v-if="faces[0]!.family === currentFamily"
                   class="shrink-0 rounded-sm bg-primary/20 px-1 text-[10px] text-primary"
                 >
                   目前
@@ -207,13 +213,13 @@
               <button
                 type="button"
                 class="shrink-0 rounded p-0.5 hover:bg-secondary"
-                :title="preferences.isFavorite(entry.family) ? '取消最愛' : '加入最愛'"
-                @click="preferences.toggleFavorite(entry.family)"
+                :title="preferences.isFavorite(faces[0]!.family) ? '取消最愛' : '加入最愛'"
+                @click="preferences.toggleFavorite(faces[0]!.family)"
               >
                 <Star
                   :size="12"
                   :class="
-                    preferences.isFavorite(entry.family)
+                    preferences.isFavorite(faces[0]!.family)
                       ? 'fill-primary text-primary'
                       : 'text-muted-foreground/50'
                   "
@@ -229,10 +235,10 @@
                   ? '點一下可以直接改樣本文字'
                   : '這個環境不支援在格子裡編輯，請用上方的樣本文字欄'
               "
-              @mousedown="startEditing(entry, $event)"
+              @mousedown="startEditing(shownFace(faces), $event)"
             >
               <FontSampleCanvas
-                :entry="entry"
+                :entry="shownFace(faces)"
                 :text="sample"
                 :size-px="appliedSize"
                 :fill-color="fillColor"
@@ -240,20 +246,53 @@
                 :vertical="vertical"
                 :weight-px="weightPx"
                 :mark="markMissing"
-                :editing="editingFamily === entry.family"
-                :start-at="editingFamily === entry.family ? editingAt : undefined"
+                :editing="editingFamily === faces[0]!.family"
+                :start-at="editingFamily === faces[0]!.family ? editingAt : undefined"
                 @update:text="onEditorText"
-                @close="stopEditing(entry.family)"
+                @close="stopEditing(faces[0]!.family)"
               />
             </div>
 
-            <button
-              type="button"
-              class="absolute bottom-1.5 right-1.5 rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground opacity-0 shadow-sm transition-opacity hover:bg-primary/90 group-hover/cell:opacity-100"
-              @click="picker.select(entry, weightPx)"
-            >
-              選擇
-            </button>
+            <div class="cell-actions">
+              <div v-if="faces.length > 1" class="weight-row">
+                <button
+                  type="button"
+                  class="weight-step"
+                  title="上一個字重"
+                  @click="cycleFace(faces, -1)"
+                >
+                  &lt;
+                </button>
+                <span class="weight-name" :title="styleLabel(shownFace(faces))">
+                  {{ styleLabel(shownFace(faces)) }} ·
+                  {{ faces.indexOf(shownFace(faces)) + 1 }}/{{ faces.length }}
+                </span>
+                <button
+                  type="button"
+                  class="weight-step"
+                  title="下一個字重"
+                  @click="cycleFace(faces, 1)"
+                >
+                  &gt;
+                </button>
+              </div>
+              <button
+                type="button"
+                class="cell-action"
+                title="按住不放：畫布上選取的文字暫時套這個字款預覽"
+                @mouseenter="picker.startPreview(shownFace(faces))"
+                @mouseleave="picker.endPreview()"
+              >
+                預覽
+              </button>
+              <button
+                type="button"
+                class="cell-action primary"
+                @click="picker.select(shownFace(faces), weightPx)"
+              >
+                選擇
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -272,7 +311,7 @@ import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { canEditInCell } from '@/lib/editContext'
-import { catalog, faceKey, loadFontCatalog } from '@/lib/fontCatalog'
+import { catalog, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
@@ -394,11 +433,11 @@ const minCellWidth = computed(() => {
 })
 
 /**
- * Label, padding and gap around the sample. Only an estimate is needed: every
- * row is measured for real once it exists, and the closer this starts the less
- * the list has to correct afterwards.
+ * Label, padding, gap and the three action rows around the sample. Only an
+ * estimate is needed: every row is measured for real once it exists, and the
+ * closer this starts the less the list has to correct afterwards.
  */
-const CELL_CHROME_PX = 40
+const CELL_CHROME_PX = 130
 /** A line box runs a little taller than the em; measured across this library. */
 const LINE_HEIGHT_RATIO = 1.35
 
@@ -464,6 +503,12 @@ const error = ref<string | null>(null)
 const search = ref('')
 const appliedSearch = refDebounced(search, 200)
 
+/**
+ * One cell per family, every face still reachable: the cell shows one face at
+ * a time and its weight row walks the rest. Filters run on faces — a family
+ * whose Light lacks the sample glyphs but whose Regular has them keeps the
+ * cell and loses the weight.
+ */
 const displayed = computed(() => {
   let list = catalog.value
   if (group.value === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
@@ -473,13 +518,52 @@ const displayed = computed(() => {
     list = list.filter((e) => coverageOf(e).length === 0)
   }
   const q = appliedSearch.value.trim().toLowerCase()
-  return q
-    ? list.filter(
-        (e) =>
-          e.displayName.toLowerCase().includes(q) || e.family.toLowerCase().includes(q),
-      )
-    : list
+  if (q) {
+    list = list.filter(
+      (e) => e.displayName.toLowerCase().includes(q) || e.family.toLowerCase().includes(q),
+    )
+  }
+  // The catalogue keeps a family's faces contiguous, so grouping is a fold.
+  const families: FontEntry[][] = []
+  for (const entry of list) {
+    const held = families.at(-1)
+    if (held && held[0]!.family === entry.family) held.push(entry)
+    else families.push([entry])
+  }
+  return families
 })
+
+/**
+ * Which of its faces each family's cell is showing, per opening. Unset means
+ * the face the object being styled names, or failing that the family's
+ * representative — so a cell starts where the user already is.
+ */
+const shownIndex = ref(new Map<string, number>())
+
+function shownFace(faces: FontEntry[]): FontEntry {
+  const held = shownIndex.value.get(faces[0]!.family)
+  if (held !== undefined && held < faces.length) return faces[held]!
+  const wanted = picker.request.value.currentFace
+  const current = wanted ? faces.findIndex((f) => f.postscriptName === wanted) : -1
+  if (current >= 0) return faces[current]!
+  const representative = representativeOf(faces)
+  return representative ?? faces[0]!
+}
+
+function cycleFace(faces: FontEntry[], step: number) {
+  const family = faces[0]!.family
+  const at = faces.indexOf(shownFace(faces))
+  const next = (at + step + faces.length) % faces.length
+  shownIndex.value.set(family, next)
+  // A Map mutation is invisible to a shallow structure; replacing it is what
+  // repaints the cell.
+  shownIndex.value = new Map(shownIndex.value)
+}
+
+/** What the weight row calls a face that names no style. */
+function styleLabel(face: FontEntry): string {
+  return face.style || face.postscriptName || '—'
+}
 
 function coverageOf(entry: FontEntry): number[] {
   try {
@@ -491,8 +575,10 @@ function coverageOf(entry: FontEntry): number[] {
   }
 }
 
+const familyCount = computed(() => new Set(catalog.value.map((e) => e.family)).size)
+
 const groupTabs = computed(() => [
-  { id: 'all' as Group, label: 'All', count: catalog.value.length },
+  { id: 'all' as Group, label: 'All', count: familyCount.value },
   { id: 'fav' as Group, label: 'Fav', count: preferences.prefs.fontFavorites.length },
 ])
 
@@ -508,7 +594,7 @@ const { width: gridWidth } = useElementSize(scrollEl)
 const columns = computed(() => Math.max(1, Math.floor(gridWidth.value / minCellWidth.value)))
 const rows = computed(() => {
   const perRow = columns.value
-  const out: FontEntry[][] = []
+  const out: FontEntry[][][] = []
   for (let i = 0; i < displayed.value.length; i += perRow) {
     out.push(displayed.value.slice(i, i + perRow))
   }
@@ -592,6 +678,8 @@ watch(
     // picker was opened to compare it against.
     search.value = ''
     editingFamily.value = null
+    // Fresh per opening, so every cell starts from the face the object names.
+    shownIndex.value = new Map()
     vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical
     await nextTick()
     requestAnimationFrame(revealCurrentFamily)
@@ -599,7 +687,7 @@ watch(
 )
 
 function revealCurrentFamily() {
-  const at = displayed.value.findIndex((e) => e.family === currentFamily.value)
+  const at = displayed.value.findIndex((faces) => faces[0]!.family === currentFamily.value)
   if (at < 0) return
   virtualizer.value.scrollToIndex(Math.floor(at / columns.value), { align: 'center' })
 }
@@ -640,7 +728,67 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 .cell-sample {
   display: flex;
   min-width: 0;
+  flex: 1;
   overflow: hidden;
+}
+
+/* The three rows sit at the bottom whatever the sample above them measured,
+ * so a row of cells keeps its controls on one line. */
+.cell-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding-top: 0.375rem;
+}
+.weight-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.weight-step {
+  flex-shrink: 0;
+  width: 1.75rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.125rem 0;
+  font-size: 11px;
+  color: var(--foreground);
+}
+.weight-step:hover {
+  background: var(--secondary);
+}
+.weight-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.cell-action {
+  width: 100%;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.125rem 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.cell-action:hover {
+  background: var(--secondary);
+}
+.cell-action.primary {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.cell-action.primary:hover {
+  background: color-mix(in srgb, var(--primary) 90%, transparent);
 }
 /*
  * A vertical run reads right to left, so its first column sits against the

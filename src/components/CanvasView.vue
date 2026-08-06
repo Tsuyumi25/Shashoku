@@ -131,6 +131,7 @@ import RasterFrame from '@/components/RasterFrame.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import { textOf } from '@shared/page/text'
@@ -194,6 +195,23 @@ const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.pa
  * this component on every frame, does not hand each label a new style object
  * and make it look like the text changed.
  */
+/**
+ * Trying a face on the page without writing it: while the picker's 預覽 is
+ * held, the selection draws with that face and nothing else changes. Reading
+ * the preview here keeps the swap inside the memoized style objects, so
+ * letting go restores the page by mere recomputation.
+ */
+function previewedStyle(id: string, style: TextStyle): TextStyle {
+  const face = fontPicker.previewFace.value
+  if (face === null || !editor.isSelected(id)) return style
+  return {
+    ...style,
+    fontFamily: face.family,
+    fontFace: face.postscriptName,
+    fontStyleName: face.style,
+  }
+}
+
 const objects = computed(() => {
   const file = currentFile.value
   if (!file) return []
@@ -207,7 +225,7 @@ const objects = computed(() => {
     y: label.y,
     rotation: label.rotation,
     color: colorOf(label.tags),
-    style: label.style,
+    style: previewedStyle(label.id, label.style),
     caption: showingTags.value ? tagsInRegistryOrder(label.tags, project.header.tags).join('、') : '',
   }))
 })

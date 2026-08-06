@@ -8,7 +8,11 @@
     <SplitterPanel :order="1" :default-size="50" :min-size="25" class="flex min-w-0 flex-col">
       <section class="relative min-h-0 flex-1">
         <CanvasView />
-        <div v-show="fontPicker.isOpen.value" class="absolute inset-0 z-10">
+        <div
+          v-show="fontPicker.isOpen.value"
+          class="absolute inset-0 z-10 transition-opacity duration-150"
+          :class="fontPicker.previewFace.value !== null ? 'opacity-0' : ''"
+        >
           <FontPickerOverlay />
         </div>
       </section>

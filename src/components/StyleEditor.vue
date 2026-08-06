@@ -211,6 +211,7 @@ const picker = useFontPicker()
 async function openFont() {
   const chosen = await picker.open({
     current: props.value.fontFamily,
+    currentFace: isMixed('fontFace') ? undefined : props.value.fontFace,
     fillColor: props.value.color,
     vertical: props.value.direction === 'vertical',
     weightPx: isMixed('weightPx') ? 0 : props.value.weightPx,

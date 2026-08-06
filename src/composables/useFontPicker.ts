@@ -3,8 +3,10 @@ import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 
 export interface FontPickerRequest {
-  /** Current family; prefills the search box so the user starts from it. */
+  /** Current family; the grid scrolls it into view so the user starts from it. */
   current: string
+  /** Current face, so that family's weight switch starts where the object is. */
+  currentFace?: string
   /**
    * Fill and stroke of the style being edited. Samples are rasterized with
    * them so what the grid shows is the same stroke that will be typeset.
@@ -41,10 +43,18 @@ const isOpen = ref(false)
  */
 const request = shallowRef<FontPickerRequest>({ current: '', fillColor: '#000000' })
 
+/**
+ * The face being tried on the page. While set, the picker fades itself out and
+ * the canvas draws the selection with this face instead of what the objects
+ * store — letting go restores everything, because nothing was written.
+ */
+const previewFace = shallowRef<FontEntry | null>(null)
+
 let resolver: ((result: FontPickerResult | null) => void) | null = null
 
 function settle(result: FontPickerResult | null) {
   isOpen.value = false
+  previewFace.value = null
   const resolve = resolver
   resolver = null
   resolve?.(result)
@@ -54,6 +64,13 @@ export function useFontPicker() {
   return {
     isOpen,
     request,
+    previewFace,
+    startPreview(face: FontEntry) {
+      previewFace.value = face
+    },
+    endPreview() {
+      previewFace.value = null
+    },
     open(req: FontPickerRequest): Promise<FontPickerResult | null> {
       // Reopening while a request is outstanding would otherwise leave the
       // earlier caller awaiting a promise nobody can settle.
