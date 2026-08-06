@@ -193,7 +193,7 @@
             gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
           }"
         >
-          <div v-for="entry in rows[vrow.index]" :key="entry.family" class="font-cell group/cell">
+          <div v-for="entry in rows[vrow.index]" :key="faceKey(entry)" class="font-cell group/cell">
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
                 <span class="truncate text-[11px] text-muted-foreground">{{ entry.displayName }}</span>
@@ -272,7 +272,7 @@ import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { canEditInCell } from '@/lib/editContext'
-import { catalog, loadFontCatalog } from '@/lib/fontCatalog'
+import { catalog, faceKey, loadFontCatalog } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 

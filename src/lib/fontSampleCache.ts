@@ -1,7 +1,7 @@
 import type { EngineClusterRect, EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextAlign } from '@shared/text-style/types'
-import { engineSourceFor } from './fontCatalog'
+import { engineSourceFor, faceKey } from './fontCatalog'
 
 export interface SampleRequest {
   /**
@@ -76,17 +76,17 @@ const cache = new Map<string, Sample>()
 const coverage = new Map<string, number[]>()
 
 function coverageKey(entry: FontEntry, text: string): string {
-  return `${entry.family}|${text}`
+  return `${faceKey(entry)}|${text}`
 }
 
 function keyOf(req: SampleRequest): string {
   const stroke = req.stroke
     ? `${req.stroke.width}/${req.stroke.color}/${req.stroke.position ?? 'outside'}`
     : '-'
-  // The tag keeps the two key spaces apart, so a family that happened to be
+  // The tag keeps the two key spaces apart, so a face that happened to be
   // named like the notdef key could not answer for it.
   return [
-    req.entry ? `f${req.entry.family}` : 'n',
+    req.entry ? `f${faceKey(req.entry)}` : 'n',
     req.sizePx,
     req.fillColor,
     stroke,

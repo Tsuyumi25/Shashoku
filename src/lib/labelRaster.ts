@@ -1,5 +1,5 @@
 import type { TextStyle } from '@shared/text-style/types'
-import { catalogByFamily, catalogLoaded } from './fontCatalog'
+import { catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
 import { sampleFor, type Sample } from './fontSampleCache'
 import {
   frameCenter,
@@ -58,7 +58,8 @@ export function rasterFor(
 ): LabelRaster {
   if (text.length === 0) return NOTHING
 
-  const entry = catalogByFamily.value.get(style.fontFamily) ?? null
+  const faces = catalogByFamily.value.get(style.fontFamily)
+  const entry = faces ? representativeOf(faces) : null
   // Nothing to say while the catalogue is still being enumerated: the family
   // is not missing yet, it is unanswered — and a box drawn on every start
   // would say the wrong one.

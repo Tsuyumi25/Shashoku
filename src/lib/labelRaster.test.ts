@@ -132,6 +132,10 @@ describe('drawnLabel', () => {
         family: FAMILY,
         displayName: FAMILY,
         style: 'Regular',
+        postscriptName: 'TestFace-Regular',
+        weight: 400,
+        width: 100,
+        slant: 0,
         origin: { kind: 'system', path: '/fonts/test.ttf', faceIndex: 0 },
       },
     ]

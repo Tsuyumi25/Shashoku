@@ -21,5 +21,17 @@ export interface FontEntry {
   displayName: string;
   /** Subfamily as the font names it, e.g. "Regular" or "Bold". */
   style: string;
+  /**
+   * One per face and ASCII by specification, which makes it the only name a
+   * weight can be addressed by. Empty when the font declares none — such a
+   * face is still listed and drawn, it just cannot be named across machines.
+   */
+  postscriptName: string;
+  /** usWeightClass, nominally 1–1000 with 400 as regular. */
+  weight: number;
+  /** Width as a percentage of normal, 100 being normal. */
+  width: number;
+  /** Degrees away from upright; 0 is upright. */
+  slant: number;
   origin: FontOrigin;
 }
