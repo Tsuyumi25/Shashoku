@@ -639,65 +639,78 @@ fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
     }
 }
 
-/// The narrower side of the narrowest contour, from control-point boxes. An
-/// over-estimate of each contour's true extent — curves stay inside their
-/// control hull — which is the safe direction for a threshold that falls back
-/// below it.
-fn narrowest_contour(path: &Path) -> f32 {
-    struct Box {
-        lo: (f32, f32),
-        hi: (f32, f32),
-    }
-    impl Box {
-        fn take(p: tiny_skia::Point) -> Self {
-            Box {
-                lo: (p.x, p.y),
-                hi: (p.x, p.y),
-            }
+/// Each contour of the path as its own path, in order.
+fn contours_of(path: &Path) -> Vec<Path> {
+    let mut out = Vec::new();
+    let mut pb = PathBuilder::new();
+    let mut flush = |pb: &mut PathBuilder| {
+        if let Some(done) = std::mem::replace(pb, PathBuilder::new()).finish() {
+            out.push(done);
         }
-        fn extend(&mut self, p: tiny_skia::Point) {
-            self.lo = (self.lo.0.min(p.x), self.lo.1.min(p.y));
-            self.hi = (self.hi.0.max(p.x), self.hi.1.max(p.y));
-        }
-        fn width(&self) -> f32 {
-            (self.hi.0 - self.lo.0).min(self.hi.1 - self.lo.1)
-        }
-    }
-
-    let mut narrowest = f32::INFINITY;
-    let mut held: Option<Box> = None;
+    };
     for segment in path.segments() {
         match segment {
             PathSegment::MoveTo(p) => {
-                if let Some(done) = held.replace(Box::take(p)) {
-                    narrowest = narrowest.min(done.width());
-                }
+                flush(&mut pb);
+                pb.move_to(p.x, p.y);
             }
-            PathSegment::Close => {}
-            PathSegment::LineTo(p) => {
-                if let Some(open) = held.as_mut() {
-                    open.extend(p);
-                }
-            }
-            PathSegment::QuadTo(c, p) => {
-                if let Some(open) = held.as_mut() {
-                    open.extend(c);
-                    open.extend(p);
-                }
-            }
-            PathSegment::CubicTo(c0, c1, p) => {
-                if let Some(open) = held.as_mut() {
-                    open.extend(c0);
-                    open.extend(c1);
-                    open.extend(p);
-                }
-            }
+            PathSegment::LineTo(p) => pb.line_to(p.x, p.y),
+            PathSegment::QuadTo(c, p) => pb.quad_to(c.x, c.y, p.x, p.y),
+            PathSegment::CubicTo(c0, c1, p) => pb.cubic_to(c0.x, c0.y, c1.x, c1.y, p.x, p.y),
+            PathSegment::Close => pb.close(),
         }
     }
-    if let Some(done) = held {
-        narrowest = narrowest.min(done.width());
+    flush(&mut pb);
+    out
+}
+
+/// The ink an outside stroke lays down, as coverage. `width` is the stroke's,
+/// so the pen is twice that: the half under the fill is what the seam needs.
+///
+/// Contour by contour, because of what a stroker's pen does to a contour
+/// narrower than itself: the inner offset inverts, and the inverted loop's
+/// winding cancels a ring of the band — a hole around every island and inside
+/// every counter close to the pen's size. What such a contour's band should be
+/// is its whole dilation, and that is the stroker's outermost loop filled
+/// solid, so narrow contours keep only that loop. Wide ones keep the whole
+/// stroke: their bands are honest annuli, and a counter wider than the pen
+/// must keep its middle open.
+fn outside_band(path: &Path, width: f32, w: u32, h: u32) -> Option<Vec<f32>> {
+    let pen = 2.0 * width;
+    // Round joins are what the band construction already produces: grown from
+    // the shape's edge, every corner it turns is round.
+    let stroke = Stroke {
+        width: pen,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
+    let widest_bounds = |paths: Vec<Path>| {
+        paths.into_iter().max_by(|a, b| {
+            let (ab, bb) = (a.bounds(), b.bounds());
+            let (aa, ba) = (ab.width() * ab.height(), bb.width() * bb.height());
+            aa.partial_cmp(&ba).unwrap_or(std::cmp::Ordering::Equal)
+        })
+    };
+
+    let mut mask = Mask::new(w, h)?;
+    for contour in contours_of(path) {
+        let Some(stroked) = contour.stroke(&stroke, 1.0) else {
+            // Nothing the stroker could lay its pen on. A speck like that
+            // draws no ink of its own either, so it grows no band.
+            continue;
+        };
+        let bounds = contour.bounds();
+        let band: Path = if bounds.width().min(bounds.height()) > pen {
+            stroked
+        } else {
+            match widest_bounds(contours_of(&stroked)) {
+                Some(outer) => outer,
+                None => continue,
+            }
+        };
+        mask.fill_path(&band, FillRule::Winding, true, Transform::identity());
     }
-    narrowest
+    Some(mask.data().iter().map(|&v| v as f32 / 255.0).collect())
 }
 
 /// `weight` moves the fill's own edge, in pixels, positive outward. It is the
@@ -746,30 +759,10 @@ fn paint_run(
     // over the fill, a different composition. The field also stays the road
     // anything reading offsets from the shape's edge — a future glow or
     // shadow — comes back to.
-    //
-    // The stroker itself adds the last condition: a contour narrower than the
-    // pen inverts its inner offset, and the inverted loop's winding cancels a
-    // ring of the band — a hole around every island smaller than the pen. The
-    // field grows from coverage and cannot do that, so those runs stay on it.
     if let Some(spec) = stroke.as_ref().filter(|spec| {
-        inked
-            && weight == 0.0
-            && fill.3 == 255
-            && spec.position == StrokePosition::Outside
-            && narrowest_contour(&path) > 2.0 * spec.width
+        inked && weight == 0.0 && fill.3 == 255 && spec.position == StrokePosition::Outside
     }) {
-        // Round joins are what the band construction already produces: grown
-        // from the shape's edge, every corner it turns is round.
-        let band = path.stroke(
-            &Stroke {
-                width: 2.0 * spec.width,
-                line_join: LineJoin::Round,
-                ..Stroke::default()
-            },
-            1.0,
-        );
-        if let Some(band) = band {
-            let ink = coverage_of(&band, run.width, run.height)?;
+        if let Some(ink) = outside_band(&path, spec.width, run.width, run.height) {
             return Ok(TextBitmap {
                 width: run.width,
                 height: run.height,
@@ -778,7 +771,6 @@ fn paint_run(
                 clusters: run.clusters,
             });
         }
-        // A stroker with nothing to say falls back to the field.
     }
 
     let field = (inked || weight != 0.0)
@@ -1917,16 +1909,22 @@ mod stroke_tests {
         }
     }
 
-    /// The guard's yardstick: the narrowest contour, not the whole path's
-    /// box — an 8px counter in an 80px rectangle is an 8px contour, and it is
-    /// contours the stroker inverts on.
+    /// The stroker's failure mode the band construction has to dodge: a pen
+    /// wider than a freestanding contour inverts its inner offset, and the
+    /// inverted winding would cancel a ring of the band around it. Islands
+    /// like this are real — a full stop at text sizes is one — so the ring
+    /// must come back solid, not as an annulus with a hole around the dot.
     #[test]
-    fn the_band_guard_sees_the_narrowest_contour_not_the_path() {
-        let mut pb = PathBuilder::new();
-        pb.push_rect(Rect::from_ltrb(40.0, 40.0, 120.0, 120.0).unwrap());
-        pb.push_rect(Rect::from_ltrb(76.0, 76.0, 84.0, 84.0).unwrap());
-        let narrowest = narrowest_contour(&pb.finish().unwrap());
-        assert!((narrowest - 8.0).abs() < 0.01, "{narrowest}");
+    fn a_dot_narrower_than_the_pen_keeps_a_solid_band() {
+        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside)), 0.0)
+            .unwrap();
+        // From the centre out to the pen's reach: no cancelled ring anywhere.
+        for step in 0..10 {
+            for angle in ANGLES {
+                let (alpha, _) = probe(&bmp, step as f32, angle);
+                assert_eq!(alpha, 255, "hole in the band at {step}px, {angle}deg");
+            }
+        }
     }
 
     #[test]
