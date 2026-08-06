@@ -238,6 +238,12 @@ pub struct FaceInfo {
     pub postscript_name: String,
     pub path: String,
     pub face_index: u32,
+    /// usWeightClass, nominally 1–1000 with 400 as regular.
+    pub weight: f64,
+    /// Width as a percentage of normal, 100 being normal.
+    pub width: f64,
+    /// Degrees away from upright; 0 is upright, italic and oblique are not.
+    pub slant: f64,
 }
 
 pub struct ScanFonts {
@@ -263,6 +269,9 @@ impl Task for ScanFonts {
                 postscript_name: face.postscript_name,
                 path: face.path,
                 face_index: face.face_index,
+                weight: face.weight as f64,
+                width: face.width as f64,
+                slant: face.slant as f64,
             })
             .collect())
     }

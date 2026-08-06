@@ -101,6 +101,12 @@ export interface EngineFaceInfo {
   postscriptName: string;
   path: string;
   faceIndex: number;
+  /** usWeightClass, nominally 1–1000 with 400 as regular. */
+  weight: number;
+  /** Width as a percentage of normal, 100 being normal. */
+  width: number;
+  /** Degrees away from upright; 0 is upright, italic and oblique are not. */
+  slant: number;
 }
 
 export interface EngineEncodeInput {

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
-use skrifa::{FontRef, MetadataProvider, string::StringId};
+use skrifa::{FontRef, MetadataProvider, attribute::Style, string::StringId};
 
 pub struct FaceInfo {
     /// Locale-independent name, used as the family's identity. Display names
@@ -15,6 +15,29 @@ pub struct FaceInfo {
     pub postscript_name: String,
     pub path: String,
     pub face_index: u32,
+    /// usWeightClass, nominally 1–1000 with 400 as regular. Read so a family's
+    /// faces can be ordered by weight rather than by directory walk order.
+    pub weight: f32,
+    /// Width as a percentage of normal, 100 being normal. Derived from
+    /// usWidthClass, which only has nine steps.
+    pub width: f32,
+    /// Degrees away from upright; 0 is upright. See `slant_degrees`.
+    pub slant: f32,
+}
+
+/// CSS's default `font-style: oblique` angle, for faces that declare a slope
+/// without saying how much.
+const DEFAULT_SLANT_DEGREES: f32 = 14.0;
+
+/// One number for the style axis so faces sort upright-first without the
+/// caller having to know italic from oblique — the style string still carries
+/// that distinction for anything that wants to show it.
+fn slant_degrees(style: Style) -> f32 {
+    match style {
+        Style::Normal => 0.0,
+        Style::Italic => DEFAULT_SLANT_DEGREES,
+        Style::Oblique(angle) => angle.unwrap_or(DEFAULT_SLANT_DEGREES),
+    }
 }
 
 const FONT_EXTENSIONS: [&str; 4] = ["ttf", "otf", "ttc", "otc"];
@@ -118,6 +141,7 @@ fn read_faces(path: &Path, locales: &[String], out: &mut Vec<FaceInfo>) {
         if let Some(family) = name_for(&font, &FAMILY_IDS, &[]) {
             let display_name =
                 name_for(&font, &FAMILY_IDS, locales).unwrap_or_else(|| family.clone());
+            let attributes = font.attributes();
             out.push(FaceInfo {
                 family,
                 display_name,
@@ -126,6 +150,9 @@ fn read_faces(path: &Path, locales: &[String], out: &mut Vec<FaceInfo>) {
                     .unwrap_or_default(),
                 path: path_text.to_string(),
                 face_index,
+                weight: attributes.weight.value(),
+                width: attributes.stretch.percentage(),
+                slant: slant_degrees(attributes.style),
             });
         }
         face_index += 1;
@@ -369,6 +396,18 @@ mod tests {
     #[test]
     fn nameless_fonts_are_skipped() {
         assert_eq!(choose_localized(&[], &["zh-Hant".to_string()]), None);
+    }
+
+    #[test]
+    fn upright_is_zero_and_a_declared_angle_survives() {
+        assert_eq!(slant_degrees(Style::Normal), 0.0);
+        assert_eq!(slant_degrees(Style::Oblique(Some(-9.4))), -9.4);
+    }
+
+    #[test]
+    fn a_slope_with_no_angle_still_reads_as_slanted() {
+        assert_ne!(slant_degrees(Style::Italic), 0.0);
+        assert_ne!(slant_degrees(Style::Oblique(None)), 0.0);
     }
 
     #[test]
