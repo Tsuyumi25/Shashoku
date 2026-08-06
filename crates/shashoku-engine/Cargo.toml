@@ -17,6 +17,10 @@ napi-derive = "3"
 
 memmap2 = "0.9"
 skrifa = "0.45"
+# Kept at the version skrifa itself uses — a second copy would parse the same
+# tables twice. Direct dependency because reading name records at the byte
+# level is the only way to decode the encodings read-fonts maps to Unknown.
+read-fonts = "0.42"
 harfrust = "0.12"
 tiny-skia = "0.12"
 

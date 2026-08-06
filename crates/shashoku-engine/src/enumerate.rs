@@ -2,6 +2,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
+use read_fonts::{Offset, TableProvider};
 use skrifa::{FontRef, MetadataProvider, attribute::Style, string::StringId};
 
 pub struct FaceInfo {
@@ -89,28 +90,114 @@ fn choose_localized<'a>(entries: &[(Option<String>, &'a str)], locales: &[String
         .map(|(_, value)| *value)
 }
 
-fn localized_entries(font: &FontRef, id: StringId) -> Vec<(Option<String>, String)> {
-    font.localized_strings(id)
-        .map(|s| {
-            (
-                s.language().map(|l| l.to_string()),
-                s.chars().collect::<String>(),
-            )
+struct DecodedName {
+    platform_rank: usize,
+    plausible: bool,
+    language: Option<String>,
+    value: String,
+}
+
+/// Windows first: its records carry the localizations, and every one of them
+/// is decodable. The Macintosh platform comes last because its non-Roman
+/// charsets are not, and its Roman records are where a skipped Windows record
+/// used to surface as mojibake.
+fn platform_rank(platform_id: u16) -> usize {
+    match platform_id {
+        3 => 0,
+        0 => 1,
+        1 => 2,
+        _ => 3,
+    }
+}
+
+const PLATFORM_RANKS: usize = 4;
+
+fn decode_utf16_be(bytes: &[u8]) -> String {
+    char::decode_utf16(
+        bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_be_bytes([pair[0], pair[1]])),
+    )
+    .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+    .collect()
+}
+
+/// Whether a decode produced text rather than wreckage. Nothing legitimate in
+/// a name is a control character or a replacement character, so either one
+/// says the bytes were not what the decoding assumed.
+fn plausibly_decoded(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|c| c == char::REPLACEMENT_CHARACTER || c.is_control())
+}
+
+fn decoded_entries(font: &FontRef, id: StringId) -> Vec<DecodedName> {
+    let Ok(name) = font.name() else {
+        return Vec::new();
+    };
+    let data = name.string_data();
+    // skrifa visits the same records in the same order, and zipping its
+    // iterator in is the only public route to its language-id table.
+    let languages = font
+        .localized_strings(id)
+        .map(|s| s.language().map(str::to_string));
+    name.name_record()
+        .iter()
+        .filter(|record| record.name_id() == id)
+        .zip(languages)
+        .filter_map(|(record, language)| {
+            let start = record.string_offset().non_null().unwrap_or(0);
+            let bytes = data.as_bytes().get(start..start + record.length() as usize)?;
+            // All platform-3 strings are UTF-16BE — the encoding ID names a
+            // character repertoire, not an encoding. read-fonts (and HarfBuzz)
+            // decode only a shortlist of those IDs and hand back nothing for
+            // the rest, which is how a font's real name got skipped for a
+            // mojibake Macintosh fallback.
+            let value = match (record.platform_id(), record.encoding_id()) {
+                (0 | 3, _) => decode_utf16_be(bytes),
+                (1, 0) => record.string(data).ok()?.chars().collect(),
+                // Undecodable without per-charset tables (Macintosh Shift-JIS
+                // and friends): one dependency for 0.5% of a real library.
+                _ => return None,
+            };
+            Some(DecodedName {
+                platform_rank: platform_rank(record.platform_id()),
+                plausible: plausibly_decoded(&value),
+                language,
+                value,
+            })
         })
+        .collect()
+}
+
+fn borrowed<'a>(entries: &[&'a DecodedName]) -> Vec<(Option<String>, &'a str)> {
+    entries
+        .iter()
+        .map(|e| (e.language.clone(), e.value.as_str()))
         .collect()
 }
 
 fn name_for(font: &FontRef, ids: &[StringId], locales: &[String]) -> Option<String> {
     for id in ids {
-        let owned = localized_entries(font, *id);
-        if owned.is_empty() {
-            continue;
+        let entries = decoded_entries(font, *id);
+        // A name is resolved entirely within one platform before the next is
+        // consulted: the platforms hold translations of the same name, so a
+        // clean lower-priority record must not outrank a clean Windows one
+        // merely by being English.
+        for rank in 0..PLATFORM_RANKS {
+            let group: Vec<&DecodedName> = entries
+                .iter()
+                .filter(|e| e.platform_rank == rank && e.plausible)
+                .collect();
+            if let Some(picked) = choose_localized(&borrowed(&group), locales) {
+                return Some(picked.to_string());
+            }
         }
-        let borrowed: Vec<(Option<String>, &str)> = owned
-            .iter()
-            .map(|(language, value)| (language.clone(), value.as_str()))
-            .collect();
-        if let Some(picked) = choose_localized(&borrowed, locales) {
+        // Every record decoded to wreckage. A wrong-looking name still names
+        // the face better than dropping it from the catalogue.
+        let mut leftovers: Vec<&DecodedName> = entries.iter().filter(|e| !e.plausible).collect();
+        leftovers.sort_by_key(|e| e.platform_rank);
+        if let Some(picked) = choose_localized(&borrowed(&leftovers), locales) {
             return Some(picked.to_string());
         }
     }
@@ -396,6 +483,36 @@ mod tests {
     #[test]
     fn nameless_fonts_are_skipped() {
         assert_eq!(choose_localized(&[], &["zh-Hant".to_string()]), None);
+    }
+
+    #[test]
+    fn utf16be_decodes_the_basic_plane_and_surrogate_pairs() {
+        assert_eq!(decode_utf16_be(&[0x00, 0x41, 0x4E, 0x9F]), "A亟");
+        assert_eq!(decode_utf16_be(&[0xD8, 0x3D, 0xDE, 0x00]), "😀");
+    }
+
+    #[test]
+    fn a_lone_surrogate_becomes_a_replacement_character() {
+        assert_eq!(decode_utf16_be(&[0xD8, 0x3D]), "\u{FFFD}");
+    }
+
+    #[test]
+    fn clean_text_is_plausible_in_any_script() {
+        assert!(plausibly_decoded("SourceHanSansTC-Bold"));
+        assert!(plausibly_decoded("源ノ角ゴシック"));
+    }
+
+    #[test]
+    fn wreckage_is_not_plausible() {
+        assert!(!plausibly_decoded("源ノ\u{FFFD}ゴシック"));
+        assert!(!plausibly_decoded("源ノ\u{0002}ゴシック"));
+    }
+
+    #[test]
+    fn windows_outranks_unicode_outranks_macintosh() {
+        assert!(platform_rank(3) < platform_rank(0));
+        assert!(platform_rank(0) < platform_rank(1));
+        assert!(platform_rank(1) < platform_rank(2));
     }
 
     #[test]

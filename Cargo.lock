@@ -477,6 +477,7 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "png",
+ "read-fonts 0.42.1",
  "skrifa",
  "tiny-skia",
 ]
