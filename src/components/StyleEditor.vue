@@ -14,6 +14,33 @@
       <ChevronDown :size="12" class="shrink-0 text-muted-foreground" />
     </button>
 
+    <template v-if="weightFaces">
+      <label class="text-muted-foreground">字重</label>
+      <div class="flex h-6 w-full items-center gap-1">
+        <button
+          type="button"
+          class="h-full w-7 shrink-0 rounded border border-input bg-background hover:bg-secondary"
+          title="上一個字重"
+          @click="cycleWeight(-1)"
+        >
+          &lt;
+        </button>
+        <span
+          class="min-w-0 flex-1 truncate text-center"
+          :class="isMixed('fontFace') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
+          :title="weightText"
+        >{{ weightText }}</span>
+        <button
+          type="button"
+          class="h-full w-7 shrink-0 rounded border border-input bg-background hover:bg-secondary"
+          title="下一個字重"
+          @click="cycleWeight(1)"
+        >
+          &gt;
+        </button>
+      </div>
+    </template>
+
     <label class="text-muted-foreground">字級</label>
     <div class="flex items-center gap-1">
       <input
@@ -173,6 +200,7 @@ import type {
   TextStyle,
 } from '@shared/text-style/types'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
 
 const props = defineProps<{
   /**
@@ -193,6 +221,52 @@ const MIXED_TEXT = '多個值'
 
 function isMixed(field: keyof TextStyle): boolean {
   return props.mixed?.includes(field) ?? false
+}
+
+/**
+ * The faces the weight row can walk. Null hides the row: a family the
+ * selection disagrees on has no list to walk, a family this machine lacks has
+ * nothing to switch to, and a single-weight family has nowhere to go.
+ */
+const weightFaces = computed(() => {
+  if (isMixed('fontFamily')) return null
+  const faces = catalogByFamily.value.get(props.value.fontFamily)
+  return faces && faces.length > 1 ? faces : null
+})
+
+/**
+ * Where the walk stands. A face this machine lacks — or a selection that
+ * disagrees — stands at the family's representative, so a step lands
+ * everywhere the same and one press gives the whole selection one weight.
+ */
+const weightAt = computed(() => {
+  const faces = weightFaces.value
+  if (!faces) return -1
+  if (!isMixed('fontFace')) {
+    const at = faces.findIndex((f) => f.postscriptName === props.value.fontFace)
+    if (at >= 0) return at
+  }
+  const representative = representativeOf(faces)
+  return representative ? faces.indexOf(representative) : 0
+})
+
+const weightText = computed(() => {
+  const faces = weightFaces.value
+  if (!faces) return ''
+  if (isMixed('fontFace')) return MIXED_TEXT
+  const face = faces[weightAt.value]!
+  return `${face.style || face.postscriptName} · ${weightAt.value + 1}/${faces.length}`
+})
+
+function cycleWeight(step: number) {
+  const faces = weightFaces.value
+  if (!faces) return
+  const next = faces[(weightAt.value + step + faces.length) % faces.length]!
+  emit('patch', {
+    fontFamily: next.family,
+    fontFace: next.postscriptName,
+    fontStyleName: next.style,
+  })
 }
 
 const strokeToggleEl = useTemplateRef<HTMLInputElement>('strokeToggleEl')
