@@ -749,9 +749,13 @@ fn paint_run(
     // An outside stroke under an opaque fill needs no distance field: a centre
     // stroke of twice the width shows exactly its outer half, and the seam
     // pixels compose to full coverage without a mask — fill f plus stroke 1−f
-    // is 1, which is also what makes an opaque fill the condition. Cheaper by
-    // 1.5–2x at label sizes (the field is O(area), the stroke O(path length)),
-    // and a shade more accurate at the seam than the field's worst pixels.
+    // is 1, which is also what makes an opaque fill the condition. The identity
+    // needs the band to span the rasterizer's ~1px coverage ramp, so it holds
+    // from about a pixel of width up; a sub-pixel stroke seams either way — the
+    // field path sits on the same ramp — so the lane loses nothing there.
+    // Cheaper by 1.5–2x at label sizes (the field is O(area), the stroke
+    // O(path length)), and a shade more accurate at the seam than the field's
+    // worst pixels.
     //
     // Only a fast lane, not a replacement. A nonzero weight erodes or grows
     // the fill through the field, and a geometric stroker has no negative pen
@@ -1846,7 +1850,9 @@ mod stroke_tests {
 
     /// The seam property the mask-free construction is exact on: wherever fill
     /// meets band, f plus 1−f composes to full coverage, so nothing shows
-    /// through between an opaque fill and its outside stroke.
+    /// through between an opaque fill and its outside stroke. Exact from about
+    /// a pixel of width up — a sub-pixel band cannot span the rasterizer's own
+    /// coverage ramp, on either construction.
     #[test]
     fn an_opaque_outside_stroke_leaves_no_seam() {
         let (radius, pen) = (40.0f32, 6.0f32);
@@ -1936,6 +1942,51 @@ mod stroke_tests {
             assert!(!is_ink);
             let (alpha, _) = probe(&bmp, 24.0, angle);
             assert_eq!(alpha, 0);
+        }
+    }
+
+    /// The lane reconciled against the field it replaced, on a real face — the
+    /// net under outside_band's widest-bounds approximation. Landing it, the
+    /// worst alpha deficit measured 0.247 over four CJK faces at label sizes;
+    /// 0.35 leaves room for other faces while still catching a broken band,
+    /// since a cancelled ring reads as a deficit of 1.
+    #[test]
+    fn the_fast_lane_stays_near_the_field_on_a_real_face() {
+        use super::installed_face::drawing;
+
+        const TEXT: &str = "鬱。o8";
+        let Some((bytes, face)) = drawing(TEXT) else {
+            eprintln!("no face for the sample text — fast lane reconciliation did not run");
+            return;
+        };
+        let ink = spec(4.0, StrokePosition::Outside);
+        for size in [40.0f32, 200.0] {
+            let run = build_horizontal_path(
+                &bytes,
+                TEXT,
+                size,
+                8,
+                face,
+                Phase::default(),
+                Align::Start,
+            )
+            .unwrap();
+            let Some(path) = run.path.clone() else { continue };
+            let (w, h) = (run.width, run.height);
+
+            let cov = coverage_of(&path, w, h).unwrap();
+            let field = signed_distance_field(&cov, w as usize, h as usize);
+            let bmp = paint_run(run, FILL, Some(ink), 0.0).unwrap();
+
+            let mut worst = 0.0f32;
+            for i in 0..(w * h) as usize {
+                let reference = cov[i] + coverage_at(field[i], ink.width) * (1.0 - cov[i]);
+                if reference >= 0.999 {
+                    let got = bmp.rgba[i * 4 + 3] as f32 / 255.0;
+                    worst = worst.max(reference - got);
+                }
+            }
+            assert!(worst < 0.35, "deficit {worst} against the field at {size}px");
         }
     }
 }
