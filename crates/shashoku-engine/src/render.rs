@@ -4,7 +4,7 @@ use skrifa::{
     instance::{LocationRef, Size},
     outline::{DrawSettings, OutlinePen},
 };
-use tiny_skia::{FillRule, Mask, Path, PathBuilder, Stroke, Transform};
+use tiny_skia::{FillRule, LineJoin, Mask, Path, PathBuilder, PathSegment, Stroke, Transform};
 
 use crate::stroke::{coverage_at, signed_distance_field};
 
@@ -639,6 +639,67 @@ fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
     }
 }
 
+/// The narrower side of the narrowest contour, from control-point boxes. An
+/// over-estimate of each contour's true extent — curves stay inside their
+/// control hull — which is the safe direction for a threshold that falls back
+/// below it.
+fn narrowest_contour(path: &Path) -> f32 {
+    struct Box {
+        lo: (f32, f32),
+        hi: (f32, f32),
+    }
+    impl Box {
+        fn take(p: tiny_skia::Point) -> Self {
+            Box {
+                lo: (p.x, p.y),
+                hi: (p.x, p.y),
+            }
+        }
+        fn extend(&mut self, p: tiny_skia::Point) {
+            self.lo = (self.lo.0.min(p.x), self.lo.1.min(p.y));
+            self.hi = (self.hi.0.max(p.x), self.hi.1.max(p.y));
+        }
+        fn width(&self) -> f32 {
+            (self.hi.0 - self.lo.0).min(self.hi.1 - self.lo.1)
+        }
+    }
+
+    let mut narrowest = f32::INFINITY;
+    let mut held: Option<Box> = None;
+    for segment in path.segments() {
+        match segment {
+            PathSegment::MoveTo(p) => {
+                if let Some(done) = held.replace(Box::take(p)) {
+                    narrowest = narrowest.min(done.width());
+                }
+            }
+            PathSegment::Close => {}
+            PathSegment::LineTo(p) => {
+                if let Some(open) = held.as_mut() {
+                    open.extend(p);
+                }
+            }
+            PathSegment::QuadTo(c, p) => {
+                if let Some(open) = held.as_mut() {
+                    open.extend(c);
+                    open.extend(p);
+                }
+            }
+            PathSegment::CubicTo(c0, c1, p) => {
+                if let Some(open) = held.as_mut() {
+                    open.extend(c0);
+                    open.extend(c1);
+                    open.extend(p);
+                }
+            }
+        }
+    }
+    if let Some(done) = held {
+        narrowest = narrowest.min(done.width());
+    }
+    narrowest
+}
+
 /// `weight` moves the fill's own edge, in pixels, positive outward. It is the
 /// same distance-field offset a stroke band is read at, which is why thinning
 /// costs no more than thickening and needs nothing painted underneath: the
@@ -671,6 +732,55 @@ fn paint_run(
     let inked = stroke
         .as_ref()
         .is_some_and(|spec| spec.width > 0.0 && spec.color.3 != 0);
+
+    // An outside stroke under an opaque fill needs no distance field: a centre
+    // stroke of twice the width shows exactly its outer half, and the seam
+    // pixels compose to full coverage without a mask — fill f plus stroke 1−f
+    // is 1, which is also what makes an opaque fill the condition. Cheaper by
+    // 1.5–2x at label sizes (the field is O(area), the stroke O(path length)),
+    // and a shade more accurate at the seam than the field's worst pixels.
+    //
+    // Only a fast lane, not a replacement. A nonzero weight erodes or grows
+    // the fill through the field, and a geometric stroker has no negative pen
+    // width; Inside must mask the stroke by the fill; Center paints its band
+    // over the fill, a different composition. The field also stays the road
+    // anything reading offsets from the shape's edge — a future glow or
+    // shadow — comes back to.
+    //
+    // The stroker itself adds the last condition: a contour narrower than the
+    // pen inverts its inner offset, and the inverted loop's winding cancels a
+    // ring of the band — a hole around every island smaller than the pen. The
+    // field grows from coverage and cannot do that, so those runs stay on it.
+    if let Some(spec) = stroke.as_ref().filter(|spec| {
+        inked
+            && weight == 0.0
+            && fill.3 == 255
+            && spec.position == StrokePosition::Outside
+            && narrowest_contour(&path) > 2.0 * spec.width
+    }) {
+        // Round joins are what the band construction already produces: grown
+        // from the shape's edge, every corner it turns is round.
+        let band = path.stroke(
+            &Stroke {
+                width: 2.0 * spec.width,
+                line_join: LineJoin::Round,
+                ..Stroke::default()
+            },
+            1.0,
+        );
+        if let Some(band) = band {
+            let ink = coverage_of(&band, run.width, run.height)?;
+            return Ok(TextBitmap {
+                width: run.width,
+                height: run.height,
+                rgba: compose(|i| (coverage[i], ink[i]), count, fill, spec.color),
+                baseline: run.baseline,
+                clusters: run.clusters,
+            });
+        }
+        // A stroker with nothing to say falls back to the field.
+    }
+
     let field = (inked || weight != 0.0)
         .then(|| signed_distance_field(&coverage, run.width as usize, run.height as usize));
 
@@ -1740,6 +1850,83 @@ mod stroke_tests {
                 assert!(is_ink, "counter is not stroke coloured at {step}px");
             }
         }
+    }
+
+    /// The seam property the mask-free construction is exact on: wherever fill
+    /// meets band, f plus 1−f composes to full coverage, so nothing shows
+    /// through between an opaque fill and its outside stroke.
+    #[test]
+    fn an_opaque_outside_stroke_leaves_no_seam() {
+        let (radius, pen) = (40.0f32, 6.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            Some(spec(pen, StrokePosition::Outside)),
+            0.0,
+        )
+        .unwrap();
+        for tenth in 0..40 {
+            for angle in ANGLES {
+                let (alpha, _) = probe(&bmp, radius - 2.0 + tenth as f32 * 0.1, angle);
+                assert_eq!(alpha, 255, "seam at {tenth} tenths past, {angle}deg");
+            }
+        }
+    }
+
+    /// A see-through fill is what the distance field construction is for: the
+    /// stroke has to stand under the whole shape, not just past its edge, or
+    /// the fill would have nothing to show through to.
+    #[test]
+    fn a_translucent_fill_shows_the_stroke_beneath_it() {
+        let (radius, pen) = (40.0f32, 6.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            Rgba(0, 0, 0, 128),
+            Some(spec(pen, StrokePosition::Outside)),
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            // Deep inside, far past the band: the stroke under the fill is
+            // what tops the translucent fill up to full coverage.
+            let (alpha, _) = probe(&bmp, radius / 2.0, angle);
+            assert_eq!(alpha, 255, "stroke missing under the fill at {angle}deg");
+        }
+    }
+
+    /// A thinned glyph's stroke hugs the thinned edge, which only the distance
+    /// field can move — a fast lane that ignored the weight would leave the
+    /// band hanging where the untouched outline was.
+    #[test]
+    fn a_thinned_glyph_keeps_its_stroke_on_the_thinned_edge() {
+        let (radius, pen, weight) = (40.0f32, 6.0f32, -3.0f32);
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            Some(spec(pen, StrokePosition::Outside)),
+            weight,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            let (band_alpha, band_is_ink) = probe(&bmp, radius + weight + pen / 2.0, angle);
+            assert_eq!(band_alpha, 255, "gap in the band at {angle}deg");
+            assert!(band_is_ink, "band is not stroke coloured at {angle}deg");
+
+            let (past_alpha, _) = probe(&bmp, radius + weight + pen + 2.0, angle);
+            assert_eq!(past_alpha, 0, "ink past the thinned pen width at {angle}deg");
+        }
+    }
+
+    /// The guard's yardstick: the narrowest contour, not the whole path's
+    /// box — an 8px counter in an 80px rectangle is an 8px contour, and it is
+    /// contours the stroker inverts on.
+    #[test]
+    fn the_band_guard_sees_the_narrowest_contour_not_the_path() {
+        let mut pb = PathBuilder::new();
+        pb.push_rect(Rect::from_ltrb(40.0, 40.0, 120.0, 120.0).unwrap());
+        pb.push_rect(Rect::from_ltrb(76.0, 76.0, 84.0, 84.0).unwrap());
+        let narrowest = narrowest_contour(&pb.finish().unwrap());
+        assert!((narrowest - 8.0).abs() < 0.01, "{narrowest}");
     }
 
     #[test]
