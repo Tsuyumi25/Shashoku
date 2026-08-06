@@ -100,17 +100,17 @@ struct DecodedName {
 /// Windows first: its records carry the localizations, and every one of them
 /// is decodable. The Macintosh platform comes last because its non-Roman
 /// charsets are not, and its Roman records are where a skipped Windows record
-/// used to surface as mojibake.
+/// used to surface as mojibake. Three ranks cover everything, because
+/// `decoded_entries` yields nothing for any other platform.
 fn platform_rank(platform_id: u16) -> usize {
     match platform_id {
         3 => 0,
         0 => 1,
-        1 => 2,
-        _ => 3,
+        _ => 2,
     }
 }
 
-const PLATFORM_RANKS: usize = 4;
+const PLATFORM_RANKS: usize = 3;
 
 fn decode_utf16_be(bytes: &[u8]) -> String {
     char::decode_utf16(
@@ -512,7 +512,6 @@ mod tests {
     fn windows_outranks_unicode_outranks_macintosh() {
         assert!(platform_rank(3) < platform_rank(0));
         assert!(platform_rank(0) < platform_rank(1));
-        assert!(platform_rank(1) < platform_rank(2));
     }
 
     #[test]

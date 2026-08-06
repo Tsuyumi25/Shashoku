@@ -60,10 +60,10 @@ export interface TextStyle {
   fontFace: string
 
   /**
-   * The weight as a reader calls it — "Medium", "W7". Never compared; it
-   * earns its bytes on the machine that lacks the face, which can then say
-   * "missing: 思源黑體 Medium" rather than a bare family name with no clue
-   * which weight.
+   * The weight as a reader calls it — "Medium", "W7". Resolution never
+   * compares it; it earns its bytes on the machine that lacks the face, which
+   * can then say "missing: 思源黑體 Medium" rather than a bare family name
+   * with no clue which weight.
    */
   fontStyleName: string
 
