@@ -38,6 +38,7 @@ function openOnePage(labels: TextLayerEntry[] = []) {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         readingOrder: labels.map((l) => l.id),
+        readingEdges: [],
         layers: [...labels],
       },
       badge: 'ok',
@@ -56,6 +57,7 @@ function pageOf(filename: string, labels: TextLayerEntry[]): ProjectFile {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
       readingOrder: labels.map((l) => l.id),
+      readingEdges: [],
       layers: [...labels],
     },
     badge: 'ok',
@@ -595,7 +597,7 @@ describe('layer tree edits', () => {
       {
         filename: PAGE,
         pageDir: `/x/${PAGE}`,
-        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, layers },
+        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers },
         badge: 'ok',
       },
     ]
@@ -936,6 +938,7 @@ describe('layer tree edits', () => {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
           revision: 0,
           readingOrder: ['z'],
+          readingEdges: [],
           layers: [label('z')],
         },
         badge: 'ok',
@@ -972,6 +975,7 @@ describe('deleteSelection', () => {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         readingOrder: p.order,
+        readingEdges: [],
         layers: p.layers,
       },
       badge: 'ok' as const,
@@ -1209,7 +1213,13 @@ describe('selectLayerBy', () => {
       {
         filename: PAGE,
         pageDir: `/x/${PAGE}`,
-        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder: order, layers },
+        page: {
+          schemaVersion: MANIFEST_SCHEMA_VERSION,
+          revision: 0,
+          readingOrder: order,
+          readingEdges: [],
+          layers,
+        },
         badge: 'ok' as const,
       },
     ]
@@ -1300,6 +1310,7 @@ describe('moveObjectsTo', () => {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         readingOrder: p.order,
+        readingEdges: [],
         layers: p.layers,
       },
       badge: 'ok' as const,

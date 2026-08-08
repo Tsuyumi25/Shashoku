@@ -1,7 +1,8 @@
 import type { TextStyle } from '../text-style/types'
+import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 7
+export const MANIFEST_SCHEMA_VERSION = 8
 
 export const OCR_SCHEMA_VERSION = 1
 
@@ -163,6 +164,23 @@ export interface ManifestJson {
    * A fallback is how an order someone set quietly reverts to stacking order.
    */
   readingOrder: string[]
+
+  /**
+   * The lines drawn between text objects on this page, each saying that one is
+   * read before another. A layer over the order rather than a replacement for
+   * it: the order covers every object because it is the typing surface, and a
+   * line says the one thing a single column cannot, which is that two objects
+   * split off the same place.
+   *
+   * Empty is the ordinary state of a page and stays legal for ever — a short
+   * chapter can be typeset without a single line being drawn. Concrete here
+   * where the persisted form leaves it out when empty, so nothing downstream
+   * has to keep asking whether an absent key means no lines.
+   *
+   * ⚠️ No line between two objects does not mean they are read at the same
+   * time. It means nobody has said. See `readingGraph.ts`.
+   */
+  readingEdges: ReadingEdge[]
 
   layers: LayerEntry[]
 }

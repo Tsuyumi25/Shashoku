@@ -27,7 +27,7 @@ function file(filename: string, layers: LayerEntry[], readingOrder: string[]): P
     filename,
     pageDir: `/p/${filename}`,
     badge: 'ok',
-    page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, layers },
+    page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers },
   }
 }
 
@@ -126,6 +126,7 @@ describe('buildLabelRows filtered', () => {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         readingOrder: ids,
+        readingEdges: [],
         layers: ids.map((id) => ({ ...text(id), lines: lines[id] })),
       },
     }

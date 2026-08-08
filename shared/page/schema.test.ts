@@ -44,6 +44,7 @@ function manifestWith(entry: TextLayerEntry): ManifestJson {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
     readingOrder: [entry.id],
+    readingEdges: [],
     layers: [entry],
   }
 }
@@ -235,6 +236,7 @@ describe('parseManifest', () => {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 7,
       readingOrder: ['b', 'a'],
+      readingEdges: [{ from: 'b', to: 'a' }],
       layers: [
         {
           kind: 'group',
@@ -320,5 +322,80 @@ describe('parseManifest', () => {
   it('opens a page whose reading order disagrees with its objects', () => {
     const parsed = parseManifest(raw(UPRIGHT, ['ghost']))
     expect(parsed.readingOrder).toEqual(['ghost'])
+  })
+})
+
+describe('the lines drawn between objects', () => {
+  function withEdges(edges: unknown): string {
+    return JSON.stringify({
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      readingOrder: ['a', 'b'],
+      readingEdges: edges,
+      layers: [UPRIGHT, { ...UPRIGHT, id: 'b' }],
+    })
+  }
+
+  // A page nobody has drawn on is the model's ordinary starting state, not a
+  // page missing something.
+  it('reads a page with no lines on it as a page with no lines on it', () => {
+    expect(parseManifest(raw(UPRIGHT)).readingEdges).toEqual([])
+  })
+
+  it('carries a line through', () => {
+    expect(parseManifest(withEdges([{ from: 'a', to: 'b' }])).readingEdges).toEqual([
+      { from: 'a', to: 'b' },
+    ])
+  })
+
+  it('refuses an object pointed at itself, which says nothing', () => {
+    expect(() => parseManifest(withEdges([{ from: 'a', to: 'a' }]))).toThrow(PageParseError)
+  })
+
+  it('refuses an end that names nothing', () => {
+    expect(() => parseManifest(withEdges([{ from: 'a', to: '' }]))).toThrow(PageParseError)
+    expect(() => parseManifest(withEdges([{ from: 'a' }]))).toThrow(PageParseError)
+    expect(() => parseManifest(withEdges(['a>b']))).toThrow(PageParseError)
+    expect(() => parseManifest(withEdges({ from: 'a', to: 'b' }))).toThrow(PageParseError)
+  })
+
+  it('keeps one line where a file names the same one twice', () => {
+    const twice = [
+      { from: 'a', to: 'b' },
+      { from: 'a', to: 'b' },
+    ]
+    expect(parseManifest(withEdges(twice)).readingEdges).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  // The order lines were drawn in says nothing, so two files meaning the same
+  // thing are written the same way — the rule a tag set already follows.
+  it('writes two spellings of the same lines identically', () => {
+    const one = parseManifest(
+      withEdges([
+        { from: 'b', to: 'a' },
+        { from: 'a', to: 'b' },
+      ]),
+    )
+    const other = parseManifest(
+      withEdges([
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ]),
+    )
+    expect(serializeManifest(one)).toBe(serializeManifest(other))
+  })
+
+  it('writes no lines key for a page with none', () => {
+    expect(JSON.parse(serializeManifest(manifestWith(textEntry())))).not.toHaveProperty(
+      'readingEdges',
+    )
+  })
+
+  // Structure only, as with the reading order: whether both ends name objects
+  // that are on the page is repair's question.
+  it('opens a page whose line names an object that is not there', () => {
+    expect(parseManifest(withEdges([{ from: 'a', to: 'ghost' }])).readingEdges).toEqual([
+      { from: 'a', to: 'ghost' },
+    ])
   })
 })

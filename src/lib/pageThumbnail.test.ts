@@ -14,6 +14,7 @@ function page(): ProjectFile {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
       readingOrder: ['a'],
+      readingEdges: [],
       layers: [
         {
           kind: 'text',

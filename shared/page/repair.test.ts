@@ -4,6 +4,7 @@ import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { repairPage } from './repair'
 import { validatePage } from './validate'
 import { textObjects } from './tree'
+import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string): TextLayerEntry {
@@ -36,8 +37,19 @@ function group(id: string, children: LayerEntry[]): GroupLayerEntry {
   }
 }
 
-function manifest(layers: LayerEntry[], readingOrder: string[]): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, layers }
+function manifest(
+  layers: LayerEntry[],
+  readingOrder: string[],
+  readingEdges: ReadingEdge[] = [],
+): ManifestJson {
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges, layers }
+}
+
+function edges(...pairs: string[]): ReadingEdge[] {
+  return pairs.map((pair) => {
+    const [from, to] = pair.split('>')
+    return { from, to }
+  })
 }
 
 /** Deterministic replacements, so a repaired id can be named in an assertion. */
@@ -110,5 +122,60 @@ describe('repairPage', () => {
     const broken = manifest([text('a'), text('b')], ['a', 'a'])
     repairPage(broken, counter())
     expect(broken.readingOrder).toEqual(['a', 'a'])
+  })
+})
+
+describe('repairing the lines drawn between objects', () => {
+  it('leaves sound lines exactly as they were', () => {
+    const page = manifest([text('a'), text('b')], ['a', 'b'], edges('a>b'))
+    const { manifest: fixed, repaired } = repairPage(page, counter())
+    expect(repaired).toEqual([])
+    expect(fixed.readingEdges).toEqual(edges('a>b'))
+  })
+
+  it('drops a line reaching for an object that is not on the page', () => {
+    const page = manifest([text('a'), text('b')], ['a', 'b'], edges('a>b', 'b>ghost'))
+    const { manifest: fixed, repaired } = repairPage(page, counter())
+    expect(repaired).toEqual([{ kind: 'reading-edge-dangling', id: 'b', to: 'ghost' }])
+    expect(fixed.readingEdges).toEqual(edges('a>b'))
+  })
+
+  /**
+   * A line resolves an id exactly as the reading order does. Making ids unique
+   * leaves the first entry holding the id and renames the ones behind it, so
+   * both land on the same object — a line that resolved somewhere the order
+   * did not would be a second answer to one question.
+   */
+  it('leaves a line on the entry that kept the id, as the reading order does', () => {
+    const page = manifest([text('a'), text('a'), text('b')], ['a', 'b'], edges('b>a'))
+    const { manifest: fixed, repaired } = repairPage(page, counter())
+    expect(repaired.some((d) => d.kind === 'duplicate-id')).toBe(true)
+    expect(fixed.readingEdges).toEqual(edges('b>a'))
+    expect(fixed.readingOrder).toContain('a')
+  })
+
+  it('opens the ring rather than refusing the page', () => {
+    const page = manifest([text('a'), text('b')], ['a', 'b'], edges('a>b', 'b>a'))
+    const { manifest: fixed, repaired } = repairPage(page, counter())
+    expect(repaired).toEqual([{ kind: 'reading-edge-cycle', id: 'b', to: 'a' }])
+    expect(fixed.readingEdges).toEqual(edges('a>b'))
+    expect(validatePage(fixed)).toEqual([])
+  })
+
+  it('leaves a page whose lines meet again untouched', () => {
+    const page = manifest(
+      [text('a'), text('b'), text('c'), text('d')],
+      ['a', 'b', 'c', 'd'],
+      edges('a>b', 'a>c', 'b>d', 'c>d'),
+    )
+    const { manifest: fixed, repaired } = repairPage(page, counter())
+    expect(repaired).toEqual([])
+    expect(fixed.readingEdges).toHaveLength(4)
+  })
+
+  it('leaves the page it was handed alone', () => {
+    const page = manifest([text('a')], ['a'], edges('a>ghost'))
+    repairPage(page, counter())
+    expect(page.readingEdges).toEqual(edges('a>ghost'))
   })
 })

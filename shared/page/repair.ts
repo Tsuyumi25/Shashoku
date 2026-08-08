@@ -1,5 +1,6 @@
 import type { LayerEntry, ManifestJson } from './types'
 import type { PageDefect } from './validate'
+import { siftReadingEdges } from './validate'
 import { generateId } from './schema'
 import { allEntries, textObjects } from './tree'
 
@@ -9,7 +10,8 @@ import { allEntries, textObjects } from './tree'
  * Order matters between them: ids are made unique first, because until they
  * are, "which object does this reading-order entry mean" has no answer. What
  * that rename leaves behind — an object nothing points at any more — is then
- * picked up by the same pass that catches an object nobody ever pointed at.
+ * picked up by the same pass that catches an object nobody ever pointed at,
+ * and by the one that catches a line reaching for it.
  */
 export function repairPage(
   manifest: ManifestJson,
@@ -62,8 +64,11 @@ export function repairPage(
     readingOrder.push(id)
   }
 
+  const lines = siftReadingEdges(manifest.readingEdges, textIdSet)
+  repaired.push(...lines.defects)
+
   return {
-    manifest: { ...manifest, readingOrder, layers },
+    manifest: { ...manifest, readingOrder, readingEdges: lines.kept, layers },
     repaired,
   }
 }

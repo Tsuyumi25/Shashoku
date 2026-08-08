@@ -10,6 +10,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
+import { normalizeEdges, type ReadingEdge } from './readingGraph'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
@@ -213,7 +214,35 @@ function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void
 }
 
 export function defaultManifest(): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder: [], layers: [] }
+  return {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision: 0,
+    readingOrder: [],
+    readingEdges: [],
+    layers: [],
+  }
+}
+
+/**
+ * An object pointed at itself is refused here rather than left to repair,
+ * unlike an end that names nothing: a self-reference cannot be a page whose
+ * parts have drifted apart, only a file describing something that has no
+ * meaning to have.
+ */
+function parseReadingEdges(v: unknown): ReadingEdge[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail('manifest.json.readingEdges 必須是陣列')
+  return normalizeEdges(
+    v.map((entry, i) => {
+      const at = `manifest.json.readingEdges[${i}]`
+      if (!isRecord(entry)) fail(`${at} 必須是物件`)
+      const { from, to } = entry
+      if (typeof from !== 'string' || from.length === 0) fail(`${at}.from 必須是非空字串`)
+      if (typeof to !== 'string' || to.length === 0) fail(`${at}.to 必須是非空字串`)
+      if (from === to) fail(`${at} 的兩端是同一個物件`)
+      return { from, to }
+    }),
+  )
 }
 
 /**
@@ -274,7 +303,14 @@ export function parseManifest(raw: string): ManifestJson {
   collectRasterFiles(layers, files)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, ...size, readingOrder, layers }
+  return {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision,
+    ...size,
+    readingOrder,
+    readingEdges: parseReadingEdges(data.readingEdges),
+    layers,
+  }
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
@@ -344,6 +380,7 @@ export function serializeManifest(m: ManifestJson): string {
     out.height = m.height
   }
   out.readingOrder = m.readingOrder
+  if (m.readingEdges.length > 0) out.readingEdges = normalizeEdges(m.readingEdges)
   out.layers = m.layers.map(serializeLayerEntry)
   return `${JSON.stringify(out, null, 2)}\n`
 }

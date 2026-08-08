@@ -1,5 +1,6 @@
 import type { ManifestJson } from './types'
 import { allEntries, textObjects } from './tree'
+import { wouldCycle, type ReadingEdge } from './readingGraph'
 
 /**
  * Each way a page can disagree with itself, named. Named one by one rather than
@@ -16,10 +17,49 @@ export type PageDefectKind =
   | 'reading-order-dangling'
   /** A text object the reading order never names. */
   | 'reading-order-missing'
+  /** A line with an end on something no text object on this page answers to. */
+  | 'reading-edge-dangling'
+  /** A line that closes a ring, which no reading of a page can mean. */
+  | 'reading-edge-cycle'
 
 export interface PageDefect {
   kind: PageDefectKind
   id: string
+  /** The far end, for a fault about a line. Absent for every other kind. */
+  to?: string
+}
+
+/**
+ * Which lines a page can keep, and what is wrong with the rest — the one place
+ * that decides, so the fault named here and the line dropped next door cannot
+ * come to disagree.
+ *
+ * An end naming nothing is judged first and the ring after, over the lines that
+ * survived: a chain held together by a line to an object that is not there was
+ * never a ring in the first place.
+ *
+ * Which line of a ring loses is decided by the order they arrive in, which the
+ * parser has already made canonical — so two copies of one broken file are
+ * mended the same way.
+ */
+export function siftReadingEdges(
+  edges: readonly ReadingEdge[],
+  textIds: ReadonlySet<string>,
+): { kept: ReadingEdge[]; defects: PageDefect[] } {
+  const kept: ReadingEdge[] = []
+  const defects: PageDefect[] = []
+  for (const edge of edges) {
+    if (!textIds.has(edge.from) || !textIds.has(edge.to)) {
+      defects.push({ kind: 'reading-edge-dangling', id: edge.from, to: edge.to })
+      continue
+    }
+    if (wouldCycle(kept, edge)) {
+      defects.push({ kind: 'reading-edge-cycle', id: edge.from, to: edge.to })
+      continue
+    }
+    kept.push(edge)
+  }
+  return { kept, defects }
 }
 
 /**
@@ -63,5 +103,7 @@ export function validatePage(manifest: ManifestJson): PageDefect[] {
     .filter((id) => !ordered.has(id))
     .map((id) => ({ kind: 'reading-order-missing', id }))
 
-  return [...duplicateIds, ...duplicates, ...dangling, ...missing]
+  const lines = siftReadingEdges(manifest.readingEdges, textIdSet).defects
+
+  return [...duplicateIds, ...duplicates, ...dangling, ...missing, ...lines]
 }
