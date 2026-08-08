@@ -1227,6 +1227,10 @@ export const useEditorStore = defineStore('editor', () => {
    * typeset can answer. What it costs is one undo — which is why the tags and
    * the styles are one command and not two.
    *
+   * What triggers it is the tag set changing, so an object already carrying the
+   * tag is left as it is: filling in the stragglers of a half-tagged selection
+   * would otherwise overwrite the ones that were already right.
+   *
    * Everything is derived from a sample read before anything is written, so a
    * batch lands the same way whatever order the objects come in, and no object
    * casts a vote in the meaning it is in the middle of joining.
@@ -1246,6 +1250,7 @@ export const useEditorStore = defineStore('editor', () => {
     const { tags: registry, seedStyle } = project.header
     const after = before.map((entry) => {
       const tags = adding ? withTag(entry.tags, tag) : withoutTag(entry.tags, tag)
+      if (sameTagSet(entry.tags, tags)) return entry
       return { ...entry, tags, style: deriveStyle(sample, tags, registry, seedStyle) }
     })
     const write = (states: typeof before) => {

@@ -1758,3 +1758,37 @@ describe('tagging a selection', () => {
     expect(project.labelById('001.png', 'new')!.style.fontFamily).toBe('Mincho')
   })
 })
+
+describe('tagging a partly tagged selection', () => {
+  function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
+    return { ...label(id), tags, style: { ...DEFAULT_TEXT_STYLE, ...style } }
+  }
+
+  /**
+   * The trigger is the tag set changing. An object the click did not reclassify
+   * had nothing happen to it, and restyling it would make a batch that fills in
+   * the stragglers overwrite the objects that were already right.
+   */
+  it('restyles only the objects whose meaning changed', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.files = [
+      pageOf(PAGE, [
+        styled('had', ['outside'], { fontFamily: 'Gothic' }),
+        styled('lacked', [], { fontFamily: 'Gothic' }),
+        ...Array.from({ length: 4 }, (_, i) =>
+          styled(`s${i}`, ['outside'], { fontFamily: 'Mincho' }),
+        ),
+      ]),
+    ]
+    project.addTag('outside')
+    editor.currentFilename = PAGE
+    editor.selectMany(['had', 'lacked'], false)
+
+    editor.cmdToggleTagOnSelection('outside')
+
+    expect(project.labelById(PAGE, 'had')!.style.fontFamily).toBe('Gothic')
+    expect(project.labelById(PAGE, 'lacked')!.style.fontFamily).toBe('Mincho')
+    expect(project.labelById(PAGE, 'lacked')!.tags).toEqual(['outside'])
+  })
+})
