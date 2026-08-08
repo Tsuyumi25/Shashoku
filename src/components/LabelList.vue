@@ -394,6 +394,11 @@ function onInput(row: LabelRow, e: Event) {
  * Selecting on the canvas has to bring the list to the object, or the two stop
  * being about the same thing. A row already on screen is left where it is,
  * which is what keeps clicking a row from scrolling under the pointer.
+ *
+ * It runs on arrival as well as on every move, because the list shares its
+ * column with the tree now and is built afresh each time it is switched back
+ * to — a list that only caught later moves would come back scrolled to the top
+ * with the cursor pages away.
  */
 watch(
   () => [editor.currentFilename, editor.cursorId] as const,
@@ -426,6 +431,7 @@ watch(
       focusIn(selector)
     }
   },
+  { immediate: true },
 )
 
 function orderedTags(tags: readonly string[]): string[] {

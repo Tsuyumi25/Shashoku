@@ -7,6 +7,7 @@ import {
   MIN_FONT_SAMPLE_PX,
   defaultPreferences,
   type MissingGlyphMode,
+  type SidePanel,
 } from '@shared/preferences/types'
 
 const PERSIST_DEBOUNCE_MS = 250
@@ -120,6 +121,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.markMissingGlyphs = on
   }
 
+  function setSidePanel(panel: SidePanel) {
+    prefs.sidePanel = panel
+  }
+
   return {
     prefs,
     hydrate,
@@ -137,5 +142,6 @@ export const usePreferencesStore = defineStore('preferences', () => {
     removeScanPoint,
     setMissingGlyphMode,
     setMarkMissingGlyphs,
+    setSidePanel,
   }
 })

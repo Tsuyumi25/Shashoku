@@ -10,6 +10,16 @@ export const MAX_FONT_SAMPLE_PX = 64;
  */
 export type MissingGlyphMode = "hide" | "tofu";
 
+/**
+ * Which of the two ways of listing a page the side column is showing: the tree,
+ * whose order is stacking, or the list, whose order is reading.
+ *
+ * They share one column because translating and typesetting are separate trips
+ * and their busy hours do not overlap — two columns of list took eighty percent
+ * of the canvas between them for no moment when both were being read.
+ */
+export type SidePanel = "layers" | "labels";
+
 export interface Preferences {
   /** Font families the user starred, in the order they were added. */
   fontFavorites: string[];
@@ -44,6 +54,13 @@ export interface Preferences {
    * owns both the keys and the serialized values; we only provide storage.
    */
   panelLayout: Record<string, string>;
+  /**
+   * Which panel that column was left on. Kept here rather than with the
+   * project because it is a property of how someone works, not of the chapter:
+   * a letterer who lives in the tree wants it there in every project, and
+   * re-picking it on each open would be the same click every time.
+   */
+  sidePanel: SidePanel;
 }
 
 /**
@@ -61,5 +78,7 @@ export function defaultPreferences(): Preferences {
     markMissingGlyphs: true,
     scanPoints: [],
     panelLayout: {},
+    // The reading, because a page is framed and typed before it is stacked.
+    sidePanel: "labels",
   };
 }

@@ -37,6 +37,7 @@ export function parsePreferences(raw: string): Preferences {
     markMissingGlyphs,
     scanPoints,
     panelLayout,
+    sidePanel,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
@@ -79,6 +80,9 @@ export function parsePreferences(raw: string): Preferences {
       if (typeof value === "string") prefs.panelLayout[key] = value;
     }
   }
+  if (sidePanel === "layers" || sidePanel === "labels") {
+    prefs.sidePanel = sidePanel;
+  }
   return prefs;
 }
 
@@ -94,6 +98,7 @@ export function serializePreferences(prefs: Preferences): string {
       markMissingGlyphs: prefs.markMissingGlyphs,
       scanPoints: prefs.scanPoints,
       panelLayout: prefs.panelLayout,
+      sidePanel: prefs.sidePanel,
     },
     null,
     2,

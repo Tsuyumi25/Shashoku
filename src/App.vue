@@ -221,21 +221,15 @@ useEventListener(window, 'keydown', (e) => {
   if (ownsKeyboard(document.activeElement)) return
 
   /**
-   * Both lists are on screen at once, so which one the arrows walk is decided
-   * by what the cursor is standing on rather than by which panel is up. Landing
-   * on a raster layer or a folder means the tree is what is being worked, and
-   * anything else — a text object, or nothing selected yet — means the
-   * translations are.
-   *
-   * A text object is in both lists, so one reached through the tree still hands
-   * the arrows to the label list. That is the right way round: the tree's order
-   * is stacking and the list's is reading order, and stepping through
-   * translations is what stepping through text is for.
+   * Which list the arrows walk is whichever one is on screen. They used to be
+   * dispatched by what the cursor was standing on, because both lists were up
+   * at once and there was nothing else to go by — which left the case where an
+   * object picked in the tree handed the arrows to the other panel. One list at
+   * a time makes the question answerable, and that case disappears with it.
    */
   const byRow = (offset: number) => {
     e.preventDefault()
-    const under = editor.cursorId ? project.entryById(editor.cursorId) : undefined
-    if (under && under.kind !== 'text') editor.selectLayerBy(offset)
+    if (preferences.prefs.sidePanel === 'layers') editor.selectLayerBy(offset)
     else editor.selectLabelBy(offset)
   }
 
