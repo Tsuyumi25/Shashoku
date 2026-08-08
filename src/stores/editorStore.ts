@@ -278,14 +278,6 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const foreground = ref('#000000')
 
-  /**
-   * Whether the canvas says what its objects mean — tag colours and names on
-   * top of the picture. Off by default: the page is the thing being judged, and
-   * an editor that always draws its own bookkeeping over it answers a question
-   * nobody asked while typesetting.
-   */
-  const showTags = ref(false)
-  
   const fontSize = ref(14)
 
   function adjustFontSize(delta: number) {
@@ -1393,7 +1385,6 @@ export const useEditorStore = defineStore('editor', () => {
     tool,
     setTool,
     foreground,
-    showTags,
     fontSize,
     adjustFontSize,
     view,

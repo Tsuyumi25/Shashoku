@@ -2,10 +2,7 @@
   <div
     ref="boxEl"
     class="absolute"
-    :class="[
-      frameClass,
-      locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab',
-    ]"
+    :class="[locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab']"
     :style="boxStyle"
     :title="title || undefined"
     @pointerenter="hovered = true"
@@ -15,7 +12,7 @@
     @pointerup="onUp"
     @pointercancel="onUp"
   >
-    <slot :counter-turn="-turn" />
+    <slot :counter-turn="-turn" :hovered="hovered" />
 
     <template v-if="handles && selected && !locked">
       <div
@@ -107,6 +104,22 @@ const props = defineProps<{
    * pulled before anything else.
    */
   handles: boolean
+  /**
+   * A colour for the outline, or nothing to leave it drawing in `primary`.
+   *
+   * Which state a frame is in is told by its thickness and by nothing else, so
+   * colour was a channel standing empty — which is what lets an object say what
+   * it means here without taking the signal that says it is selected.
+   *
+   * ⚠️ The cost is that being selected is now told by one pixel of thickness
+   * alone, and one pixel is harder to compare once no two frames share a colour.
+   */
+  accent?: string
+  /**
+   * Keep the outline drawn whether or not the pointer is here — for an object
+   * that would otherwise be findable only by hunting for it.
+   */
+  standing?: boolean
   title?: string
 }>()
 
@@ -148,20 +161,41 @@ const boxEl = useTemplateRef<HTMLElement>('boxEl')
  * A selected object wears a heavier line than one merely under the pointer:
  * hovering says something is here, selection says this is what a key will act on.
  */
-const frameClass = computed(() => {
-  if (props.selected || props.inSelection) return 'outline-2 outline-primary'
-  if (hovered.value || dragging.value) return 'outline-1 outline-primary'
-  return ''
+/**
+ * How heavy the outline is, in screen pixels. Nothing means no outline at all.
+ *
+ * Two states and one channel: hovering says something is here, being in the
+ * selection says this is what a key will act on. Colour is left to say what the
+ * object means, which is the whole reason it was free to take.
+ */
+const outlineWidth = computed(() => {
+  if (props.selected || props.inSelection) return 2
+  if (hovered.value || dragging.value || props.standing) return 1
+  return 0
 })
 
 const turn = computed(() => props.viewRotate + props.rotation)
 
+/**
+ * The outline is written out here rather than composed from utility classes.
+ * Its colour comes from the project and its width from this component's own
+ * state, so half of it could never have been a class anyway — and a rule split
+ * between a stylesheet and an inline value is a rule with two places to be
+ * wrong.
+ */
 const boxStyle = computed(() => ({
   left: `${props.box.centerX}px`,
   top: `${props.box.centerY}px`,
   width: `${props.box.width}px`,
   height: `${props.box.height}px`,
   transform: `translate(-50%, -50%) rotate(${turn.value}rad)`,
+  // Always solid; a width of zero is what makes it absent, so there is one
+  // number deciding whether the outline is there and how heavy it is.
+  outlineStyle: 'solid' as const,
+  outlineWidth: `${outlineWidth.value}px`,
+  // An object no registered tag speaks for draws in the ordinary colour, which
+  // is what "nobody has said what this is" looks like.
+  outlineColor: props.accent ?? 'var(--primary)',
 }))
 
 interface Corner {

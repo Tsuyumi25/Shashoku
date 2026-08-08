@@ -7,6 +7,8 @@
     :in-selection="inSelection"
     :locked="locked"
     :handles="true"
+    :accent="accent"
+    :standing="untyped"
     :title="substitution"
     @select="emit('select', $event)"
     @drag-start="onDragStart"
@@ -19,20 +21,16 @@
     @rotate="onRotate"
     @rotate-end="onRotateEnd"
   >
-    <template #default="{ counterTurn }">
+    <template #default="{ counterTurn, hovered }">
       <div
-        class="absolute flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold text-white shadow-md ring-1 ring-black/40 select-none"
-        :style="markerStyle(counterTurn)"
-      >
-        {{ index }}
-      </div>
-
-      <div
-        v-if="tagCaption"
-        class="absolute max-w-40 truncate rounded bg-black/70 px-1 py-px text-[10px] leading-tight text-white select-none"
+        v-if="tags.length > 0 && (hovered || inSelection)"
+        class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[10px] leading-tight whitespace-nowrap text-white select-none"
         :style="captionStyle(counterTurn)"
       >
-        {{ tagCaption }}
+        <span v-for="tag in tags" :key="tag.name" class="flex items-center gap-1">
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />
+          {{ tag.name }}
+        </span>
       </div>
     </template>
   </ObjectFrame>
@@ -72,7 +70,6 @@ import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
  * empty label reachable instead of invisible.
  */
 const props = defineProps<{
-  index: number
   text: string
   /** The object's own complete style. */
   textStyle: TextStyle
@@ -81,15 +78,33 @@ const props = defineProps<{
   y: number
   /** The object's own turn on the page, in radians. */
   rotation: number
-  /** The colour of whichever known tag sits highest, worn by the number badge. */
-  color: string
   /**
-   * What the object is, spelled out over the page. Empty unless the workspace
-   * has been asked to show semantics — the page is the thing being judged, and
-   * an editor that always draws its own bookkeeping over it answers a question
-   * nobody asked while typesetting.
+   * The colour of whichever registered tag sits highest, worn by the frame.
+   * Nothing for an object no registered tag speaks for, which leaves the frame
+   * drawing in `primary` — not being coloured is what "nobody has said what
+   * this is" looks like.
    */
-  tagCaption?: string
+  accent?: string
+  /**
+   * What the object is, one tag to a line, shown while the pointer is here or
+   * while this is in the selection.
+   *
+   * Every member of the selection and not only the cursor: a selection is a set
+   * of objects being asked about together, and answering for one of them is not
+   * an answer. ⚠️ The cost lands on a batch pass over the whole chapter, where
+   * every object caught wears its own caption at once.
+   *
+   * It comes and goes with the frame's own outline rather than waiting out a
+   * dwell: the outline is the signal that says the pointer found something, and
+   * a caption that arrives after it reads as the interface lagging.
+   *
+   * One line each rather than a row that truncates: three tags or one long name
+   * is not an unusual object, and a name cut off mid-word says less than no
+   * name at all. It is the frame colours that a page is read at a glance from;
+   * this is for reading one object properly, which is why it is never on more
+   * than the two objects the hand is pointing at.
+   */
+  tags: { name: string; color: string }[]
   natural: { w: number; h: number }
   view: ViewTransform
   selected: boolean
@@ -246,39 +261,50 @@ function onRotateEnd() {
 }
 
 /**
- * How far outside the top left corner the number sits, on each axis. Out along
- * the diagonal rather than straight out to the side: the diagonal buys the same
- * clearance from that corner's scale handle for less distance from the object,
- * and on a wide frame a badge level with the top edge reads as floating beside
- * the object rather than belonging to that corner. Sharing the corner with the
- * handle is not an option — the handle would take the digit's clicks and start
- * a resize.
+ * An object with nothing typed in it yet keeps its frame without being pointed
+ * at. Having a frame at all is what makes an empty object reachable, but
+ * reachable is not visible — after framing a page of bubbles, the way to check
+ * for a missed one has to be looking rather than hunting with the pointer.
+ *
+ * It clears itself as the work is done: the frames go one by one as the lines
+ * are typed, so the clutter only exists while it is the thing being looked for.
  */
-const MARKER_CORNER_OFFSET_PX = 16
+const untyped = computed(() => props.text.length === 0)
 
 /**
- * Placed off the frame's corner rather than on the anchor, which is where a
- * numbered badge stops covering the text it belongs to. The offset is applied
- * in the frame's own axes, so the badge orbits with the page and the object;
- * the turn is then undone in place so the number stays readable however either
- * is lying. No scale is undone because the frame is already sized in screen
- * pixels.
+ * How far outside the top left corner the caption sits, on each axis. Out along
+ * the diagonal rather than straight out to the side: the diagonal buys the same
+ * clearance from that corner's scale handle for less distance from the object,
+ * and on a wide frame something level with the top edge reads as floating
+ * beside the object rather than belonging to that corner.
+ */
+const CAPTION_CORNER_OFFSET_PX = 16
+
+/**
+ * Anchored outside the top left corner, growing downward, never flipping to the
+ * other side.
+ *
+ * Growing down is what pins the first line: the tags arrive in the order the
+ * project set, so the one that matters most is always in the same place.
+ * Centring the block would read better and put that line somewhere new for
+ * every object.
+ *
+ * The offset is applied in the frame's own axes, so the caption orbits with the
+ * page and the object; the turn is undone in place so the words stay upright
+ * however either is lying. No scale is undone because the frame is already
+ * sized in screen pixels. Turned about its own top edge rather than its middle,
+ * so where the first line lands does not move as the block grows a line.
+ *
+ * Nothing here adapts to an edge. An object can stand off the page and still
+ * draw, so the page's border is not a wall; the window's is, and a scroll now
+ * and then is cheaper than the logic for flipping sides.
  */
 function captionStyle(counterTurn: number) {
   return {
     left: '0px',
     top: '0px',
-    transform: `translate(calc(-50% - ${MARKER_CORNER_OFFSET_PX}px), calc(${MARKER_CORNER_OFFSET_PX}px)) rotate(${counterTurn}rad)`,
-  }
-}
-
-function markerStyle(counterTurn: number) {
-  const out = `-50% - ${MARKER_CORNER_OFFSET_PX}px`
-  return {
-    left: '0px',
-    top: '0px',
-    transform: `translate(calc(${out}), calc(${out})) rotate(${counterTurn}rad)`,
-    backgroundColor: props.color,
+    transform: `translate(calc(-50% - ${CAPTION_CORNER_OFFSET_PX}px), calc(${CAPTION_CORNER_OFFSET_PX}px)) rotate(${counterTurn}rad)`,
+    transformOrigin: 'top center',
   }
 }
 </script>

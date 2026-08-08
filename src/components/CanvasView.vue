@@ -59,19 +59,18 @@
           v-for="object in objects"
           :key="object.id"
           :class="[!gestureArmed && !selecting && 'pointer-events-auto']"
-          :index="object.index"
           :text="object.text"
           :text-style="object.style"
           :x="object.x"
           :y="object.y"
           :rotation="object.rotation"
-          :color="object.color"
+          :accent="object.accent"
+          :tags="object.tags"
           :natural="editor.viewContentSize"
           :view="view"
           :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
           :locked="object.locked"
-          :tag-caption="object.caption"
           @select="onSelectObject(object.id, $event)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -151,7 +150,7 @@ import {
   resetRotationDirection,
   trackRotationDirection,
 } from '@/lib/rotateDirection'
-import { primaryTag, tagsInRegistryOrder, UNKNOWN_TAG_COLOR } from '@shared/tags/set'
+import { primaryTag, tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   isSelectionTool,
   maskBrushModeOf,
@@ -215,27 +214,21 @@ function previewedStyle(id: string, style: TextStyle): TextStyle {
 const objects = computed(() => {
   const file = currentFile.value
   if (!file) return []
-  const numbering = new Map(file.page.readingOrder.map((id, i) => [id, i + 1]))
   return stackedTextNodes(stack.value).map(({ entry: label }) => ({
     id: label.id,
-    index: numbering.get(label.id) ?? 0,
     locked: isLocked(file.page.layers, label.id),
     text: textOf(label),
     x: label.x,
     y: label.y,
     rotation: label.rotation,
-    color: colorOf(label.tags),
+    accent: accentOf(label.tags),
     style: previewedStyle(label.id, label.style),
-    caption: showingTags.value ? tagsInRegistryOrder(label.tags, project.header.tags).join('、') : '',
+    tags: tagsInRegistryOrder(label.tags, project.header.tags).map((name) => ({
+      name,
+      color: tagColor(name, project.header.tags),
+    })),
   }))
 })
-
-/**
- * Semantics are drawn over the page only under the tool whose subject they
- * are. Off any other tool the page is what is being judged, and bookkeeping
- * painted over it answers a question nobody asked.
- */
-const showingTags = computed(() => editor.showTags && editor.tool === 'select-text')
 
 /**
  * The raster layers wearing a frame, which is only the ones selected.
@@ -361,9 +354,14 @@ function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) 
   editor.cmdRotateLabel(editor.currentFilename, labelId, from, to)
 }
 
-/** Whichever known tag sits highest in the project's order decides the marker. */
-function colorOf(tags: readonly string[]): string {
-  return primaryTag(tags, project.header.tags)?.color ?? UNKNOWN_TAG_COLOR
+/**
+ * Whichever registered tag sits highest in the project's order decides the
+ * frame's colour. Nothing for an object no registered tag speaks for — the
+ * frame then draws in `primary`, and drawing in the ordinary colour is what
+ * "nobody has said what this is" looks like.
+ */
+function accentOf(tags: readonly string[]): string | undefined {
+  return primaryTag(tags, project.header.tags)?.color
 }
 
 const containerRef = useTemplateRef('containerRef')
