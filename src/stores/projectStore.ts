@@ -27,6 +27,14 @@ import {
   type DropTarget,
 } from '@shared/page/tree'
 import { linesOf } from '@shared/page/text'
+import {
+  edgesTouching,
+  hasEdge,
+  normalizeEdges,
+  withoutEdges,
+  wouldCycle,
+  type ReadingEdge,
+} from '@shared/page/readingGraph'
 import { previewImport, type ImportDiff } from '@shared/project/import'
 import { parentFolder } from '@shared/project/library'
 import { assertDistinctFolders } from '@shared/export/profile'
@@ -38,13 +46,19 @@ import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
 
 /**
- * Where a text object sits, in both senses at once: its place in the tree,
- * which is stacking order, and its place in the reading order. Undo has to put
- * a deleted object back into both, and neither can be worked out from the other.
+ * Where a text object sits, in every sense at once: its place in the tree,
+ * which is stacking order, its place in the reading order, and the lines drawn
+ * to and from it. Undo has to put a deleted object back into all three, and
+ * none of them can be worked out from the others.
+ *
+ * The lines ride along rather than being left for `repair` to sweep. A sweep
+ * happens at the next open, so leaving them would make the undo look right
+ * today and lose the lines tomorrow.
  */
 export interface LabelPlace {
   path: number[]
   orderIndex: number
+  edges: ReadingEdge[]
 }
 
 
@@ -61,6 +75,8 @@ export interface RemovedEntry {
   path: number[]
   entry: LayerEntry
   order: Array<{ id: string; index: number }>
+  /** Every line with an end on anything the removal carried away. */
+  edges: ReadingEdge[]
 }
 
 
@@ -289,15 +305,21 @@ export const useProjectStore = defineStore('project', () => {
   function addLabel(filename: string, label: TextLayerEntry, at?: LabelPlace) {
     const file = fileByName(filename)
     if (!file) return
-    const place = at ?? {
+    const place: LabelPlace = at ?? {
       path: [file.page.layers.length],
       orderIndex: file.page.readingOrder.length,
+      // A new object is nowhere in the reading yet. Lines only arrive here on
+      // the way back from a delete, carried by the place that delete recorded.
+      edges: [],
     }
     // The tree can have changed shape since the place was taken — a folder the
     // path went through may be gone. Landing on top beats losing the object.
     if (!insertAtPath(file.page.layers, place.path, label)) file.page.layers.push(label)
     const orderIndex = Math.min(Math.max(place.orderIndex, 0), file.page.readingOrder.length)
     file.page.readingOrder.splice(orderIndex, 0, label.id)
+    // The object is back before its lines are, so nothing put back here is ever
+    // a line to somewhere that is not on the page.
+    file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...place.edges])
     markPageDirty(filename)
   }
 
@@ -309,8 +331,10 @@ export const useProjectStore = defineStore('project', () => {
     const found = file.page.readingOrder.indexOf(labelId)
     const orderIndex = found === -1 ? file.page.readingOrder.length : found
     if (found !== -1) file.page.readingOrder.splice(found, 1)
+    const edges = edgesTouching(file.page.readingEdges, new Set([labelId]))
+    file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
     markPageDirty(filename)
-    return { path, orderIndex }
+    return { path, orderIndex, edges }
   }
 
   /**
@@ -448,6 +472,43 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(filename)
   }
 
+  function readingEdgesOf(filename: string): readonly ReadingEdge[] {
+    return fileByName(filename)?.page.readingEdges ?? []
+  }
+
+  /**
+   * Draws lines and answers with the ones it took, which is what undo has to
+   * rub out — a gesture that repeats a line already on the page must not take
+   * that line away when it is taken back.
+   *
+   * Judged one at a time against what is held so far, so a gesture cannot close
+   * a ring against its own earlier link either. The canvas asks the same
+   * question while the pointer is still down and draws a target it would refuse
+   * as refused, so reaching this refusal means something got past that.
+   */
+  function addReadingEdges(filename: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
+    const file = fileByName(filename)
+    if (!file) return []
+    const taken: ReadingEdge[] = []
+    for (const edge of edges) {
+      const held = file.page.readingEdges
+      if (hasEdge(held, edge) || wouldCycle(held, edge)) continue
+      file.page.readingEdges = normalizeEdges([...held, edge])
+      taken.push(edge)
+    }
+    if (taken.length > 0) markPageDirty(filename)
+    return taken
+  }
+
+  function removeReadingEdges(filename: string, edges: readonly ReadingEdge[]): void {
+    const file = fileByName(filename)
+    if (!file || edges.length === 0) return
+    const left = withoutEdges(file.page.readingEdges, edges)
+    if (left.length === file.page.readingEdges.length) return
+    file.page.readingEdges = left
+    markPageDirty(filename)
+  }
+
   /** On top of everything, which is where an object arriving on a page belongs. */
   function appendEntry(filename: string, entry: LayerEntry) {
     const file = fileByName(filename)
@@ -485,8 +546,10 @@ export const useProjectStore = defineStore('project', () => {
         if (carried.has(orderedId)) order.push({ id: orderedId, index })
       })
       file.page.readingOrder = file.page.readingOrder.filter((o) => !carried.has(o))
+      const edges = edgesTouching(file.page.readingEdges, carried)
+      file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
       markPageDirty(file.filename)
-      return { filename: file.filename, path, entry, order }
+      return { filename: file.filename, path, entry, order, edges }
     }
     return null
   }
@@ -505,6 +568,7 @@ export const useProjectStore = defineStore('project', () => {
     for (const { id, index } of removed.order) {
       file.page.readingOrder.splice(Math.min(index, file.page.readingOrder.length), 0, id)
     }
+    file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...removed.edges])
     markPageDirty(removed.filename)
   }
 
@@ -749,6 +813,9 @@ export const useProjectStore = defineStore('project', () => {
     entryById,
     pageOfEntry,
     setReadingOrder,
+    readingEdgesOf,
+    addReadingEdges,
+    removeReadingEdges,
     appendEntry,
     removeEntry,
     restoreEntry,

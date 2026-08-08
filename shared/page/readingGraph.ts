@@ -49,6 +49,15 @@ export function hasEdge(edges: readonly ReadingEdge[], edge: ReadingEdge): boole
   return edges.some((e) => e.from === edge.from && e.to === edge.to)
 }
 
+/** What is left after rubbing some lines out. A line not there is not a fault. */
+export function withoutEdges(
+  edges: readonly ReadingEdge[],
+  rubbedOut: readonly ReadingEdge[],
+): ReadingEdge[] {
+  const gone = new Set(rubbedOut.map(edgeKey))
+  return edges.filter((edge) => !gone.has(edgeKey(edge)))
+}
+
 function successors(edges: readonly ReadingEdge[]): Map<string, string[]> {
   const out = new Map<string, string[]>()
   for (const edge of edges) {

@@ -13,6 +13,7 @@ import { screenToPagePx } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
 import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
@@ -1266,6 +1267,47 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  /**
+   * A gesture's worth of lines, however many it drew — connecting five objects
+   * in one sweep is one thing that happened, and five entries to undo would say
+   * it was five.
+   *
+   * Applied first, like a restack: the lines a page refuses — a ring, or one
+   * already drawn — must not reach the stack as an entry that undoes to
+   * nothing. What is recorded is what the page actually took, so taking the
+   * gesture back cannot rub out a line that was there before it.
+   */
+  function cmdDrawReadingEdges(filename: string, edges: readonly ReadingEdge[]) {
+    const project = useProjectStore()
+    // Where an object is read is one of the things a lock is put on to hold
+    // still, and a line is a statement about exactly that.
+    const allowed = edges.filter((e) => !isLayerLocked(e.from) && !isLayerLocked(e.to))
+    const taken = project.addReadingEdges(filename, allowed)
+    if (taken.length === 0) return
+    pushCommand(
+      {
+        label: `draw-reading-edges ${taken.length}`,
+        do: () => project.addReadingEdges(filename, taken),
+        undo: () => project.removeReadingEdges(filename, taken),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  function cmdEraseReadingEdges(filename: string, edges: readonly ReadingEdge[]) {
+    const project = useProjectStore()
+    const held = project.readingEdgesOf(filename)
+    const going = edges.filter(
+      (e) => hasEdge(held, e) && !isLayerLocked(e.from) && !isLayerLocked(e.to),
+    )
+    if (going.length === 0) return
+    pushCommand({
+      label: `erase-reading-edges ${going.length}`,
+      do: () => project.removeReadingEdges(filename, going),
+      undo: () => project.addReadingEdges(filename, going),
+    })
+  }
+
   function cmdSetLabelTags(filename: string, labelId: string, from: string[], to: string[]) {
     if (sameTagSet(from, to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
@@ -1406,6 +1448,8 @@ export const useEditorStore = defineStore('editor', () => {
     batchScope,
     cmdApplyStyleToSelection,
     cmdToggleTagOnSelection,
+    cmdDrawReadingEdges,
+    cmdEraseReadingEdges,
     cmdSetLabelTags,
     cmdAddTag,
     cmdRemoveTag,

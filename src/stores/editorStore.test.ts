@@ -1803,3 +1803,140 @@ describe('tagging a partly tagged selection', () => {
     expect(project.labelById(PAGE, 'lacked')!.tags).toEqual(['outside'])
   })
 })
+
+describe('drawing lines between text objects', () => {
+  const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
+    project.fileByName(PAGE)?.page.readingEdges ?? []
+
+  it('draws a line and takes it back in one step', () => {
+    const { project, editor } = openOnePage([label('a'), label('b')])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+    editor.undo()
+    expect(edgesOf(project)).toEqual([])
+    editor.redo()
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  /**
+   * The whole point of chaining: connecting five objects in one gesture is one
+   * thing that happened, so Ctrl+Z takes back the chain and not its last link.
+   */
+  it('puts a chain drawn in one gesture on the stack as one entry', () => {
+    const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
+    editor.cmdDrawReadingEdges(PAGE, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ])
+    expect(edgesOf(project)).toHaveLength(2)
+    editor.undo()
+    expect(edgesOf(project)).toEqual([])
+  })
+
+  it('refuses the line that would close a ring', () => {
+    const { project, editor } = openOnePage([label('a'), label('b')])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'b', to: 'a' }])
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  it('refuses a ring the gesture would have closed against its own earlier link', () => {
+    const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
+    editor.cmdDrawReadingEdges(PAGE, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+      { from: 'c', to: 'a' },
+    ])
+    expect(edgesOf(project)).toHaveLength(2)
+  })
+
+  /**
+   * Taking back a gesture must not take back a line that was already there —
+   * undo puts the page back as it was, and it was holding that one.
+   */
+  it('leaves a line already drawn alone when a gesture that repeats it is undone', () => {
+    const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.cmdDrawReadingEdges(PAGE, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ])
+    editor.undo()
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  it('leaves nothing on the stack for a gesture that drew nothing', () => {
+    const { editor } = openOnePage([label('a'), label('b')])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'a' }])
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('rubs a line out and puts it back', () => {
+    const { project, editor } = openOnePage([label('a'), label('b')])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.cmdEraseReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    expect(edgesOf(project)).toEqual([])
+    editor.undo()
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  /**
+   * Deleting an object takes its lines with it, and one undo brings both back.
+   * Leaving the lines behind would hand a batch of ends pointing at nothing to
+   * `repair`, which drops them at the next open — so the undo would look like
+   * it worked and the lines would be gone the next morning.
+   */
+  it('takes the lines on a deleted object with it, and gives them back', () => {
+    const { project, editor } = openOnePage([label('a'), label('b'), label('c')])
+    editor.cmdDrawReadingEdges(PAGE, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ])
+    editor.selectOnly('b')
+    editor.deleteSelection()
+    expect(edgesOf(project)).toEqual([])
+    editor.undo()
+    expect(edgesOf(project)).toEqual([
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ])
+  })
+
+  it('takes the lines inside a deleted folder with it', () => {
+    const a = label('a')
+    const b = label('b')
+    const { project, editor } = openOnePage([])
+    const file = project.fileByName(PAGE)
+    if (!file) throw new Error('page missing')
+    file.page.layers = [
+      {
+        kind: 'group',
+        id: 'g',
+        name: '對白',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: PASS_THROUGH,
+        children: [a, b],
+      },
+    ]
+    file.page.readingOrder = ['a', 'b']
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.selectOnly('g')
+    editor.deleteSelection()
+    expect(edgesOf(project)).toEqual([])
+    editor.undo()
+    expect(edgesOf(project)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  it('takes the lines on an object with it when its creation is undone', () => {
+    const { project, editor } = openOnePage([label('a')])
+    editor.cmdAddLabel(PAGE, label('b'))
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.undo()
+    editor.undo()
+    expect(edgesOf(project)).toEqual([])
+    editor.redo()
+    expect(project.labelsOf(PAGE).map((l) => l.id)).toEqual(['a', 'b'])
+  })
+})
