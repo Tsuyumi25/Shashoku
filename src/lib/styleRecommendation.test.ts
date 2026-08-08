@@ -207,6 +207,24 @@ describe('recommendStyle', () => {
     ])
   })
 
+  /**
+   * The row the reader is choosing from cannot move while they choose. Nothing
+   * narrows the font row, so which font is in use changes what is under it and
+   * never the order of it.
+   */
+  it('leaves the font row in the same order whichever font is in use', () => {
+    const objects = [
+      ...copies(9, ['outside'], { fontFamily: 'Gothic' }),
+      ...copies(2, ['outside'], { fontFamily: 'Mincho' }),
+    ]
+    const fontRow = (inUse: string) =>
+      rowFor(recommendStyle(objects, ['outside'], REGISTRY, inUse), 'fontFamily').candidates
+
+    expect(fontRow('Mincho')).toEqual(fontRow('Gothic'))
+    expect(fontRow('Mincho')).toEqual(fontRow(''))
+    expect(fontRow('Mincho').map((c) => c.patch.fontFamily)).toEqual(['Gothic', 'Mincho'])
+  })
+
   it('does not narrow anything while no family has been chosen', () => {
     const objects = [
       ...copies(9, ['outside'], { fontFamily: 'Gothic', color: '#ffffff' }),

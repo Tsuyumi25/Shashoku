@@ -61,13 +61,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/text-style/batch'
 import { sameTagSet, tagColor, tagsInRegistryOrder } from '@shared/tags/set'
-import { bucketObjectsOf } from '@/lib/valueBuckets'
+import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import {
   recommendStyle,
   type StyleCandidate,
@@ -111,18 +111,63 @@ const fontFamily = computed(() => {
   return shared.kind === 'one' ? shared.value : ''
 })
 
-const chapterObjects = computed(() =>
-  project.files.flatMap((file) => bucketObjectsOf(file.filename, file.page.layers)),
+/**
+ * When the sample is taken again: the selection changed, or what it means did.
+ * Deliberately not when a style changed.
+ *
+ * An object votes in the statistics it is being shown, so counting live would
+ * move the candidate out from under the cursor the moment it was clicked — the
+ * value just applied joins a different bucket, and a batch of forty turns the
+ * row over completely. Holding the sample still means only the mark moves.
+ *
+ * It is also what keeps drift readable. Counted live, a colour applied to forty
+ * objects becomes the largest bucket and takes the head of its row, so the panel
+ * would confirm whatever was just done instead of showing it as a departure from
+ * the kind — which is the one thing this panel is here to make visible.
+ *
+ * The meaning changing must retake it: tagging writes a style, and the head of
+ * every row is only that style because the object is counted holding it.
+ */
+const sampleKey = computed(() => {
+  if (tagState.value.kind !== 'one') return ''
+  const ids = targets.value.map((t) => t.label.id).sort()
+  return JSON.stringify([tagState.value.value, ids])
+})
+
+/**
+ * Styles copied rather than referenced — `bucketObjectsOf` hands back the
+ * labels' own style objects, so holding the array alone would go on watching
+ * the very edits this is here to sit still through.
+ */
+const sample = shallowRef<BucketObject[]>([])
+
+watch(
+  sampleKey,
+  () => {
+    sample.value = project.files.flatMap((file) =>
+      bucketObjectsOf(file.filename, file.page.layers).map((object) => ({
+        ...object,
+        tags: [...object.tags],
+        style: { ...object.style },
+      })),
+    )
+  },
+  { immediate: true },
 )
 
+/**
+ * The family is read live while the sample is not, so choosing a font renarrows
+ * every row below it — that is what the narrowing is for — without disturbing
+ * the font row, which nothing narrows.
+ *
+ * ⚠️ One edge: a font set from the picker that no object in the sample uses
+ * narrows the rows below to nothing until the selection moves. "沒有樣本" is
+ * true when it says that, but it costs the guarantee that the panel can never
+ * be empty, which used to hold because an object always matched its own filter.
+ */
 const rows = computed<StyleRow[]>(() => {
   if (tagState.value.kind !== 'one') return []
-  return recommendStyle(
-    chapterObjects.value,
-    tagState.value.value,
-    project.header.tags,
-    fontFamily.value,
-  )
+  return recommendStyle(sample.value, tagState.value.value, project.header.tags, fontFamily.value)
 })
 
 /**
