@@ -77,3 +77,22 @@ export function obbIntersectsRect(box: Obb, rect: Rect): boolean {
   ]
   return axes.every((axis) => overlapsOn(axis, a, b))
 }
+
+/**
+ * Whether a turned frame holds a point — what says which object a click on the
+ * page landed on.
+ *
+ * Measured in the frame's own axes rather than against its upright bounds: a
+ * long object lying at 45° has bounds far larger than the object, and a click
+ * near one of those corners would land on something it never touched.
+ */
+export function obbHoldsPoint(box: Obb, p: Point): boolean {
+  const cos = Math.cos(box.rotation)
+  const sin = Math.sin(box.rotation)
+  const dx = p.x - box.center.x
+  const dy = p.y - box.center.y
+  // The inverse turn, written out rather than negating the angle, so this and
+  // `cornersOf` above read as one another's opposite.
+  const local = { x: dx * cos + dy * sin, y: -dx * sin + dy * cos }
+  return Math.abs(local.x) <= box.w / 2 && Math.abs(local.y) <= box.h / 2
+}

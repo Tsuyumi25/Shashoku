@@ -6,9 +6,9 @@
     :selected="selected"
     :in-selection="inSelection"
     :locked="locked"
-    :handles="true"
+    :handles="handles ?? true"
     :accent="accent"
-    :standing="untyped"
+    :standing="framed || untyped"
     :title="substitution"
     @select="emit('select', $event)"
     @drag-start="onDragStart"
@@ -85,6 +85,19 @@ const props = defineProps<{
    * this is" looks like.
    */
   accent?: string
+  /**
+   * Draw the frame whether or not the pointer is here — for a tool whose whole
+   * subject is the objects and what runs between them. Reading a page's
+   * structure means seeing every object at once, and one that appears under the
+   * pointer can only be found by hunting for it.
+   */
+  framed?: boolean
+  /**
+   * Whether to offer the corner and rotation handles. Off under a tool that
+   * takes no pointer on the objects, since a handle drawn but carrying nothing
+   * out is an interface that lies.
+   */
+  handles?: boolean
   /**
    * What the object is, one tag to a line, shown while the pointer is here or
    * while this is in the selection.

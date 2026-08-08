@@ -8,7 +8,7 @@
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
-    @pointerleave="cursorPos = null"
+    @pointerleave="onPointerLeave"
     @dblclick="selectionTool.onDoubleClick()"
     @contextmenu.prevent
   >
@@ -38,11 +38,59 @@
         />
       </div>
 
+      <!--
+        The lines, under the frames rather than over them: a frame is what says
+        an object is there, and a line drawn across one would be covering the
+        thing it points at. It takes no pointer of its own — which line a click
+        landed on is worked out from the page point, the same way the objects
+        are.
+      -->
+      <svg
+        v-if="imageReady && connecting"
+        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+      >
+        <defs>
+          <marker
+            v-for="head in ARROW_HEADS"
+            :id="head.id"
+            :key="head.id"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            markerUnits="userSpaceOnUse"
+            orient="auto"
+          >
+            <path d="M 0 0 L 8 4 L 0 8 z" :fill="head.fill" />
+          </marker>
+        </defs>
+        <line
+          v-for="line in drawnLines"
+          :key="line.key"
+          :x1="line.a.x"
+          :y1="line.a.y"
+          :x2="line.b.x"
+          :y2="line.b.y"
+          :class="line.chosen ? 'reading-line-chosen' : 'reading-line'"
+          :marker-end="line.chosen ? 'url(#reading-arrow-chosen)' : 'url(#reading-arrow)'"
+        />
+        <line
+          v-if="previewLine"
+          :x1="previewLine.a.x"
+          :y1="previewLine.a.y"
+          :x2="previewLine.b.x"
+          :y2="previewLine.b.y"
+          :class="previewLine.refused ? 'reading-line-refused' : 'reading-line-preview'"
+          :marker-end="previewLine.refused ? undefined : 'url(#reading-arrow)'"
+        />
+      </svg>
+
       <div v-if="imageReady" class="pointer-events-none absolute inset-0">
         <RasterFrame
           v-for="layer in rasterFrames"
           :key="layer.entry.id"
-          :class="[!gestureArmed && !selecting && 'pointer-events-auto']"
+          :class="[!gestureArmed && !selecting && !connecting && 'pointer-events-auto']"
           :entry="layer.entry"
           :view="view"
           :selected="layer.entry.id === editor.cursorId"
@@ -58,7 +106,9 @@
         <LabelBox
           v-for="object in objects"
           :key="object.id"
-          :class="[!gestureArmed && !selecting && 'pointer-events-auto']"
+          :class="[!gestureArmed && !selecting && !connecting && 'pointer-events-auto']"
+          :framed="connecting"
+          :handles="!connecting"
           :text="object.text"
           :text-style="object.style"
           :x="object.x"
@@ -132,7 +182,8 @@ import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
-import { isLocked } from '@shared/page/tree'
+import { isLocked, textObjects } from '@shared/page/tree'
+import type { ReadingEdge } from '@shared/page/readingGraph'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
@@ -140,10 +191,22 @@ import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
-import { applyViewTransform, centeredBoxOnScreen, screenToPagePx, type Anchor } from '@/lib/coords'
+import {
+  applyViewTransform,
+  centeredBoxOnScreen,
+  contentToScreenPx,
+  screenToPagePx,
+  type Anchor,
+} from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import {
+  distanceToSegment,
+  nearestAnchor,
+  readingLineBetween,
+  type FrameBox,
+} from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
-import { obbIntersectsRect, type Obb } from '@/lib/selection/obb'
+import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -158,6 +221,7 @@ import {
   type ScaledLabel,
   type TurnedLabel,
 } from '@/stores/editorStore'
+import { useConnectStore } from '@/stores/connectStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -166,6 +230,7 @@ import { useUiStore } from '@/stores/uiStore'
 const project = useProjectStore()
 const editor = useEditorStore()
 const selection = useSelectionStore()
+const connect = useConnectStore()
 const ui = useUiStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
@@ -214,7 +279,16 @@ function previewedStyle(id: string, style: TextStyle): TextStyle {
 const objects = computed(() => {
   const file = currentFile.value
   if (!file) return []
-  return stackedTextNodes(stack.value).map(({ entry: label }) => ({
+  // Under the connecting tool the hidden ones are here too. Compositing skips
+  // what is switched off, but the reading order is this chapter's script and a
+  // line of dialogue turned off for a moment has not left the script — the
+  // label list has always read the page this way. Without them a line into a
+  // hidden object would have nowhere to land and would go undrawn, which is the
+  // one thing this tool must not do.
+  const entries = connecting.value
+    ? textObjects(file.page.layers)
+    : stackedTextNodes(stack.value).map((node) => node.entry)
+  return entries.map((label) => ({
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
     text: textOf(label),
@@ -439,6 +513,185 @@ function sweepObjects() {
   editor.selectMany(hit, drag.additive)
 }
 
+/**
+ * Drawing the reading onto the page.
+ *
+ * Everything below works in page pixels and converts to the screen only where
+ * it draws, so nothing has to be redone when the view is panned, zoomed or
+ * turned. A line holds two ids and no geometry — both ends are worked out
+ * afresh from where the objects are standing — which is what makes moving an
+ * object take its lines with it for free.
+ */
+const connecting = computed(() => editor.tool === 'connect')
+
+const ARROW_HEADS = [
+  { id: 'reading-arrow', fill: 'var(--primary)' },
+  { id: 'reading-arrow-chosen', fill: 'var(--foreground)' },
+]
+
+/** Each object's frame on the page, which is where its lines begin and end. */
+const objectBoxes = computed(() => {
+  const out = new Map<string, FrameBox>()
+  for (const object of objects.value) {
+    const drawn = drawnLabel(
+      object.text,
+      object.style,
+      { x: object.x, y: object.y },
+      object.rotation,
+    )
+    out.set(object.id, {
+      center: drawn.center,
+      w: drawn.box.w,
+      h: drawn.box.h,
+      rotation: object.rotation,
+    })
+  }
+  return out
+})
+
+/**
+ * Which object a page point is on — the topmost, so the one drawn over the
+ * others is the one taken hold of.
+ *
+ * The whole object is the target rather than a marker on one corner, which is
+ * what makes aiming on a crowded page easy instead of fiddly, and what removed
+ * the badge's worst problem: two 24-pixel markers overlap at low zoom, two
+ * frames overlapping means two objects really do.
+ */
+function objectAt(p: Anchor): string | null {
+  for (let i = objects.value.length - 1; i >= 0; i -= 1) {
+    const object = objects.value[i]
+    const box = objectBoxes.value.get(object.id)
+    if (box === undefined) continue
+    const hit: Obb = { center: box.center, w: box.w, h: box.h, rotation: box.rotation }
+    if (obbHoldsPoint(hit, p)) return object.id
+  }
+  return null
+}
+
+const heldEdges = computed<readonly ReadingEdge[]>(
+  () => currentFile.value?.page.readingEdges ?? [],
+)
+
+function toScreen(p: Anchor): Anchor {
+  return contentToScreenPx(p.x, p.y, view)
+}
+
+/**
+ * Every line there is to see: the ones the page holds, and the ones the chain
+ * being drawn has already laid.
+ *
+ * The chain's own links are here because they are lines the person drew and can
+ * see no other way — that they are still tool state and land in the manifest
+ * only on commit is bookkeeping, and an interface that made someone track it
+ * would be asking them to hold its implementation in their head.
+ *
+ * Nothing is filtered out on the way. A line that exists and is not drawn can
+ * be neither found nor taken back; two frames that overlap get a line running
+ * the wrong way rather than no line, because that at least says out loud that
+ * they are sitting on top of each other.
+ */
+const drawnLines = computed(() => {
+  const chosen = connect.selected
+  const out: { key: string; a: Anchor; b: Anchor; chosen: boolean }[] = []
+  const draw = (edge: ReadingEdge, keyPrefix: string) => {
+    const from = objectBoxes.value.get(edge.from)
+    const to = objectBoxes.value.get(edge.to)
+    if (from === undefined || to === undefined) return
+    const line = readingLineBetween(from, to)
+    out.push({
+      // Both ends quoted, so no pair of ids spells another pair's key.
+      key: `${keyPrefix}${JSON.stringify([edge.from, edge.to])}`,
+      a: toScreen(line.a),
+      b: toScreen(line.b),
+      chosen: chosen !== null && chosen.edge.from === edge.from && chosen.edge.to === edge.to,
+    })
+  }
+  for (const edge of heldEdges.value) draw(edge, 'held/')
+  for (const edge of connect.links) draw(edge, 'laid/')
+  return out
+})
+
+/** What the pointer is over while a chain is being drawn. */
+const hoverTargetId = ref<string | null>(null)
+
+/**
+ * The loose end of the chain, following the pointer between clicks — the one
+ * thing on screen saying which object the next link will come from, which is
+ * what this gesture's single layer of hidden state needs to stay readable.
+ *
+ * Drawn as refused when the object under it cannot be reached, so a target that
+ * would close a ring says so before the click rather than after it.
+ */
+const previewLine = computed(() => {
+  const g = connect.gesture
+  if (g === null) return null
+  const from = objectBoxes.value.get(g.source)
+  if (from === undefined) return null
+  const target = hoverTargetId.value
+  const to = target === null ? undefined : objectBoxes.value.get(target)
+  if (to === undefined) {
+    return { a: toScreen(nearestAnchor(from, g.at)), b: toScreen(g.at), refused: false }
+  }
+  const line = readingLineBetween(from, to)
+  return { a: toScreen(line.a), b: toScreen(line.b), refused: connect.refuses(target as string) }
+})
+
+/** How thick a line is drawn, in screen pixels. */
+const LINE_STROKE_PX = 1.5
+
+/**
+ * How close a click has to come to a line to have landed on it. The stroke's
+ * own half-width is added, so a thicker line is not harder to hit than the
+ * space beside it.
+ */
+const LINE_HIT_PX = 8 + LINE_STROKE_PX / 2
+
+function lineAt(p: Anchor): ReadingEdge | null {
+  const at = toScreen(p)
+  let nearest: { edge: ReadingEdge; away: number } | null = null
+  for (const edge of heldEdges.value) {
+    const from = objectBoxes.value.get(edge.from)
+    const to = objectBoxes.value.get(edge.to)
+    if (from === undefined || to === undefined) continue
+    const line = readingLineBetween(from, to)
+    const away = distanceToSegment(at, toScreen(line.a), toScreen(line.b))
+    if (away > LINE_HIT_PX) continue
+    if (nearest === null || away < nearest.away) nearest = { edge, away }
+  }
+  return nearest?.edge ?? null
+}
+
+/**
+ * A click either carries the chain on or ends it.
+ *
+ * Landing on an object reaches it. Landing on bare page ends the chain and
+ * banks it — the only way to leave holding something unfinished is to cancel,
+ * and cancelling is meant to lose it. A refused target does nothing at all,
+ * since the refusal is already drawn on the preview and saying it twice would
+ * be saying it once too often.
+ */
+function onConnectDown(p: Anchor) {
+  const page = editor.currentFilename
+  if (page === null) return
+  const hit = objectAt(p)
+  if (connect.isDrawing) {
+    if (hit !== null) connect.reach(hit)
+    else connect.commit()
+    return
+  }
+  if (hit !== null) {
+    connect.begin(page, hit, p)
+    return
+  }
+  connect.select(page, lineAt(p))
+}
+
+function onConnectMove(p: Anchor) {
+  hoverTargetId.value = objectAt(p)
+  connect.track(p)
+}
+
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => imageReady.value)
 const selectionTool = useSelectionTool(containerRef, imgRef, () => imageReady.value)
 
@@ -559,7 +812,17 @@ function onImageLoad(e: Event) {
 
 // Switching tool abandons whatever the last one had half drawn, which is what
 // makes the tool rail the mode: nothing carries over between them.
-watch(() => editor.tool, () => selection.cancelGesture())
+watch(
+  () => editor.tool,
+  () => {
+    selection.cancelGesture()
+    connect.reset()
+  },
+)
+
+// A chain belongs to one page, and so does the line being looked at: both ends
+// are ids that mean nothing anywhere else.
+watch(() => editor.currentFilename, () => connect.reset())
 
 const spaceDown = ref(false)
 const rDown = ref(false)
@@ -693,7 +956,12 @@ const canvasCursor = computed(() => {
   // The ring is the cursor while it is up; a second mark would only be one more
   // thing to aim with.
   if (showBrushRing.value) return 'cursor-none'
-  if (editor.tool === 'text' || editor.tool === 'select-text' || selecting.value)
+  if (
+    editor.tool === 'text' ||
+    editor.tool === 'select-text' ||
+    connecting.value ||
+    selecting.value
+  )
     return 'cursor-crosshair'
   return 'cursor-default'
 })
@@ -761,6 +1029,11 @@ function onPointerDown(e: PointerEvent) {
     objectMarquee.value = { origin: p, current: p, additive: e.shiftKey }
     return
   }
+  if (connecting.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    onConnectDown(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    return
+  }
   editor.selectOnly(null)
 }
 
@@ -804,7 +1077,20 @@ function onPointerMove(e: PointerEvent) {
     )
     return
   }
+  if (connecting.value && containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    return
+  }
   if (selecting.value) selectionTool.onPointerMove(e)
+}
+
+function onPointerLeave() {
+  cursorPos.value = null
+  // The chain's loose end stays where the pointer left it rather than snapping
+  // back to its source, so stepping off the canvas for the tool rail or a panel
+  // does not look like the gesture broke.
+  hoverTargetId.value = null
 }
 
 function onPointerUp(e: PointerEvent) {
@@ -855,6 +1141,8 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool('text')
   } else if (key === 'v') {
     editor.setTool(e.shiftKey ? 'select-text' : 'select')
+  } else if (key === 'c') {
+    editor.setTool('connect')
   } else if (key === 'm') {
     // Shift on a tool key reaches the other tool behind it, as it does in
     // Photoshop, where one slot of the rail holds a pair.
@@ -877,6 +1165,9 @@ useEventListener(window, 'keydown', (e) => {
   } else if (e.key === 'Enter' && selection.isDrawing) {
     e.preventDefault()
     selection.commitGesture()
+  } else if (e.key === 'Enter' && connect.isDrawing) {
+    e.preventDefault()
+    connect.commit()
   } else if (e.key === 'Escape') {
     const now = performance.now()
     const isDouble = now - lastEscapeAt < ESCAPE_DOUBLE_MS
@@ -921,6 +1212,44 @@ useEventListener(window, 'blur', () => {
 </script>
 
 <style scoped>
+/*
+ * Straight, to begin with. A curve laid over a whiteboard's empty background
+ * looks better and over a page of artwork covers more of it — but a straight
+ * line through a speech bubble covers the words. Both cost something and which
+ * costs less is not decidable on paper.
+ *
+ * A white glow under every stroke, so a line reads over black ink and over
+ * white paper without either having to be sampled — the same trick the brush
+ * ring uses, and the reason none of these can go unseen against the page.
+ */
+.reading-line,
+.reading-line-chosen,
+.reading-line-preview,
+.reading-line-refused {
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.9))
+    drop-shadow(0 0 2px rgb(255 255 255 / 0.7));
+}
+.reading-line {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+}
+.reading-line-chosen {
+  stroke: var(--foreground);
+  stroke-width: 2.5;
+}
+.reading-line-preview {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+/* Refused before the click rather than reported after it. */
+.reading-line-refused {
+  stroke: var(--destructive);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 4;
+}
+
 /*
  * A black ring under a white halo, so it reads on a white page and on the dark
  * gutter around it without either colour having to be sampled.

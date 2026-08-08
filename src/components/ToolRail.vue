@@ -52,6 +52,7 @@ import {
   SquareDashed,
   Type,
   Wand,
+  Waypoints,
 } from '@lucide/vue'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
@@ -82,6 +83,7 @@ const tools = computed<RailTool[]>(() => [
   { tool: 'select', icon: MousePointer2, title: '選取工具（V）' },
   { tool: 'select-text', icon: MousePointerClick, title: '文字選取工具（Shift+V）' },
   { tool: 'text', icon: Type, title: '文字工具（T）' },
+  { tool: 'connect', icon: Waypoints, title: '閱讀順序連線（C）' },
   { tool: 'marquee-rect', icon: SquareDashed, title: '矩形選區（M）', opensGroup: true },
   { tool: 'marquee-ellipse', icon: CircleDashed, title: '橢圓選區（Shift+M）' },
   { tool: 'lasso', icon: Lasso, title: '套索（L）' },

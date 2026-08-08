@@ -77,10 +77,16 @@ export const UNDO_LIMIT = 100
  * the second one — sweeping a marquee over objects, and drawing what they mean
  * over the page — because a general move tool that grew those would be
  * answering questions about text while somebody is nudging an erase patch.
+ *
+ * `connect` is where the tool being the mode pays for itself: pressing an
+ * object already means take hold of it, so drawing a line from one would have
+ * collided with moving it. Under this tool a press means draw, and moving an
+ * object is what the move tool is for.
  */
 export type CanvasTool =
   | 'select'
   | 'select-text'
+  | 'connect'
   | 'text'
   | 'marquee-rect'
   | 'marquee-ellipse'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { obbIntersectsRect } from './obb'
+import { obbHoldsPoint, obbIntersectsRect } from './obb'
 
 const upright = { center: { x: 100, y: 100 }, w: 40, h: 20, rotation: 0 }
 
@@ -50,5 +50,26 @@ describe('obbIntersectsRect', () => {
   it('treats an empty rectangle as the point it sits at', () => {
     expect(obbIntersectsRect(upright, { x: 100, y: 100, w: 0, h: 0 })).toBe(true)
     expect(obbIntersectsRect(upright, { x: 300, y: 300, w: 0, h: 0 })).toBe(false)
+  })
+})
+
+describe('obbHoldsPoint', () => {
+  const box = { center: { x: 100, y: 100 }, w: 100, h: 40, rotation: 0 }
+
+  it('holds a point inside it and lets go of one outside', () => {
+    expect(obbHoldsPoint(box, { x: 100, y: 100 })).toBe(true)
+    expect(obbHoldsPoint(box, { x: 160, y: 100 })).toBe(false)
+  })
+
+  // The edge counts: a click on the outline is a click on the object, and
+  // refusing it would make the boundary a place nothing can be picked.
+  it('holds a point on its edge', () => {
+    expect(obbHoldsPoint(box, { x: 150, y: 100 })).toBe(true)
+  })
+
+  it('turns with the object rather than testing its upright bounds', () => {
+    const turned = { center: { x: 100, y: 100 }, w: 100, h: 10, rotation: Math.PI / 2 }
+    expect(obbHoldsPoint(turned, { x: 100, y: 140 })).toBe(true)
+    expect(obbHoldsPoint(turned, { x: 140, y: 100 })).toBe(false)
   })
 })

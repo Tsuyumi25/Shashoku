@@ -90,6 +90,7 @@ import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
+import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerLayout from '@/modes/ProjectManagerLayout.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
@@ -103,6 +104,7 @@ import { useUiStore } from '@/stores/uiStore'
 const project = useProjectStore()
 const editor = useEditorStore()
 const selection = useSelectionStore()
+const connect = useConnectStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
@@ -160,14 +162,15 @@ useEventListener(window, 'keydown', (e) => {
 
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
-    // A half-drawn shape is tool state and not in the document, so its own
-    // vertices are what this takes back first. Reaching past it would undo
-    // whatever came before while the unfinished shape sat there untouched.
-    if (selection.gestureUndo()) return
+    // A half-drawn shape or an unfinished chain is tool state and not in the
+    // document, so its own vertices and links are what this takes back first.
+    // Reaching past one would undo whatever came before while the unfinished
+    // thing sat there untouched.
+    if (selection.gestureUndo() || connect.gestureUndo()) return
     editor.undo()
   } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
     e.preventDefault()
-    if (selection.gestureRedo()) return
+    if (selection.gestureRedo() || connect.gestureRedo()) return
     editor.redo()
   } else if (key === 'd') {
     e.preventDefault()
@@ -238,9 +241,16 @@ useEventListener(window, 'keydown', (e) => {
   else if (e.key === 'ArrowLeft') editor.pageBy(-1)
   else if (e.key === 'ArrowRight') editor.pageBy(1)
   else if (e.key === 'Delete') {
-    // No confirmation, as in every editor with an undo stack behind it.
+    // No confirmation, as in every editor with an undo stack behind it. A line
+    // being looked at goes first: it is the smaller and more transient of the
+    // two, and it is the one the connecting tool just put under attention.
     e.preventDefault()
+    if (connect.eraseSelected()) return
     editor.deleteSelection()
+  } else if (e.key === 'Backspace' && connect.isDrawing) {
+    // The same act as Ctrl+Z inside a chain.
+    e.preventDefault()
+    connect.gestureUndo()
   } else if (e.key === 'Backspace' && selection.isDrawing) {
     // The same act as Ctrl+Z inside a gesture, and the key GIMP and Krita both
     // use for it.
@@ -252,6 +262,15 @@ useEventListener(window, 'keydown', (e) => {
     // also read this press as the first half of its double tap to fit.
     e.preventDefault()
     selection.cancelGesture()
+  } else if (e.key === 'Escape' && connect.isDrawing) {
+    // ⚠️ The whole chain goes, not its last link. Cancelling is free precisely
+    // because the page was never touched, and a partial cancel would be a
+    // different promise from the one that makes it free.
+    e.preventDefault()
+    connect.cancel()
+  } else if (e.key === 'Escape' && connect.selected !== null) {
+    e.preventDefault()
+    connect.deselect()
   } else if (e.key === 'Escape' && editor.selectedIds.size > 0) {
     e.preventDefault()
     editor.selectOnly(null)
