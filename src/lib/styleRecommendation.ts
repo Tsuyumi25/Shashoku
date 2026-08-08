@@ -1,7 +1,7 @@
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
-import { SKELETON_FIELDS } from '@shared/text-style/fields'
+import { FONT_FIELDS, SKELETON_FIELDS, SKIN_FIELDS } from '@shared/text-style/fields'
 import { groupByValue, type BucketObject, type StyleBucket, type TagGroup } from '@/lib/valueBuckets'
 
 /**
@@ -49,34 +49,30 @@ interface RowSpec {
   patch: (style: TextStyle) => Partial<TextStyle>
 }
 
+function pick(style: TextStyle, fields: readonly (keyof TextStyle)[]): Partial<TextStyle> {
+  const out: Partial<TextStyle> = {}
+  for (const field of fields) Object.assign(out, { [field]: style[field] })
+  return out
+}
+
 /**
- * A row per parameter, in the order the style editor shows them.
+ * A row per parameter, in the order the style editor shows them, built from the
+ * field split so that a field added to a style cannot be left out of here.
  *
  * Only the family narrows the others, and it is the one row it cannot narrow.
  * The reason is causal rather than a ranking of importance: a heavy face at
  * 14px reads like a light one at 16px, how much ink a weight offset adds
  * depends on how heavy the face already is, and a stroke sits on the strokes of
  * the letter. Nothing about the colour or the alignment decides a size. And a
- * font row filtered by the current font could only ever offer the font already
- * in use.
+ * font row narrowed by the font in use could only ever offer the font in use.
  */
 const ROWS: readonly RowSpec[] = [
-  {
-    field: 'fontFamily',
-    narrowed: false,
-    patch: (s) => ({
-      fontFamily: s.fontFamily,
-      fontFace: s.fontFace,
-      fontStyleName: s.fontStyleName,
-    }),
-  },
-  { field: 'fontSizePx', narrowed: true, patch: (s) => ({ fontSizePx: s.fontSizePx }) },
-  { field: 'direction', narrowed: true, patch: (s) => ({ direction: s.direction }) },
-  { field: 'align', narrowed: true, patch: (s) => ({ align: s.align }) },
-  { field: 'color', narrowed: true, patch: (s) => ({ color: s.color }) },
-  { field: 'leadingPercent', narrowed: true, patch: (s) => ({ leadingPercent: s.leadingPercent }) },
-  { field: 'weightPx', narrowed: true, patch: (s) => ({ weightPx: s.weightPx }) },
-  { field: 'effects', narrowed: true, patch: (s) => ({ effects: s.effects }) },
+  { field: 'fontFamily', narrowed: false, patch: (s) => pick(s, FONT_FIELDS) },
+  ...[...SKIN_FIELDS, ...SKELETON_FIELDS.filter((f) => f !== 'fontFamily')].map((field) => ({
+    field,
+    narrowed: true,
+    patch: (s: TextStyle) => pick(s, [field]),
+  })),
 ]
 
 export interface StyleCandidate {
@@ -169,17 +165,13 @@ export function deriveStyle(
     const members = stylesOf(winner, byId)
     if (members.length === 0) continue
 
-    const font = tally(members, (s) =>
-      JSON.stringify([s.fontFamily, s.fontFace, s.fontStyleName]),
-    )[0]!
+    const font = tally(members, (s) => JSON.stringify(pick(s, FONT_FIELDS)))[0]!
     const size = tally(members, (s) => String(s.fontSizePx))[0]!
     const clears = size.count / members.length >= sizeThreshold
 
     return {
       ...winner.style,
-      fontFamily: font.value.fontFamily,
-      fontFace: font.value.fontFace,
-      fontStyleName: font.value.fontStyleName,
+      ...pick(font.value, FONT_FIELDS),
       fontSizePx: clears ? size.value.fontSizePx : seedStyle.fontSizePx,
     }
   }
@@ -209,14 +201,24 @@ export function recommendStyle(
 ): StyleRow[] {
   const byId = indexById(objects)
   const chain = tagChain(tags, registry)
-  const all = groupsByTagSet(objects, registry)
+  /**
+   * An object with no tags has no meaning to be counted under — untagged is not
+   * a category, which is why the derivation's chain stops before it. The
+   * chapter as a whole is counted instead: not what this object's kind looks
+   * like, but what the work looks like, which is the only true thing left to
+   * say. Stripping the tags puts every object in one group and leaves the rest
+   * of this function with nothing to know about the difference.
+   */
+  const sample = chain.length > 0 ? objects : objects.map((o) => ({ ...o, tags: [] }))
+  const stations: string[][] = chain.length > 0 ? chain : [[]]
+  const all = groupsByTagSet(sample, registry)
   // Empty means no face has been chosen, so there is nothing to narrow by —
   // which is also the state an object is in at the moment it is auto-styled.
   const narrowed =
     fontFamily === ''
       ? all
       : groupsByTagSet(
-          objects.filter((o) => o.style.fontFamily === fontFamily),
+          sample.filter((o) => o.style.fontFamily === fontFamily),
           registry,
         )
 
@@ -225,7 +227,7 @@ export function recommendStyle(
     const candidates: StyleCandidate[] = []
     const seen = new Set<string>()
 
-    for (const station of chain) {
+    for (const station of stations) {
       const group = groups.get(tagSetKey(station))
       if (!group) continue
       for (const bucket of group.buckets) {

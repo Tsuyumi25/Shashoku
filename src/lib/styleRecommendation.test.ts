@@ -263,9 +263,29 @@ describe('recommendStyle', () => {
     expect(rows.every((row) => row.candidates.length > 0)).toBe(true)
   })
 
-  it('has nothing to show for an object carrying no tags', () => {
-    const objects = copies(9, [], { fontFamily: 'Mincho' })
-    const rows = recommendStyle(objects, [], REGISTRY, 'Mincho')
-    expect(rows.every((row) => row.candidates.length === 0)).toBe(true)
+  /**
+   * Untagged is not a meaning, so there is no group to count — but the chapter
+   * as a whole is still a true answer, and a blank panel reads as broken.
+   */
+  describe('an object carrying no tags', () => {
+    const objects = [
+      ...copies(6, ['outside'], { fontFamily: 'Mincho', color: '#000000' }),
+      ...copies(4, ['inside'], { fontFamily: 'Mincho', color: '#ffffff' }),
+      ...copies(1, [], { fontFamily: 'Mincho', color: '#ff0000' }),
+    ]
+
+    it('is shown the whole chapter, tags ignored', () => {
+      const colors = rowFor(recommendStyle(objects, [], REGISTRY, 'Mincho'), 'color')
+      expect(colors.candidates.map((c) => c.patch.color)).toEqual([
+        '#000000',
+        '#ffffff',
+        '#ff0000',
+      ])
+    })
+
+    it('says the candidates came from no meaning in particular', () => {
+      const colors = rowFor(recommendStyle(objects, [], REGISTRY, 'Mincho'), 'color')
+      expect(colors.candidates.every((c) => c.from.length === 0)).toBe(true)
+    })
   })
 })

@@ -40,7 +40,10 @@ export const SKIN_FIELDS = ['fontSizePx'] as const satisfies readonly (keyof Tex
  * resolution never compares. Either one compared on its own would split objects
  * a reader sees as identical, and the split would be invisible on the page.
  */
-export const CARRIED_WITH_FAMILY = ['fontFace', 'fontStyleName'] as const satisfies readonly (keyof TextStyle)[]
+export const CARRIED_WITH_FAMILY = [
+  'fontFace',
+  'fontStyleName',
+] as const satisfies readonly (keyof TextStyle)[]
 
 /** The family and the two names it drags along — one font, as a person picks it. */
 export const FONT_FIELDS = ['fontFamily', ...CARRIED_WITH_FAMILY] as const
