@@ -138,8 +138,12 @@ import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { SKELETON_FIELDS } from '@shared/text-style/fields'
 import { tagColor } from '@shared/tags/set'
-import { textObjects } from '@shared/page/tree'
-import { groupByValue, type BucketObject, type StyleBucket } from '@/lib/valueBuckets'
+import {
+  bucketObjectsOf,
+  groupByValue,
+  type BucketObject,
+  type StyleBucket,
+} from '@/lib/valueBuckets'
 import { styleFieldText, TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
 import { useSeriesObjects } from '@/composables/useSeriesObjects'
 import { useEditorStore } from '@/stores/editorStore'
@@ -190,23 +194,14 @@ watch([scope, fields], () => {
   expanded.value = new Set()
 })
 
-function flatten(filename: string, layers: Parameters<typeof textObjects>[0]): BucketObject[] {
-  return textObjects(layers).map((label) => ({
-    id: label.id,
-    filename,
-    tags: label.tags,
-    style: label.style,
-  }))
-}
-
 const chapterObjects = computed<BucketObject[]>(() =>
-  project.files.flatMap((file) => flatten(file.filename, file.page.layers)),
+  project.files.flatMap((file) => bucketObjectsOf(file.filename, file.page.layers)),
 )
 
 const objects = computed<BucketObject[]>(() => {
   if (scope.value === 'page') {
     const file = editor.currentFilename ? project.fileByName(editor.currentFilename) : null
-    return file ? flatten(file.filename, file.page.layers) : []
+    return file ? bucketObjectsOf(file.filename, file.page.layers) : []
   }
   if (scope.value === 'chapter') return chapterObjects.value
   return [...chapterObjects.value, ...series.objects.value]

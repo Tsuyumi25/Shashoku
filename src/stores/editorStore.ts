@@ -16,6 +16,8 @@ import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tr
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
+import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
+import { deriveStyle } from '@/lib/styleRecommendation'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
@@ -1206,11 +1208,28 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  /** Every text object in the chapter, which is what the statistics count. */
+  function chapterBucketObjects(): BucketObject[] {
+    const project = useProjectStore()
+    return project.files.flatMap((file) => bucketObjectsOf(file.filename, file.page.layers))
+  }
+
   /**
    * Turning a tag on for a selection that already partly carries it means
    * putting it on the rest, not flipping each object separately: a control
    * showing one state has to end in one state, or a second click would undo
    * what the first appeared to do.
+   *
+   * The style follows the tags, taken from what the project already sets under
+   * the meaning each object ends up with, and it overwrites whatever was there.
+   * A deliberate pause rather than a settled trade: which edits should be
+   * protected from this is a question only a chapter that has actually been
+   * typeset can answer. What it costs is one undo — which is why the tags and
+   * the styles are one command and not two.
+   *
+   * Everything is derived from a sample read before anything is written, so a
+   * batch lands the same way whatever order the objects come in, and no object
+   * casts a vote in the meaning it is in the middle of joining.
    */
   function cmdToggleTagOnSelection(tag: string) {
     const project = useProjectStore()
@@ -1221,13 +1240,19 @@ export const useEditorStore = defineStore('editor', () => {
       filename,
       id: label.id,
       tags: [...label.tags],
+      style: { ...label.style },
     }))
-    const after = before.map((entry) => ({
-      ...entry,
-      tags: adding ? withTag(entry.tags, tag) : withoutTag(entry.tags, tag),
-    }))
+    const sample = chapterBucketObjects()
+    const { tags: registry, seedStyle } = project.header
+    const after = before.map((entry) => {
+      const tags = adding ? withTag(entry.tags, tag) : withoutTag(entry.tags, tag)
+      return { ...entry, tags, style: deriveStyle(sample, tags, registry, seedStyle) }
+    })
     const write = (states: typeof before) => {
-      for (const { filename, id, tags } of states) project.setLabelTags(filename, id, tags)
+      for (const { filename, id, tags, style } of states) {
+        project.setLabelTags(filename, id, tags)
+        project.setLabelStyle(filename, id, style)
+      }
     }
     pushCommand({
       label: `${adding ? 'tag' : 'untag'} ${tag} ${targets.length}`,

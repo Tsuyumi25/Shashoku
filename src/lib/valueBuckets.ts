@@ -1,6 +1,8 @@
+import type { LayerEntry } from '@shared/page/types'
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
+import { textObjects } from '@shared/page/tree'
 
 /** One text object, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
@@ -8,6 +10,20 @@ export interface BucketObject {
   filename: string
   tags: string[]
   style: TextStyle
+}
+
+/**
+ * One page's objects as every statistic here sees them. Nothing is filtered
+ * out — an object votes for itself, which is what keeps a panel drawn from
+ * these from ever being empty for an object that exists.
+ */
+export function bucketObjectsOf(filename: string, layers: readonly LayerEntry[]): BucketObject[] {
+  return textObjects(layers).map((label) => ({
+    id: label.id,
+    filename,
+    tags: label.tags,
+    style: label.style,
+  }))
 }
 
 export interface StyleBucket {

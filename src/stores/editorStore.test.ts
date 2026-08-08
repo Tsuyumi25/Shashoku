@@ -1634,3 +1634,127 @@ describe('moving through a narrowed list', () => {
     expect(editor.cursorId).toBe('c')
   })
 })
+
+describe('tagging a selection', () => {
+  function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
+    return { ...label(id), tags, style: { ...DEFAULT_TEXT_STYLE, ...style } }
+  }
+
+  function many(n: number, from: number, tags: string[], style: Partial<TextStyle>) {
+    return Array.from({ length: n }, (_, i) => styled(`s${from + i}`, tags, style))
+  }
+
+  const SEED_FAMILY = 'Seed'
+
+  function openTagged(labels: TextLayerEntry[]) {
+    const { project, editor } = openOnePage(labels)
+    project.projectMeta.seedStyle = { ...DEFAULT_TEXT_STYLE, fontFamily: SEED_FAMILY }
+    project.addTag('outside')
+    project.addTag('emphasis')
+    return { project, editor }
+  }
+
+  const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+    project.labelById(PAGE, id)!.style
+
+  const tagsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+    project.labelById(PAGE, id)!.tags
+
+  it('gives the object the style its new meaning already has', () => {
+    const { project, editor } = openTagged([
+      styled('new', [], { fontFamily: SEED_FAMILY }),
+      ...many(5, 1, ['outside'], { fontFamily: 'Mincho', color: '#112233' }),
+    ])
+    editor.selectOnly('new')
+
+    editor.cmdToggleTagOnSelection('outside')
+
+    expect(tagsOf(project, 'new')).toEqual(['outside'])
+    expect(styleOf(project, 'new')).toMatchObject({ fontFamily: 'Mincho', color: '#112233' })
+  })
+
+  /** One act: a tag that changed the look and an undo that took back only the
+   * tag would leave a style nobody asked for standing. */
+  it('takes back the tag and the style together', () => {
+    const { project, editor } = openTagged([
+      styled('new', [], { fontFamily: SEED_FAMILY }),
+      ...many(5, 1, ['outside'], { fontFamily: 'Mincho' }),
+    ])
+    editor.selectOnly('new')
+    editor.cmdToggleTagOnSelection('outside')
+
+    editor.undo()
+
+    expect(tagsOf(project, 'new')).toEqual([])
+    expect(styleOf(project, 'new').fontFamily).toBe(SEED_FAMILY)
+  })
+
+  /**
+   * Derived before written, which is what lets the degradation chain have no
+   * exception in it: written first, this object would be the only member of its
+   * new tag set and would recommend its own current style back to itself.
+   */
+  it('does not let the object vote for itself in the meaning it is joining', () => {
+    const { project, editor } = openTagged([
+      styled('x', ['outside'], { fontFamily: 'Gothic' }),
+      ...many(30, 1, ['outside'], { fontFamily: 'Mincho' }),
+    ])
+    editor.selectOnly('x')
+
+    editor.cmdToggleTagOnSelection('emphasis')
+
+    expect(tagsOf(project, 'x')).toEqual(['emphasis', 'outside'])
+    expect(styleOf(project, 'x').fontFamily).toBe('Mincho')
+  })
+
+  /** Each object derives from its own resulting tag set, so a batch lands the
+   * same way however the objects are ordered. */
+  it('derives per object across a mixed selection', () => {
+    const { project, editor } = openTagged([
+      styled('a', ['outside'], { fontFamily: 'Gothic' }),
+      styled('b', [], { fontFamily: 'Gothic' }),
+      ...many(4, 1, ['outside'], { fontFamily: 'Mincho' }),
+    ])
+    editor.selectMany(['a', 'b'], false)
+
+    editor.cmdToggleTagOnSelection('emphasis')
+
+    expect(styleOf(project, 'a').fontFamily).toBe('Mincho')
+    expect(styleOf(project, 'b').fontFamily).toBe(SEED_FAMILY)
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(styleOf(project, 'a').fontFamily).toBe('Gothic')
+    expect(styleOf(project, 'b').fontFamily).toBe('Gothic')
+  })
+
+  /** Untagged is not a meaning to derive from, so taking the last tag off is a
+   * reset — the same answer a brand new object gets. */
+  it('falls back to the seed when the last tag comes off', () => {
+    const { project, editor } = openTagged([
+      styled('a', ['outside'], { fontFamily: 'Gothic', color: '#abcdef' }),
+      ...many(4, 1, ['outside'], { fontFamily: 'Gothic', color: '#abcdef' }),
+    ])
+    editor.selectOnly('a')
+
+    editor.cmdToggleTagOnSelection('outside')
+
+    expect(tagsOf(project, 'a')).toEqual([])
+    expect(styleOf(project, 'a')).toEqual(project.header.seedStyle)
+  })
+
+  it('counts the whole chapter, not the page on screen', () => {
+    const project = useProjectStore()
+    project.files = [
+      pageOf('001.png', [{ ...label('new'), tags: [] }]),
+      pageOf('002.png', many(5, 1, ['outside'], { fontFamily: 'Mincho' })),
+    ]
+    project.addTag('outside')
+    const editor = useEditorStore()
+    editor.startOnPage('001.png')
+    editor.selectOnly('new')
+
+    editor.cmdToggleTagOnSelection('outside')
+
+    expect(project.labelById('001.png', 'new')!.style.fontFamily).toBe('Mincho')
+  })
+})
