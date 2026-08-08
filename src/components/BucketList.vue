@@ -136,10 +136,11 @@ import { computed, ref, watch } from 'vue'
 import { ChevronRight, RefreshCw } from '@lucide/vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
+import { SKELETON_FIELDS } from '@shared/text-style/fields'
 import { tagColor } from '@shared/tags/set'
 import { textObjects } from '@shared/page/tree'
 import { groupByValue, type BucketObject, type StyleBucket } from '@/lib/valueBuckets'
-import { TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
+import { styleFieldText, TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
 import { useSeriesObjects } from '@/composables/useSeriesObjects'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -152,24 +153,15 @@ const SCOPES = [
   { scope: 'series', label: '全書', title: '同一層資料夾下的其他話，從磁碟讀' },
 ] as const satisfies readonly { scope: Scope; label: string; title: string }[]
 
-/**
- * Size is off to begin with. It is the field that legitimately differs inside
- * one meaning — a line squeezed to fit its bubble is not a different kind of
- * text — so comparing on it out of the box would split nearly every group and
- * bury the disagreements that do matter.
- */
-// fontFace is an identity, not a readable property — comparing it would split
-// buckets the reader sees as identical whenever two names reach one face.
-const UNCOMPARED_BY_DEFAULT: readonly (keyof TextStyle)[] = ['fontSizePx', 'fontFace']
-
 const project = useProjectStore()
 const editor = useEditorStore()
 const series = useSeriesObjects()
 
 const scope = ref<Scope>('chapter')
-const fields = ref(
-  new Set<keyof TextStyle>(TEXT_STYLE_FIELDS.filter((f) => !UNCOMPARED_BY_DEFAULT.includes(f))),
-)
+// The skeleton to begin with, which is where the reasons for leaving fields out
+// now live: size spreads because it is computed, and the two font names split
+// buckets a reader sees as identical.
+const fields = ref(new Set<keyof TextStyle>(SKELETON_FIELDS))
 const expanded = ref(new Set<string>())
 
 function chooseScope(next: Scope) {
@@ -245,26 +237,14 @@ const titleField = computed<keyof TextStyle | null>(() => comparedFields.value[0
 function bucketTitle(bucket: StyleBucket): string {
   const field = titleField.value
   if (field === null) return '未比較任何欄位'
-  return `${TEXT_STYLE_FIELD_NAMES[field]} ${valueText(bucket.style, field)}`
+  return `${TEXT_STYLE_FIELD_NAMES[field]} ${styleFieldText(bucket.style, field)}`
 }
 
 /** Everything else being compared, which is what opening the row is for. */
 function details(bucket: StyleBucket): string[] {
   return comparedFields.value
     .filter((f) => f !== titleField.value)
-    .map((f) => `${TEXT_STYLE_FIELD_NAMES[f]} ${valueText(bucket.style, f)}`)
-}
-
-function valueText(style: TextStyle, f: keyof TextStyle): string {
-  const value = style[f]
-  if (f === 'fontFamily' || f === 'fontFace' || f === 'fontStyleName')
-    return (value as string) || '未指定'
-  if (f === 'fontSizePx') return `${value as number}px`
-  if (f === 'leadingPercent') return `${value as number}%`
-  if (f === 'direction') return value === 'vertical' ? '直排' : '橫排'
-  if (f === 'align') return { start: '起', center: '中', end: '末' }[value as string] ?? ''
-  if (f === 'effects') return (value as unknown[]).length === 0 ? '無' : '描邊'
-  return String(value)
+    .map((f) => `${TEXT_STYLE_FIELD_NAMES[f]} ${styleFieldText(bucket.style, f)}`)
 }
 
 /**
