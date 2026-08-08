@@ -173,9 +173,16 @@ const rows = computed<StyleRow[]>(() => {
 
 /**
  * What the selection holds now, so the candidate it is already on can be marked.
- * Auto-styling leaves the object on the head of every row, so what this shows
- * from then on is how far the object has drifted from its own kind — visible
- * while the work is happening rather than at some later audit.
+ * A freshly tagged object sits on the head of its rows, so from then on this
+ * shows how far it has drifted from its kind — while the work is happening,
+ * rather than at some later audit.
+ *
+ * ⚠️ The mark is what makes two known exceptions readable rather than confusing,
+ * since in both the head of the row is not what was applied: a size that failed
+ * to clear its threshold (see `SIZE_SHARE_THRESHOLD`), and an object with no
+ * tags, which is written the seed style while the rows count the whole chapter.
+ * The heading says as much for the second — these rows are what the work looks
+ * like, not a claim about this object's kind.
  */
 const currentValues = computed(() => {
   const out = new Map<string, string>()
