@@ -140,6 +140,24 @@ describe('deriveStyle', () => {
   })
 
   /**
+   * A style taken off one object and put on another must share nothing mutable
+   * with it. Two labels holding one array is a corruption waiting for whoever
+   * next edits an effect in place instead of replacing the list.
+   */
+  it('hands back effects the object it copied from does not also hold', () => {
+    const donor = obj(['outside'], {
+      fontFamily: 'Mincho',
+      effects: [{ kind: 'stroke', width: 3, color: '#000000', position: 'outside' }],
+    })
+
+    const derived = deriveStyle([donor], ['outside'], REGISTRY, SEED)
+
+    expect(derived.effects).toEqual(donor.style.effects)
+    expect(derived.effects).not.toBe(donor.style.effects)
+    expect(derived.effects[0]).not.toBe(donor.style.effects[0])
+  })
+
+  /**
    * The face is not a compared field, so a bucket can hold two weights of one
    * family and the representative's face is whichever object landed first.
    */
@@ -223,6 +241,18 @@ describe('recommendStyle', () => {
     expect(fontRow('Mincho')).toEqual(fontRow('Gothic'))
     expect(fontRow('Mincho')).toEqual(fontRow(''))
     expect(fontRow('Mincho').map((c) => c.patch.fontFamily)).toEqual(['Gothic', 'Mincho'])
+  })
+
+  it('offers effects the object it copied from does not also hold', () => {
+    const donor = obj(['outside'], {
+      fontFamily: 'Mincho',
+      effects: [{ kind: 'stroke', width: 3, color: '#000000', position: 'outside' }],
+    })
+
+    const effects = rowFor(recommendStyle([donor], ['outside'], REGISTRY, 'Mincho'), 'effects')
+
+    expect(effects.candidates[0]!.patch.effects).toEqual(donor.style.effects)
+    expect(effects.candidates[0]!.patch.effects).not.toBe(donor.style.effects)
   })
 
   it('does not narrow anything while no family has been chosen', () => {
