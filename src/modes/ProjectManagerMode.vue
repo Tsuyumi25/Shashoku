@@ -92,9 +92,24 @@
           <p v-if="problem" class="dialog-problem">{{ problem }}</p>
           <div class="dialog-actions">
             <AlertDialogCancel class="bar-button">取消</AlertDialogCancel>
-            <AlertDialogAction class="bar-button bar-button-danger" @click="confirm">
-              刪除
-            </AlertDialogAction>
+            <!--
+              A plain button and not AlertDialogAction, which closes the dialog
+              itself. Its handler is bound before this one and runs first, so by
+              the time this ran there was nothing left to confirm — and the
+              preventDefault that was supposed to hold it open never had a say,
+              since nothing here checks whether the event was defaulted.
+
+              Closing is this component's to do, and only once the directories
+              are really gone.
+            -->
+            <button
+              type="button"
+              class="bar-button bar-button-danger"
+              :disabled="deleting"
+              @click="confirm"
+            >
+              {{ deleting ? '刪除中…' : '刪除' }}
+            </button>
           </div>
         </AlertDialogContent>
       </AlertDialogPortal>
@@ -106,7 +121,6 @@
 import { computed, onMounted, ref } from 'vue'
 import Draggable from 'vuedraggable'
 import {
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -165,6 +179,8 @@ function onDropped(e: { moved?: { element: ProjectFile; newIndex: number } }) {
  *  that what is confirmed is what was asked about. */
 const asking = ref<ProjectFile[] | null>(null)
 const problem = ref<string | null>(null)
+/** A run is out; the dialog stays and the button cannot start a second one. */
+const deleting = ref(false)
 
 /** Named while there are few enough to read, counted once there are not. */
 const namesAsked = computed(() => {
@@ -184,14 +200,17 @@ function onDialogOpen(open: boolean) {
   if (!open) asking.value = null
 }
 
-async function confirm(e: Event) {
+/**
+ * Held open until the directories are really gone, so a deletion that failed
+ * says so where it was asked for rather than closing as though it worked.
+ */
+async function confirm() {
   const pages = asking.value
-  if (!pages) return
-  // Held open until the directories are really gone, so a deletion that failed
-  // says so where it was asked for rather than closing as though it worked.
-  e.preventDefault()
+  if (!pages || deleting.value) return
+  deleting.value = true
   const wasOn = editor.currentPageId
   const { deleted, problem: stopped } = await project.deletePages(pages.map((f) => f.pageId))
+  deleting.value = false
   if (stopped !== null) {
     problem.value = `刪不掉 — ${stopped}`
     asking.value = pages.filter((f) => !deleted.includes(f.pageId))
