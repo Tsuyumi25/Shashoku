@@ -68,7 +68,7 @@ async function encodePng(canvas: OffscreenCanvas): Promise<Uint8Array> {
 
 /**
  * A project's cover is a raw page, not a composited one: the library knows a
- * project's path and its first filename and nothing else, and compositing one
+ * project's path and its first pageId and nothing else, and compositing one
  * would mean opening every project in the sidebar to read its labels. A cover
  * says which project this is, which the raw does.
  *

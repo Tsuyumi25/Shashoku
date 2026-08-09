@@ -130,7 +130,7 @@ export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {
 
 
 export const useEditorStore = defineStore('editor', () => {
-  const currentFilename = ref<string | null>(null)
+  const currentPageId = ref<string | null>(null)
 
   /**
    * One selection, held as a set with a cursor into it — never two selections
@@ -195,10 +195,10 @@ export const useEditorStore = defineStore('editor', () => {
    * dropped the selection would make looking at page 3 to check something cost
    * the set you spent a sweep building.
    */
-  function showPage(filename: string) {
-    if (filename === currentFilename.value) return
+  function showPage(pageId: string) {
+    if (pageId === currentPageId.value) return
     commitTextEdit()
-    currentFilename.value = filename
+    currentPageId.value = pageId
   }
 
   /** One entry in or out, leaving the rest alone. */
@@ -314,7 +314,7 @@ export const useEditorStore = defineStore('editor', () => {
    * until a page has decoded, since there is nothing to measure before that.
    */
   const maskTarget = computed<MaskTarget | null>(() => {
-    const page = currentFilename.value
+    const page = currentPageId.value
     const size = viewContentSize.value
     if (page === null || size.w === 0 || size.h === 0) return null
     return { page, w: size.w, h: size.h }
@@ -332,11 +332,11 @@ export const useEditorStore = defineStore('editor', () => {
    * anything else calls. Every other way to another page keeps the selection —
    * this one is the case where there is nothing yet to keep.
    */
-  function startOnPage(filename: string | null) {
+  function startOnPage(pageId: string | null) {
     commitTextEdit()
-    currentFilename.value = filename
+    currentPageId.value = pageId
     const project = useProjectStore()
-    selectOnly(filename ? (project.labelsOf(filename)[0]?.id ?? null) : null)
+    selectOnly(pageId ? (project.labelsOf(pageId)[0]?.id ?? null) : null)
   }
 
   
@@ -351,10 +351,10 @@ export const useEditorStore = defineStore('editor', () => {
   function pageBy(offset: number) {
     const project = useProjectStore()
     if (project.files.length === 0) return
-    const index = project.files.findIndex((f) => f.filename === currentFilename.value)
+    const index = project.files.findIndex((f) => f.pageId === currentPageId.value)
     const next = index === -1 ? 0 : index + offset
     if (next < 0 || next >= project.files.length) return
-    showPage(project.files[next].filename)
+    showPage(project.files[next].pageId)
   }
 
   /**
@@ -373,7 +373,7 @@ export const useEditorStore = defineStore('editor', () => {
     const at = stops.findIndex((r) =>
       r.kind === 'label'
         ? r.label.id === cursorId.value
-        : cursorId.value === null && r.filename === currentFilename.value,
+        : cursorId.value === null && r.pageId === currentPageId.value,
     )
     const next = at === -1 ? (offset > 0 ? 0 : stops.length - 1) : at + offset
     if (next < 0 || next >= stops.length) return
@@ -385,7 +385,7 @@ export const useEditorStore = defineStore('editor', () => {
       return
     }
     commitTextEdit()
-    currentFilename.value = row.filename
+    currentPageId.value = row.pageId
     selectOnly(null)
   }
 
@@ -398,8 +398,8 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function selectLayerBy(offset: number) {
     const project = useProjectStore()
-    if (!currentFilename.value) return
-    const file = project.fileByName(currentFilename.value)
+    if (!currentPageId.value) return
+    const file = project.pageById(currentPageId.value)
     if (!file) return
     const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value)
     if (rows.length === 0) return
@@ -421,8 +421,8 @@ export const useEditorStore = defineStore('editor', () => {
    * chapter, and a canvas that scrolled and zoomed itself on every click would
    * make reading down it unbearable.
    */
-  function revealLabel(filename: string, labelId: string) {
-    showPage(filename)
+  function revealLabel(pageId: string, labelId: string) {
+    showPage(pageId)
     selectOnly(labelId)
   }
 
@@ -433,14 +433,14 @@ export const useEditorStore = defineStore('editor', () => {
    * visited reads as "you edited this line", where a time window would let
    * typing speed decide how much an undo takes back.
    */
-  const pendingTextEdit = ref<{ filename: string; labelId: string; from: string } | null>(null)
+  const pendingTextEdit = ref<{ pageId: string; labelId: string; from: string } | null>(null)
 
   /** Undefined once the label being edited has been deleted under the caret. */
   function textOfPending(): string | undefined {
     const pending = pendingTextEdit.value
     if (!pending) return undefined
     const project = useProjectStore()
-    const label = project.labelById(pending.filename, pending.labelId)
+    const label = project.labelById(pending.pageId, pending.labelId)
     return label === undefined ? undefined : textOf(label)
   }
 
@@ -450,10 +450,10 @@ export const useEditorStore = defineStore('editor', () => {
    * a caret in the first place. Letting the box open and refusing the keystrokes
    * would leave someone typing into something that quietly does nothing.
    */
-  function beginTextEdit(filename: string, labelId: string, from: string) {
+  function beginTextEdit(pageId: string, labelId: string, from: string) {
     commitTextEdit()
     if (isLayerLocked(labelId)) return
-    pendingTextEdit.value = { filename, labelId, from }
+    pendingTextEdit.value = { pageId, labelId, from }
   }
 
   function commitTextEdit() {
@@ -465,7 +465,7 @@ export const useEditorStore = defineStore('editor', () => {
     pendingTextEdit.value = null
     // The label was deleted mid-edit, and the delete already captured its text.
     if (text === undefined) return
-    cmdUpdateLabelText(pending.filename, pending.labelId, pending.from, text)
+    cmdUpdateLabelText(pending.pageId, pending.labelId, pending.from, text)
   }
 
   /**
@@ -479,7 +479,7 @@ export const useEditorStore = defineStore('editor', () => {
   function editBy(offset: number) {
     commitTextEdit()
     selectLabelBy(offset)
-    const page = currentFilename.value
+    const page = currentPageId.value
     const id = cursorId.value
     if (page === null || id === null) return
     const label = useProjectStore().labelById(page, id)
@@ -550,14 +550,14 @@ export const useEditorStore = defineStore('editor', () => {
 
   
 
-  function cmdAddLabel(filename: string, label: TextLayerEntry) {
+  function cmdAddLabel(pageId: string, label: TextLayerEntry) {
     const project = useProjectStore()
     let place: LabelPlace | undefined
     pushCommand({
       label: `add-label ${label.id}`,
-      do: () => project.addLabel(filename, label, place),
+      do: () => project.addLabel(pageId, label, place),
       undo: () => {
-        place = project.deleteLabel(filename, label.id) ?? undefined
+        place = project.deleteLabel(pageId, label.id) ?? undefined
       },
     })
     selectOnly(label.id)
@@ -573,8 +573,8 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function addLabelAt(x: number, y: number) {
     const project = useProjectStore()
-    if (!currentFilename.value) return
-    cmdAddLabel(currentFilename.value, {
+    if (!currentPageId.value) return
+    cmdAddLabel(currentPageId.value, {
       kind: 'text',
       id: generateLabelId(),
       visible: true,
@@ -655,7 +655,7 @@ export const useEditorStore = defineStore('editor', () => {
 
     const before = new Map<string, string[]>()
     for (const p of touched) {
-      before.set(p, [...(project.fileByName(p)?.page.readingOrder ?? [])])
+      before.set(p, [...(project.pageById(p)?.page.readingOrder ?? [])])
     }
 
     const wanted = new Set(moving)
@@ -706,7 +706,7 @@ export const useEditorStore = defineStore('editor', () => {
     })
 
     // The canvas follows the cursor, and the cursor may have just emigrated.
-    if (cursorId.value !== null && wanted.has(cursorId.value)) currentFilename.value = page
+    if (cursorId.value !== null && wanted.has(cursorId.value)) currentPageId.value = page
   }
 
   /**
@@ -749,7 +749,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const ids = unlockedSelection()
     if (ids.length === 0) return
-    const page = currentFilename.value
+    const page = currentPageId.value
     const landing = page === null ? 0 : landingIndex(page, ids)
 
     let removed: RemovedEntry[] = []
@@ -777,7 +777,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   
   function cmdDuplicateLabel(
-    filename: string,
+    pageId: string,
     label: TextLayerEntry,
     opts?: { alreadyApplied?: boolean },
   ) {
@@ -786,9 +786,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `duplicate-label ${label.id}`,
-        do: () => project.addLabel(filename, label, place),
+        do: () => project.addLabel(pageId, label, place),
         undo: () => {
-          place = project.deleteLabel(filename, label.id) ?? undefined
+          place = project.deleteLabel(pageId, label.id) ?? undefined
         },
       },
       opts,
@@ -799,7 +799,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   
   function cmdMoveLabel(
-    filename: string,
+    pageId: string,
     labelId: string,
     oldPos: { x: number; y: number },
     newPos: { x: number; y: number },
@@ -809,8 +809,8 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `move-label ${labelId}`,
-        do: () => project.moveLabel(filename, labelId, newPos.x, newPos.y),
-        undo: () => project.moveLabel(filename, labelId, oldPos.x, oldPos.y),
+        do: () => project.moveLabel(pageId, labelId, newPos.x, newPos.y),
+        undo: () => project.moveLabel(pageId, labelId, oldPos.x, oldPos.y),
       },
       { alreadyApplied: true },
     )
@@ -827,7 +827,7 @@ export const useEditorStore = defineStore('editor', () => {
    * swept, which is what makes going back cost nothing.
    */
   function cmdPlaceLayer(
-    filename: string,
+    pageId: string,
     layerId: string,
     from: LayerPlace,
     to: LayerPlace,
@@ -836,8 +836,8 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     pushCommand({
       label: `place-layer ${layerId}`,
-      do: () => project.placeLayer(filename, layerId, to),
-      undo: () => project.placeLayer(filename, layerId, from),
+      do: () => project.placeLayer(pageId, layerId, to),
+      undo: () => project.placeLayer(pageId, layerId, from),
     })
   }
 
@@ -848,7 +848,7 @@ export const useEditorStore = defineStore('editor', () => {
    * somewhere else.
    */
   function cmdRotateLabel(
-    filename: string,
+    pageId: string,
     labelId: string,
     from: TurnedLabel,
     to: TurnedLabel,
@@ -856,8 +856,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (JSON.stringify(from) === JSON.stringify(to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: TurnedLabel) => {
-      project.rotateLabel(filename, labelId, state.rotation)
-      project.moveLabel(filename, labelId, state.x, state.y)
+      project.rotateLabel(pageId, labelId, state.rotation)
+      project.moveLabel(pageId, labelId, state.x, state.y)
     }
     pushCommand(
       {
@@ -881,7 +881,7 @@ export const useEditorStore = defineStore('editor', () => {
    * without the other would leave the label somewhere nobody dragged it.
    */
   function cmdScaleLabel(
-    filename: string,
+    pageId: string,
     labelId: string,
     from: ScaledLabel,
     to: ScaledLabel,
@@ -890,8 +890,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
-      project.setLabelStyle(filename, labelId, state.style)
-      project.moveLabel(filename, labelId, state.x, state.y)
+      project.setLabelStyle(pageId, labelId, state.style)
+      project.moveLabel(pageId, labelId, state.x, state.y)
     }
     pushCommand(
       {
@@ -908,13 +908,13 @@ export const useEditorStore = defineStore('editor', () => {
    * later writes that reach past it grow it — an AI erase patch extended by
    * hand has to grow the same way, so nothing here is owed to this button alone.
    */
-  function cmdAddRasterLayer(filename: string, layer: RasterLayerEntry, path?: number[]) {
+  function cmdAddRasterLayer(pageId: string, layer: RasterLayerEntry, path?: number[]) {
     const project = useProjectStore()
     let removed: RemovedEntry | null = null
     pushCommand({
       label: `add-layer ${layer.id}`,
       do: () => {
-        if (removed === null) project.addLayer(filename, layer, path)
+        if (removed === null) project.addLayer(pageId, layer, path)
         else project.restoreEntry(removed)
       },
       undo: () => {
@@ -924,7 +924,7 @@ export const useEditorStore = defineStore('editor', () => {
     selectOnly(layer.id)
   }
 
-  function cmdAddFolder(filename: string, name: string) {
+  function cmdAddFolder(pageId: string, name: string) {
     const project = useProjectStore()
     const folder: GroupLayerEntry = {
       kind: 'group',
@@ -939,9 +939,9 @@ export const useEditorStore = defineStore('editor', () => {
     let path: number[] | undefined
     pushCommand({
       label: `add-folder ${folder.id}`,
-      do: () => project.addLayer(filename, folder, path),
+      do: () => project.addLayer(pageId, folder, path),
       undo: () => {
-        const removed = project.dissolveFolder(filename, folder.id)
+        const removed = project.dissolveFolder(pageId, folder.id)
         path = removed?.path
       },
     })
@@ -952,16 +952,16 @@ export const useEditorStore = defineStore('editor', () => {
    * one away has to leave what it held behind. There is no way to lose a
    * translation by tidying up.
    */
-  function cmdDissolveFolder(filename: string, folderId: string) {
+  function cmdDissolveFolder(pageId: string, folderId: string) {
     if (isLayerLocked(folderId)) return
     const project = useProjectStore()
-    const removed = project.dissolveFolder(filename, folderId)
+    const removed = project.dissolveFolder(pageId, folderId)
     if (removed === null) return
     pushCommand(
       {
         label: `dissolve-folder ${folderId}`,
-        do: () => project.dissolveFolder(filename, folderId),
-        undo: () => project.restoreFolder(filename, removed.path, removed.folder),
+        do: () => project.dissolveFolder(pageId, folderId),
+        undo: () => project.restoreFolder(pageId, removed.path, removed.folder),
       },
       { alreadyApplied: true },
     )
@@ -972,7 +972,7 @@ export const useEditorStore = defineStore('editor', () => {
    * reaches the stack as an entry that undoes to nothing.
    */
   function cmdMoveLayer(
-    filename: string,
+    pageId: string,
     layerId: string,
     fromPath: number[],
     target: DropTarget,
@@ -982,15 +982,15 @@ export const useEditorStore = defineStore('editor', () => {
     // What a folder holds is part of the folder, so a drop into a locked one is
     // a change to it — and moving out of a locked folder is already refused
     // above, since the entry inherits that lock.
-    const file = project.fileByName(filename)
+    const file = project.pageById(pageId)
     const into = file ? folderAtPath(file.page.layers, target.parentPath) : null
     if (into !== null && isLayerLocked(into.id)) return
-    if (!project.moveLayer(filename, fromPath, target)) return
+    if (!project.moveLayer(pageId, fromPath, target)) return
     pushCommand(
       {
         label: `move-layer ${layerId}`,
-        do: () => project.moveLayer(filename, fromPath, target),
-        undo: () => project.restoreLayerAt(filename, layerId, fromPath),
+        do: () => project.moveLayer(pageId, fromPath, target),
+        undo: () => project.restoreLayerAt(pageId, layerId, fromPath),
       },
       { alreadyApplied: true },
     )
@@ -1012,7 +1012,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const page = project.pageOfEntry(id)
     if (page === null) return false
-    const file = project.fileByName(page)
+    const file = project.pageById(page)
     return file ? isLocked(file.page.layers, id) : false
   }
 
@@ -1030,9 +1030,9 @@ export const useEditorStore = defineStore('editor', () => {
    * than changed by a slider nobody could see it under.
    */
   function layersToBlend(): LayerEntry[] {
-    const page = currentFilename.value
+    const page = currentPageId.value
     if (page === null) return []
-    const file = useProjectStore().fileByName(page)
+    const file = useProjectStore().pageById(page)
     if (!file) return []
     return allEntries(file.page.layers).filter(
       (e) => selectedIds.value.has(e.id) && !isLocked(file.page.layers, e.id),
@@ -1049,7 +1049,7 @@ export const useEditorStore = defineStore('editor', () => {
    * worth of entries to undo one at a time.
    */
   function cmdSetLayerOpacity(
-    filename: string,
+    pageId: string,
     before: ReadonlyMap<string, number>,
     opacity: number,
   ) {
@@ -1060,10 +1060,10 @@ export const useEditorStore = defineStore('editor', () => {
       {
         label: `set-opacity ${moved.length}`,
         do: () => {
-          for (const [id] of moved) project.setLayerOpacity(filename, id, opacity)
+          for (const [id] of moved) project.setLayerOpacity(pageId, id, opacity)
         },
         undo: () => {
-          for (const [id, was] of moved) project.setLayerOpacity(filename, id, was)
+          for (const [id, was] of moved) project.setLayerOpacity(pageId, id, was)
         },
       },
       { alreadyApplied: true },
@@ -1077,7 +1077,7 @@ export const useEditorStore = defineStore('editor', () => {
    * a folder.
    */
   function cmdSetLayerBlendMode(
-    filename: string,
+    pageId: string,
     before: ReadonlyMap<string, string>,
     blendMode: string,
   ) {
@@ -1085,7 +1085,7 @@ export const useEditorStore = defineStore('editor', () => {
     const moved: Array<[string, string]> = []
     for (const [id, was] of before) {
       if (was === blendMode || isLayerLocked(id)) continue
-      if (!project.setLayerBlendMode(filename, id, blendMode)) continue
+      if (!project.setLayerBlendMode(pageId, id, blendMode)) continue
       moved.push([id, was])
     }
     if (moved.length === 0) return
@@ -1093,28 +1093,28 @@ export const useEditorStore = defineStore('editor', () => {
       {
         label: `set-blend-mode ${moved.length}`,
         do: () => {
-          for (const [id] of moved) project.setLayerBlendMode(filename, id, blendMode)
+          for (const [id] of moved) project.setLayerBlendMode(pageId, id, blendMode)
         },
         undo: () => {
-          for (const [id, was] of moved) project.setLayerBlendMode(filename, id, was)
+          for (const [id, was] of moved) project.setLayerBlendMode(pageId, id, was)
         },
       },
       { alreadyApplied: true },
     )
   }
 
-  function cmdRenameLayer(filename: string, layerId: string, from: string, to: string) {
+  function cmdRenameLayer(pageId: string, layerId: string, from: string, to: string) {
     if (from === to || isLayerLocked(layerId)) return
     const project = useProjectStore()
     // Applied first, as a restack is: a name the tree refuses — a text object
     // has none to change — must not reach the stack as an entry that undoes to
     // nothing.
-    if (!project.renameLayer(filename, layerId, to)) return
+    if (!project.renameLayer(pageId, layerId, to)) return
     pushCommand(
       {
         label: `rename-layer ${layerId}`,
-        do: () => project.renameLayer(filename, layerId, to),
-        undo: () => project.renameLayer(filename, layerId, from),
+        do: () => project.renameLayer(pageId, layerId, to),
+        undo: () => project.renameLayer(pageId, layerId, from),
       },
       { alreadyApplied: true },
     )
@@ -1124,12 +1124,12 @@ export const useEditorStore = defineStore('editor', () => {
    * The one change a lock does not refuse — refusing it would leave no way to
    * take the lock off again.
    */
-  function cmdSetLayerLocked(filename: string, layerId: string, locked: boolean) {
+  function cmdSetLayerLocked(pageId: string, layerId: string, locked: boolean) {
     const project = useProjectStore()
     pushCommand({
       label: `set-locked ${layerId}`,
-      do: () => project.setLayerLocked(filename, layerId, locked),
-      undo: () => project.setLayerLocked(filename, layerId, !locked),
+      do: () => project.setLayerLocked(pageId, layerId, locked),
+      undo: () => project.setLayerLocked(pageId, layerId, !locked),
     })
   }
 
@@ -1139,12 +1139,12 @@ export const useEditorStore = defineStore('editor', () => {
    * moment to see what is under it would be frozen rather than protected. The
    * same exception Photoshop, Krita and Clip Studio all make.
    */
-  function cmdSetLayerVisible(filename: string, layerId: string, visible: boolean) {
+  function cmdSetLayerVisible(pageId: string, layerId: string, visible: boolean) {
     const project = useProjectStore()
     pushCommand({
       label: `set-visible ${layerId}`,
-      do: () => project.setLayerVisible(filename, layerId, visible),
-      undo: () => project.setLayerVisible(filename, layerId, !visible),
+      do: () => project.setLayerVisible(pageId, layerId, visible),
+      undo: () => project.setLayerVisible(pageId, layerId, !visible),
     })
   }
 
@@ -1153,25 +1153,25 @@ export const useEditorStore = defineStore('editor', () => {
    * was put on, so this refuses like every other change rather than being the
    * one exception content slips through.
    */
-  function cmdUpdateLabelText(filename: string, labelId: string, oldText: string, newText: string) {
+  function cmdUpdateLabelText(pageId: string, labelId: string, oldText: string, newText: string) {
     if (oldText === newText || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand({
       label: `update-text ${labelId}`,
-      do: () => project.updateLabelText(filename, labelId, newText),
-      undo: () => project.updateLabelText(filename, labelId, oldText),
+      do: () => project.updateLabelText(pageId, labelId, newText),
+      undo: () => project.updateLabelText(pageId, labelId, oldText),
     })
   }
 
   /** Every selected text object a change is allowed to reach, with its page. */
-  function selectedTextObjects(): { filename: string; label: TextLayerEntry }[] {
+  function selectedTextObjects(): { pageId: string; label: TextLayerEntry }[] {
     const project = useProjectStore()
-    const out: { filename: string; label: TextLayerEntry }[] = []
+    const out: { pageId: string; label: TextLayerEntry }[] = []
     for (const id of unlockedSelection()) {
-      const filename = project.pageOfEntry(id)
-      if (filename === null) continue
-      const label = project.labelById(filename, id)
-      if (label) out.push({ filename, label })
+      const pageId = project.pageOfEntry(id)
+      if (pageId === null) continue
+      const label = project.labelById(pageId, id)
+      if (label) out.push({ pageId, label })
     }
     return out
   }
@@ -1183,11 +1183,11 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const batchScope = computed(() => {
     const objects = selectedTextObjects()
-    const pages = new Set(objects.map((o) => o.filename))
+    const pages = new Set(objects.map((o) => o.pageId))
     return {
       objects: objects.length,
       pages: pages.size,
-      offPage: [...pages].some((p) => p !== currentFilename.value),
+      offPage: [...pages].some((p) => p !== currentPageId.value),
     }
   })
 
@@ -1200,14 +1200,14 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const targets = selectedTextObjects()
     if (targets.length === 0 || Object.keys(patch).length === 0) return
-    const before = targets.map(({ filename, label }) => ({
-      filename,
+    const before = targets.map(({ pageId, label }) => ({
+      pageId,
       id: label.id,
       style: { ...label.style },
     }))
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const write = (states: typeof before) => {
-      for (const { filename, id, style } of states) project.setLabelStyle(filename, id, style)
+      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
     }
     pushCommand({
       label: `style ${targets.length}`,
@@ -1219,7 +1219,7 @@ export const useEditorStore = defineStore('editor', () => {
   /** Every text object in the chapter, which is what the statistics count. */
   function chapterBucketObjects(): BucketObject[] {
     const project = useProjectStore()
-    return project.files.flatMap((file) => bucketObjectsOf(file.filename, file.page.layers))
+    return project.files.flatMap((file) => bucketObjectsOf(file.pageId, file.page.layers))
   }
 
   /**
@@ -1248,8 +1248,8 @@ export const useEditorStore = defineStore('editor', () => {
     const targets = selectedTextObjects()
     if (targets.length === 0) return
     const adding = !targets.every(({ label }) => label.tags.includes(tag))
-    const before = targets.map(({ filename, label }) => ({
-      filename,
+    const before = targets.map(({ pageId, label }) => ({
+      pageId,
       id: label.id,
       tags: [...label.tags],
       style: { ...label.style },
@@ -1262,9 +1262,9 @@ export const useEditorStore = defineStore('editor', () => {
       return { ...entry, tags, style: deriveStyle(sample, tags, registry, seedStyle) }
     })
     const write = (states: typeof before) => {
-      for (const { filename, id, tags, style } of states) {
-        project.setLabelTags(filename, id, tags)
-        project.setLabelStyle(filename, id, style)
+      for (const { pageId, id, tags, style } of states) {
+        project.setLabelTags(pageId, id, tags)
+        project.setLabelStyle(pageId, id, style)
       }
     }
     pushCommand({
@@ -1284,44 +1284,44 @@ export const useEditorStore = defineStore('editor', () => {
    * nothing. What is recorded is what the page actually took, so taking the
    * gesture back cannot rub out a line that was there before it.
    */
-  function cmdDrawReadingEdges(filename: string, edges: readonly ReadingEdge[]) {
+  function cmdDrawReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
     // Where an object is read is one of the things a lock is put on to hold
     // still, and a line is a statement about exactly that.
     const allowed = edges.filter((e) => !isLayerLocked(e.from) && !isLayerLocked(e.to))
-    const taken = project.addReadingEdges(filename, allowed)
+    const taken = project.addReadingEdges(pageId, allowed)
     if (taken.length === 0) return
     pushCommand(
       {
         label: `draw-reading-edges ${taken.length}`,
-        do: () => project.addReadingEdges(filename, taken),
-        undo: () => project.removeReadingEdges(filename, taken),
+        do: () => project.addReadingEdges(pageId, taken),
+        undo: () => project.removeReadingEdges(pageId, taken),
       },
       { alreadyApplied: true },
     )
   }
 
-  function cmdEraseReadingEdges(filename: string, edges: readonly ReadingEdge[]) {
+  function cmdEraseReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
-    const held = project.readingEdgesOf(filename)
+    const held = project.readingEdgesOf(pageId)
     const going = edges.filter(
       (e) => hasEdge(held, e) && !isLayerLocked(e.from) && !isLayerLocked(e.to),
     )
     if (going.length === 0) return
     pushCommand({
       label: `erase-reading-edges ${going.length}`,
-      do: () => project.removeReadingEdges(filename, going),
-      undo: () => project.addReadingEdges(filename, going),
+      do: () => project.removeReadingEdges(pageId, going),
+      undo: () => project.addReadingEdges(pageId, going),
     })
   }
 
-  function cmdSetLabelTags(filename: string, labelId: string, from: string[], to: string[]) {
+  function cmdSetLabelTags(pageId: string, labelId: string, from: string[], to: string[]) {
     if (sameTagSet(from, to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand({
       label: `set-tags ${labelId}`,
-      do: () => project.setLabelTags(filename, labelId, to),
-      undo: () => project.setLabelTags(filename, labelId, from),
+      do: () => project.setLabelTags(pageId, labelId, to),
+      undo: () => project.setLabelTags(pageId, labelId, from),
     })
   }
 
@@ -1386,7 +1386,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   return {
-    currentFilename,
+    currentPageId,
     selectedIds,
     cursorId,
     showPage,

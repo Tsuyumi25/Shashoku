@@ -32,7 +32,7 @@ function openOnePage(labels: TextLayerEntry[] = []) {
   const project = useProjectStore()
   project.files = [
     {
-      filename: PAGE,
+      pageId: PAGE,
       pageDir: `/x/${PAGE}`,
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -45,14 +45,14 @@ function openOnePage(labels: TextLayerEntry[] = []) {
     },
   ]
   const editor = useEditorStore()
-  editor.currentFilename = PAGE
+  editor.currentPageId = PAGE
   return { project, editor }
 }
 
-function pageOf(filename: string, labels: TextLayerEntry[]): ProjectFile {
+function pageOf(pageId: string, labels: TextLayerEntry[]): ProjectFile {
   return {
-    filename,
-    pageDir: `/x/${filename}`,
+    pageId,
+    pageDir: `/x/${pageId}`,
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
@@ -151,7 +151,7 @@ describe('selection', () => {
 
     editor.pageBy(1)
 
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     expect(editor.cursorId).toBe('a')
     expect(setOf(editor)).toEqual(['a'])
   })
@@ -164,7 +164,7 @@ describe('selection', () => {
 
     editor.showPage('002.png')
 
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     expect(setOf(editor)).toEqual(['a'])
   })
 
@@ -198,7 +198,7 @@ describe('addLabelAt', () => {
 
   it('does nothing without a page open', () => {
     const { project, editor } = openOnePage()
-    editor.currentFilename = null
+    editor.currentPageId = null
     editor.addLabelAt(200, 150)
     expect(labelsOf(project)).toHaveLength(0)
   })
@@ -433,12 +433,12 @@ describe('revealLabel', () => {
       pageOf('002.png', [label('c'), label('d')]),
     ]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.selectOnly('a')
 
     editor.revealLabel('002.png', 'd')
 
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     // Turning the page lands on its first object, so the asked-for one has to
     // be put back afterwards or the jump quietly goes somewhere else.
     expect(editor.cursorId).toBe('d')
@@ -448,12 +448,12 @@ describe('revealLabel', () => {
     const project = useProjectStore()
     project.files = [pageOf('001.png', [label('a'), label('b')])]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.selectOnly('a')
 
     editor.revealLabel('001.png', 'b')
 
-    expect(editor.currentFilename).toBe('001.png')
+    expect(editor.currentPageId).toBe('001.png')
     expect(editor.cursorId).toBe('b')
   })
 
@@ -461,7 +461,7 @@ describe('revealLabel', () => {
     const project = useProjectStore()
     project.files = [pageOf('001.png', [label('a', 'a0')]), pageOf('002.png', [label('c')])]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.beginTextEdit('001.png', 'a', 'a0')
     project.updateLabelText('001.png', 'a', 'a1')
 
@@ -595,22 +595,22 @@ describe('layer tree edits', () => {
     const project = useProjectStore()
     project.files = [
       {
-        filename: PAGE,
+        pageId: PAGE,
         pageDir: `/x/${PAGE}`,
         page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers },
         badge: 'ok',
       },
     ]
     const editor = useEditorStore()
-    editor.currentFilename = PAGE
+    editor.currentPageId = PAGE
     return { project, editor }
   }
 
   const stackOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-    (project.fileByName(PAGE)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(PAGE)?.page.layers ?? []).map((e) => e.id)
 
   const orderOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-    project.fileByName(PAGE)?.page.readingOrder ?? []
+    project.pageById(PAGE)?.page.readingOrder ?? []
 
   /**
    * The reason the two orders are held apart at all: restacking is about what
@@ -815,7 +815,7 @@ describe('layer tree edits', () => {
 
   describe('renaming', () => {
     const nameOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
-      const entry = findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)
+      const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
       return entry !== undefined && entry.kind !== 'text' ? entry.name : undefined
     }
 
@@ -848,10 +848,10 @@ describe('layer tree edits', () => {
 
   describe('blending', () => {
     const opacityOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)?.opacity
+      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.opacity
 
     const blendOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      findEntry(project.fileByName(PAGE)?.page.layers ?? [], id)?.blendMode
+      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.blendMode
 
     it('fades everything selected in one step of history', () => {
       const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
@@ -932,7 +932,7 @@ describe('layer tree edits', () => {
     it('acts only on what is selected on the open page', () => {
       const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
       project.files.push({
-        filename: 'p002.png',
+        pageId: 'p002.png',
         pageDir: '/x/p002.png',
         page: {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -945,7 +945,7 @@ describe('layer tree edits', () => {
       })
       editor.selectOnly('a')
       editor.toggleSelected('z')
-      editor.currentFilename = PAGE
+      editor.currentPageId = PAGE
 
       expect(editor.layersToBlend().map((e) => e.id)).toEqual(['a'])
     })
@@ -969,7 +969,7 @@ describe('deleteSelection', () => {
   function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
     const project = useProjectStore()
     project.files = pages.map((p) => ({
-      filename: p.name,
+      pageId: p.name,
       pageDir: `/x/${p.name}`,
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -981,15 +981,15 @@ describe('deleteSelection', () => {
       badge: 'ok' as const,
     }))
     const editor = useEditorStore()
-    editor.currentFilename = pages[0].name
+    editor.currentPageId = pages[0].name
     return { project, editor }
   }
 
   const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    project.fileByName(name)?.page.readingOrder ?? []
+    project.pageById(name)?.page.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.fileByName(name)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(name)?.page.layers ?? []).map((e) => e.id)
 
   it('takes the whole selection in one step of history', () => {
     const { project, editor } = open([
@@ -1083,7 +1083,7 @@ describe('deleteSelection', () => {
 
     editor.deleteSelection()
 
-    expect(editor.currentFilename).toBe('p1')
+    expect(editor.currentPageId).toBe('p1')
     expect(editor.cursorId).toBeNull()
     expect([...editor.selectedIds]).toEqual([])
   })
@@ -1109,7 +1109,7 @@ describe('deleteSelection', () => {
 
     editor.deleteSelection()
 
-    expect(editor.currentFilename).toBe('p1')
+    expect(editor.currentPageId).toBe('p1')
     expect(orderOf(project, 'p1')).toEqual(['b'])
     expect(orderOf(project, 'p2')).toEqual([])
     expect(editor.cursorId).toBe('b')
@@ -1211,7 +1211,7 @@ describe('selectLayerBy', () => {
     const project = useProjectStore()
     project.files = [
       {
-        filename: PAGE,
+        pageId: PAGE,
         pageDir: `/x/${PAGE}`,
         page: {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -1224,7 +1224,7 @@ describe('selectLayerBy', () => {
       },
     ]
     const editor = useEditorStore()
-    editor.currentFilename = PAGE
+    editor.currentPageId = PAGE
     return { editor }
   }
 
@@ -1282,21 +1282,21 @@ describe('editBy', () => {
 
     expect(editor.canUndo).toBe(true)
     expect(editor.cursorId).toBe('b')
-    expect(editor.pendingTextEdit).toEqual({ filename: PAGE, labelId: 'b', from: 'b0' })
+    expect(editor.pendingTextEdit).toEqual({ pageId: PAGE, labelId: 'b', from: 'b0' })
   })
 
   it('carries on to the next page at the end of this one', () => {
     const project = useProjectStore()
     project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('b', 'b0')])]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.selectOnly('a')
     editor.beginTextEdit('001.png', 'a', '')
 
     editor.editBy(1)
 
-    expect(editor.currentFilename).toBe('002.png')
-    expect(editor.pendingTextEdit).toEqual({ filename: '002.png', labelId: 'b', from: 'b0' })
+    expect(editor.currentPageId).toBe('002.png')
+    expect(editor.pendingTextEdit).toEqual({ pageId: '002.png', labelId: 'b', from: 'b0' })
   })
 })
 
@@ -1311,7 +1311,7 @@ describe('moveObjectsTo', () => {
   ) {
     const project = useProjectStore()
     project.files = pages.map((p) => ({
-      filename: p.name,
+      pageId: p.name,
       pageDir: `/x/${p.name}`,
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -1323,15 +1323,15 @@ describe('moveObjectsTo', () => {
       badge: 'ok' as const,
     }))
     const editor = useEditorStore()
-    editor.currentFilename = pages[0].name
+    editor.currentPageId = pages[0].name
     return { project, editor }
   }
 
   const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    project.fileByName(name)?.page.readingOrder ?? []
+    project.pageById(name)?.page.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.fileByName(name)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(name)?.page.layers ?? []).map((e) => e.id)
 
   /**
    * Reordering within a page is about what is read first, and says nothing
@@ -1349,7 +1349,7 @@ describe('moveObjectsTo', () => {
   })
 
   const edgesOf = (project: ReturnType<typeof useProjectStore>, name: string) =>
-    project.fileByName(name)?.page.readingEdges ?? []
+    project.pageById(name)?.page.readingEdges ?? []
 
   it('carries a line to the new page when both its ends make the journey', () => {
     const { project, editor } = open([
@@ -1502,7 +1502,7 @@ describe('a selection that reaches across pages', () => {
       pageOf('002.png', [label('c'), label('d')]),
     ]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.selectOnly('a')
     return { project, editor }
   }
@@ -1518,7 +1518,7 @@ describe('a selection that reaches across pages', () => {
     editor.toggleSelected('c')
 
     expect(editor.cursorId).toBe('c')
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     expect([...editor.selectedIds].sort()).toEqual(['a', 'c'])
   })
 
@@ -1527,7 +1527,7 @@ describe('a selection that reaches across pages', () => {
 
     editor.extendSelectionTo('c', ['a', 'b', 'c', 'd'])
 
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     expect([...editor.selectedIds].sort()).toEqual(['a', 'b', 'c'])
   })
 
@@ -1543,7 +1543,7 @@ describe('a selection that reaches across pages', () => {
     editor.toggleSelected('c')
 
     expect(editor.cursorId).toBe('a')
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
   })
 
   it('leaves the page alone when the selection empties', () => {
@@ -1552,7 +1552,7 @@ describe('a selection that reaches across pages', () => {
     editor.toggleSelected('a')
 
     expect(editor.cursorId).toBeNull()
-    expect(editor.currentFilename).toBe('001.png')
+    expect(editor.currentPageId).toBe('001.png')
   })
 })
 
@@ -1638,7 +1638,7 @@ describe('moving through a narrowed list', () => {
       pageOf('002.png', [label('d', 'まって')]),
     ]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     return { editor }
   }
 
@@ -1678,7 +1678,7 @@ describe('moving through a narrowed list', () => {
     editor.selectLabelBy(1)
 
     expect(editor.cursorId).toBe('d')
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
   })
 
   /** An empty page is somewhere the cursor can be, and its heading is the stop. */
@@ -1686,11 +1686,11 @@ describe('moving through a narrowed list', () => {
     const project = useProjectStore()
     project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', []), pageOf('003.png', [label('c')])]
     const editor = useEditorStore()
-    editor.currentFilename = '001.png'
+    editor.currentPageId = '001.png'
     editor.selectOnly('a')
 
     editor.selectLabelBy(1)
-    expect(editor.currentFilename).toBe('002.png')
+    expect(editor.currentPageId).toBe('002.png')
     expect(editor.cursorId).toBeNull()
 
     editor.selectLabelBy(1)
@@ -1845,7 +1845,7 @@ describe('tagging a partly tagged selection', () => {
       ]),
     ]
     project.addTag('outside')
-    editor.currentFilename = PAGE
+    editor.currentPageId = PAGE
     editor.selectMany(['had', 'lacked'], false)
 
     editor.cmdToggleTagOnSelection('outside')
@@ -1858,7 +1858,7 @@ describe('tagging a partly tagged selection', () => {
 
 describe('drawing lines between text objects', () => {
   const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
-    project.fileByName(PAGE)?.page.readingEdges ?? []
+    project.pageById(PAGE)?.page.readingEdges ?? []
 
   it('draws a line and takes it back in one step', () => {
     const { project, editor } = openOnePage([label('a'), label('b')])
@@ -1958,7 +1958,7 @@ describe('drawing lines between text objects', () => {
     const a = label('a')
     const b = label('b')
     const { project, editor } = openOnePage([])
-    const file = project.fileByName(PAGE)
+    const file = project.pageById(PAGE)
     if (!file) throw new Error('page missing')
     file.page.layers = [
       {

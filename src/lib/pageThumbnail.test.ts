@@ -7,7 +7,7 @@ import { thumbnailKey } from '@/lib/pageThumbnail'
 
 function page(): ProjectFile {
   return {
-    filename: '001.png',
+    pageId: '001.png',
     pageDir: '/p/.shashoku/pages/001',
     badge: 'ok',
     page: {

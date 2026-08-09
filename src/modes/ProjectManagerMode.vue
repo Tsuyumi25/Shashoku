@@ -25,8 +25,8 @@
       </p>
     </div>
 
-    <!-- Dragging across the grid picks pages; it must never start highlighting
-         filenames instead. -->
+    <!-- Dragging across the grid picks pages; it must never start highlighting page
+         names instead. -->
     <div v-else class="min-h-0 flex-1 overflow-y-auto p-2 select-none">
       <div
         class="grid items-start gap-2"
@@ -34,10 +34,10 @@
       >
         <PageThumb
           v-for="file in project.files"
-          :key="file.filename"
+          :key="file.pageId"
           :file="file"
-          :selected="exportSelection.isSelected(file.filename)"
-          @pick="onPick(file.filename, $event)"
+          :selected="exportSelection.isSelected(file.pageId)"
+          @pick="onPick(file.pageId, $event)"
         />
       </div>
     </div>
@@ -65,10 +65,10 @@ onMounted(() => {
   })
 })
 
-function onPick(filename: string, e: MouseEvent) {
-  if (e.shiftKey) exportSelection.extendTo(filename)
-  else if (e.ctrlKey || e.metaKey) exportSelection.toggle(filename)
-  else exportSelection.only(filename)
+function onPick(pageId: string, e: MouseEvent) {
+  if (e.shiftKey) exportSelection.extendTo(pageId)
+  else if (e.ctrlKey || e.metaKey) exportSelection.toggle(pageId)
+  else exportSelection.only(pageId)
 }
 </script>
 

@@ -41,9 +41,9 @@ export function useMergeLayers() {
   const editor = useEditorStore()
 
   function openPage(): { page: string; pageDir: string; layers: LayerEntry[] } | null {
-    const page = editor.currentFilename
+    const page = editor.currentPageId
     if (page === null) return null
-    const file = project.fileByName(page)
+    const file = project.pageById(page)
     return file ? { page, pageDir: file.pageDir, layers: file.page.layers } : null
   }
 
@@ -239,7 +239,7 @@ export function useMergeLayers() {
     const at = [...path.slice(0, -1), path[path.length - 1] + 1]
 
     /** Each copied translation follows the one it came from, so reading order survives. */
-    const order = [...(project.fileByName(open.page)?.page.readingOrder ?? [])]
+    const order = [...(project.pageById(open.page)?.page.readingOrder ?? [])]
     for (const [was, now] of clone.texts) {
       const found = order.indexOf(was)
       order.splice(found === -1 ? order.length : found + 1, 0, now)

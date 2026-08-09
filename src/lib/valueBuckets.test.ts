@@ -11,7 +11,7 @@ const registry: TagDefinition[] = [
 function object(id: string, tags: string[], style: Partial<TextStyle> = {}): BucketObject {
   return {
     id,
-    filename: '001.png',
+    pageId: '001.png',
     tags,
     style: { ...DEFAULT_TEXT_STYLE, ...style },
   }

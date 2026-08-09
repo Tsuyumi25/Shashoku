@@ -191,8 +191,8 @@ export function useLayerPlacement() {
    */
   async function commit(entry: RasterLayerEntry): Promise<void> {
     const gesture = held.value
-    const page = editor.currentFilename
-    const file = page === null ? undefined : project.fileByName(page)
+    const page = editor.currentPageId
+    const file = page === null ? undefined : project.pageById(page)
     if (
       gesture === null ||
       gesture.id !== entry.id ||

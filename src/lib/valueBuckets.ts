@@ -7,7 +7,7 @@ import { textObjects } from '@shared/page/tree'
 /** One text object, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
   id: string
-  filename: string
+  pageId: string
   tags: string[]
   style: TextStyle
 }
@@ -17,10 +17,10 @@ export interface BucketObject {
  * out — an object votes for itself, which is what keeps a panel drawn from
  * these from ever being empty for an object that exists.
  */
-export function bucketObjectsOf(filename: string, layers: readonly LayerEntry[]): BucketObject[] {
+export function bucketObjectsOf(pageId: string, layers: readonly LayerEntry[]): BucketObject[] {
   return textObjects(layers).map((label) => ({
     id: label.id,
-    filename,
+    pageId,
     tags: label.tags,
     style: label.style,
   }))

@@ -44,7 +44,7 @@
         <Check :size="12" :stroke-width="3" />
       </span>
       <span class="truncate text-xs" :class="selected ? '' : 'text-muted-foreground'">
-        {{ file.filename }}
+        {{ file.pageId }}
       </span>
     </div>
   </button>
@@ -112,7 +112,7 @@ async function bytesFor(): Promise<Uint8Array> {
   if (cached) return cached
 
   return inRenderSlot(async () => {
-    const raw = await window.api.readImage(rawsDirOf(project.rootPath ?? ''), props.file.filename)
+    const raw = await window.api.readImage(rawsDirOf(project.rootPath ?? ''), props.file.pageId)
     const png = await renderThumbnail(raw, props.file)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})

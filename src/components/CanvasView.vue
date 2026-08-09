@@ -165,7 +165,7 @@
 
     <div v-else class="flex h-full items-center justify-center select-none">
       <span v-if="currentFile" class="text-xs text-muted-foreground">
-        {{ currentFile.badge === 'ok' ? '載入中…' : `圖檔不存在：${currentFile.filename}` }}
+        {{ currentFile.badge === 'ok' ? '載入中…' : `圖檔不存在：${currentFile.pageId}` }}
       </span>
       <span v-else class="text-sm text-muted-foreground">開啟一個資料夾開始工作</span>
     </div>
@@ -241,7 +241,7 @@ const { chooseTool } = useToolChoice()
 const view = editor.view
 
 const currentFile = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename) ?? null) : null,
+  editor.currentPageId ? (project.pageById(editor.currentPageId) ?? null) : null,
 )
 
 /** What this page draws and in what order — the same answer the export reads. */
@@ -357,13 +357,13 @@ onMounted(() => {
  * frame's worth of entries to undo one at a time.
  */
 function moveLabelTo(labelId: string, to: Anchor) {
-  if (!editor.currentFilename || editor.isLayerLocked(labelId)) return
-  project.moveLabel(editor.currentFilename, labelId, to.x, to.y)
+  if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
+  project.moveLabel(editor.currentPageId, labelId, to.x, to.y)
 }
 
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
-  if (!editor.currentFilename) return
-  editor.cmdMoveLabel(editor.currentFilename, labelId, from, to)
+  if (!editor.currentPageId) return
+  editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
 }
 
 /**
@@ -377,8 +377,8 @@ function onSelectObject(id: string, additive: boolean) {
 }
 
 function labelById(labelId: string): TextLayerEntry | undefined {
-  return editor.currentFilename
-    ? project.labelById(editor.currentFilename, labelId)
+  return editor.currentPageId
+    ? project.labelById(editor.currentPageId, labelId)
     : undefined
 }
 
@@ -405,28 +405,28 @@ function beginLabelScale(labelId: string) {
  */
 function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
-  if (!label || !editor.currentFilename || editor.isLayerLocked(labelId)) return
-  project.setLabelStyle(editor.currentFilename, labelId, { ...label.style, fontSizePx })
-  project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
+  if (!label || !editor.currentPageId || editor.isLayerLocked(labelId)) return
+  project.setLabelStyle(editor.currentPageId, labelId, { ...label.style, fontSizePx })
+  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }
 
 function commitLabelScale(labelId: string) {
   const label = labelById(labelId)
-  if (!editor.currentFilename || !scaledFrom || !label) return
-  editor.cmdScaleLabel(editor.currentFilename, labelId, scaledFrom, scaledState(label))
+  if (!editor.currentPageId || !scaledFrom || !label) return
+  editor.cmdScaleLabel(editor.currentPageId, labelId, scaledFrom, scaledState(label))
   scaledFrom = null
 }
 
 /** Both together, for the same reason a corner drag writes both. */
 function rotateLabelTo(labelId: string, radians: number, at: Anchor) {
-  if (!editor.currentFilename || editor.isLayerLocked(labelId)) return
-  project.rotateLabel(editor.currentFilename, labelId, radians)
-  project.moveLabel(editor.currentFilename, labelId, at.x, at.y)
+  if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
+  project.rotateLabel(editor.currentPageId, labelId, radians)
+  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }
 
 function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) {
-  if (!editor.currentFilename) return
-  editor.cmdRotateLabel(editor.currentFilename, labelId, from, to)
+  if (!editor.currentPageId) return
+  editor.cmdRotateLabel(editor.currentPageId, labelId, from, to)
 }
 
 /**
@@ -673,7 +673,7 @@ function lineAt(p: Anchor): ReadingEdge | null {
  * be saying it once too often.
  */
 function onConnectDown(p: Anchor) {
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (page === null) return
   const hit = objectAt(p)
   if (connect.isDrawing) {
@@ -760,8 +760,8 @@ function revoke() {
 }
 
 watch(
-  () => [project.rawsDir, editor.currentFilename, currentFile.value?.badge] as const,
-  async ([rawsDir, filename, badge]) => {
+  () => [project.rawsDir, editor.currentPageId, currentFile.value?.badge] as const,
+  async ([rawsDir, pageId, badge]) => {
     revoke()
     src.value = null
     imageReady.value = false
@@ -775,9 +775,9 @@ watch(
     selectionTool.dropPageSample()
     scheduleBaseDraw()
     selectionOverlay.schedulePaint()
-    if (!rawsDir || !filename || badge !== 'ok') return
+    if (!rawsDir || !pageId || badge !== 'ok') return
     try {
-      const bytes = await window.api.readImage(rawsDir, filename)
+      const bytes = await window.api.readImage(rawsDir, pageId)
       const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
       currentUrl = url
       src.value = url
@@ -795,8 +795,8 @@ onBeforeUnmount(revoke)
  * a page you have already framed keeps its zoom when it is redrawn.
  */
 function fitUnfittedPage() {
-  if (!imageReady.value || editor.viewFittedPage === editor.currentFilename) return
-  if (editor.fitToView()) editor.viewFittedPage = editor.currentFilename
+  if (!imageReady.value || editor.viewFittedPage === editor.currentPageId) return
+  if (editor.fitToView()) editor.viewFittedPage = editor.currentPageId
 }
 
 function onImageLoad(e: Event) {
@@ -804,8 +804,8 @@ function onImageLoad(e: Event) {
   editor.viewContentSize = { w: img.naturalWidth, h: img.naturalHeight }
   // The one moment the page's own size is known: the parser is synchronous and
   // has no decoded image, so a manifest can only learn this here.
-  if (editor.currentFilename)
-    project.recordPageSize(editor.currentFilename, img.naturalWidth, img.naturalHeight)
+  if (editor.currentPageId)
+    project.recordPageSize(editor.currentPageId, img.naturalWidth, img.naturalHeight)
   imageReady.value = true
   fitUnfittedPage()
   selectionOverlay.schedulePaint()
@@ -823,7 +823,7 @@ watch(
 
 // A chain belongs to one page, and so does the line being looked at: both ends
 // are ids that mean nothing anywhere else.
-watch(() => editor.currentFilename, () => connect.reset())
+watch(() => editor.currentPageId, () => connect.reset())
 
 const spaceDown = ref(false)
 const rDown = ref(false)

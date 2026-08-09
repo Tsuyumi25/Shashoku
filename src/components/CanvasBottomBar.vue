@@ -17,13 +17,13 @@
 
     <select
       class="h-5 max-w-64 min-w-0 rounded border border-input bg-background px-1 text-xs disabled:opacity-50"
-      :value="editor.currentFilename ?? ''"
+      :value="editor.currentPageId ?? ''"
       :disabled="!project.isOpen"
       @change="onSelect"
     >
       <option v-if="!project.isOpen" value="">未開啟專案</option>
-      <option v-for="f in project.files" :key="f.filename" :value="f.filename">
-        {{ f.filename }}{{ f.page.readingOrder.length > 0 ? `（${f.page.readingOrder.length}）` : '' }}
+      <option v-for="f in project.files" :key="f.pageId" :value="f.pageId">
+        {{ f.pageId }}{{ f.page.readingOrder.length > 0 ? `（${f.page.readingOrder.length}）` : '' }}
       </option>
     </select>
     <button class="page-btn" title="上一頁" @click="editor.pageBy(-1)">

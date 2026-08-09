@@ -4,7 +4,7 @@
 
     <div class="min-h-0 flex-1 overflow-y-auto" @dragover.prevent @drop.prevent="onDrop">
       <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
-        {{ editor.currentFilename ? '本頁沒有圖層' : '尚未開啟頁面' }}
+        {{ editor.currentPageId ? '本頁沒有圖層' : '尚未開啟頁面' }}
       </div>
 
       <div
@@ -169,7 +169,7 @@ const editor = useEditorStore()
  * question the next page has its own answer to.
  */
 const currentFile = computed(() =>
-  editor.currentFilename ? (project.fileByName(editor.currentFilename) ?? null) : null,
+  editor.currentPageId ? (project.pageById(editor.currentPageId) ?? null) : null,
 )
 
 // Ids belong to one page, so a folder left collapsed here cannot be mistaken
@@ -218,8 +218,8 @@ function onPick(row: LayerTreeRow, e: MouseEvent) {
 }
 
 function onToggleVisible(entry: LayerEntry) {
-  if (!editor.currentFilename) return
-  editor.cmdSetLayerVisible(editor.currentFilename, entry.id, !entry.visible)
+  if (!editor.currentPageId) return
+  editor.cmdSetLayerVisible(editor.currentPageId, entry.id, !entry.visible)
 }
 
 function lockTitle(row: LayerTreeRow): string {
@@ -228,13 +228,13 @@ function lockTitle(row: LayerTreeRow): string {
 }
 
 function onToggleLocked(entry: LayerEntry) {
-  if (!editor.currentFilename) return
-  editor.cmdSetLayerLocked(editor.currentFilename, entry.id, !entry.locked)
+  if (!editor.currentPageId) return
+  editor.cmdSetLayerLocked(editor.currentPageId, entry.id, !entry.locked)
 }
 
 function onDissolve(folderId: string) {
-  if (!editor.currentFilename) return
-  editor.cmdDissolveFolder(editor.currentFilename, folderId)
+  if (!editor.currentPageId) return
+  editor.cmdDissolveFolder(editor.currentPageId, folderId)
 }
 
 
@@ -259,12 +259,12 @@ function onDrop() {
   const from = dragging.value
   const over = hover.value
   clearDrag()
-  if (from === null || over === null || !editor.currentFilename) return
+  if (from === null || over === null || !editor.currentPageId) return
   const row = rows.value.find((r) => r.entry.id === over.id)
   if (row === undefined) return
   const target = dropTargetFor(row, over.zone)
   if (target === null) return
-  editor.cmdMoveLayer(editor.currentFilename, from.id, from.path, target)
+  editor.cmdMoveLayer(editor.currentPageId, from.id, from.path, target)
 }
 
 function clearDrag() {
@@ -309,14 +309,14 @@ async function beginRename(row: LayerTreeRow) {
 function commitRename() {
   const editing = renaming.value
   renaming.value = null
-  if (editing === null || !editor.currentFilename) return
+  if (editing === null || !editor.currentPageId) return
   const entry = currentFile.value
     ? findEntry(currentFile.value.page.layers, editing.id)
     : undefined
   if (entry === undefined || !canRename(entry)) return
   const name = editing.draft.trim()
   if (name.length === 0) return
-  editor.cmdRenameLayer(editor.currentFilename, editing.id, entry.name, name)
+  editor.cmdRenameLayer(editor.currentPageId, editing.id, entry.name, name)
 }
 
 function iconFor(entry: LayerEntry) {

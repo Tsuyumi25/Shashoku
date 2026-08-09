@@ -36,7 +36,7 @@ export function useSeriesObjects() {
       for (const label of textObjects(parseManifest(raw.manifestRaw).layers)) {
         out.push({
           id: label.id,
-          filename: `${folderName(rootPath)}/${page.filename}`,
+          pageId: `${folderName(rootPath)}/${page.pageId}`,
           tags: label.tags,
           style: label.style,
         })

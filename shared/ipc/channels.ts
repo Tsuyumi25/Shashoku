@@ -34,7 +34,8 @@ export interface ScanRootResult {
 export type PageBadge = "ok" | "raw-missing" | "page-missing" | "damaged";
 
 export interface PageEntry {
-  filename: string;
+  /** What names this page for as long as it exists. */
+  pageId: string;
   pageDir: string;
   badge: PageBadge;
 }

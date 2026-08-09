@@ -157,14 +157,14 @@ async function buildOpenResult(rootPath: string): Promise<OpenProjectResult> {
     } else {
       badge = "damaged";
     }
-    pages.push({ filename, pageDir, badge });
+    pages.push({ pageId: filename, pageDir, badge });
   }
 
   
   for (const stem of pageDirs) {
     if (seenStems.has(stem)) continue;
     pages.push({
-      filename: stem,
+      pageId: stem,
       pageDir: join(pagesRoot, stem),
       badge: "raw-missing",
     });

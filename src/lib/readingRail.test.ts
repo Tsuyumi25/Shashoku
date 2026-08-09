@@ -28,7 +28,7 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
   const order = ids.split(' ')
   const layers: LayerEntry[] = order.map(text)
   const file: ProjectFile = {
-    filename: '001.png',
+    pageId: '001.png',
     pageDir: '/p/001.png',
     badge: 'ok',
     page: {

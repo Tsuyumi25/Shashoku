@@ -17,7 +17,7 @@ let serial = 0
 function obj(tags: string[], style: Partial<TextStyle>): BucketObject {
   return {
     id: `o${++serial}`,
-    filename: 'p001.png',
+    pageId: 'p001.png',
     tags,
     style: { ...DEFAULT_TEXT_STYLE, ...style },
   }

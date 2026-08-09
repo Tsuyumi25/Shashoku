@@ -231,15 +231,15 @@ describe('undo', () => {
   it('turns to the page the command happened on', () => {
     const sel = useSelectionStore()
     const editor = useEditorStore()
-    editor.currentFilename = PAGE_A.page
+    editor.currentPageId = PAGE_A.page
     select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
-    editor.currentFilename = PAGE_B.page
+    editor.currentPageId = PAGE_B.page
 
     editor.undo()
-    expect(editor.currentFilename).toBe(PAGE_A.page)
-    editor.currentFilename = PAGE_B.page
+    expect(editor.currentPageId).toBe(PAGE_A.page)
+    editor.currentPageId = PAGE_B.page
     editor.redo()
-    expect(editor.currentFilename).toBe(PAGE_A.page)
+    expect(editor.currentPageId).toBe(PAGE_A.page)
   })
 })
 

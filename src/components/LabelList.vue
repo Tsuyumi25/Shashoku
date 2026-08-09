@@ -35,15 +35,15 @@
     <template v-for="group in pageGroups" :key="group.page.key">
       <div
         tabindex="0"
-        :data-page-id="group.page.filename"
+        :data-page-id="group.page.pageId"
         class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
         :class="[
-          group.page.filename === editor.currentFilename && 'text-foreground',
+          group.page.pageId === editor.currentPageId && 'text-foreground',
           isHere(group.page) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
         ]"
-        @mousedown="editor.showPage(group.page.filename)"
+        @mousedown="editor.showPage(group.page.pageId)"
       >
-        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.filename }}</span>
+        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.pageId }}</span>
         <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
           {{ group.page.count }}
         </span>
@@ -352,7 +352,7 @@ function isSelected(row: LabelRow): boolean {
  * object that is no longer where anyone is.
  */
 function isHere(row: ChapterRow): boolean {
-  return row.filename === editor.currentFilename && editor.cursorId === null
+  return row.pageId === editor.currentPageId && editor.cursorId === null
 }
 
 /**
@@ -362,7 +362,7 @@ function isHere(row: ChapterRow): boolean {
  */
 function isEditing(row: LabelRow): boolean {
   const pending = editor.pendingTextEdit
-  return pending?.filename === row.filename && pending?.labelId === row.label.id
+  return pending?.pageId === row.pageId && pending?.labelId === row.label.id
 }
 
 function isBlank(row: LabelRow): boolean {
@@ -386,12 +386,12 @@ function onPick(row: LabelRow, e: MouseEvent) {
   if (isEditing(row)) return
   if (e.shiftKey) editor.extendSelectionTo(row.label.id, sequence.value)
   else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.label.id)
-  else editor.revealLabel(row.filename, row.label.id)
+  else editor.revealLabel(row.pageId, row.label.id)
 }
 
 function onEdit(row: LabelRow) {
-  editor.revealLabel(row.filename, row.label.id)
-  editor.beginTextEdit(row.filename, row.label.id, textOf(row.label))
+  editor.revealLabel(row.pageId, row.label.id)
+  editor.beginTextEdit(row.pageId, row.label.id, textOf(row.label))
 }
 
 /**
@@ -458,7 +458,7 @@ function onSearchKey(e: KeyboardEvent) {
   e.preventDefault()
   const first = rows.value.find((r): r is LabelRow => r.kind === 'label')
   if (first === undefined) return
-  editor.revealLabel(first.filename, first.label.id)
+  editor.revealLabel(first.pageId, first.label.id)
   void nextTick(() => focusIn(`[data-row-id="${CSS.escape(first.label.id)}"]`))
 }
 
@@ -503,7 +503,7 @@ function onInputKey(e: KeyboardEvent) {
  */
 function onInput(row: LabelRow, e: Event) {
   if (editor.isLayerLocked(row.label.id)) return
-  project.updateLabelText(row.filename, row.label.id, (e.target as HTMLTextAreaElement).value)
+  project.updateLabelText(row.pageId, row.label.id, (e.target as HTMLTextAreaElement).value)
 }
 
 /**
@@ -517,19 +517,19 @@ function onInput(row: LabelRow, e: Event) {
  * with the cursor pages away.
  */
 watch(
-  () => [editor.currentFilename, editor.cursorId] as const,
-  async ([filename, labelId]) => {
-    if (filename === null) return
+  () => [editor.currentPageId, editor.cursorId] as const,
+  async ([pageId, labelId]) => {
+    if (pageId === null) return
     const index =
       labelId === null
-        ? rows.value.findIndex((r) => r.kind === 'page' && r.filename === filename)
+        ? rows.value.findIndex((r) => r.kind === 'page' && r.pageId === pageId)
         : rows.value.findIndex(
-            (r) => r.kind === 'label' && r.filename === filename && r.label.id === labelId,
+            (r) => r.kind === 'label' && r.pageId === pageId && r.label.id === labelId,
           )
     if (index === -1) return
     const selector =
       labelId === null
-        ? `[data-page-id="${CSS.escape(filename)}"]`
+        ? `[data-page-id="${CSS.escape(pageId)}"]`
         : `[data-row-id="${CSS.escape(labelId)}"]`
 
     // Focus goes where the cursor went, but only while the list is the thing

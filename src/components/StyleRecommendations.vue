@@ -146,7 +146,7 @@ watch(
   sampleKey,
   () => {
     sample.value = project.files.flatMap((file) =>
-      bucketObjectsOf(file.filename, file.page.layers).map((object) => ({
+      bucketObjectsOf(file.pageId, file.page.layers).map((object) => ({
         ...object,
         tags: [...object.tags],
         style: cloneTextStyle(object.style),

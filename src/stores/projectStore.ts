@@ -71,7 +71,7 @@ export interface LabelPlace {
  * impossible, since each removal shifts the ones behind it.
  */
 export interface RemovedEntry {
-  filename: string
+  pageId: string
   path: number[]
   entry: LayerEntry
   order: Array<{ id: string; index: number }>
@@ -95,7 +95,7 @@ export const useProjectStore = defineStore('project', () => {
   const files = ref<ProjectFile[]>([])
   const metaDirty = ref(false)
   
-  const dirtyFilenames = ref<string[]>([])
+  const dirtyPageIds = ref<string[]>([])
 
   const isOpen = computed(() => rootPath.value !== null)
   const folderPath = computed(() => rootPath.value)
@@ -104,7 +104,7 @@ export const useProjectStore = defineStore('project', () => {
     seedStyle: projectMeta.value.seedStyle,
     comment: projectMeta.value.comment,
   }))
-  const dirty = computed(() => metaDirty.value || dirtyFilenames.value.length > 0)
+  const dirty = computed(() => metaDirty.value || dirtyPageIds.value.length > 0)
   
   const rawsDir = computed(() =>
     rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR, DIR_RAWS),
@@ -113,8 +113,8 @@ export const useProjectStore = defineStore('project', () => {
   const shashokuDir = computed(() =>
     rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR),
   )
-  function fileByName(filename: string): ProjectFile | undefined {
-    return files.value.find((f) => f.filename === filename)
+  function pageById(pageId: string): ProjectFile | undefined {
+    return files.value.find((f) => f.pageId === pageId)
   }
 
   /**
@@ -131,8 +131,8 @@ export const useProjectStore = defineStore('project', () => {
    * autosave be scheduled in two places rather than at each of the twenty-odd
    * call sites — and what keeps a new mutation from silently opting out of it.
    */
-  function markPageDirty(filename: string) {
-    if (!dirtyFilenames.value.includes(filename)) dirtyFilenames.value.push(filename)
+  function markPageDirty(pageId: string) {
+    if (!dirtyPageIds.value.includes(pageId)) dirtyPageIds.value.push(pageId)
     autosave.mark()
   }
 
@@ -147,12 +147,12 @@ export const useProjectStore = defineStore('project', () => {
     projectMeta.value = defaultProjectJson()
     files.value = []
     metaDirty.value = false
-    dirtyFilenames.value = []
+    dirtyPageIds.value = []
   }
 
 
   async function ingestProject(newRootPath: string, projectMetaRaw: string, pages: Array<{
-    filename: string
+    pageId: string
     pageDir: string
     badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
   }>): Promise<void> {
@@ -171,19 +171,19 @@ export const useProjectStore = defineStore('project', () => {
         const raw = await window.api.readPage(p.pageDir)
         const repair = repairPage(parseManifest(raw.manifestRaw))
         page = repair.manifest
-        if (repair.repaired.length > 0) mended.push(p.filename)
+        if (repair.repaired.length > 0) mended.push(p.pageId)
       } catch {
         // Opens empty rather than taking the whole project down. The page
         // already carries a badge saying its manifest could not be read.
       }
-      loaded.push({ filename: p.filename, pageDir: p.pageDir, page, badge: p.badge })
+      loaded.push({ pageId: p.pageId, pageDir: p.pageDir, page, badge: p.badge })
     }
     rootPath.value = newRootPath
     projectMeta.value = meta
     files.value = loaded
     metaDirty.value = false
-    dirtyFilenames.value = []
-    for (const filename of mended) markPageDirty(filename)
+    dirtyPageIds.value = []
+    for (const pageId of mended) markPageDirty(pageId)
     // Opening a project is also how its neighbours get found: the folder it
     // sits in becomes somewhere the library looks from now on.
     usePreferencesStore().addScanPoint(parentFolder(newRootPath))
@@ -223,7 +223,7 @@ export const useProjectStore = defineStore('project', () => {
     
     const rawImages = files.value
       .filter((f) => f.badge !== 'raw-missing')
-      .map((f) => f.filename)
+      .map((f) => f.pageId)
     return previewImport(scan.rootImages, rawImages)
   }
 
@@ -255,14 +255,14 @@ export const useProjectStore = defineStore('project', () => {
     const root = rootPath.value
     if (root === null || !dirty.value) return
 
-    const pages = dirtyFilenames.value
+    const pages = dirtyPageIds.value
     const metaWasDirty = metaDirty.value
-    dirtyFilenames.value = []
+    dirtyPageIds.value = []
     metaDirty.value = false
 
     try {
-      for (const filename of pages) {
-        const file = fileByName(filename)
+      for (const pageId of pages) {
+        const file = pageById(pageId)
         if (!file) continue
         await window.api.writePage(file.pageDir, {
           manifestRaw: serializeManifest(file.page),
@@ -275,8 +275,8 @@ export const useProjectStore = defineStore('project', () => {
         )
       }
     } catch (err) {
-      for (const filename of pages) {
-        if (!dirtyFilenames.value.includes(filename)) dirtyFilenames.value.push(filename)
+      for (const pageId of pages) {
+        if (!dirtyPageIds.value.includes(pageId)) dirtyPageIds.value.push(pageId)
       }
       if (metaWasDirty) metaDirty.value = true
       throw err
@@ -286,13 +286,13 @@ export const useProjectStore = defineStore('project', () => {
 
 
   /** A page's text objects as a reader meets them — the label list's order. */
-  function labelsOf(filename: string): TextLayerEntry[] {
-    const file = fileByName(filename)
+  function labelsOf(pageId: string): TextLayerEntry[] {
+    const file = pageById(pageId)
     return file ? textObjectsInReadingOrder(file.page) : []
   }
 
-  function labelById(filename: string, labelId: string): TextLayerEntry | undefined {
-    const file = fileByName(filename)
+  function labelById(pageId: string, labelId: string): TextLayerEntry | undefined {
+    const file = pageById(pageId)
     return file ? findTextObject(file.page.layers, labelId) : undefined
   }
 
@@ -302,8 +302,8 @@ export const useProjectStore = defineStore('project', () => {
    * reading order because inserting near the pointer would renumber the page
    * under whoever is reading it.
    */
-  function addLabel(filename: string, label: TextLayerEntry, at?: LabelPlace) {
-    const file = fileByName(filename)
+  function addLabel(pageId: string, label: TextLayerEntry, at?: LabelPlace) {
+    const file = pageById(pageId)
     if (!file) return
     const place: LabelPlace = at ?? {
       path: [file.page.layers.length],
@@ -320,11 +320,11 @@ export const useProjectStore = defineStore('project', () => {
     // The object is back before its lines are, so nothing put back here is ever
     // a line to somewhere that is not on the page.
     file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...place.edges])
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function deleteLabel(filename: string, labelId: string): LabelPlace | null {
-    const file = fileByName(filename)
+  function deleteLabel(pageId: string, labelId: string): LabelPlace | null {
+    const file = pageById(pageId)
     if (!file) return null
     const path = pathOf(file.page.layers, labelId)
     if (path === null || removeAtPath(file.page.layers, path) === null) return null
@@ -333,7 +333,7 @@ export const useProjectStore = defineStore('project', () => {
     if (found !== -1) file.page.readingOrder.splice(found, 1)
     const edges = edgesTouching(file.page.readingEdges, new Set([labelId]))
     file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
-    markPageDirty(filename)
+    markPageDirty(pageId)
     return { path, orderIndex, edges }
   }
 
@@ -341,13 +341,13 @@ export const useProjectStore = defineStore('project', () => {
    * Any entry, not only a text object: hiding a folder is how a whole run of
    * them goes away at once.
    */
-  function setLayerVisible(filename: string, layerId: string, visible: boolean) {
-    const file = fileByName(filename)
+  function setLayerVisible(pageId: string, layerId: string, visible: boolean) {
+    const file = pageById(pageId)
     if (!file) return
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.visible === visible) return
     entry.visible = visible
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /**
@@ -358,13 +358,13 @@ export const useProjectStore = defineStore('project', () => {
    * read differently in each. A raster is the opposite case — its content is
    * pixels, which read as nothing, so 「塗白」 carries real information.
    */
-  function renameLayer(filename: string, layerId: string, name: string): boolean {
-    const file = fileByName(filename)
+  function renameLayer(pageId: string, layerId: string, name: string): boolean {
+    const file = pageById(pageId)
     if (!file) return false
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.kind === 'text' || entry.name === name) return false
     entry.name = name
-    markPageDirty(filename)
+    markPageDirty(pageId)
     return true
   }
 
@@ -377,11 +377,11 @@ export const useProjectStore = defineStore('project', () => {
    * longer opens.
    */
   function placeLayer(
-    filename: string,
+    pageId: string,
     layerId: string,
     at: { file: string; x: number; y: number; w: number; h: number },
   ) {
-    const file = fileByName(filename)
+    const file = pageById(pageId)
     if (!file) return
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.kind !== 'raster') return
@@ -390,26 +390,26 @@ export const useProjectStore = defineStore('project', () => {
     entry.y = Math.round(at.y)
     entry.w = Math.round(at.w)
     entry.h = Math.round(at.h)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function setLayerLocked(filename: string, layerId: string, locked: boolean) {
-    const file = fileByName(filename)
+  function setLayerLocked(pageId: string, layerId: string, locked: boolean) {
+    const file = pageById(pageId)
     if (!file) return
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.locked === locked) return
     entry.locked = locked
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /** Any entry too — a folder carries blending so a run can be faded as one. */
-  function setLayerOpacity(filename: string, layerId: string, opacity: number) {
-    const file = fileByName(filename)
+  function setLayerOpacity(pageId: string, layerId: string, opacity: number) {
+    const file = pageById(pageId)
     if (!file) return
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.opacity === opacity) return
     entry.opacity = opacity
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /**
@@ -417,14 +417,14 @@ export const useProjectStore = defineStore('project', () => {
    * pass-through says "no buffer of my own", and only a container has one to
    * decline. Letting it through would write a manifest that will not parse.
    */
-  function setLayerBlendMode(filename: string, layerId: string, blendMode: string): boolean {
-    const file = fileByName(filename)
+  function setLayerBlendMode(pageId: string, layerId: string, blendMode: string): boolean {
+    const file = pageById(pageId)
     if (!file) return false
     const entry = findEntry(file.page.layers, layerId)
     if (!entry || entry.blendMode === blendMode) return false
     if (blendMode === PASS_THROUGH && entry.kind !== 'group') return false
     entry.blendMode = blendMode
-    markPageDirty(filename)
+    markPageDirty(pageId)
     return true
   }
 
@@ -436,44 +436,44 @@ export const useProjectStore = defineStore('project', () => {
    * Unlike `addLabel` this touches no reading order — a folder and a raster are
    * not things a reader meets.
    */
-  function addLayer(filename: string, entry: LayerEntry, path?: number[]) {
-    const file = fileByName(filename)
+  function addLayer(pageId: string, entry: LayerEntry, path?: number[]) {
+    const file = pageById(pageId)
     if (!file) return
     const at = path ?? [file.page.layers.length]
     if (!insertAtPath(file.page.layers, at, entry)) file.page.layers.push(entry)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   function dissolveFolder(
-    filename: string,
+    pageId: string,
     folderId: string,
   ): { path: number[]; folder: GroupLayerEntry } | null {
-    const file = fileByName(filename)
+    const file = pageById(pageId)
     if (!file) return null
     const path = pathOf(file.page.layers, folderId)
     if (path === null) return null
     const folder = dissolveGroupAt(file.page.layers, path)
     if (folder === null) return null
-    markPageDirty(filename)
+    markPageDirty(pageId)
     return { path, folder }
   }
 
-  function restoreFolder(filename: string, path: number[], folder: GroupLayerEntry) {
-    const file = fileByName(filename)
+  function restoreFolder(pageId: string, path: number[], folder: GroupLayerEntry) {
+    const file = pageById(pageId)
     if (!file) return
     if (!restoreGroupAt(file.page.layers, path, folder)) return
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function setReadingOrder(filename: string, order: string[]) {
-    const file = fileByName(filename)
+  function setReadingOrder(pageId: string, order: string[]) {
+    const file = pageById(pageId)
     if (!file) return
     file.page.readingOrder = order
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function readingEdgesOf(filename: string): readonly ReadingEdge[] {
-    return fileByName(filename)?.page.readingEdges ?? []
+  function readingEdgesOf(pageId: string): readonly ReadingEdge[] {
+    return pageById(pageId)?.page.readingEdges ?? []
   }
 
   /**
@@ -486,8 +486,8 @@ export const useProjectStore = defineStore('project', () => {
    * question while the pointer is still down and draws a target it would refuse
    * as refused, so reaching this refusal means something got past that.
    */
-  function addReadingEdges(filename: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
-    const file = fileByName(filename)
+  function addReadingEdges(pageId: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
+    const file = pageById(pageId)
     if (!file) return []
     const taken: ReadingEdge[] = []
     for (const edge of edges) {
@@ -496,31 +496,31 @@ export const useProjectStore = defineStore('project', () => {
       file.page.readingEdges = normalizeEdges([...held, edge])
       taken.push(edge)
     }
-    if (taken.length > 0) markPageDirty(filename)
+    if (taken.length > 0) markPageDirty(pageId)
     return taken
   }
 
-  function removeReadingEdges(filename: string, edges: readonly ReadingEdge[]): void {
-    const file = fileByName(filename)
+  function removeReadingEdges(pageId: string, edges: readonly ReadingEdge[]): void {
+    const file = pageById(pageId)
     if (!file || edges.length === 0) return
     const left = withoutEdges(file.page.readingEdges, edges)
     if (left.length === file.page.readingEdges.length) return
     file.page.readingEdges = left
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /** On top of everything, which is where an object arriving on a page belongs. */
-  function appendEntry(filename: string, entry: LayerEntry) {
-    const file = fileByName(filename)
+  function appendEntry(pageId: string, entry: LayerEntry) {
+    const file = pageById(pageId)
     if (!file) return
     file.page.layers.push(entry)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /** Which page an entry is on, since the selection reaches across all of them. */
   function pageOfEntry(id: string): string | null {
     for (const file of files.value) {
-      if (findEntry(file.page.layers, id)) return file.filename
+      if (findEntry(file.page.layers, id)) return file.pageId
     }
     return null
   }
@@ -548,8 +548,8 @@ export const useProjectStore = defineStore('project', () => {
       file.page.readingOrder = file.page.readingOrder.filter((o) => !carried.has(o))
       const edges = edgesTouching(file.page.readingEdges, carried)
       file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
-      markPageDirty(file.filename)
-      return { filename: file.filename, path, entry, order, edges }
+      markPageDirty(file.pageId)
+      return { pageId: file.pageId, path, entry, order, edges }
     }
     return null
   }
@@ -560,7 +560,7 @@ export const useProjectStore = defineStore('project', () => {
    * of it are already back in place by the time it lands.
    */
   function restoreEntry(removed: RemovedEntry): void {
-    const file = fileByName(removed.filename)
+    const file = pageById(removed.pageId)
     if (!file) return
     if (!insertAtPath(file.page.layers, removed.path, removed.entry)) {
       file.page.layers.push(removed.entry)
@@ -569,14 +569,14 @@ export const useProjectStore = defineStore('project', () => {
       file.page.readingOrder.splice(Math.min(index, file.page.readingOrder.length), 0, id)
     }
     file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...removed.edges])
-    markPageDirty(removed.filename)
+    markPageDirty(removed.pageId)
   }
 
-  function moveLayer(filename: string, fromPath: number[], target: DropTarget): boolean {
-    const file = fileByName(filename)
+  function moveLayer(pageId: string, fromPath: number[], target: DropTarget): boolean {
+    const file = pageById(pageId)
     if (!file) return false
     if (!moveEntry(file.page.layers, fromPath, target)) return false
-    markPageDirty(filename)
+    markPageDirty(pageId)
     return true
   }
 
@@ -585,15 +585,15 @@ export const useProjectStore = defineStore('project', () => {
    * drop rules cannot express: their indices are read before the entry comes
    * out, and running them backwards lands one place off.
    */
-  function restoreLayerAt(filename: string, layerId: string, path: number[]) {
-    const file = fileByName(filename)
+  function restoreLayerAt(pageId: string, layerId: string, path: number[]) {
+    const file = pageById(pageId)
     if (!file) return
     const current = pathOf(file.page.layers, layerId)
     if (current === null) return
     const entry = removeAtPath(file.page.layers, current)
     if (entry === null) return
     insertAtPath(file.page.layers, path, entry)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /**
@@ -605,63 +605,63 @@ export const useProjectStore = defineStore('project', () => {
    * console is where that stays until replacing a page's material is a command
    * rather than something done behind the program's back.
    */
-  function recordPageSize(filename: string, width: number, height: number) {
-    const file = fileByName(filename)
+  function recordPageSize(pageId: string, width: number, height: number) {
+    const file = pageById(pageId)
     if (!file || width <= 0 || height <= 0) return
     const { page } = file
     if (page.width !== undefined && page.height !== undefined) {
       if (page.width !== width || page.height !== height)
         console.warn(
-          `${filename}: 記錄的頁面尺寸 ${page.width}×${page.height} 與原圖的 ${width}×${height} 不符`,
+          `${pageId}: 記錄的頁面尺寸 ${page.width}×${page.height} 與原圖的 ${width}×${height} 不符`,
         )
       return
     }
     page.width = width
     page.height = height
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function moveLabel(filename: string, labelId: string, x: number, y: number) {
-    const label = labelById(filename, labelId)
+  function moveLabel(pageId: string, labelId: string, x: number, y: number) {
+    const label = labelById(pageId, labelId)
     if (!label) return
     label.x = x
     label.y = y
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function rotateLabel(filename: string, labelId: string, rotation: number) {
-    const label = labelById(filename, labelId)
+  function rotateLabel(pageId: string, labelId: string, rotation: number) {
+    const label = labelById(pageId, labelId)
     if (!label) return
     label.rotation = rotation
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function updateLabelText(filename: string, labelId: string, text: string) {
-    const label = labelById(filename, labelId)
+  function updateLabelText(pageId: string, labelId: string, text: string) {
+    const label = labelById(pageId, labelId)
     if (!label) return
     label.lines = linesOf(text)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function setLabelTags(filename: string, labelId: string, tags: readonly string[]) {
-    const label = labelById(filename, labelId)
+  function setLabelTags(pageId: string, labelId: string, tags: readonly string[]) {
+    const label = labelById(pageId, labelId)
     if (!label) return
     label.tags = normalizeTagSet(tags)
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
-  function setLabelStyle(filename: string, labelId: string, style: TextStyle) {
-    const label = labelById(filename, labelId)
+  function setLabelStyle(pageId: string, labelId: string, style: TextStyle) {
+    const label = labelById(pageId, labelId)
     if (!label) return
     label.style = { ...style }
-    markPageDirty(filename)
+    markPageDirty(pageId)
   }
 
   /** Every text object in the chapter, with the page each one came from. */
-  function allTextObjects(): { filename: string; label: TextLayerEntry }[] {
-    const out: { filename: string; label: TextLayerEntry }[] = []
+  function allTextObjects(): { pageId: string; label: TextLayerEntry }[] {
+    const out: { pageId: string; label: TextLayerEntry }[] = []
     for (const file of files.value) {
-      for (const label of textObjects(file.page.layers)) out.push({ filename: file.filename, label })
+      for (const label of textObjects(file.page.layers)) out.push({ pageId: file.pageId, label })
     }
     return out
   }
@@ -719,10 +719,10 @@ export const useProjectStore = defineStore('project', () => {
     if (tags.some((t) => t.name === to)) return false
     tags[index].name = to
     markMetaDirty()
-    for (const { filename, label } of allTextObjects()) {
+    for (const { pageId, label } of allTextObjects()) {
       if (!label.tags.includes(from)) continue
       label.tags = normalizeTagSet(label.tags.map((t) => (t === from ? to : t)))
-      markPageDirty(filename)
+      markPageDirty(pageId)
     }
     return true
   }
@@ -774,7 +774,7 @@ export const useProjectStore = defineStore('project', () => {
     rootPath,
     projectMeta,
     files,
-    dirtyFilenames,
+    dirtyPageIds,
     
     folderPath,
     header,
@@ -785,7 +785,7 @@ export const useProjectStore = defineStore('project', () => {
     shashokuDir,
     layersDirOf,
     
-    fileByName,
+    pageById,
     labelsOf,
     labelById,
     reset,

@@ -46,14 +46,14 @@ export function useFillSelection() {
 
   const canFill = computed(
     () =>
-      editor.currentFilename !== null &&
+      editor.currentPageId !== null &&
       selection.bounds !== null &&
       !isEmptyRect(selection.bounds),
   )
 
   function nextFillName(page: string): string {
     const taken = new Set(
-      allEntries(project.fileByName(page)?.page.layers ?? [])
+      allEntries(project.pageById(page)?.page.layers ?? [])
         .filter((e) => e.kind === 'raster')
         .map((e) => e.name),
     )
@@ -61,10 +61,10 @@ export function useFillSelection() {
   }
 
   async function fillSelection(): Promise<void> {
-    const page = editor.currentFilename
+    const page = editor.currentPageId
     const bounds = selection.bounds
     if (page === null || bounds === null || isEmptyRect(bounds)) return
-    const file = project.fileByName(page)
+    const file = project.pageById(page)
     if (!file) return
     const color = hexToRgb(editor.foreground)
     if (color === null) return

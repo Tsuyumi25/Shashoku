@@ -84,7 +84,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
   }
 
   function build(): OverlayFrame {
-    const page = editor.currentFilename
+    const page = editor.currentPageId
     if (page === null || !ready()) return EMPTY_FRAME
     const dpr = window.devicePixelRatio || 1
 
@@ -190,7 +190,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
   watch(view, schedulePaint)
   watch(() => selection.revision, schedulePaint)
   watch(() => selection.quickMask, schedulePaint)
-  watch(() => editor.currentFilename, schedulePaint)
+  watch(() => editor.currentPageId, schedulePaint)
 
   onBeforeUnmount(stopCrawl)
 

@@ -34,7 +34,7 @@ export const useExportStore = defineStore('export', () => {
   )
 
   function selectAll() {
-    selected.value = project.files.map((f) => f.filename)
+    selected.value = project.files.map((f) => f.pageId)
   }
 
   /** All, or none once all of them already are — one control does both. */
@@ -49,7 +49,7 @@ export const useExportStore = defineStore('export', () => {
     () => project.files,
     () => {
       selectAll()
-      anchor.value = project.files[0]?.filename ?? null
+      anchor.value = project.files[0]?.pageId ?? null
     },
     { immediate: true },
   )
@@ -63,28 +63,28 @@ export const useExportStore = defineStore('export', () => {
     },
   )
 
-  function isSelected(filename: string): boolean {
-    return selectedSet.value.has(filename)
+  function isSelected(pageId: string): boolean {
+    return selectedSet.value.has(pageId)
   }
 
-  function only(filename: string) {
-    selected.value = [filename]
-    anchor.value = filename
+  function only(pageId: string) {
+    selected.value = [pageId]
+    anchor.value = pageId
   }
 
-  function toggle(filename: string) {
-    const at = selected.value.indexOf(filename)
-    if (at === -1) selected.value.push(filename)
+  function toggle(pageId: string) {
+    const at = selected.value.indexOf(pageId)
+    if (at === -1) selected.value.push(pageId)
     else selected.value.splice(at, 1)
-    anchor.value = filename
+    anchor.value = pageId
   }
 
   /** Everything between the anchor and here, added to what is already picked. */
-  function extendTo(filename: string) {
-    const names = project.files.map((f) => f.filename)
+  function extendTo(pageId: string) {
+    const names = project.files.map((f) => f.pageId)
     const from = anchor.value === null ? 0 : names.indexOf(anchor.value)
-    const to = names.indexOf(filename)
-    if (from === -1 || to === -1) return only(filename)
+    const to = names.indexOf(pageId)
+    if (from === -1 || to === -1) return only(pageId)
     const [lo, hi] = from <= to ? [from, to] : [to, from]
     const run = names.slice(lo, hi + 1)
     selected.value = [...new Set([...selected.value, ...run])]
@@ -103,7 +103,7 @@ export const useExportStore = defineStore('export', () => {
     const profile = project.exportProfiles[activeProfile.value]
     return profile === undefined ? [] : [profile]
   })
-  const pagesToRun = computed(() => project.files.filter((f) => selectedSet.value.has(f.filename)))
+  const pagesToRun = computed(() => project.files.filter((f) => selectedSet.value.has(f.pageId)))
 
   function cancel() {
     abandoned = true
@@ -134,18 +134,18 @@ export const useExportStore = defineStore('export', () => {
     try {
       for (const [index, file] of pages.entries()) {
         if (abandoned) return stop(written, '已取消')
-        if (file.badge !== 'ok') return stop(written, `${file.filename}:圖檔不存在`)
+        if (file.badge !== 'ok') return stop(written, `${file.pageId}:圖檔不存在`)
 
         let page: OffscreenCanvas
         try {
-          const raw = await window.api.readImage(rawsDirOf(root), file.filename)
+          const raw = await window.api.readImage(rawsDirOf(root), file.pageId)
           page = await compositePage({
             raw,
             page: file.page,
             loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
           })
         } catch (err) {
-          return stop(written, `${file.filename}:${messageOf(err)}`)
+          return stop(written, `${file.pageId}:${messageOf(err)}`)
         }
 
         for (const profile of profiles) {
@@ -156,11 +156,11 @@ export const useExportStore = defineStore('export', () => {
             await window.api.writeExport(
               root,
               folder,
-              outputFilename(profile, file.filename, index),
+              outputFilename(profile, file.pageId, index),
               bytes,
             )
           } catch (err) {
-            return stop(written, `${file.filename} → ${folder}/:${messageOf(err)}`)
+            return stop(written, `${file.pageId} → ${folder}/:${messageOf(err)}`)
           }
           written++
           progress.value = { done: written, total: pages.length * profiles.length }

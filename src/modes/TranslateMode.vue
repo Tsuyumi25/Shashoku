@@ -93,7 +93,7 @@
               type="button"
               class="panel-action"
               title="新增圖層"
-              :disabled="!editor.currentFilename"
+              :disabled="!editor.currentPageId"
               @click="onAddLayer"
             >
               <FilePlus :size="14" />
@@ -120,7 +120,7 @@
               type="button"
               class="panel-action"
               title="新增資料夾"
-              :disabled="!editor.currentFilename"
+              :disabled="!editor.currentPageId"
               @click="onAddFolder"
             >
               <FolderPlus :size="14" />
@@ -135,7 +135,7 @@
               type="button"
               class="panel-action ml-auto"
               title="在畫面中心新增標籤"
-              :disabled="!editor.currentFilename"
+              :disabled="!editor.currentPageId"
               @click="editor.addLabelAtViewCenter()"
             >
               <Plus :size="14" />
@@ -216,8 +216,8 @@ const labelCount = computed(() =>
 
 /** The names already spoken for on the open page, among one kind of entry. */
 function takenNames(kind: 'group' | 'raster'): Set<string> {
-  const page = editor.currentFilename
-    ? project.fileByName(editor.currentFilename)?.page
+  const page = editor.currentPageId
+    ? project.pageById(editor.currentPageId)?.page
     : undefined
   return new Set(
     (page ? allEntries(page.layers) : [])
@@ -227,8 +227,8 @@ function takenNames(kind: 'group' | 'raster'): Set<string> {
 }
 
 function onAddFolder() {
-  if (!editor.currentFilename) return
-  editor.cmdAddFolder(editor.currentFilename, nextAutoName(takenNames('group'), '資料夾'))
+  if (!editor.currentPageId) return
+  editor.cmdAddFolder(editor.currentPageId, nextAutoName(takenNames('group'), '資料夾'))
 }
 
 /**
@@ -236,9 +236,9 @@ function onAddFolder() {
  * one. It has no frame and no file behind it yet; the first write places both.
  */
 function onAddLayer() {
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (!page) return
-  const file = project.fileByName(page)
+  const file = project.pageById(page)
   if (!file) return
 
   const id = generateId()

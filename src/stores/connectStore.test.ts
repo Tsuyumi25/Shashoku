@@ -31,7 +31,7 @@ function openPage(ids: string[]) {
   const project = useProjectStore()
   project.files = [
     {
-      filename: PAGE,
+      pageId: PAGE,
       pageDir: `/x/${PAGE}`,
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -44,12 +44,12 @@ function openPage(ids: string[]) {
     },
   ]
   const editor = useEditorStore()
-  editor.currentFilename = PAGE
+  editor.currentPageId = PAGE
   return { project, editor, connect: useConnectStore() }
 }
 
 const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
-  project.fileByName(PAGE)?.page.readingEdges ?? []
+  project.pageById(PAGE)?.page.readingEdges ?? []
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -126,7 +126,7 @@ describe('a chain being drawn', () => {
 
   it('refuses to reach a locked object, and to set out from one', () => {
     const { project, editor, connect } = openPage(['a', 'b'])
-    const file = project.fileByName(PAGE)
+    const file = project.pageById(PAGE)
     if (!file) throw new Error('page missing')
     editor.cmdSetLayerLocked(PAGE, 'b', true)
     connect.begin(PAGE, 'a', AT)

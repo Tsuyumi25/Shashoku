@@ -84,10 +84,10 @@ const BLEND_LABELS: Record<string, string> = {
 
 /** What the controls show. The cursor is the row touched last, as everywhere else. */
 const target = computed<LayerEntry | null>(() => {
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   const id = editor.cursorId
   if (page === null || id === null) return null
-  const file = project.fileByName(page)
+  const file = project.pageById(page)
   return file ? (findEntry(file.page.layers, id) ?? null) : null
 })
 
@@ -115,7 +115,7 @@ function clampPercent(raw: number): number | null {
 let slideFrom: Map<string, number> | null = null
 
 function writeOpacity(value: number) {
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (page === null) return
   for (const entry of affected()) project.setLayerOpacity(page, entry.id, value)
 }
@@ -133,14 +133,14 @@ function onSlideEnd(e: Event) {
   const next = clampPercent((e.target as HTMLInputElement).valueAsNumber)
   const from = slideFrom
   slideFrom = null
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (next === null || from === null || page === null) return
   editor.cmdSetLayerOpacity(page, from, next / 100)
 }
 
 function onTypedPercent(e: Event) {
   const next = clampPercent((e.target as HTMLInputElement).valueAsNumber)
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (next === null || page === null) return
   const from = new Map(affected().map((entry) => [entry.id, entry.opacity]))
   writeOpacity(next / 100)
@@ -149,7 +149,7 @@ function onTypedPercent(e: Event) {
 
 function onBlendMode(e: Event) {
   const next = (e.target as HTMLSelectElement).value
-  const page = editor.currentFilename
+  const page = editor.currentPageId
   if (page === null) return
   editor.cmdSetLayerBlendMode(
     page,

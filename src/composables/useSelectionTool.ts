@@ -64,7 +64,7 @@ export function useSelectionTool(
   }
 
   function pagePixels(): Uint8ClampedArray | null {
-    const page = editor.currentFilename
+    const page = editor.currentPageId
     const img = image.value
     if (page === null || !img || !ready()) return null
     if (sample?.page === page) return sample.pixels

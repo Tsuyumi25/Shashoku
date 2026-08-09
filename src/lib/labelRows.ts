@@ -7,14 +7,14 @@ import { textOf } from '@shared/page/text'
 export interface PageRow {
   kind: 'page'
   key: string
-  filename: string
+  pageId: string
   count: number
 }
 
 export interface LabelRow {
   kind: 'label'
   key: string
-  filename: string
+  pageId: string
   label: TextLayerEntry
   /**
    * Its place in this page's reading order — where a drop lands, not what is
@@ -69,15 +69,15 @@ export function buildLabelRows(files: readonly ProjectFile[], query = ''): Chapt
 
     rows.push({
       kind: 'page',
-      key: `page/${file.filename}`,
-      filename: file.filename,
+      key: `page/${file.pageId}`,
+      pageId: file.pageId,
       count: shown.length,
     })
     for (const row of shown) {
       rows.push({
         kind: 'label',
-        key: `label/${file.filename}/${row.label.id}`,
-        filename: file.filename,
+        key: `label/${file.pageId}/${row.label.id}`,
+        pageId: file.pageId,
         label: row.label,
         // Filtering hides rows; it does not renumber the page or move anything.
         index: numbering.get(row.label.id) ?? 0,
@@ -128,6 +128,6 @@ export interface ReadingOrderDrop {
  * above the target and subtracts it there.
  */
 export function dropAt(row: ChapterRow, after: boolean): ReadingOrderDrop {
-  if (row.kind === 'page') return { page: row.filename, index: 0 }
-  return { page: row.filename, index: after ? row.index : row.index - 1 }
+  if (row.kind === 'page') return { page: row.pageId, index: 0 }
+  return { page: row.pageId, index: after ? row.index : row.index - 1 }
 }

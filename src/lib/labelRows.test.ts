@@ -23,7 +23,7 @@ function text(id: string): TextLayerEntry {
 }
 
 function file(
-  filename: string,
+  pageId: string,
   layers: LayerEntry[],
   readingOrder: string[],
   drawn: string[] = [],
@@ -33,8 +33,8 @@ function file(
     return { from, to }
   })
   return {
-    filename,
-    pageDir: `/p/${filename}`,
+    pageId,
+    pageDir: `/p/${pageId}`,
     badge: 'ok',
     page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges, layers },
   }
@@ -52,7 +52,7 @@ describe('buildLabelRows', () => {
   it('heads each page and then lists its objects', () => {
     const rows = buildLabelRows([file('001.png', [text('a'), text('b')], ['a', 'b'])])
     expect(rows.map((r) => r.kind)).toEqual(['page', 'label', 'label'])
-    expect(rows[0]).toMatchObject({ kind: 'page', filename: '001.png', count: 2 })
+    expect(rows[0]).toMatchObject({ kind: 'page', pageId: '001.png', count: 2 })
   })
 
   it('numbers within the page, so each page starts at one', () => {
@@ -60,7 +60,7 @@ describe('buildLabelRows', () => {
       file('001.png', [text('a'), text('b')], ['a', 'b']),
       file('002.png', [text('c')], ['c']),
     ])
-    expect(rows.filter((r) => r.kind === 'label').map((r) => [r.filename, r.index])).toEqual([
+    expect(rows.filter((r) => r.kind === 'label').map((r) => [r.pageId, r.index])).toEqual([
       ['001.png', 1],
       ['001.png', 2],
       ['002.png', 1],
@@ -112,7 +112,7 @@ describe('buildLabelRows', () => {
         file('002.png', [text('c'), text('d')], ['c', 'd']),
       ]),
     )
-    expect(rows.map((row) => [row.filename, row.label.id])).toEqual([
+    expect(rows.map((row) => [row.pageId, row.label.id])).toEqual([
       ['001.png', 'b'],
       ['001.png', 'a'],
       ['002.png', 'c'],
@@ -163,7 +163,7 @@ describe('dropAt', () => {
   /** A page with nothing on it has only its heading to aim at. */
   it('reads a drop on a heading as the head of that page, either half', () => {
     const rows = buildLabelRows(chapter)
-    const empty = rows.find((r) => r.kind === 'page' && r.filename === '002.png')
+    const empty = rows.find((r) => r.kind === 'page' && r.pageId === '002.png')
     expect(dropAt(empty!, false)).toEqual({ page: '002.png', index: 0 })
     expect(dropAt(empty!, true)).toEqual({ page: '002.png', index: 0 })
   })
@@ -178,7 +178,7 @@ describe('buildLabelRows filtered', () => {
   function withText(name: string, lines: Record<string, string[]>): ProjectFile {
     const ids = Object.keys(lines)
     return {
-      filename: name,
+      pageId: name,
       pageDir: `/p/${name}`,
       badge: 'ok',
       page: {
@@ -209,7 +209,7 @@ describe('buildLabelRows filtered', () => {
       [withText('001.png', { a: ['そうか'] }), withText('002.png', { b: ['やめろ'] })],
       'そう',
     )
-    expect(rows.filter((r) => r.kind === 'page').map((r) => r.filename)).toEqual(['001.png'])
+    expect(rows.filter((r) => r.kind === 'page').map((r) => r.pageId)).toEqual(['001.png'])
   })
 
   /**
@@ -244,7 +244,7 @@ describe('chapterStops', () => {
       file('001.png', [text('a'), text('b')], ['a', 'b']),
       file('002.png', [text('c')], ['c']),
     ])
-    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.filename))).toEqual([
+    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.pageId))).toEqual([
       'a',
       'b',
       'c',
@@ -261,7 +261,7 @@ describe('chapterStops', () => {
       file('002.png', [], []),
       file('003.png', [text('c')], ['c']),
     ])
-    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.filename))).toEqual([
+    expect(chapterStops(rows).map((r) => (r.kind === 'label' ? r.label.id : r.pageId))).toEqual([
       'a',
       '002.png',
       'c',
