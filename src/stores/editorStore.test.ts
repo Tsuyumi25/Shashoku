@@ -1301,7 +1301,14 @@ describe('editBy', () => {
 })
 
 describe('moveObjectsTo', () => {
-  function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
+  function open(
+    pages: Array<{
+      name: string
+      layers: LayerEntry[]
+      order: string[]
+      drawn?: Array<{ from: string; to: string }>
+    }>,
+  ) {
     const project = useProjectStore()
     project.files = pages.map((p) => ({
       filename: p.name,
@@ -1310,7 +1317,7 @@ describe('moveObjectsTo', () => {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
         readingOrder: p.order,
-        readingEdges: [],
+        readingEdges: p.drawn ?? [],
         layers: p.layers,
       },
       badge: 'ok' as const,
@@ -1339,6 +1346,51 @@ describe('moveObjectsTo', () => {
 
     expect(orderOf(project, 'p1')).toEqual(['c', 'a', 'b'])
     expect(stackOf(project, 'p1')).toEqual(['a', 'b', 'c'])
+  })
+
+  const edgesOf = (project: ReturnType<typeof useProjectStore>, name: string) =>
+    project.fileByName(name)?.page.readingEdges ?? []
+
+  it('carries a line to the new page when both its ends make the journey', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'], drawn: [{ from: 'a', to: 'b' }] },
+      { name: 'p2', layers: [], order: [] },
+    ])
+
+    editor.moveObjectsTo(['a', 'b'], 'p2', 0)
+
+    expect(edgesOf(project, 'p2')).toEqual([{ from: 'a', to: 'b' }])
+    expect(edgesOf(project, 'p1')).toEqual([])
+  })
+
+  /**
+   * An id means something only within its page, so a line reaching back to one
+   * left behind has nothing to point at. Dropping it is the answer; carrying it
+   * would leave the new page holding a line to an object that is not on it.
+   */
+  it('drops a line whose other end stayed behind', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'], drawn: [{ from: 'a', to: 'b' }] },
+      { name: 'p2', layers: [], order: [] },
+    ])
+
+    editor.moveObjectsTo(['a'], 'p2', 0)
+
+    expect(edgesOf(project, 'p2')).toEqual([])
+    expect(edgesOf(project, 'p1')).toEqual([])
+  })
+
+  it('gives a carried line back to the page it came from when undone', () => {
+    const { project, editor } = open([
+      { name: 'p1', layers: [label('a'), label('b')], order: ['a', 'b'], drawn: [{ from: 'a', to: 'b' }] },
+      { name: 'p2', layers: [], order: [] },
+    ])
+
+    editor.moveObjectsTo(['a', 'b'], 'p2', 0)
+    editor.undo()
+
+    expect(edgesOf(project, 'p1')).toEqual([{ from: 'a', to: 'b' }])
+    expect(edgesOf(project, 'p2')).toEqual([])
   })
 
   it('lands where it was aimed when moving down its own page', () => {

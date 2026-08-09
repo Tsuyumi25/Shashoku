@@ -685,6 +685,15 @@ export const useEditorStore = defineStore('editor', () => {
           .map((id) => project.removeEntry(id))
           .filter((r): r is RemovedEntry => r !== null)
         for (const r of removed) project.appendEntry(page, r.entry)
+        // A line whose both ends made the same journey is still saying something
+        // true, so it travels with them. One that had an end left behind is not:
+        // ids only mean anything within a page, so there is nothing for it to
+        // point at any more, and dropping it is the honest answer.
+        const landed = new Set(removed.flatMap((r) => textObjects([r.entry]).map((t) => t.id)))
+        project.addReadingEdges(
+          page,
+          removed.flatMap((r) => r.edges).filter((e) => landed.has(e.from) && landed.has(e.to)),
+        )
         for (const [p, order] of orders) project.setReadingOrder(p, [...order])
       },
       undo: () => {
