@@ -14,12 +14,6 @@
   >
     <template v-if="currentFile && pageReady">
       <!--
-        Decoded but never shown: this is the page's bottom raster, and the wand
-        samples its pixels to find a balloon. The stack draws it like any other
-        layer, so drawing it here as well would put it on the page twice.
-      -->
-      <img ref="imgRef" :src="baseMapSrc ?? undefined" class="hidden" alt="" />
-      <!--
         Its own canvas rather than a mark on the ones the layers are drawn into:
         the ants crawl on their own clock, and the page has no reason to be
         redrawn for them.
@@ -178,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
 import PageStack from '@/components/PageStack.vue'
@@ -204,6 +198,7 @@ import {
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { compositeArtwork } from '@/lib/pageComposite'
 import {
   distanceToSegment,
   nearestAnchor,
@@ -444,7 +439,6 @@ function accentOf(tags: readonly string[]): string | undefined {
 }
 
 const containerRef = useTemplateRef('containerRef')
-const imgRef = useTemplateRef('imgRef')
 const overlayCanvasRef = useTemplateRef('overlayCanvasRef')
 
 
@@ -697,14 +691,7 @@ function onConnectMove(p: Anchor) {
 }
 
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.value)
-const selectionTool = useSelectionTool(
-  containerRef,
-  () => {
-    const entry = baseMap.value
-    return entry ? { image: imgRef.value, x: entry.x, y: entry.y, w: entry.w, h: entry.h } : null
-  },
-  () => pageReady.value,
-)
+const selectionTool = useSelectionTool(containerRef, () => artwork.value, () => pageReady.value)
 
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
@@ -734,52 +721,58 @@ watch(
 )
 
 /**
- * The page's bottom raster, decoded but never drawn from here. It is what the
- * wand samples — a balloon is in the artwork, and a translation sitting inside
- * that balloon is not part of it — while the stack draws it as the ordinary
- * layer it is.
+ * The page's rasters composited into one page-sized picture, kept for the wand
+ * to read. Never drawn from here — the stack on screen draws those same layers
+ * itself, and this would put them on the page twice.
+ *
+ * Composited rather than picked, because the base map has no type of its own:
+ * it can be unlocked, reordered, dropped into a folder. "Which layer is the
+ * artwork" therefore has no answer, while "what is at this point" always does.
  */
-const baseMap = computed(() => {
+const artwork = ref<OffscreenCanvas | null>(null)
+
+/**
+ * What the composite would come out as. Text is left out of it on purpose, so
+ * typing a translation does not throw the wand's sample away mid-page.
+ */
+const artworkSignature = computed(() => {
   const file = currentFile.value
   if (!file) return null
-  const bottom = file.page.layers.find((l) => l.kind === 'raster')
-  return bottom?.kind === 'raster' && bottom.w > 0 && bottom.h > 0 ? bottom : null
+  return stackedRasterNodes(pageStack(file.page.layers))
+    .map((n) => {
+      const { file: name, x, y, w, h } = n.entry
+      return `${name}|${x},${y},${w},${h}|${n.opacity}|${n.blendMode}`
+    })
+    .join('\n')
 })
 
-const baseMapSrc = ref<string | null>(null)
-let currentUrl: string | null = null
-
-function revoke() {
-  if (currentUrl) {
-    URL.revokeObjectURL(currentUrl)
-    currentUrl = null
-  }
-}
-
 watch(
-  () => [currentFile.value?.pageDir, baseMap.value?.file] as const,
-  async ([pageDir, file]) => {
-    revoke()
-    baseMapSrc.value = null
-    // Any gesture belonged to the page being left, and the wand's sample was of
-    // its pixels.
+  () => [currentFile.value?.pageDir, artworkSignature.value] as const,
+  async ([pageDir]) => {
+    artwork.value = null
+    // Any gesture belonged to the picture being replaced, and so did the
+    // wand's reading of it.
     selection.cancelGesture()
     selectionTool.dropPageSample()
     selectionOverlay.schedulePaint()
+    const file = currentFile.value
     if (!pageDir || !file) return
+    const wanted = file.pageId
     try {
-      const bytes = await window.api.readImage(layersDirOf(pageDir), file)
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
-      currentUrl = url
-      baseMapSrc.value = url
+      const composited = await compositeArtwork({
+        page: file.page,
+        loadLayer: (name) => window.api.readImage(layersDirOf(pageDir), name),
+      })
+      // The page can have been left, or edited again, while this was out.
+      if (editor.currentPageId === wanted && currentFile.value?.pageDir === pageDir) {
+        artwork.value = composited
+      }
     } catch (err) {
       console.error(err)
     }
   },
   { immediate: true },
 )
-
-onBeforeUnmount(revoke)
 
 /**
  * Fitting is per page, not per decode: turning the page starts you fitted, but

@@ -186,16 +186,37 @@ export function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
+  return await compositeWith(input, drawTextWith)
+}
+
+/**
+ * The same page with the typesetting left off — every raster in its own place,
+ * in stacking order, with nothing written on top.
+ *
+ * This is what the wand reads. It is there to find a shape in the artwork, and
+ * a translation sitting inside a balloon is not part of that balloon, so text
+ * is skipped rather than sampled around. Skipping it invents nothing: `text`
+ * and `raster` are already two kinds in the stack.
+ *
+ * Compositing rather than picking a layer is the whole point. The base map has
+ * no type of its own — it can be unlocked, reordered, dropped into a folder —
+ * so "which layer is the artwork" has no answer to look up. "What is at this
+ * point on the page" always does.
+ */
+export async function compositeArtwork(input: CompositeInput): Promise<OffscreenCanvas> {
+  return await compositeWith(input, () => {})
+}
+
+async function compositeWith(
+  input: CompositeInput,
+  drawText: StackPaint['drawText'],
+): Promise<OffscreenCanvas> {
   const size = { w: input.page.width, h: input.page.height }
   const stack = pageStack(input.page.layers)
   const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)
-    drawStack(context2d(canvas), stack, {
-      page: size,
-      rasters,
-      drawText: drawTextWith,
-    })
+    drawStack(context2d(canvas), stack, { page: size, rasters, drawText })
     return canvas
   } finally {
     for (const bitmap of rasters.values()) bitmap.close()

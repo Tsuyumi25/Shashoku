@@ -32,8 +32,12 @@ const GESTURE_OF: Partial<Record<CanvasTool, SelectionGestureKind>> = {
  */
 export function useSelectionTool(
   container: Ref<HTMLElement | null>,
-  /** The page's bottom raster and the frame it occupies, or null when it has none. */
-  baseMap: () => { image: HTMLImageElement | null; x: number; y: number; w: number; h: number } | null,
+  /**
+   * The page's artwork, already laid out on the page's own grid, or null while
+   * there is none to read. Page-sized on arrival, so a point on the page is a
+   * point in it and nothing here has to know where any layer sits.
+   */
+  artwork: () => CanvasImageSource | null,
   ready: () => boolean,
 ) {
   const editor = useEditorStore()
@@ -54,13 +58,10 @@ export function useSelectionTool(
   let altReleased = false
 
   /**
-   * The artwork's own pixels, laid out on the page's grid. The wand samples
-   * these rather than what is composited on screen — it is there to find a
-   * balloon, and a translation sitting inside that balloon is not part of it.
-   *
-   * Drawn into a page-sized buffer at the layer's own frame rather than sampled
-   * from the layer directly, so a point on the page is a point in here whatever
-   * the base map has been moved to.
+   * The artwork's pixels, read back once per page and kept until something
+   * makes them wrong. The wand reads these rather than the screen: it is there
+   * to find a balloon, and a translation sitting inside that balloon is not
+   * part of it.
    */
   let sample: { page: string; pixels: Uint8ClampedArray } | null = null
 
@@ -70,17 +71,17 @@ export function useSelectionTool(
 
   function pagePixels(): Uint8ClampedArray | null {
     const page = editor.currentPageId
-    const base = baseMap()
     const { w, h } = editor.viewContentSize
-    if (page === null || !base?.image || !ready() || w <= 0 || h <= 0) return null
-    // Nothing is cached from an image still on its way: a blank sample kept
-    // under this page's name would answer every later click for it too.
-    if (!base.image.complete || base.image.naturalWidth === 0) return null
+    if (page === null || !ready() || w <= 0 || h <= 0) return null
     if (sample?.page === page) return sample.pixels
+    // Null while the composite is still out. Caching an empty read under this
+    // page's name would answer every later click for it too.
+    const source = artwork()
+    if (!source) return null
     const canvas = new OffscreenCanvas(w, h)
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    ctx.drawImage(base.image, base.x, base.y, base.w, base.h)
+    ctx.drawImage(source, 0, 0)
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data
     sample = { page, pixels }
     return pixels
