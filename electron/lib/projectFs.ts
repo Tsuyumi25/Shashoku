@@ -231,7 +231,7 @@ async function buildOpenResult(rootPath: string): Promise<OpenProjectResult> {
  * would be adopted at the next open and shown as a damaged page — a fault
  * invented by the failure rather than reported by it.
  */
-async function createPage(
+async function makePage(
   rootPath: string,
   pagesRoot: string,
   sourceName: string,
@@ -256,27 +256,21 @@ async function createPage(
 }
 
 /**
- * A page for each named image in the project root, appended to what is already
- * there.
+ * One page, from one image in the project root, appended to whatever is already
+ * there. Answers with the name it was given.
+ *
+ * One page per call rather than a batch: a chapter takes minutes, and the
+ * caller is the one that can say how far it has got and stop when asked.
  *
  * Nothing is written to the page list here. The directories are enough — the
  * open that follows takes them in and the document catches up on the next save,
- * which is the same mechanism that survives a crash halfway through a batch.
+ * which is the same mechanism that survives a crash halfway through a run.
  */
-export async function createPages(
-  rootPath: string,
-  sourceNames: readonly string[],
-): Promise<OpenProjectResult> {
-  const shashokuDir = join(rootPath, SHASHOKU_DIR);
-  const pagesRoot = join(shashokuDir, DIR_PAGES);
-  const taken = new Set(await listPageDirs(pagesRoot));
-  const at = new Date();
-  for (const sourceName of sourceNames) {
-    const pageId = pageDirName(sourceName, at, taken);
-    taken.add(pageId);
-    await createPage(rootPath, pagesRoot, sourceName, pageId);
-  }
-  return await buildOpenResult(rootPath);
+export async function createPage(rootPath: string, sourceName: string): Promise<string> {
+  const pagesRoot = join(rootPath, SHASHOKU_DIR, DIR_PAGES);
+  const pageId = pageDirName(sourceName, new Date(), new Set(await listPageDirs(pagesRoot)));
+  await makePage(rootPath, pagesRoot, sourceName, pageId);
+  return pageId;
 }
 
 export async function createProject(rootPath: string): Promise<OpenProjectResult> {
@@ -291,10 +285,9 @@ export async function createProject(rootPath: string): Promise<OpenProjectResult
     serializeProjectJson(defaultProjectJson()),
   );
 
-  // Every image in the folder still becomes a page. Choosing which ones is what
-  // the source panel is for, and until it exists this is what a new project has
-  // to be for it to be anything at all.
-  return await createPages(rootPath, await listImages(rootPath));
+  // Deliberately empty. Reading a source image is irreversible and takes real
+  // time, so it waits to be asked for — opening a folder is not asking.
+  return await buildOpenResult(rootPath);
 }
 
 export async function openProject(rootPath: string): Promise<OpenProjectResult> {

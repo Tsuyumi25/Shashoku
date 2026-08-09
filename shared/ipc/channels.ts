@@ -7,7 +7,7 @@ export const CHANNELS = {
   listSources: "shashoku:list-sources",
   scanLibrary: "shashoku:scan-library",
   createProject: "shashoku:create-project",
-  createPages: "shashoku:create-pages",
+  createPage: "shashoku:create-page",
   openProject: "shashoku:open-project",
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
@@ -91,12 +91,18 @@ export interface ShashokuApi {
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
-   * A page for each named image in the project root, appended to the ones
-   * already there. The one irreversible step and the only one that reads a
-   * source file: the pixels are copied in, and the project stops depending on
-   * the folder they came from.
+   * One page, from one image in the project root, appended to the ones already
+   * there. Answers with the name it was given.
+   *
+   * The one irreversible step and the only one that reads a source file: the
+   * pixels are copied in, and from then on the project does not depend on the
+   * folder they came from.
+   *
+   * One page per call rather than a batch, because a batch is minutes long on a
+   * chapter and the caller is the one that has to say how far it has got and
+   * stop when asked.
    */
-  createPages(rootPath: string, sourceNames: string[]): Promise<OpenProjectResult>;
+  createPage(rootPath: string, sourceName: string): Promise<string>;
   openProject(rootPath: string): Promise<OpenProjectResult>;
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;

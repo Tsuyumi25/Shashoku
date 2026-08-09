@@ -222,14 +222,58 @@ export const useProjectStore = defineStore('project', () => {
 
 
   /**
+   * How far a run of page-making has got, or null when none is running. Held
+   * here rather than in the panel that started it because it is the one thing
+   * about a project that a view showing something else still has to know.
+   */
+  const creating = ref<{ done: number; total: number } | null>(null)
+  let abandoned = false
+
+  /**
    * A page for each named image in the project root. Irreversible, and the only
    * step that reads one: the pixels are copied in, and from then on the project
    * does not depend on the folder they came from.
+   *
+   * Answers rather than throws, because a run that stopped part way has made
+   * real pages and both halves of that are worth saying. The images it got
+   * through are named rather than counted, so nothing has to be worked out.
    */
-  async function createPages(sourceNames: string[]): Promise<void> {
-    if (rootPath.value === null) return
-    const result = await window.api.createPages(rootPath.value, sourceNames)
-    await ingestProject(rootPath.value, result.projectMetaRaw, result.pages)
+  async function createPages(
+    sourceNames: readonly string[],
+  ): Promise<{ made: string[]; problem: string | null }> {
+    const root = rootPath.value
+    if (root === null || creating.value !== null || sourceNames.length === 0) {
+      return { made: [], problem: null }
+    }
+    abandoned = false
+    creating.value = { done: 0, total: sourceNames.length }
+    const made: string[] = []
+    let problem: string | null = null
+    try {
+      for (const sourceName of sourceNames) {
+        if (abandoned) break
+        try {
+          await window.api.createPage(root, sourceName)
+        } catch (err) {
+          // Stops rather than skipping on: a folder that half converted itself
+          // and carried on is the outcome nobody can see.
+          problem = `${sourceName}:${err instanceof Error ? err.message : String(err)}`
+          break
+        }
+        made.push(sourceName)
+        creating.value = { done: made.length, total: sourceNames.length }
+      }
+    } finally {
+      creating.value = null
+      const result = await window.api.openProject(root)
+      await ingestProject(root, result.projectMetaRaw, result.pages)
+    }
+    return { made, problem }
+  }
+
+  /** Stops after the page being made now, which cannot be taken back. */
+  function abandonCreating(): void {
+    abandoned = true
   }
 
   
@@ -782,7 +826,9 @@ export const useProjectStore = defineStore('project', () => {
     createNewProject,
     openExisting,
     openByPath,
+    creating,
     createPages,
+    abandonCreating,
     flush: autosave.flush,
     addLabel,
     deleteLabel,

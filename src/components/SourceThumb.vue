@@ -1,7 +1,24 @@
 <template>
-  <div ref="cellRef" class="flex flex-col gap-1 rounded-[5px] p-1 text-left">
+  <button
+    ref="cellRef"
+    type="button"
+    class="flex cursor-pointer flex-col gap-1 rounded-[5px] border p-1 text-left"
+    :class="
+      picked
+        ? 'border-primary bg-primary/10'
+        : 'border-transparent hover:border-border hover:bg-secondary'
+    "
+    @click="emit('toggle')"
+  >
     <div class="relative">
-      <img v-if="src" :src="src" class="block w-full" alt="" draggable="false" />
+      <img
+        v-if="src"
+        :src="src"
+        class="block w-full"
+        alt=""
+        draggable="false"
+        :class="!picked && 'opacity-60'"
+      />
       <div
         v-else
         class="flex aspect-[3/4] w-full items-center justify-center bg-muted/40 px-1 text-center"
@@ -11,16 +28,21 @@
       </div>
     </div>
 
-    <span class="truncate text-xs text-muted-foreground" :title="source.name">
-      {{ source.name }}
-    </span>
-  </div>
+    <div class="flex min-w-0 items-center gap-1.5">
+      <span class="pick" :data-checked="String(picked)">
+        <Check :size="12" :stroke-width="3" />
+      </span>
+      <span class="truncate text-xs" :class="picked ? '' : 'text-muted-foreground'" :title="source.name">
+        {{ source.name }}
+      </span>
+    </div>
+  </button>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useIntersectionObserver } from '@vueuse/core'
-import { ImageOff, Loader } from '@lucide/vue'
+import { Check, ImageOff, Loader } from '@lucide/vue'
 import type { SourceImage } from '@shared/ipc/channels'
 import { inRenderSlot, renderFitted, sourceKey } from '@/lib/pageThumbnail'
 
@@ -32,7 +54,8 @@ import { inRenderSlot, renderFitted, sourceKey } from '@/lib/pageThumbnail'
  * Reading it wrong in either direction is what the two of them being side by
  * side is meant to prevent.
  */
-const props = defineProps<{ rootPath: string; source: SourceImage }>()
+const props = defineProps<{ rootPath: string; source: SourceImage; picked: boolean }>()
+const emit = defineEmits<{ toggle: [] }>()
 
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
 const src = ref<string | null>(null)

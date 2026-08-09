@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertPathSegment, createPages, createProject, openProject } from "./projectFs";
+import { assertPathSegment, createPage, createProject, openProject } from "./projectFs";
 import { parseManifest } from "@shared/page/schema";
 import { parseProjectJson, serializeProjectJson } from "@shared/project/schema";
 import {
@@ -111,26 +111,36 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     return parseManifest(await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8"));
   }
 
-  it("gives every image in the folder a page", async () => {
+  /**
+   * Reading a source is irreversible and takes real time, so opening a folder
+   * does not do it. It waits to be asked.
+   */
+  it("is not made by opening the folder it came from", async () => {
     await writeFile(join(root, "001.png"), sourcePng(6, 4));
-    await writeFile(join(root, "002.png"), sourcePng(6, 4));
 
     const opened = await createProject(root);
 
-    expect(opened.pages.map((p) => p.badge)).toEqual(["ok", "ok"]);
-    expect(opened.pages[0].pageId).toMatch(/^001-\d{6}-\d{4}$/);
-    expect(opened.pages[1].pageId).toMatch(/^002-\d{6}-\d{4}$/);
+    expect(opened.pages).toEqual([]);
+  });
+
+  it("is named after the image and the moment it was made", async () => {
+    await writeFile(join(root, "001.png"), sourcePng(6, 4));
+    await createProject(root);
+
+    expect(await createPage(root, "001.png")).toMatch(/^001-\d{6}-\d{4}$/);
+    expect((await openProject(root)).pages.map((p) => p.badge)).toEqual(["ok"]);
   });
 
   it("leaves the source behind entirely", async () => {
     await writeFile(join(root, "001.png"), sourcePng(6, 4));
-    const opened = await createProject(root);
+    await createProject(root);
+    await createPage(root, "001.png");
     await rm(join(root, "001.png"));
 
     const reopened = await openProject(root);
 
     expect(reopened.pages.map((p) => p.badge)).toEqual(["ok"]);
-    expect((await manifestOf(opened.pages[0].pageDir)).layers).toHaveLength(1);
+    expect((await manifestOf(reopened.pages[0].pageDir)).layers).toHaveLength(1);
   });
 
   /**
@@ -140,8 +150,10 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
    */
   it("takes its size and its name from the image it was made from", async () => {
     await writeFile(join(root, "第01話.png"), sourcePng(7, 3));
+    await createProject(root);
+    await createPage(root, "第01話.png");
 
-    const opened = await createProject(root);
+    const opened = await openProject(root);
     const manifest = await manifestOf(opened.pages[0].pageDir);
 
     expect([manifest.width, manifest.height]).toEqual([7, 3]);
@@ -150,8 +162,10 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
 
   it("starts with the base map as a locked raster covering the page", async () => {
     await writeFile(join(root, "001.png"), sourcePng(6, 4));
+    await createProject(root);
+    await createPage(root, "001.png");
 
-    const opened = await createProject(root);
+    const opened = await openProject(root);
     const [base] = (await manifestOf(opened.pages[0].pageDir)).layers;
 
     expect(base.kind).toBe("raster");
@@ -168,8 +182,9 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
 
   it("does not read a format the engine has no decoder for", async () => {
     await writeFile(join(root, "001.png"), Buffer.from("II*\0 not a png at all"));
+    await createProject(root);
 
-    await expect(createProject(root)).rejects.toThrow();
+    await expect(createPage(root, "001.png")).rejects.toThrow();
     // Nothing half-made is left where the next open would adopt it as a page.
     await expect(openProject(root)).resolves.toMatchObject({ pages: [] });
   });
@@ -197,11 +212,11 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
   }
 
   async function threePages(): Promise<string[]> {
-    for (const name of ["001.png", "002.png", "003.png"]) {
-      await writeFile(join(root, name), sourcePng(4, 4));
-    }
-    const opened = await createProject(root);
-    return opened.pages.map((p) => p.pageId);
+    const names = ["001.png", "002.png", "003.png"];
+    for (const name of names) await writeFile(join(root, name), sourcePng(4, 4));
+    await createProject(root);
+    for (const name of names) await createPage(root, name);
+    return (await openProject(root)).pages.map((p) => p.pageId);
   }
 
   it("reads pages in the order the list gives, not the order the disk does", async () => {
@@ -252,8 +267,9 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
     const made = await threePages();
     await writeList(made);
     await writeFile(join(root, "004.png"), sourcePng(4, 4));
+    await createPage(root, "004.png");
 
-    const opened = await createPages(root, ["004.png"]);
+    const opened = await openProject(root);
 
     expect(opened.pages).toHaveLength(4);
     expect(opened.pages[3].pageId).toMatch(/^004-/);
@@ -266,11 +282,12 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
    */
   it("counts past a name a page already answers to", async () => {
     await writeFile(join(root, "001.png"), sourcePng(4, 4));
-    const first = await createProject(root);
-    const second = await createPages(root, ["001.png"]);
+    await createProject(root);
+    const first = await createPage(root, "001.png");
+    const second = await createPage(root, "001.png");
 
-    expect(second.pages).toHaveLength(2);
-    expect(second.pages[1].pageId).toBe(`${first.pages[0].pageId}-2`);
+    expect(second).toBe(`${first}-2`);
+    expect((await openProject(root)).pages).toHaveLength(2);
   });
 
   it("has no pages in a folder of no images", async () => {

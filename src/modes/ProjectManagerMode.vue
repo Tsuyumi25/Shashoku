@@ -25,6 +25,12 @@
       </p>
     </div>
 
+    <div v-else-if="project.files.length === 0" class="flex flex-1 items-center justify-center p-8">
+      <p class="max-w-xs text-center text-sm text-muted-foreground">
+        還沒有頁面。左邊挑要用的圖,按「建立 N 頁」——那一步會把像素複製進專案,之後原圖搬走或刪掉都不影響。
+      </p>
+    </div>
+
     <!-- Dragging across the grid picks pages; it must never start highlighting page
          names instead. -->
     <div v-else class="min-h-0 flex-1 overflow-y-auto p-2 select-none">

@@ -5,7 +5,7 @@ import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { CHANNELS, type WritePageInput } from "@shared/ipc/channels";
 import {
   createProject,
-  createPages,
+  createPage,
   listSources,
   openProject,
   readPage,
@@ -50,8 +50,8 @@ export function registerShashokuProjectHandlers(): void {
   ipcMain.handle(CHANNELS.listSources, (_e, rootPath: string) => listSources(rootPath));
   ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));
-  ipcMain.handle(CHANNELS.createPages, (_e, rootPath: string, sourceNames: string[]) =>
-    createPages(rootPath, sourceNames),
+  ipcMain.handle(CHANNELS.createPage, (_e, rootPath: string, sourceName: string) =>
+    createPage(rootPath, sourceName),
   );
   ipcMain.handle(CHANNELS.openProject, (_e, rootPath: string) => openProject(rootPath));
   ipcMain.handle(CHANNELS.readPage, (_e, pageDir: string) => readPage(pageDir));
