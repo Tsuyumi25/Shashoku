@@ -56,21 +56,90 @@
         translation. Row height then follows the translation, as it must, and
         nothing has to be measured for the two to agree.
       -->
-      <div class="page-body">
+      <div class="page-body" :style="{ '--rail': `${group.rail}px` }">
+        <!--
+          The rail is where the reading is said out loud: a row it holds was put
+          in its place by a line somebody drew, and a row below where it stops is
+          only sitting where it was typed. Nothing marks that boundary, because
+          the rail stopping is the boundary.
+        -->
+        <div v-if="group.rail > 0" class="rail">
+          <div
+            v-for="(row, at) in group.rows"
+            :key="row.key"
+            class="rail-cell border-b border-border/40 text-primary"
+            :class="isSelected(row) && 'bg-accent/50'"
+          >
+            <span
+              v-for="x in group.marks[at].through"
+              :key="`through/${x}`"
+              class="rail-line"
+              :style="strokeAt(x, { top: '0', bottom: RAIL_OVERHANG })"
+            />
+            <span
+              v-if="group.marks[at].arrives !== undefined"
+              class="rail-line"
+              :style="strokeAt(group.marks[at].arrives!, { top: '0', height: '50%' })"
+            />
+            <span
+              v-if="group.marks[at].leaves !== undefined"
+              class="rail-line"
+              :style="strokeAt(group.marks[at].leaves!, { top: '50%', bottom: RAIL_OVERHANG })"
+            />
+            <svg
+              v-if="group.marks[at].joins.length > 0"
+              class="rail-join"
+              :viewBox="`0 0 ${group.rail} 100`"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path
+                v-for="[from, to] in group.marks[at].joins"
+                :key="`join/${from}/${to}`"
+                :d="`M ${from} 0 C ${from} 50, ${to} 50, ${to} 100`"
+                vector-effect="non-scaling-stroke"
+                fill="none"
+                stroke="currentColor"
+                :stroke-width="RAIL_STROKE"
+              />
+            </svg>
+            <span
+              v-if="group.marks[at].stops !== undefined"
+              class="rail-stop"
+              :style="{ left: `${group.marks[at].stops - 4.5}px` }"
+            />
+            <span
+              v-if="group.marks[at].dot !== undefined"
+              class="rail-dot"
+              :style="{ left: `${group.marks[at].dot - 3.5}px` }"
+            />
+          </div>
+        </div>
+
         <div class="gutter">
           <div
             v-for="row in group.rows"
             :key="row.key"
             class="gutter-cell border-b border-border/40 pt-1 pr-1 text-right text-xs text-muted-foreground tabular-nums select-none"
             :class="isSelected(row) && 'bg-accent/50'"
-          >{{ row.index }}</div>
+          >{{ row.depth ?? '' }}</div>
         </div>
 
+        <!--
+          A row the rail holds refuses to be dragged: its place was said by a
+          line, and a drag carries one position where the graph needs more than
+          one — an object with two ways into it cannot say which of them a drop
+          meant to keep, so it would quietly drop one. Rearranging is done by
+          drawing and rubbing out lines. Rows below the rail have said nothing,
+          so they stay free.
+        -->
         <Draggable
           :model-value="group.rows"
           item-key="key"
           :group="LABEL_GROUP"
           :disabled="filtering"
+          filter=".rail-held"
+          :prevent-on-filter="false"
           :class="group.rows.length === 0 ? 'rows-empty' : 'rows'"
           @change="onChanged(group, $event)"
         >
@@ -82,8 +151,13 @@
               :class="[
                 isSelected(element as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
                 !isEditing(element as LabelRow) && 'select-none',
-                !isEditing(element as LabelRow) && !filtering && 'cursor-grab',
+                (element as LabelRow).lane !== undefined && 'rail-held',
+                !isEditing(element as LabelRow) &&
+                  !filtering &&
+                  (element as LabelRow).lane === undefined &&
+                  'cursor-grab',
               ]"
+              :style="branchIndent(element as LabelRow)"
               @mousedown="onPick(element as LabelRow, $event)"
               @dblclick="onEdit(element as LabelRow)"
               @keydown="onRowKey(element as LabelRow, $event)"
@@ -165,6 +239,7 @@ import {
   type LabelRow,
   type PageRow,
 } from '@/lib/labelRows'
+import { RAIL_STROKE, railMarks, railWidth } from '@/lib/readingRail'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEventListener } from '@vueuse/core'
@@ -209,7 +284,17 @@ const pageGroups = computed(() => {
     if (row.kind === 'page') out.push({ page: row, rows: [] })
     else out[out.length - 1]?.rows.push(row)
   }
-  return out
+  /*
+   * Narrowing puts the rail away rather than drawing it with holes in. A line
+   * with one end filtered out has nowhere to land, and a rail missing pieces
+   * reads as a structure missing pieces — which is worse than no rail at all.
+   * Sortable is already switched off for the same stretch.
+   */
+  return out.map((group) => ({
+    ...group,
+    marks: filtering.value ? [] : railMarks(group.rows),
+    rail: filtering.value ? 0 : railWidth(group.rows),
+  }))
 })
 
 /** What a range reaches over, in the order the panel is showing it. */
@@ -219,6 +304,37 @@ const sequence = computed(() =>
 
 const scrollEl = ref<HTMLElement | null>(null)
 const searchEl = ref<HTMLInputElement | null>(null)
+
+/**
+ * How far a line hangs below its row, so that it runs over the rule between
+ * rows rather than stopping short of it.
+ *
+ * An absolutely placed child is offset from the padding box, which ends where
+ * the bottom border begins — so `0` leaves the rail cut once per row. Painting
+ * order already puts the child above the parent's border; it only has to reach
+ * it. The reading is one line down the page, and a rule breaking it every row
+ * makes it read as a column of unconnected marks.
+ */
+const RAIL_OVERHANG = '-1px'
+
+/**
+ * A vertical stroke standing on an offset, which names the middle of it rather
+ * than its left edge — the same thing the dot and the curve are placed on, so
+ * that all three agree.
+ */
+function strokeAt(offset: number, span: Record<string, string>): Record<string, string> {
+  return { left: `${offset - RAIL_STROKE / 2}px`, width: `${RAIL_STROKE}px`, ...span }
+}
+
+/**
+ * A branch is set in from the reading it hangs off — one step, and no deeper
+ * however many lanes the rail needs. The lanes past the first are room for
+ * branches that are alive at the same time, not another level of nesting, so
+ * indenting per lane would say a depth that is not there.
+ */
+function branchIndent(row: LabelRow): Record<string, string> | undefined {
+  return row.lane !== undefined && row.lane > 0 ? { paddingLeft: '1.5rem' } : undefined
+}
 
 /** Its own lock or a folder's above it, which this list has no way to tell apart. */
 function isRowLocked(row: LabelRow): boolean {
@@ -459,18 +575,64 @@ function orderedTags(tags: readonly string[]): string[] {
  */
 .page-body {
   display: grid;
-  grid-template-columns: 1.5rem 1fr;
+  grid-template-columns: var(--rail, 0px) 1.5rem 1fr;
   grid-auto-flow: row dense;
 }
+.rail,
 .gutter,
 .page-body :deep(.rows) {
   display: contents;
 }
-.gutter-cell {
+.rail-cell {
   grid-column: 1;
+  position: relative;
+}
+.gutter-cell {
+  grid-column: 2;
 }
 .row-content {
-  grid-column: 2;
+  grid-column: 3;
+}
+
+/*
+ * The rail is drawn out of the row it belongs to rather than over the column as
+ * one picture: a translation sets its own height, and a picture that spanned
+ * them all would have to be told what those heights came out as.
+ */
+.rail-line {
+  position: absolute;
+  background: currentColor;
+}
+/*
+ * Stretched to the dot rather than drawn at a fixed height, since the dot sits
+ * halfway down a row only the translation knows the height of. The stroke is
+ * held out of that stretch, or a tall row would draw a fat curve and a short one
+ * a thin one.
+ */
+.rail-join {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: visible;
+}
+.rail-dot {
+  position: absolute;
+  top: 50%;
+  margin-top: -3.5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.rail-stop {
+  position: absolute;
+  top: 50%;
+  margin-top: 5px;
+  width: 9px;
+  height: 1.5px;
+  background: currentColor;
 }
 
 /*
@@ -478,7 +640,7 @@ function orderedTags(tags: readonly string[]): string[] {
  * so this one keeps a box of its own.
  */
 .page-body :deep(.rows-empty) {
-  grid-column: 2;
+  grid-column: 3;
   min-height: 1.5rem;
 }
 </style>

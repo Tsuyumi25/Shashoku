@@ -169,6 +169,15 @@ export interface ReadingRow {
   depth: number | undefined
   /** The objects a line arrives from, in the order the page lists them. */
   parents: readonly string[]
+  /**
+   * The lanes still carrying a line downwards once this row has been laid.
+   *
+   * Only this walk knows them, because a lane is handed back and taken again:
+   * reading the rows on their own, a lane used at the top and again at the
+   * bottom is indistinguishable from one held open the whole way down. What a
+   * row draws is the difference between this and the row above it.
+   */
+  carries: readonly number[]
 }
 
 function push(lists: Map<string, string[]>, key: string, value: string): void {
@@ -265,7 +274,11 @@ export function flattenReading(
     const lane = inherited ?? openLane()
     laneOf.set(id, lane)
     held[lane] = (waysOut.get(id) ?? 0) > 0 ? id : undefined
-    rows.push({ id, lane, depth: depths.get(id), parents: parentsOf.get(id) ?? [] })
+    const carries: number[] = []
+    for (let at = 0; at < held.length; at += 1) {
+      if (held[at] !== undefined) carries.push(at)
+    }
+    rows.push({ id, lane, depth: depths.get(id), parents: parentsOf.get(id) ?? [], carries })
 
     for (const child of childrenOf.get(id) ?? []) {
       const owed = (waysIn.get(child) as number) - 1
@@ -285,7 +298,9 @@ export function flattenReading(
   // Whatever the rail never reached: the objects no line touches, and — only if
   // a ring ever survives both the canvas and repair — the ones caught in it.
   for (const id of order) {
-    if (!laneOf.has(id)) rows.push({ id, lane: undefined, depth: undefined, parents: [] })
+    if (!laneOf.has(id)) {
+      rows.push({ id, lane: undefined, depth: undefined, parents: [], carries: [] })
+    }
   }
   return rows
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProjectFile } from '@/types/project'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
-import { buildLabelRows, chapterStops, dropAt } from '@/lib/labelRows'
+import { buildLabelRows, chapterStops, dropAt, type LabelRow } from '@/lib/labelRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 
 function text(id: string): TextLayerEntry {
@@ -22,13 +22,26 @@ function text(id: string): TextLayerEntry {
   }
 }
 
-function file(filename: string, layers: LayerEntry[], readingOrder: string[]): ProjectFile {
+function file(
+  filename: string,
+  layers: LayerEntry[],
+  readingOrder: string[],
+  drawn: string[] = [],
+): ProjectFile {
+  const readingEdges = drawn.map((pair) => {
+    const [from, to] = pair.split('>')
+    return { from, to }
+  })
   return {
     filename,
     pageDir: `/p/${filename}`,
     badge: 'ok',
-    page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers },
+    page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges, layers },
   }
+}
+
+function labels(rows: ReturnType<typeof buildLabelRows>): LabelRow[] {
+  return rows.filter((row): row is LabelRow => row.kind === 'label')
 }
 
 describe('buildLabelRows', () => {
@@ -74,6 +87,52 @@ describe('buildLabelRows', () => {
     ])
     const keys = rows.map((r) => r.key)
     expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('leaves the gutter blank while no line touches the object', () => {
+    const rows = labels(buildLabelRows([file('001.png', [text('a'), text('b')], ['a', 'b'])]))
+    expect(rows.map((row) => row.depth)).toEqual([undefined, undefined])
+    expect(rows.map((row) => row.lane)).toEqual([undefined, undefined])
+  })
+
+  it('draws the objects a line touches up above the ones it does not', () => {
+    const rows = labels(
+      buildLabelRows([
+        file('001.png', [text('a'), text('b'), text('c')], ['a', 'b', 'c'], ['c>b']),
+      ]),
+    )
+    expect(rows.map((row) => row.label.id)).toEqual(['c', 'b', 'a'])
+    expect(rows.map((row) => row.depth)).toEqual([1, 2, undefined])
+  })
+
+  it('lifts each page from its own lines', () => {
+    const rows = labels(
+      buildLabelRows([
+        file('001.png', [text('a'), text('b')], ['a', 'b'], ['b>a']),
+        file('002.png', [text('c'), text('d')], ['c', 'd']),
+      ]),
+    )
+    expect(rows.map((row) => [row.filename, row.label.id])).toEqual([
+      ['001.png', 'b'],
+      ['001.png', 'a'],
+      ['002.png', 'c'],
+      ['002.png', 'd'],
+    ])
+  })
+
+  /**
+   * The row is no longer sitting where the reading order puts it, and a drop is
+   * still against the reading order — so the two have to stay told apart.
+   */
+  it('keeps the place in the reading order even after the lines move the row', () => {
+    const rows = labels(
+      buildLabelRows([file('001.png', [text('a'), text('b')], ['a', 'b'], ['b>a'])]),
+    )
+    expect(rows.map((row) => [row.label.id, row.index])).toEqual([
+      ['b', 2],
+      ['a', 1],
+    ])
+    expect(dropAt(rows[0], true)).toEqual({ page: '001.png', index: 2 })
   })
 })
 

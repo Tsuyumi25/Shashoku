@@ -1,6 +1,7 @@
 import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry } from '@shared/page/types'
 import { textObjectsInReadingOrder } from '@shared/page/tree'
+import { flattenReading } from '@shared/page/readingGraph'
 import { textOf } from '@shared/page/text'
 
 export interface PageRow {
@@ -15,8 +16,20 @@ export interface LabelRow {
   key: string
   filename: string
   label: TextLayerEntry
-  /** Its place in this page's reading order, which is the number on the canvas. */
+  /**
+   * Its place in this page's reading order — where a drop lands, not what is
+   * shown. Since the rows are laid out from the lines, this is no longer the
+   * position the row is sitting at.
+   */
   index: number
+  /** The beat, absent while no line touches the object: the gutter stays blank. */
+  depth: number | undefined
+  /** Which column of the rail the dot stands in, absent for the same reason. */
+  lane: number | undefined
+  /** The objects a line arrives from, for the rail to draw what joins where. */
+  parents: readonly string[]
+  /** The lanes still carrying a line downwards once this row has been drawn. */
+  carries: readonly number[]
 }
 
 export type ChapterRow = PageRow | LabelRow
@@ -29,33 +42,49 @@ export type ChapterRow = PageRow | LabelRow
  *
  * Ids are unique within a page and no further, so a row's key carries the page
  * it came from.
+ *
+ * ⚠️ Each page is laid out from its own lines, so the objects a line touches
+ * rise to the head of that page and the rest keep the order they were typed in.
+ * That is one rule and not two sections: nothing here marks a boundary, because
+ * the rail stopping is the boundary.
  */
 export function buildLabelRows(files: readonly ProjectFile[], query = ''): ChapterRow[] {
   const needle = query.trim().toLowerCase()
   const rows: ChapterRow[] = []
   for (const file of files) {
-    const all = textObjectsInReadingOrder(file.page)
-    const shown = needle === '' ? all : all.filter((l) => textOf(l).toLowerCase().includes(needle))
+    const inOrder = textObjectsInReadingOrder(file.page)
+    const byId = new Map(inOrder.map((label) => [label.id, label]))
+    const numbering = new Map(inOrder.map((label, at) => [label.id, at + 1]))
+
+    const laid = flattenReading(file.page.readingEdges, file.page.readingOrder)
+    const all = laid.flatMap((row) => {
+      const label = byId.get(row.id)
+      return label === undefined ? [] : [{ ...row, label }]
+    })
+    const shown =
+      needle === '' ? all : all.filter((row) => textOf(row.label).toLowerCase().includes(needle))
     // A page nothing matches on is not a page with an empty result. It is not
     // one of the places the answer is, so it is not one of the places shown.
     if (needle !== '' && shown.length === 0) continue
 
-    const numbering = new Map(all.map((l, i) => [l.id, i + 1]))
     rows.push({
       kind: 'page',
       key: `page/${file.filename}`,
       filename: file.filename,
       count: shown.length,
     })
-    for (const label of shown) {
+    for (const row of shown) {
       rows.push({
         kind: 'label',
-        key: `label/${file.filename}/${label.id}`,
+        key: `label/${file.filename}/${row.label.id}`,
         filename: file.filename,
-        label,
-        // Its place on its page, which is what the canvas writes on it.
-        // Filtering hides rows; it does not renumber the page.
-        index: numbering.get(label.id) ?? 0,
+        label: row.label,
+        // Filtering hides rows; it does not renumber the page or move anything.
+        index: numbering.get(row.label.id) ?? 0,
+        depth: row.depth,
+        lane: row.lane,
+        parents: row.parents,
+        carries: row.carries,
       })
     }
   }

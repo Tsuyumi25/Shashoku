@@ -201,6 +201,20 @@ describe('flattenReading', () => {
     expect(rail(flattenReading(edges('a>b', 'b>gone'), order('a b')))).toBe('a@0 b@0')
   })
 
+  it('says which lanes carry on below each row', () => {
+    const rows = flattenReading(edges('a>b', 'a>c', 'c>d'), order('a b c d'))
+    expect(rail(rows)).toBe('a@0 b@1 c@0 d@0')
+    // b takes lane 1 and ends there, so nothing carries it further; the last row
+    // owes nothing at all.
+    expect(rows.map((row) => row.carries)).toEqual([[0], [0], [0], []])
+  })
+
+  it('hands a lane back so the row below knows the line has stopped', () => {
+    const rows = flattenReading(edges('a>b', 'a>c', 'c>d', 'c>e'), order('a b c d e'))
+    expect(rail(rows)).toBe('a@0 b@1 c@0 d@1 e@0')
+    expect(rows.map((row) => row.carries)).toEqual([[0], [0], [0], [0], []])
+  })
+
   it('names what a line arrives from', () => {
     const rows = flattenReading(edges('a>c', 'b>c'), order('a b c'))
     expect(rows.map((row) => row.parents)).toEqual([[], [], ['a', 'b']])
