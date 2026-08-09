@@ -154,6 +154,143 @@ export function readingDepths(edges: readonly ReadingEdge[]): Map<string, number
 }
 
 /**
+ * One row of the list: an object, and where the rail holds it.
+ *
+ * A row the rail does not hold carries none of the rail — no lane, no beat, no
+ * parents. That absence is the whole of the boundary between the stretch
+ * somebody has maintained and the stretch nobody has: there is no second
+ * section and no heading, the rail simply stops.
+ */
+export interface ReadingRow {
+  id: string
+  /** Which column of the rail the dot stands in, 0 being the line the reading runs down. */
+  lane: number | undefined
+  /** The beat, counted the way `readingDepths` counts it. */
+  depth: number | undefined
+  /** The objects a line arrives from, in the order the page lists them. */
+  parents: readonly string[]
+}
+
+function push(lists: Map<string, string[]>, key: string, value: string): void {
+  const list = lists.get(key)
+  if (list === undefined) lists.set(key, [value])
+  else list.push(value)
+}
+
+/**
+ * The page as one column: the objects lines touch first, laid out so that every
+ * line points downwards, then the ones no line touches.
+ *
+ * ⚠️ A column can show a graph, but only while its order is a linear extension
+ * of that graph — one edge pointing back up and the rail has to draw a line
+ * running the wrong way, which is the point at which one dimension really has
+ * run out. So the order is not a rendering detail that can be settled later; it
+ * is the condition the rail is drawn under.
+ *
+ * Where the graph does not decide, `order` does. That is not the fallback
+ * `types.ts` refuses: breaking a tie the lines left open with an order the same
+ * person typed is not the same as recovering an order nobody set.
+ *
+ * ⭐ A graph has many linear extensions and this picks one. It does not pick a
+ * canonical one, because there is no such thing — git's `--topo-order` documents
+ * two valid answers for one history and promises only that it prints one of
+ * them. What is promised here is the weaker and sufficient thing: the same
+ * input lays out the same way every time.
+ *
+ * At a split, the ways out are laid shortest first and the longest last, so the
+ * short branches sit against what they hang off and the reading carries on down
+ * the same lane. Laying the longest first would push every branch to the foot of
+ * the page, far from the object it says something about.
+ */
+export function flattenReading(
+  edges: readonly ReadingEdge[],
+  order: readonly string[],
+): ReadingRow[] {
+  const rank = new Map(order.map((id, position) => [id, position] as const))
+  // The page's roster decides who gets a row. An edge naming something this page
+  // does not hold is repair's business, not a reason to invent a row for it.
+  const live = edges.filter((edge) => rank.has(edge.from) && rank.has(edge.to))
+
+  const depths = readingDepths(live)
+  // The same walk run backwards: how far the reading still has to go from here,
+  // which is what says which way out of a split it carries on along.
+  const heights = readingDepths(live.map((edge) => ({ from: edge.to, to: edge.from })))
+
+  const parentsOf = new Map<string, string[]>()
+  const childrenOf = new Map<string, string[]>()
+  const waysIn = new Map<string, number>()
+  const waysOut = new Map<string, number>()
+  for (const edge of live) {
+    push(parentsOf, edge.to, edge.from)
+    push(childrenOf, edge.from, edge.to)
+    waysIn.set(edge.to, (waysIn.get(edge.to) ?? 0) + 1)
+    waysOut.set(edge.from, (waysOut.get(edge.from) ?? 0) + 1)
+    if (!waysIn.has(edge.from)) waysIn.set(edge.from, 0)
+    if (!waysOut.has(edge.to)) waysOut.set(edge.to, 0)
+  }
+
+  const positionOf = (id: string): number => rank.get(id) as number
+  for (const list of childrenOf.values()) {
+    list.sort((a, b) => (heights.get(a) ?? 0) - (heights.get(b) ?? 0) || positionOf(a) - positionOf(b))
+  }
+  for (const list of parentsOf.values()) list.sort((a, b) => positionOf(a) - positionOf(b))
+
+  const held: (string | undefined)[] = []
+  const laneOf = new Map<string, number>()
+  const rows: ReadingRow[] = []
+
+  const openLane = (): number => {
+    const free = held.indexOf(undefined)
+    if (free >= 0) return free
+    held.push(undefined)
+    return held.length - 1
+  }
+
+  const lay = (id: string): void => {
+    // Arriving here is one line fewer left to draw out of each object it comes
+    // from. An object with none left hands its lane over instead of keeping it
+    // open, and the leftmost of those is the lane the reading carries on down —
+    // so a branch laid earlier, while its parent still owes another line, has to
+    // open a lane of its own and sits indented.
+    let inherited: number | undefined
+    for (const parent of parentsOf.get(id) ?? []) {
+      const owed = (waysOut.get(parent) as number) - 1
+      waysOut.set(parent, owed)
+      if (owed > 0) continue
+      const lane = laneOf.get(parent) as number
+      held[lane] = undefined
+      if (inherited === undefined || lane < inherited) inherited = lane
+    }
+
+    const lane = inherited ?? openLane()
+    laneOf.set(id, lane)
+    held[lane] = (waysOut.get(id) ?? 0) > 0 ? id : undefined
+    rows.push({ id, lane, depth: depths.get(id), parents: parentsOf.get(id) ?? [] })
+
+    for (const child of childrenOf.get(id) ?? []) {
+      const owed = (waysIn.get(child) as number) - 1
+      waysIn.set(child, owed)
+      // Held back until every way in has been laid, which is what keeps the
+      // order a linear extension where two branches meet again.
+      if (owed === 0) lay(child)
+    }
+  }
+
+  const starts = [...waysIn]
+    .filter(([, count]) => count === 0)
+    .map(([id]) => id)
+    .sort((a, b) => positionOf(a) - positionOf(b))
+  for (const id of starts) lay(id)
+
+  // Whatever the rail never reached: the objects no line touches, and — only if
+  // a ring ever survives both the canvas and repair — the ones caught in it.
+  for (const id of order) {
+    if (!laneOf.has(id)) rows.push({ id, lane: undefined, depth: undefined, parents: [] })
+  }
+  return rows
+}
+
+/**
  * Every line with an end on one of these objects — what deleting them takes
  * with them, and what putting them back has to bring.
  */
