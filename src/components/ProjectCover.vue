@@ -24,7 +24,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { ImageOff } from '@lucide/vue'
-import { coverKey, inRenderSlot, renderCover } from '@/lib/pageThumbnail'
+import { coverKey, inRenderSlot, renderFitted } from '@/lib/pageThumbnail'
 
 /**
  * The bottom raster of a project's first page, read from inside the project
@@ -60,7 +60,7 @@ async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array>
 
   return inRenderSlot(async () => {
     const bytes = await window.api.readImage(projectPath, cover)
-    const png = await renderCover(bytes)
+    const png = await renderFitted(bytes)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})
     return png

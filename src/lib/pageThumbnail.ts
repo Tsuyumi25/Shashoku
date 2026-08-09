@@ -89,6 +89,26 @@ export function coverKey(
 }
 
 /**
+ * One image in the project folder, keyed by what the folder says about it.
+ *
+ * The write time and the size rather than the path alone: nothing here owns
+ * these files, so the same name can come back holding a different picture at
+ * any moment and the cache has to notice.
+ */
+export function sourceKey(
+  rootPath: string,
+  source: { name: string; modified: number; size: number },
+  edge: number = THUMBNAIL_EDGE,
+): Promise<string> {
+  return digest(
+    JSON.stringify(['source', edge, rootPath, source.name, source.modified, source.size]),
+  )
+}
+
+/**
+ * An encoded image, decoded and reduced to fit `edge`. What a cover and a
+ * source thumbnail both are — neither is composited, so both are this.
+ *
  * Reduced through a canvas rather than by handing a full-size image to the
  * layout. Scaling an <img> down goes through Chromium's mipmap path, which at
  * the ratio a page reaches in a sidebar keeps the odd hard edge while losing
@@ -97,7 +117,7 @@ export function coverKey(
  * which is also what the page grid does, so the two stop looking like
  * different renderers.
  */
-export async function renderCover(
+export async function renderFitted(
   bytes: Uint8Array,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<Uint8Array> {

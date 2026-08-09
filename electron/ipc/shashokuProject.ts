@@ -6,6 +6,7 @@ import { CHANNELS, type WritePageInput } from "@shared/ipc/channels";
 import {
   createProject,
   createPages,
+  listSources,
   openProject,
   readPage,
   resolveExportFolder,
@@ -46,6 +47,7 @@ export function registerShashokuProjectHandlers(): void {
     return pickFontFolder(win);
   });
   ipcMain.handle(CHANNELS.scanRoot, (_e, rootPath: string) => scanRoot(rootPath));
+  ipcMain.handle(CHANNELS.listSources, (_e, rootPath: string) => listSources(rootPath));
   ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));
   ipcMain.handle(CHANNELS.createPages, (_e, rootPath: string, sourceNames: string[]) =>
