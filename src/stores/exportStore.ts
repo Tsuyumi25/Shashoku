@@ -29,12 +29,14 @@ export const useExportStore = defineStore('export', () => {
 
   const selectedSet = computed(() => new Set(selected.value))
   /**
-   * Asked of the pages rather than of the count, so that a page deleted out
-   * from under a selection leaves it whole instead of permanently one short of
-   * "all".
+   * The pages picked that the project still has. A deletion takes pages out
+   * from under a selection without asking it, so what is counted and what is
+   * acted on both read the list rather than the record of what was clicked.
    */
+  const selectedPages = computed(() => project.files.filter((f) => selectedSet.value.has(f.pageId)))
+
   const allSelected = computed(
-    () => project.files.length > 0 && project.files.every((f) => selectedSet.value.has(f.pageId)),
+    () => project.files.length > 0 && selectedPages.value.length === project.files.length,
   )
 
   function selectAll() {
@@ -107,7 +109,7 @@ export const useExportStore = defineStore('export', () => {
     const profile = project.exportProfiles[activeProfile.value]
     return profile === undefined ? [] : [profile]
   })
-  const pagesToRun = computed(() => project.files.filter((f) => selectedSet.value.has(f.pageId)))
+  const pagesToRun = selectedPages
 
   function cancel() {
     abandoned = true
@@ -193,6 +195,7 @@ export const useExportStore = defineStore('export', () => {
     selected,
     selectedSet,
     allSelected,
+    selectedPages,
     progress,
     running,
     outcome,

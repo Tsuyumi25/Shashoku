@@ -1,15 +1,15 @@
 <template>
   <TabsRoot v-model="tab" class="flex h-full min-h-0 flex-col">
     <TabsList class="tabs">
-      <TabsTrigger value="source" class="tab">素材</TabsTrigger>
+      <TabsTrigger value="source" class="tab">頁面管理</TabsTrigger>
       <TabsTrigger value="export" class="tab">輸出</TabsTrigger>
     </TabsList>
 
     <!--
-      One splitter per tab rather than one that swaps its contents, because each
-      remembers a width and they want different ones: side by side with the
-      folder the pages came from, half and half reads as a comparison; beside
-      the delivery settings, the pages want the room.
+      One splitter per tab, but one width between them: the same auto-save id in
+      both, so dragging the divide in one tab is where it is in the other. The
+      pages column is the thing that does not move when the tab changes, and a
+      column that stayed put but changed width would only half keep that promise.
 
       No display class here — an unselected panel carries `hidden`, and giving
       it one would override that and lay both of them out at once.
@@ -18,17 +18,17 @@
       <SplitterGroup
         direction="horizontal"
         class="h-full"
-        auto-save-id="project-manager:columns:source"
+        auto-save-id="project-manager:columns"
         :storage="preferences.panelStorage"
       >
-        <SplitterPanel :order="1" :default-size="50" :min-size="20" class="flex min-w-0 flex-col">
+        <SplitterPanel :order="1" :default-size="25" :min-size="15" class="flex min-w-0 flex-col">
           <SourcePanel />
         </SplitterPanel>
 
         <ResizeHandle />
 
-        <SplitterPanel :order="2" :default-size="50" :min-size="20" class="flex min-w-0 flex-col">
-          <ProjectManagerMode />
+        <SplitterPanel :order="2" :default-size="75" :min-size="40" class="flex min-w-0 flex-col">
+          <ProjectManagerMode tab="source" />
         </SplitterPanel>
       </SplitterGroup>
     </TabsContent>
@@ -37,7 +37,7 @@
       <SplitterGroup
         direction="horizontal"
         class="h-full"
-        auto-save-id="project-manager:columns:export"
+        auto-save-id="project-manager:columns"
         :storage="preferences.panelStorage"
       >
         <SplitterPanel :order="1" :default-size="25" :min-size="15" class="flex min-w-0 flex-col">
@@ -47,7 +47,7 @@
         <ResizeHandle />
 
         <SplitterPanel :order="2" :default-size="75" :min-size="40" class="flex min-w-0 flex-col">
-          <ProjectManagerMode />
+          <ProjectManagerMode tab="export" />
         </SplitterPanel>
       </SplitterGroup>
     </TabsContent>
@@ -76,6 +76,10 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
  * Not a fourth column. The delivery settings are only wanted while delivering —
  * they have nothing to say while you are looking at what came in — so the
  * source panel takes that column over rather than adding to it.
+ *
+ * The values are the panel beside the grid; the labels are what you came to do.
+ * They differ because one tab holds two columns, and naming the tab after
+ * either of them would be naming a place after half of it.
  *
  * Tabs rather than a segmented control, which is what this was first: a segment
  * picker says "one of these settings", and these are not settings but two views

@@ -70,6 +70,11 @@ export function registerShashokuProjectHandlers(): void {
     (_e, rootPath: string, profileFolder: string, filename: string, bytes: Uint8Array) =>
       writeExport(rootPath, profileFolder, filename, bytes),
   );
+  // Its own folder, which is the one the renderer already names on every other
+  // call it makes about this project.
+  ipcMain.handle(CHANNELS.openProjectFolder, (_e, rootPath: string) =>
+    shell.openPath(rootPath),
+  );
   // The path is composed here rather than taken whole, so the only thing the
   // renderer can ask to open is a folder belonging to a project it has open.
   ipcMain.handle(

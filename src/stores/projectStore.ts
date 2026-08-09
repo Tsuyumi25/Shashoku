@@ -312,6 +312,32 @@ export const useProjectStore = defineStore('project', () => {
     markMetaDirty()
   }
 
+  /**
+   * Answers rather than throws, for the same reason making pages does: a run
+   * that stopped part way has really taken those pages away, and both halves
+   * are worth saying.
+   */
+  async function deletePages(
+    pageIds: readonly string[],
+  ): Promise<{ deleted: string[]; problem: string | null }> {
+    const deleted: string[] = []
+    for (const pageId of pageIds) {
+      const name = pageById(pageId)?.page.name ?? pageId
+      try {
+        await deletePage(pageId)
+      } catch (err) {
+        // Stops rather than carrying on: a run that kept going past a page it
+        // could not remove would leave nobody able to say which ones went.
+        return {
+          deleted,
+          problem: `${name}:${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+      deleted.push(pageId)
+    }
+    return { deleted, problem: null }
+  }
+
   
   async function openByPath(rootPathToOpen: string): Promise<string | null> {
     const scan = await window.api.scanRoot(rootPathToOpen)
@@ -867,6 +893,7 @@ export const useProjectStore = defineStore('project', () => {
     abandonCreating,
     movePageBefore,
     deletePage,
+    deletePages,
     flush: autosave.flush,
     addLabel,
     deleteLabel,

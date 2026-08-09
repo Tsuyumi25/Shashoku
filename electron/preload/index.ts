@@ -31,6 +31,7 @@ const api: ShashokuApi = {
     ipcRenderer.invoke(CHANNELS.writeExport, rootPath, profileFolder, filename, bytes),
   openExportFolder: (rootPath, profileFolder) =>
     ipcRenderer.invoke(CHANNELS.openExportFolder, rootPath, profileFolder),
+  openProjectFolder: (rootPath) => ipcRenderer.invoke(CHANNELS.openProjectFolder, rootPath),
   readImage: (folder, name) => ipcRenderer.invoke(CHANNELS.readImage, folder, name),
   readThumbnail: (key) => ipcRenderer.invoke(CHANNELS.readThumbnail, key),
   writeThumbnail: (key, bytes) => ipcRenderer.invoke(CHANNELS.writeThumbnail, key, bytes),

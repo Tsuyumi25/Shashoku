@@ -1,63 +1,5 @@
 <template>
   <div class="flex h-full w-full flex-col">
-    <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border px-2 select-none">
-      <span class="truncate text-xs text-muted-foreground">
-        {{ countText }}
-      </span>
-      <!-- One control, because pressing it again is what "none" means. -->
-      <button
-        v-if="sources.length > 0"
-        class="panel-action ml-auto flex items-center gap-1.5"
-        @click="toggleAll"
-      >
-        <span class="pick" :data-checked="String(allPicked)">
-          <Check :size="11" :stroke-width="3" />
-        </span>
-        <span>全選</span>
-      </button>
-      <button
-        class="panel-action flex items-center gap-1.5"
-        :class="sources.length === 0 && 'ml-auto'"
-        title="重新讀取資料夾"
-        :disabled="!project.rootPath"
-        @click="refresh"
-      >
-        <RefreshCw :size="12" :class="loading && 'animate-spin'" />
-        <span>重整</span>
-      </button>
-    </div>
-
-    <!--
-      The one irreversible step in the whole program, and it waits here to be
-      pressed. Permanent rather than a dialog at project creation: images arrive
-      later too, and a prompt that only ever appears once cannot serve the
-      second time.
-    -->
-    <div
-      v-if="project.creating"
-      class="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-secondary px-2 select-none"
-    >
-      <Loader :size="13" class="animate-spin text-muted-foreground" />
-      <span class="text-xs">建立中 {{ project.creating.done }} / {{ project.creating.total }}</span>
-      <button class="panel-action ml-auto" @click="project.abandonCreating()">停止</button>
-    </div>
-    <div
-      v-else-if="problem"
-      class="flex shrink-0 items-start gap-2 border-b border-border bg-destructive/10 px-2 py-1 select-none"
-    >
-      <span class="min-w-0 flex-1 text-xs break-words text-destructive">建立中止 — {{ problem }}</span>
-      <button class="panel-action shrink-0" @click="problem = null">知道了</button>
-    </div>
-    <div
-      v-else-if="pickedNames.length > 0"
-      class="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-secondary px-2 select-none"
-    >
-      <span class="min-w-0 truncate text-xs">這 {{ pickedNames.length }} 張圖還不是頁面</span>
-      <button class="panel-cta ml-auto shrink-0" @click="create">
-        建立 {{ pickedNames.length }} 頁
-      </button>
-    </div>
-
     <div v-if="!project.rootPath" class="flex flex-1 items-center justify-center p-6">
       <p class="max-w-[16rem] text-center text-sm text-muted-foreground">
         開啟一個專案,這裡就是它那個資料夾的鏡子。
@@ -93,15 +35,94 @@
         />
       </TransitionGroup>
     </div>
+
+    <!-- Only while something went wrong, and above the foot rather than inside
+         it: a reason needs room to be read, and a row of buttons has none. -->
+    <div
+      v-if="problem"
+      class="flex shrink-0 items-start gap-2 border-t border-border bg-destructive/10 px-2 py-1"
+    >
+      <span class="min-w-0 flex-1 text-xs break-words text-destructive">
+        建立中止 — {{ problem }}
+      </span>
+      <button class="panel-btn shrink-0" @click="problem = null">知道了</button>
+    </div>
+
+    <!--
+      Shaped like the delivery panel's foot, because the two answer the same
+      question at opposite ends of the work: what is here, where to go and look
+      at it, and the one act this panel is for.
+    -->
+    <div class="flex shrink-0 flex-col gap-1.5 border-t border-border p-2">
+      <div class="flex items-center gap-1.5">
+        <span class="bar-head">
+          素材 <span class="bar-count">{{ countText }}</span>
+        </span>
+
+        <button
+          class="panel-btn ml-auto"
+          title="重新讀取資料夾"
+          :disabled="!project.rootPath || busy"
+          @click="refresh"
+        >
+          <RefreshCw :size="12" :class="loading && 'animate-spin'" />
+          <span>重整</span>
+        </button>
+
+        <!-- One control, because pressing it again is what "none" means. -->
+        <button class="panel-btn" :disabled="sources.length === 0 || busy" @click="toggleAll">
+          <span class="pick" :data-checked="String(allPicked)">
+            <Check :size="11" :stroke-width="3" />
+          </span>
+          <span>全選</span>
+        </button>
+      </div>
+
+      <!--
+        Above the button that reads from it, and offered while a run is out as
+        well: watching a folder is half the reason to open it.
+      -->
+      <button class="panel-btn w-full" :disabled="!project.rootPath" @click="onOpenFolder">
+        <FolderOpen :size="14" />
+        <span>開啟素材資料夾</span>
+      </button>
+
+      <template v-if="project.creating">
+        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>建立中 {{ project.creating.done }} / {{ project.creating.total }}</span>
+          <button class="panel-btn ml-auto" @click="project.abandonCreating()">停止</button>
+        </div>
+        <div class="h-1 overflow-hidden rounded-full bg-secondary">
+          <div class="h-full bg-primary transition-[width]" :style="{ width: `${percent}%` }" />
+        </div>
+      </template>
+
+      <!--
+        The one irreversible act in the whole program, and it waits here to be
+        pressed. Permanent rather than a prompt when a project is made: images
+        arrive later too, and a prompt that appears once cannot serve the second
+        time.
+      -->
+      <button
+        v-else
+        class="panel-btn panel-btn-primary w-full"
+        :disabled="pickedNames.length === 0"
+        @click="create"
+      >
+        <FilePlusCorner :size="15" />
+        <span>建立 {{ pickedNames.length }} 頁</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Check, Loader, RefreshCw } from '@lucide/vue'
+import { Check, FilePlusCorner, FolderOpen, RefreshCw } from '@lucide/vue'
 import type { SourceImage } from '@shared/ipc/channels'
 import SourceThumb from '@/components/SourceThumb.vue'
+import { useToast } from 'vue-toastification'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -119,6 +140,7 @@ import { useProjectStore } from '@/stores/projectStore'
  * while Shashoku never lost focus, which is what the button is for.
  */
 const project = useProjectStore()
+const toast = useToast()
 
 const sources = ref<SourceImage[]>([])
 const loading = ref(false)
@@ -135,6 +157,8 @@ const unpicked = ref(new Set<string>())
 /** Why the last run stopped short, cleared by starting another. */
 const problem = ref<string | null>(null)
 
+const busy = computed(() => project.creating !== null)
+
 const pickedNames = computed(() =>
   sources.value.map((s) => s.name).filter((name) => !unpicked.value.has(name)),
 )
@@ -142,6 +166,25 @@ const pickedNames = computed(() =>
 const allPicked = computed(
   () => sources.value.length > 0 && pickedNames.value.length === sources.value.length,
 )
+
+const countText = computed(() => {
+  if (!project.rootPath) return ''
+  if (loading.value) return '讀取中…'
+  return `(${pickedNames.value.length}/${sources.value.length})`
+})
+
+const percent = computed(() => {
+  const run = project.creating
+  if (!run || run.total === 0) return 0
+  return Math.round((run.done / run.total) * 100)
+})
+
+async function onOpenFolder(): Promise<void> {
+  const root = project.rootPath
+  if (root === null) return
+  const reason = await window.api.openProjectFolder(root)
+  if (reason) toast.error(`開不了資料夾:${reason}`)
+}
 
 function toggle(name: string): void {
   const next = new Set(unpicked.value)
@@ -163,11 +206,6 @@ async function create(): Promise<void> {
   unpicked.value = new Set([...unpicked.value, ...made])
   await refresh()
 }
-
-const countText = computed(() => {
-  if (!project.rootPath) return '素材'
-  return loading.value ? '讀取中…' : `${sources.value.length} 張圖`
-})
 
 /** Which read the pending work belongs to, so a slow one cannot land last. */
 let generation = 0
@@ -206,38 +244,6 @@ useEventListener(window, 'focus', () => void refresh())
 </script>
 
 <style scoped>
-.panel-action {
-  cursor: pointer;
-  height: 1.375rem;
-  padding: 0 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-.panel-action:hover:not(:disabled) {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.panel-action:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* The one button in this panel that does something irreversible, and the only
-   one drawn as though it were the point of being here. */
-.panel-cta {
-  cursor: pointer;
-  height: 1.5rem;
-  padding: 0 0.625rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-.panel-cta:hover {
-  filter: brightness(1.08);
-}
-
 /* A file that is no longer in the folder fades rather than blinking off, and
    the ones behind it slide up rather than jumping — the two together are what
    make a removal read as one thing leaving instead of the panel redrawing. */

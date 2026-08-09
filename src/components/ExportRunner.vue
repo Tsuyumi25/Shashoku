@@ -4,7 +4,7 @@
       Above the button that fills it, and shown while a run is out as well:
       watching the files appear is half the reason to open it.
     -->
-    <button class="run-btn w-full" :disabled="!project.isOpen" @click="onOpenFolder">
+    <button class="panel-btn w-full" :disabled="!project.isOpen" @click="onOpenFolder">
       <FolderOpen :size="14" />
       <span>開啟輸出資料夾</span>
     </button>
@@ -12,7 +12,7 @@
     <template v-if="exportRun.progress">
       <div class="flex items-center gap-2 text-xs text-muted-foreground">
         <span>匯出中 {{ exportRun.progress.done }} / {{ exportRun.progress.total }}</span>
-        <button class="run-btn ml-auto" @click="exportRun.cancel()">取消</button>
+        <button class="panel-btn ml-auto" @click="exportRun.cancel()">取消</button>
       </div>
       <div class="h-1 overflow-hidden rounded-full bg-secondary">
         <div class="h-full bg-primary transition-[width]" :style="{ width: `${percent}%` }" />
@@ -21,7 +21,7 @@
 
     <button
       v-else
-      class="run-btn run-btn-primary w-full"
+      class="panel-btn panel-btn-primary w-full"
       :disabled="!ready"
       @click="exportRun.run()"
     >
@@ -80,37 +80,3 @@ watch(
   },
 )
 </script>
-
-<style scoped>
-.run-btn {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  height: 1.75rem;
-  padding: 0 0.625rem;
-  border-radius: 0.3125rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-.run-btn:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.run-btn-primary {
-  height: 2.25rem;
-  font-size: 0.8125rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-.run-btn-primary:hover {
-  background: color-mix(in oklch, var(--primary), black 8%);
-  color: var(--primary-foreground);
-}
-.run-btn-primary:disabled {
-  opacity: 0.4;
-  background: var(--secondary);
-  color: var(--muted-foreground);
-}
-</style>

@@ -15,6 +15,7 @@ export const CHANNELS = {
   writeProjectMeta: "shashoku:write-project-meta",
   writeExport: "shashoku:write-export",
   openExportFolder: "shashoku:open-export-folder",
+  openProjectFolder: "shashoku:open-project-folder",
   readImage: "project:readImage",
   readThumbnail: "thumbnails:read",
   writeThumbnail: "thumbnails:write",
@@ -127,6 +128,12 @@ export interface ShashokuApi {
    * success, or to the platform's reason for refusing.
    */
   openExportFolder(rootPath: string, profileFolder: string): Promise<string>;
+  /**
+   * Shows the project's own folder — where its source images live — in the
+   * desktop's file manager. Resolves to "" on success, or to the platform's
+   * reason for refusing.
+   */
+  openProjectFolder(rootPath: string): Promise<string>;
   readImage(folder: string, name: string): Promise<Uint8Array>;
   /**
    * A composited page held outside the project folder, keyed by a digest of

@@ -1,24 +1,5 @@
 <template>
   <div class="flex h-full w-full flex-col">
-    <div
-      v-if="project.isOpen"
-      class="flex h-7 shrink-0 items-center gap-2 border-b border-border px-2 select-none"
-    >
-      <span class="text-xs text-muted-foreground">
-        已選 {{ exportSelection.selected.length }} / {{ project.files.length }} 頁
-      </span>
-      <!-- One control, because pressing it again is what "none" means. -->
-      <button
-        class="grid-action ml-auto flex items-center gap-1.5"
-        @click="exportSelection.toggleAll()"
-      >
-        <span class="pick" :data-checked="String(exportSelection.allSelected)">
-          <Check :size="11" :stroke-width="3" />
-        </span>
-        <span>全選</span>
-      </button>
-    </div>
-
     <div v-if="!project.isOpen" class="flex flex-1 items-center justify-center p-8">
       <p class="max-w-xs text-center text-sm text-muted-foreground">
         左邊的清單就是你的專案櫃。用「新增」把一個裝著原圖的資料夾建成專案,或用「加入資料夾」把已經做過的一批列進來。
@@ -47,24 +28,51 @@
         @change="onDropped"
       >
         <template #item="{ element }">
-          <ContextMenuRoot>
-            <ContextMenuTrigger>
-              <PageThumb
-                :file="element"
-                :selected="exportSelection.isSelected(element.pageId)"
-                @pick="onPick(element.pageId, $event)"
-              />
-            </ContextMenuTrigger>
-            <ContextMenuPortal>
-              <ContextMenuContent class="menu">
-                <ContextMenuItem class="menu-item menu-item-danger" @select="ask(element)">
-                  刪除頁面…
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenuPortal>
-          </ContextMenuRoot>
+          <PageThumb
+            :file="element"
+            :selected="exportSelection.isSelected(element.pageId)"
+            @pick="onPick(element.pageId, $event)"
+          />
         </template>
       </Draggable>
+    </div>
+
+    <!--
+      Deleting sits at the far end, as far from picking as the bar is wide. They
+      are the two halves of the same mistake — picking everything and then
+      pressing the thing beside it — and nothing here can be taken back.
+
+      The count appears only where nothing else says it. Beside a delete button
+      that already carries the number it would be the same figure twice.
+    -->
+    <div v-if="project.isOpen" class="bar">
+      <button
+        class="bar-button"
+        :disabled="project.files.length === 0"
+        @click="exportSelection.toggleAll()"
+      >
+        <span class="pick" :data-checked="String(exportSelection.allSelected)">
+          <Check :size="11" :stroke-width="3" />
+        </span>
+        <span>全選</span>
+      </button>
+
+      <span class="bar-head">
+        專案頁面
+        <span v-if="tab === 'export'" class="bar-count">
+          ({{ exportSelection.selectedPages.length }}/{{ project.files.length }})
+        </span>
+      </span>
+
+      <button
+        v-if="tab === 'source'"
+        class="bar-button bar-button-danger ml-auto"
+        :disabled="exportSelection.selectedPages.length === 0"
+        @click="ask"
+      >
+        <Trash2 :size="13" />
+        <span>刪除 {{ exportSelection.selectedPages.length }} 頁</span>
+      </button>
     </div>
 
     <!--
@@ -75,18 +83,16 @@
     -->
     <AlertDialogRoot :open="asking !== null" @update:open="onDialogOpen">
       <AlertDialogPortal>
-        <AlertDialogOverlay class="fixed inset-0 z-50 bg-black/50" />
+        <AlertDialogOverlay class="dialog-overlay" />
         <AlertDialogContent class="dialog">
-          <AlertDialogTitle class="text-sm font-medium">
-            刪除「{{ asking?.page.name }}」?
-          </AlertDialogTitle>
-          <AlertDialogDescription class="text-xs leading-relaxed text-muted-foreground">
-            這一頁的資料夾會從磁碟移除,連同它的圖層和已經嵌上的文字。這一步無法復原——資料夾裡的原圖不受影響,但這一頁做過的工作會消失。
+          <AlertDialogTitle class="dialog-title">刪除 {{ asking?.length ?? 0 }} 頁?</AlertDialogTitle>
+          <AlertDialogDescription class="dialog-body">
+            {{ namesAsked }}的資料夾會從磁碟移除,連同圖層和已經嵌上的文字。這一步無法復原——資料夾裡的原圖不受影響,但這些頁面做過的工作會消失。
           </AlertDialogDescription>
-          <p v-if="problem" class="text-xs text-destructive">{{ problem }}</p>
-          <div class="mt-1 flex justify-end gap-2">
-            <AlertDialogCancel class="dialog-button">取消</AlertDialogCancel>
-            <AlertDialogAction class="dialog-button dialog-button-danger" @click="confirm">
+          <p v-if="problem" class="dialog-problem">{{ problem }}</p>
+          <div class="dialog-actions">
+            <AlertDialogCancel class="bar-button">取消</AlertDialogCancel>
+            <AlertDialogAction class="bar-button bar-button-danger" @click="confirm">
               刪除
             </AlertDialogAction>
           </div>
@@ -97,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Draggable from 'vuedraggable'
 import {
   AlertDialogAction,
@@ -108,13 +114,8 @@ import {
   AlertDialogPortal,
   AlertDialogRoot,
   AlertDialogTitle,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuPortal,
-  ContextMenuRoot,
-  ContextMenuTrigger,
 } from 'reka-ui'
-import { Check } from '@lucide/vue'
+import { Check, Trash2 } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import PageThumb from '@/components/PageThumb.vue'
 import { loadFontCatalog } from '@/lib/fontCatalog'
@@ -122,6 +123,14 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useExportStore } from '@/stores/exportStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+
+/**
+ * The finished pages, whichever tab is up. What the bar underneath offers is
+ * what the column beside them is for: making pages out of a folder means being
+ * able to unmake them too, while a delivery has nothing to say about which
+ * pages exist.
+ */
+const props = defineProps<{ tab: 'source' | 'export' }>()
 
 const project = useProjectStore()
 const preferences = usePreferencesStore()
@@ -152,12 +161,23 @@ function onDropped(e: { moved?: { element: ProjectFile; newIndex: number } }) {
   editor.cmdMovePage(e.moved.element.pageId, e.moved.newIndex)
 }
 
-const asking = ref<ProjectFile | null>(null)
+/** The pages the open dialog is asking about, held apart from the selection so
+ *  that what is confirmed is what was asked about. */
+const asking = ref<ProjectFile[] | null>(null)
 const problem = ref<string | null>(null)
 
-function ask(file: ProjectFile) {
+/** Named while there are few enough to read, counted once there are not. */
+const namesAsked = computed(() => {
+  const pages = asking.value ?? []
+  if (pages.length === 0) return ''
+  if (pages.length > 3) return `這 ${pages.length} 頁`
+  return pages.map((f) => `「${f.page.name}」`).join('、')
+})
+
+function ask() {
+  if (exportSelection.selectedPages.length === 0) return
   problem.value = null
-  asking.value = file
+  asking.value = [...exportSelection.selectedPages]
 }
 
 function onDialogOpen(open: boolean) {
@@ -165,97 +185,22 @@ function onDialogOpen(open: boolean) {
 }
 
 async function confirm(e: Event) {
-  const file = asking.value
-  if (!file) return
-  // Held open until the directory is really gone, so a deletion that failed
+  const pages = asking.value
+  if (!pages) return
+  // Held open until the directories are really gone, so a deletion that failed
   // says so where it was asked for rather than closing as though it worked.
   e.preventDefault()
-  try {
-    await project.deletePage(file.pageId)
-  } catch (err) {
-    problem.value = `刪不掉:${err instanceof Error ? err.message : String(err)}`
+  const wasOn = editor.currentPageId
+  const { deleted, problem: stopped } = await project.deletePages(pages.map((f) => f.pageId))
+  if (stopped !== null) {
+    problem.value = `刪不掉 — ${stopped}`
+    asking.value = pages.filter((f) => !deleted.includes(f.pageId))
     return
   }
-  // The workbench may have been standing on it.
-  if (editor.currentPageId === file.pageId) {
+  // The workbench may have been standing on one of them.
+  if (wasOn !== null && deleted.includes(wasOn)) {
     editor.startOnPage(project.files[0]?.pageId ?? null)
   }
   asking.value = null
 }
 </script>
-
-<style scoped>
-.grid-action {
-  cursor: pointer;
-  height: 1.375rem;
-  padding: 0 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-}
-.grid-action:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-
-.menu {
-  z-index: 50;
-  min-width: 9rem;
-  padding: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-}
-.menu-item {
-  cursor: pointer;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  outline: none;
-}
-.menu-item[data-highlighted] {
-  background: var(--secondary);
-}
-.menu-item-danger {
-  color: var(--destructive);
-}
-
-.dialog {
-  position: fixed;
-  z-index: 50;
-  top: 50%;
-  left: 50%;
-  display: flex;
-  width: min(24rem, calc(100vw - 2rem));
-  transform: translate(-50%, -50%);
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 0.28);
-}
-.dialog-button {
-  cursor: pointer;
-  height: 1.75rem;
-  padding: 0 0.75rem;
-  border: 1px solid var(--input);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-}
-.dialog-button:hover {
-  background: var(--secondary);
-}
-.dialog-button-danger {
-  border-color: transparent;
-  background: var(--destructive);
-  color: var(--destructive-foreground);
-}
-.dialog-button-danger:hover {
-  filter: brightness(1.08);
-}
-</style>
