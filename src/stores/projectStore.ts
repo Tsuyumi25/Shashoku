@@ -194,7 +194,23 @@ export const useProjectStore = defineStore('project', () => {
     usePreferencesStore().addScanPoint(parentFolder(newRootPath))
   }
 
-  
+  /**
+   * Reading a project back off disk, with the queued writes banked first.
+   *
+   * The order is the whole point and must not be taken apart: `openProject`
+   * sweeps every layer file the manifest on disk does not name, and a layer
+   * written by a tool is on disk long before the manifest that names it is —
+   * the manifest goes through autosave, the pixels do not. Sweeping ahead of
+   * the flush therefore deletes work that was never saved, and then writes a
+   * manifest pointing at the file it just removed.
+   */
+  async function reopen(rootPathToOpen: string): Promise<void> {
+    await autosave.flush()
+    const result = await window.api.openProject(rootPathToOpen)
+    await ingestProject(rootPathToOpen, result.projectMetaRaw, result.pages)
+  }
+
+
   async function createNewProject(): Promise<string | null> {
     const picked = await window.api.pickRoot()
     if (picked === null) return null
@@ -215,8 +231,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!scan.hasShashokuDir || !scan.hasSentinel) {
       throw new Error(`此資料夾不是 Shashoku 專案(缺 ${SHASHOKU_DIR}/ 或 sentinel)`)
     }
-    const result = await window.api.openProject(picked)
-    await ingestProject(picked, result.projectMetaRaw, result.pages)
+    await reopen(picked)
     return picked
   }
 
@@ -265,8 +280,7 @@ export const useProjectStore = defineStore('project', () => {
       }
     } finally {
       creating.value = null
-      const result = await window.api.openProject(root)
-      await ingestProject(root, result.projectMetaRaw, result.pages)
+      await reopen(root)
     }
     return { made, problem }
   }
@@ -342,8 +356,7 @@ export const useProjectStore = defineStore('project', () => {
   async function openByPath(rootPathToOpen: string): Promise<string | null> {
     const scan = await window.api.scanRoot(rootPathToOpen)
     if (!scan.hasShashokuDir || !scan.hasSentinel) return null
-    const result = await window.api.openProject(rootPathToOpen)
-    await ingestProject(rootPathToOpen, result.projectMetaRaw, result.pages)
+    await reopen(rootPathToOpen)
     return rootPathToOpen
   }
 
