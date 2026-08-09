@@ -6,7 +6,7 @@ export const CHANNELS = {
   scanRoot: "shashoku:scan-root",
   scanLibrary: "shashoku:scan-library",
   createProject: "shashoku:create-project",
-  importPages: "shashoku:import-pages",
+  createPages: "shashoku:create-pages",
   openProject: "shashoku:open-project",
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
@@ -31,7 +31,12 @@ export interface ScanRootResult {
   hasSentinel: boolean;
 }
 
-export type PageBadge = "ok" | "raw-missing" | "page-missing" | "damaged";
+/**
+ * Named one by one rather than lumped into "openable or not", because each has
+ * its own answer: a missing page is one to drop from the list, a damaged one is
+ * a file to look at.
+ */
+export type PageBadge = "ok" | "missing" | "damaged";
 
 export interface PageEntry {
   /** What names this page for as long as it exists. */
@@ -63,7 +68,13 @@ export interface ShashokuApi {
   /** What each scan point holds today, sentinel-bearing children only. */
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
-  importPages(rootPath: string, filenames: string[]): Promise<OpenProjectResult>;
+  /**
+   * A page for each named image in the project root, appended to the ones
+   * already there. The one irreversible step and the only one that reads a
+   * source file: the pixels are copied in, and the project stops depending on
+   * the folder they came from.
+   */
+  createPages(rootPath: string, sourceNames: string[]): Promise<OpenProjectResult>;
   openProject(rootPath: string): Promise<OpenProjectResult>;
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;

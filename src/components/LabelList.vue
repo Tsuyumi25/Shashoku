@@ -43,7 +43,7 @@
         ]"
         @mousedown="editor.showPage(group.page.pageId)"
       >
-        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.pageId }}</span>
+        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.name }}</span>
         <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
           {{ group.page.count }}
         </span>

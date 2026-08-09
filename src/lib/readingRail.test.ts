@@ -34,6 +34,9 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: order,
       readingEdges: drawn.map((pair) => {
         const [from, to] = pair.split('>')

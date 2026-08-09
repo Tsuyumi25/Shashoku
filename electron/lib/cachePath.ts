@@ -10,8 +10,8 @@ import { join, posix, win32 } from "node:path";
  * them there would make the profile churn forever. temp is swept out from
  * under a running application.
  *
- * Kept out of the project folder for the same reason: the raws copy is written
- * once and never again, while finished-page thumbnails are rewritten on every
+ * Kept out of the project folder for the same reason: a layer file is written
+ * once and never rewritten, while finished-page thumbnails are redrawn on every
  * edit, and a project folder is something people sync and hand to each other.
  */
 export function resolveCacheRoot(

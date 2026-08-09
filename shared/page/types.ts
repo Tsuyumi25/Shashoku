@@ -2,7 +2,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 8
+export const MANIFEST_SCHEMA_VERSION = 9
 
 export const OCR_SCHEMA_VERSION = 1
 
@@ -144,16 +144,23 @@ export interface ManifestJson {
   revision: number
 
   /**
-   * The raw's own pixel size, once anything has decoded it. A position in page
-   * pixels means nothing without the page it was measured against, and a raw
-   * replaced by a scan at another resolution would otherwise put every layer
-   * somewhere wrong with nothing able to notice.
-   *
-   * Absent is a state of its own — nobody has measured this page yet — rather
-   * than a zero anyone could mistake for a measurement.
+   * What the page is called in the interface. Its directory name is its
+   * identity and never moves, so this is free to be anything the user likes and
+   * free to be the same as another page's — renaming writes this field and
+   * touches no file.
    */
-  width?: number
-  height?: number
+  name: string
+
+  /**
+   * The page's own pixel grid, settled when the page was created.
+   *
+   * Every position on the page is measured in these, so nothing can be drawn
+   * without them — which is why they are not optional and not discovered. There
+   * is no image behind the page to ask any more: the base map is a layer like
+   * any other, free to be hidden, moved or deleted.
+   */
+  width: number
+  height: number
 
   /**
    * Every text object on the page, in the order a reader meets them. Held

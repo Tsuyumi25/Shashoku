@@ -61,9 +61,27 @@ export function defaultColorForTagIndex(i: number): string {
   return CATEGORY_COLORS[i % CATEGORY_COLORS.length]
 }
 
+/**
+ * A page's directory name, which is a single path segment and nothing else.
+ * Refused rather than repaired: a name that walks out of `pages/` is not a
+ * project that has drifted, it is one describing something it has no business
+ * describing.
+ */
+function parsePageList(v: unknown): string[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail('pages 必須是陣列')
+  return v.map((name, i) => {
+    if (typeof name !== 'string' || name.length === 0) fail(`pages[${i}] 必須是非空字串`)
+    if (/[\\/]/.test(name) || name === '.' || name === '..')
+      fail(`pages[${i}] 必須是單一目錄名,不可含路徑分隔符,也不可是 . 或 ..`)
+    return name
+  })
+}
+
 export function defaultProjectJson(): ProjectJson {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
+    pages: [],
     tags: DEFAULT_TAGS.map((name, i) => ({ name, color: defaultColorForTagIndex(i) })),
     seedStyle: { ...DEFAULT_TEXT_STYLE },
     comment: '',
@@ -87,7 +105,7 @@ export function parseProjectJson(raw: string): ProjectJson {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > PROJECT_SCHEMA_VERSION)
       fail(`project.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
     fail(
-      `不支援的 project.json 版本:${JSON.stringify(data.schemaVersion)}(v3 以下的舊格式需以新版重建專案)`,
+      `不支援的 project.json 版本:${JSON.stringify(data.schemaVersion)}(v4 以下的舊格式需以新版重建專案)`,
     )
   }
 
@@ -98,6 +116,7 @@ export function parseProjectJson(raw: string): ProjectJson {
 
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
+    pages: parsePageList(data.pages),
     tags,
     seedStyle,
     comment,
@@ -110,6 +129,7 @@ export function parseProjectJson(raw: string): ProjectJson {
 export function serializeProjectJson(project: ProjectJson): string {
   const out: Record<string, unknown> = {
     schemaVersion: project.schemaVersion,
+    pages: project.pages,
     tags: project.tags.map((t) => ({ name: t.name, color: t.color })),
     seedStyle: serializeTextStyle(project.seedStyle),
     comment: project.comment,

@@ -15,7 +15,10 @@ export interface ScannedScanPoint {
 
 export interface ScannedProject {
   path: string;
-  /** First image by natural order, or null when the project holds none. */
+  /**
+   * Where the cover image sits inside the project, relative to its folder, or
+   * null when it holds no page to take one from.
+   */
   cover: string | null;
 }
 

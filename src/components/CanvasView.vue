@@ -12,12 +12,17 @@
     @dblclick="selectionTool.onDoubleClick()"
     @contextmenu.prevent
   >
-    <template v-if="currentFile && src">
-      <img ref="imgRef" :src="src" class="hidden" alt="" @load="onImageLoad" />
-      <canvas ref="baseCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
+    <template v-if="currentFile && pageReady">
       <!--
-        A second canvas rather than a mark on the first: the ants crawl on their
-        own clock and the page underneath has no reason to be redrawn for them.
+        Decoded but never shown: this is the page's bottom raster, and the wand
+        samples its pixels to find a balloon. The stack draws it like any other
+        layer, so drawing it here as well would put it on the page twice.
+      -->
+      <img ref="imgRef" :src="baseMapSrc ?? undefined" class="hidden" alt="" />
+      <!--
+        Its own canvas rather than a mark on the ones the layers are drawn into:
+        the ants crawl on their own clock, and the page has no reason to be
+        redrawn for them.
       -->
       <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
@@ -28,7 +33,7 @@
         canvas gestures, and the frames go over everything drawn because they
         are what the pointer is meant to find.
       -->
-      <div v-if="imageReady && currentFile" class="pointer-events-none absolute inset-0">
+      <div v-if="pageReady && currentFile" class="pointer-events-none absolute inset-0">
         <PageStack
           :nodes="stack"
           :layers-dir="layersDirOf(currentFile.pageDir)"
@@ -46,7 +51,7 @@
         are.
       -->
       <svg
-        v-if="imageReady && connecting"
+        v-if="pageReady && connecting"
         class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
         :style="{ '--line-stroke': `${LINE_STROKE_PX}px` }"
       >
@@ -87,7 +92,7 @@
         />
       </svg>
 
-      <div v-if="imageReady" class="pointer-events-none absolute inset-0">
+      <div v-if="pageReady" class="pointer-events-none absolute inset-0">
         <RasterFrame
           v-for="layer in rasterFrames"
           :key="layer.entry.id"
@@ -165,7 +170,7 @@
 
     <div v-else class="flex h-full items-center justify-center select-none">
       <span v-if="currentFile" class="text-xs text-muted-foreground">
-        {{ currentFile.badge === 'ok' ? '載入中…' : `圖檔不存在：${currentFile.pageId}` }}
+        {{ currentFile.badge === 'missing' ? `頁面資料夾不存在：${currentFile.pageId}` : '頁面資料損毀' }}
       </span>
       <span v-else class="text-sm text-muted-foreground">開啟一個資料夾開始工作</span>
     </div>
@@ -193,7 +198,6 @@ import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/editContext'
 import {
-  applyViewTransform,
   centeredBoxOnScreen,
   contentToScreenPx,
   screenToPagePx,
@@ -441,9 +445,8 @@ function accentOf(tags: readonly string[]): string | undefined {
 
 const containerRef = useTemplateRef('containerRef')
 const imgRef = useTemplateRef('imgRef')
-const baseCanvasRef = useTemplateRef('baseCanvasRef')
 const overlayCanvasRef = useTemplateRef('overlayCanvasRef')
-const imageReady = ref(false)
+
 
 /** Whichever tool is up decides whether a drag on bare page builds a selection. */
 const selecting = computed(() => isSelectionTool(editor.tool))
@@ -693,8 +696,15 @@ function onConnectMove(p: Anchor) {
   connect.track(p)
 }
 
-const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => imageReady.value)
-const selectionTool = useSelectionTool(containerRef, imgRef, () => imageReady.value)
+const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.value)
+const selectionTool = useSelectionTool(
+  containerRef,
+  () => {
+    const entry = baseMap.value
+    return entry ? { image: imgRef.value, x: entry.x, y: entry.y, w: entry.w, h: entry.h } : null
+  },
+  () => pageReady.value,
+)
 
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
@@ -703,53 +713,40 @@ useResizeObserver(containerRef, (entries) => {
   if (!width || !height) return
   editor.viewContainerSize = { w: width, h: height }
   fitUnfittedPage()
-  scheduleBaseDraw()
   selectionOverlay.schedulePaint()
 })
 
 /**
- * The page is drawn into a viewport-sized canvas instead of being a CSS-scaled
- * `<img>`, which is why the `<img>` is hidden and only decodes. Scaling an
- * `<img>` down goes through Chromium's mipmap path and loses detail — measured
- * at roughly half the high-frequency energy of a single bilinear step — while
- * `imageSmoothingQuality: 'high'` keeps 86% of it and still suppresses the
- * aliasing a raw bilinear step leaves on screentones and hairlines.
+ * The page's own grid, which the manifest holds outright. Nothing has to decode
+ * for this to be known, so a page is ready to be worked on the moment it is
+ * turned to — the base map is a layer that arrives with the rest of them.
  */
-function drawBase() {
-  const cv = baseCanvasRef.value
-  if (!cv) return
-  const g = cv.getContext('2d')
-  if (!g) return
-  const dpr = window.devicePixelRatio || 1
-  const w = Math.max(1, Math.round(editor.viewContainerSize.w * dpr))
-  const h = Math.max(1, Math.round(editor.viewContainerSize.h * dpr))
-  // Remounting skips a resize callback, so the backing store is sized here.
-  if (cv.width !== w || cv.height !== h) {
-    cv.width = w
-    cv.height = h
-  }
-  g.setTransform(1, 0, 0, 1, 0, 0)
-  g.clearRect(0, 0, cv.width, cv.height)
-  const img = imgRef.value
-  if (!img || !imageReady.value) return
-  applyViewTransform(g, view, dpr)
-  g.drawImage(img, 0, 0)
-}
+const pageReady = computed(() => currentFile.value?.badge === 'ok')
 
-let baseDrawScheduled = false
-function scheduleBaseDraw() {
-  if (baseDrawScheduled) return
-  baseDrawScheduled = true
-  requestAnimationFrame(() => {
-    baseDrawScheduled = false
-    drawBase()
-  })
-}
+watch(
+  () => [pageReady.value, currentFile.value?.page.width, currentFile.value?.page.height] as const,
+  ([ready, w, h]) => {
+    editor.viewContentSize = ready && w && h ? { w, h } : { w: 0, h: 0 }
+    fitUnfittedPage()
+    selectionOverlay.schedulePaint()
+  },
+  { immediate: true },
+)
 
-watch(view, scheduleBaseDraw)
-watch(imageReady, scheduleBaseDraw)
+/**
+ * The page's bottom raster, decoded but never drawn from here. It is what the
+ * wand samples — a balloon is in the artwork, and a translation sitting inside
+ * that balloon is not part of it — while the stack draws it as the ordinary
+ * layer it is.
+ */
+const baseMap = computed(() => {
+  const file = currentFile.value
+  if (!file) return null
+  const bottom = file.page.layers.find((l) => l.kind === 'raster')
+  return bottom?.kind === 'raster' && bottom.w > 0 && bottom.h > 0 ? bottom : null
+})
 
-const src = ref<string | null>(null)
+const baseMapSrc = ref<string | null>(null)
 let currentUrl: string | null = null
 
 function revoke() {
@@ -760,27 +757,21 @@ function revoke() {
 }
 
 watch(
-  () => [project.rawsDir, editor.currentPageId, currentFile.value?.badge] as const,
-  async ([rawsDir, pageId, badge]) => {
+  () => [currentFile.value?.pageDir, baseMap.value?.file] as const,
+  async ([pageDir, file]) => {
     revoke()
-    src.value = null
-    imageReady.value = false
-    // Forgotten rather than kept, because a mask is measured in the raw's own
-    // pixels: a page still decoding would otherwise be offered the last page's
-    // dimensions, and Ctrl+A in that gap would select a region of the wrong size.
-    editor.viewContentSize = { w: 0, h: 0 }
+    baseMapSrc.value = null
     // Any gesture belonged to the page being left, and the wand's sample was of
     // its pixels.
     selection.cancelGesture()
     selectionTool.dropPageSample()
-    scheduleBaseDraw()
     selectionOverlay.schedulePaint()
-    if (!rawsDir || !pageId || badge !== 'ok') return
+    if (!pageDir || !file) return
     try {
-      const bytes = await window.api.readImage(rawsDir, pageId)
+      const bytes = await window.api.readImage(layersDirOf(pageDir), file)
       const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
       currentUrl = url
-      src.value = url
+      baseMapSrc.value = url
     } catch (err) {
       console.error(err)
     }
@@ -795,20 +786,8 @@ onBeforeUnmount(revoke)
  * a page you have already framed keeps its zoom when it is redrawn.
  */
 function fitUnfittedPage() {
-  if (!imageReady.value || editor.viewFittedPage === editor.currentPageId) return
+  if (!pageReady.value || editor.viewFittedPage === editor.currentPageId) return
   if (editor.fitToView()) editor.viewFittedPage = editor.currentPageId
-}
-
-function onImageLoad(e: Event) {
-  const img = e.target as HTMLImageElement
-  editor.viewContentSize = { w: img.naturalWidth, h: img.naturalHeight }
-  // The one moment the page's own size is known: the parser is synchronous and
-  // has no decoded image, so a manifest can only learn this here.
-  if (editor.currentPageId)
-    project.recordPageSize(editor.currentPageId, img.naturalWidth, img.naturalHeight)
-  imageReady.value = true
-  fitUnfittedPage()
-  selectionOverlay.schedulePaint()
 }
 
 // Switching tool abandons whatever the last one had half drawn, which is what
@@ -968,13 +947,13 @@ const canvasCursor = computed(() => {
 })
 
 function onWheel(e: WheelEvent) {
-  if (!imageReady.value) return
+  if (!pageReady.value) return
   editor.wheelZoom(e)
 }
 
 function onPointerDown(e: PointerEvent) {
   const el = e.currentTarget as HTMLElement
-  if (!imageReady.value || !containerRef.value) return
+  if (!pageReady.value || !containerRef.value) return
   if (rDown.value) {
     el.setPointerCapture(e.pointerId)
     rotating.value = true
@@ -1132,7 +1111,7 @@ useEventListener(window, 'keydown', (e) => {
   const key = e.key.toLowerCase()
 
   if (e.key === '0') {
-    if (imageReady.value) editor.fitToView()
+    if (pageReady.value) editor.fitToView()
   } else if (e.code === 'Space') {
     spaceDown.value = true
     e.preventDefault()
@@ -1174,7 +1153,7 @@ useEventListener(window, 'keydown', (e) => {
     const isDouble = now - lastEscapeAt < ESCAPE_DOUBLE_MS
     lastEscapeAt = isDouble ? 0 : now
     if (isDouble) {
-      if (imageReady.value) editor.fitToView()
+      if (pageReady.value) editor.fitToView()
     } else if (rDown.value && containerRef.value) {
       const rect = containerRef.value.getBoundingClientRect()
       editor.rotateTo(0, rect.width / 2, rect.height / 2)

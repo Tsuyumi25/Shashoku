@@ -37,6 +37,9 @@ function openOnePage(labels: TextLayerEntry[] = []) {
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
+        name: 'p',
+        width: 1200,
+        height: 1700,
         readingOrder: labels.map((l) => l.id),
         readingEdges: [],
         layers: [...labels],
@@ -56,6 +59,9 @@ function pageOf(pageId: string, labels: TextLayerEntry[]): ProjectFile {
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: labels.map((l) => l.id),
       readingEdges: [],
       layers: [...labels],
@@ -597,7 +603,7 @@ describe('layer tree edits', () => {
       {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
-        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers },
+        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges: [], layers },
         badge: 'ok',
       },
     ]
@@ -937,6 +943,9 @@ describe('layer tree edits', () => {
         page: {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
           revision: 0,
+          name: 'p',
+          width: 1200,
+          height: 1700,
           readingOrder: ['z'],
           readingEdges: [],
           layers: [label('z')],
@@ -974,6 +983,9 @@ describe('deleteSelection', () => {
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
+        name: 'p',
+        width: 1200,
+        height: 1700,
         readingOrder: p.order,
         readingEdges: [],
         layers: p.layers,
@@ -1216,6 +1228,9 @@ describe('selectLayerBy', () => {
         page: {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
           revision: 0,
+          name: 'p',
+          width: 1200,
+          height: 1700,
           readingOrder: order,
           readingEdges: [],
           layers,
@@ -1316,6 +1331,9 @@ describe('moveObjectsTo', () => {
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
+        name: 'p',
+        width: 1200,
+        height: 1700,
         readingOrder: p.order,
         readingEdges: p.drawn ?? [],
         layers: p.layers,

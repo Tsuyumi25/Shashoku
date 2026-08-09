@@ -13,7 +13,7 @@ import type { ExportProfile } from '../export/types'
 import type { TagDefinition } from '../tags/types'
 import type { TextStyle } from '../text-style/types'
 
-export const PROJECT_SCHEMA_VERSION = 3
+export const PROJECT_SCHEMA_VERSION = 4
 
 
 export type Glossary = Record<string, string>
@@ -21,6 +21,15 @@ export type Glossary = Record<string, string>
 
 export interface ProjectJson {
   schemaVersion: typeof PROJECT_SCHEMA_VERSION
+
+  /**
+   * The pages of this chapter, by directory name, in the order they are read.
+   *
+   * Order only. Whether a page exists is answered by the disk, so a name here
+   * with no directory behind it is a fault to show rather than a page, and a
+   * directory nobody listed joins the end instead of being ignored.
+   */
+  pages: string[]
 
   /**
    * Every tag this project has been told about, in the order the user put them.

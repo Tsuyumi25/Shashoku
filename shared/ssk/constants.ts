@@ -18,7 +18,12 @@ export const CATEGORY_COLORS = [
 export const RESERVED_TAG_NAMES = ['_Label', '_start', '_end']
 
 
-export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tif', '.tiff', '.webp']
+/**
+ * What can become a page. The list is the engine's decoders and nothing more:
+ * an extension named here that the import cannot read is a folder full of
+ * pictures the user is invited to open and then told off for.
+ */
+export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 
 
 
@@ -31,8 +36,6 @@ export const SENTINEL_FILENAME = '.shashoku-project'
 
 export const PROJECT_JSON_FILENAME = 'project.json'
 
-
-export const DIR_RAWS = 'raws'
 
 export const DIR_PAGES = 'pages'
 

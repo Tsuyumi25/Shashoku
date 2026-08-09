@@ -13,13 +13,15 @@ async function digest(text: string): Promise<string> {
 
 /**
  * Names everything that went into drawing the page, so a re-typeset one cannot
- * come back showing what it used to look like. The raws copy is written once
- * and never again, so the page's identity is enough to stand for its pixels;
- * the objects on it are what actually move.
+ * come back showing what it used to look like. A layer file is written once by
+ * whatever made it and never rewritten, so naming the file is enough to stand
+ * for its pixels; what moves is which layers there are and where they sit.
  *
- * Nothing from the project document is hashed, because nothing in it reaches
- * the page any more: each object carries its whole style, so the serialized
- * tree already names every pixel decision. That also ends an old annoyance —
+ * The page's own size is in here because it is what the picture is drawn on:
+ * the layers could all be untouched and the page still come out a different
+ * shape. Nothing else from the project document is, because nothing else in it
+ * reaches the page — each object carries its whole style, so the serialized
+ * tree already names every pixel decision. That also ends an old annoyance:
  * a nudge to a delivery setting used to throw away every thumbnail in the
  * chapter, back when the key hashed the document to catch the styles inside it.
  */
@@ -33,6 +35,8 @@ export function thumbnailKey(file: ProjectFile, edge: number = THUMBNAIL_EDGE): 
       'page',
       edge,
       file.pageDir,
+      file.page.width,
+      file.page.height,
       // The tree alone. Reading order is left out on purpose: it decides which
       // object comes first in the label list, never what the page looks like,
       // and hashing it would throw the picture away for a reordering.
@@ -67,13 +71,14 @@ async function encodePng(canvas: OffscreenCanvas): Promise<Uint8Array> {
 }
 
 /**
- * A project's cover is a raw page, not a composited one: the library knows a
- * project's path and its first pageId and nothing else, and compositing one
- * would mean opening every project in the sidebar to read its labels. A cover
- * says which project this is, which the raw does.
+ * A project's cover is one layer file, not a composited page: the library knows
+ * a project's path and where its first page keeps its bottom raster, and
+ * compositing would mean opening every project in the sidebar to read its
+ * labels. A cover says which project this is, which the bottom of page one does.
  *
- * Its identity is enough to key it. A raws copy is written once and never
- * touched again, so the pixels behind a path cannot change under the cache.
+ * Its path is enough to key it. A layer file is written once by whatever made
+ * it and never rewritten — an edit produces a new file — so the pixels behind a
+ * path cannot change under the cache.
  */
 export function coverKey(
   projectPath: string,
@@ -93,10 +98,10 @@ export function coverKey(
  * different renderers.
  */
 export async function renderCover(
-  raw: Uint8Array,
+  bytes: Uint8Array,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<Uint8Array> {
-  const bitmap = await createImageBitmap(new Blob([raw as BlobPart]))
+  const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
   try {
     const size = fitWithin({ w: bitmap.width, h: bitmap.height }, edge)
     const canvas = new OffscreenCanvas(size.w, size.h)
@@ -118,12 +123,10 @@ export async function renderCover(
  * question.
  */
 export async function renderThumbnail(
-  raw: Uint8Array,
   file: ProjectFile,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<Uint8Array> {
   const full = await compositePage({
-    raw,
     page: file.page,
     loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
   })

@@ -8,6 +8,8 @@ export interface PageRow {
   kind: 'page'
   key: string
   pageId: string
+  /** What the page is called, which is not what it is keyed by. */
+  name: string
   count: number
 }
 
@@ -71,6 +73,7 @@ export function buildLabelRows(files: readonly ProjectFile[], query = ''): Chapt
       kind: 'page',
       key: `page/${file.pageId}`,
       pageId: file.pageId,
+      name: file.page.name,
       count: shown.length,
     })
     for (const row of shown) {

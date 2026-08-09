@@ -17,8 +17,8 @@ const api: ShashokuApi = {
   scanRoot: (rootPath) => ipcRenderer.invoke(CHANNELS.scanRoot, rootPath),
   scanLibrary: (scanPoints) => ipcRenderer.invoke(CHANNELS.scanLibrary, scanPoints),
   createProject: (rootPath) => ipcRenderer.invoke(CHANNELS.createProject, rootPath),
-  importPages: (rootPath, filenames) =>
-    ipcRenderer.invoke(CHANNELS.importPages, rootPath, filenames),
+  createPages: (rootPath, sourceNames) =>
+    ipcRenderer.invoke(CHANNELS.createPages, rootPath, sourceNames),
   openProject: (rootPath) => ipcRenderer.invoke(CHANNELS.openProject, rootPath),
   readPage: (pageDir) => ipcRenderer.invoke(CHANNELS.readPage, pageDir),
   writePage: (pageDir, input: WritePageInput) =>

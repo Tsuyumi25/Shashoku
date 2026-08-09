@@ -1,6 +1,7 @@
 import type { TextStyle } from '@shared/text-style/types'
 import type { TagDefinition } from '@shared/tags/types'
 import type { ManifestJson } from '@shared/page/types'
+import type { PageBadge } from '@shared/ipc/channels'
 
 export interface ProjectFile {
   /**
@@ -15,7 +16,7 @@ export interface ProjectFile {
 
   pageDir: string
 
-  badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
+  badge: PageBadge
 }
 
 export interface ProjectHeader {

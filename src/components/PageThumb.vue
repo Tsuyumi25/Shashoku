@@ -44,7 +44,7 @@
         <Check :size="12" :stroke-width="3" />
       </span>
       <span class="truncate text-xs" :class="selected ? '' : 'text-muted-foreground'">
-        {{ file.pageId }}
+        {{ file.page.name }}
       </span>
     </div>
   </button>
@@ -56,7 +56,6 @@ import { useIntersectionObserver } from '@vueuse/core'
 import { Check, ImageOff, Loader } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import { inRenderSlot, renderThumbnail, thumbnailKey } from '@/lib/pageThumbnail'
-import { rawsDirOf } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -76,10 +75,8 @@ const seen = ref(false)
 
 const badgeText = computed(() => {
   switch (props.file.badge) {
-    case 'raw-missing':
-      return '原圖不存在'
-    case 'page-missing':
-      return '尚未建頁'
+    case 'missing':
+      return '頁面資料夾不存在'
     case 'damaged':
       return '頁面資料損毀'
     default:
@@ -112,8 +109,7 @@ async function bytesFor(): Promise<Uint8Array> {
   if (cached) return cached
 
   return inRenderSlot(async () => {
-    const raw = await window.api.readImage(rawsDirOf(project.rootPath ?? ''), props.file.pageId)
-    const png = await renderThumbnail(raw, props.file)
+    const png = await renderThumbnail(props.file)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})
     return png

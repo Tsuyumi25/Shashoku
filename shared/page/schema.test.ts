@@ -34,6 +34,9 @@ function raw(entry: Record<string, unknown>, readingOrder: string[] = ['a']): st
   return JSON.stringify({
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
+    name: 'p',
+    width: 1200,
+    height: 1700,
     readingOrder,
     layers: [entry],
   })
@@ -43,6 +46,9 @@ function manifestWith(entry: TextLayerEntry): ManifestJson {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
+    name: 'p',
+    width: 1200,
+    height: 1700,
     readingOrder: [entry.id],
     readingEdges: [],
     layers: [entry],
@@ -111,45 +117,55 @@ describe('a text object stands where it was put', () => {
 })
 
 describe('the page the positions are measured against', () => {
-  it('has no size until somebody has measured one', () => {
+  /**
+   * Required, not discovered. Every position on the page is in page pixels, and
+   * there is no image underneath to measure instead — the base map is an
+   * ordinary layer that can be hidden, moved or deleted.
+   */
+  it('refuses a page that does not say how big it is', () => {
+    const { width: _w, height: _h, ...sizeless } = JSON.parse(raw(UPRIGHT))
+    expect(() => parseManifest(JSON.stringify(sizeless))).toThrow(PageParseError)
+  })
+
+  it('carries the size through', () => {
     const parsed = parseManifest(raw(UPRIGHT))
-    expect(parsed.width).toBeUndefined()
-    expect(parsed.height).toBeUndefined()
+    expect([parsed.width, parsed.height]).toEqual([1200, 1700])
   })
 
-  it('carries a measured size through', () => {
-    const sized = JSON.stringify({
-      schemaVersion: MANIFEST_SCHEMA_VERSION,
-      revision: 0,
-      width: 1668,
-      height: 2388,
-      readingOrder: ['a'],
-      layers: [UPRIGHT],
-    })
-    const parsed = parseManifest(sized)
-    expect([parsed.width, parsed.height]).toEqual([1668, 2388])
-  })
-
-  it('round trips a measured size', () => {
+  it('round trips a size', () => {
     const source = { ...manifestWith(textEntry()), width: 800, height: 1200 }
     expect(parseManifest(serializeManifest(source))).toEqual(source)
   })
 
-  it('writes no size for a page nobody has measured', () => {
-    const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out)).not.toHaveProperty('width')
+  it('always writes one', () => {
+    const out = JSON.parse(serializeManifest(manifestWith(textEntry())))
+    expect([out.width, out.height]).toEqual([1200, 1700])
   })
 
   it('refuses a size no page could have', () => {
-    const bad = JSON.stringify({
-      schemaVersion: MANIFEST_SCHEMA_VERSION,
-      revision: 0,
-      width: 0,
-      height: 2388,
-      readingOrder: ['a'],
-      layers: [UPRIGHT],
-    })
-    expect(() => parseManifest(bad)).toThrow(PageParseError)
+    const bad = { ...JSON.parse(raw(UPRIGHT)), width: 0 }
+    expect(() => parseManifest(JSON.stringify(bad))).toThrow(PageParseError)
+  })
+})
+
+describe("the page's name", () => {
+  it('carries it through and writes it back', () => {
+    expect(parseManifest(raw(UPRIGHT)).name).toBe('p')
+    expect(JSON.parse(serializeManifest(manifestWith(textEntry()))).name).toBe('p')
+  })
+
+  /**
+   * A page with no name has nothing to show in a list, and there is no source
+   * filename left to fall back on — the page left that behind when it was made.
+   */
+  it('refuses a page with no name', () => {
+    const { name: _n, ...nameless } = JSON.parse(raw(UPRIGHT))
+    expect(() => parseManifest(JSON.stringify(nameless))).toThrow(PageParseError)
+  })
+
+  it('refuses an empty one', () => {
+    const bad = { ...JSON.parse(raw(UPRIGHT)), name: '' }
+    expect(() => parseManifest(JSON.stringify(bad))).toThrow(PageParseError)
   })
 })
 
@@ -235,6 +251,9 @@ describe('parseManifest', () => {
     const source: ManifestJson = {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 7,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: ['b', 'a'],
       readingEdges: [{ from: 'b', to: 'a' }],
       layers: [
@@ -267,6 +286,9 @@ describe('parseManifest', () => {
     const v4 = JSON.stringify({
       schemaVersion: MANIFEST_SCHEMA_VERSION - 1,
       revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: ['a'],
       layers: [{ ...UPRIGHT, x: 0.5, y: 0.5 }],
     })
@@ -330,6 +352,9 @@ describe('the lines drawn between objects', () => {
     return JSON.stringify({
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: ['a', 'b'],
       readingEdges: edges,
       layers: [UPRIGHT, { ...UPRIGHT, id: 'b' }],

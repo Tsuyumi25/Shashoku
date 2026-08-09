@@ -42,7 +42,7 @@ function manifest(
   readingOrder: string[],
   readingEdges: ReadingEdge[] = [],
 ): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges, layers }
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges, layers }
 }
 
 function edges(...pairs: string[]): ReadingEdge[] {

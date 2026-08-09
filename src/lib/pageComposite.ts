@@ -18,8 +18,6 @@ import { sampleSource } from '@/lib/fontSampleCache'
 export class CompositeError extends Error {}
 
 export interface CompositeInput {
-  /** The raw page as it sits in the project's own copy. */
-  raw: Uint8Array
   page: ManifestJson
   /**
    * One raster layer's PNG, by the file name the manifest holds. A loader
@@ -171,8 +169,14 @@ export function drawStack(
 }
 
 /**
- * One page as it will be delivered: the raw with its layers and its typeset
- * text burnt in, at the raw's own size.
+ * One page as it will be delivered: its layers and its typeset text, at the
+ * page's own size.
+ *
+ * Nothing is laid down first. The base map is a layer like any other, free to
+ * be hidden, moved or deleted, so anywhere no layer covers is transparent —
+ * there is no invisible sheet of white underneath that nobody could reach.
+ * A delivery that cannot carry transparency is flattened onto white by the
+ * encoder, which is where a format's limits belong.
  *
  * Deliberately built from the same stacking order, the same rasterizer, the
  * same style each object carries and the same box geometry the canvas draws with, so what
@@ -182,25 +186,18 @@ export function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
-  const page = await createImageBitmap(new Blob([input.raw as BlobPart]))
-  const size = { w: page.width, h: page.height }
+  const size = { w: input.page.width, h: input.page.height }
   const stack = pageStack(input.page.layers)
-  const rasters = await decodeLayerBitmaps(stack, input.loadLayer).catch((err: unknown) => {
-    page.close()
-    throw err
-  })
+  const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)
-    const ctx = context2d(canvas)
-    ctx.drawImage(page, 0, 0)
-    drawStack(ctx, stack, {
+    drawStack(context2d(canvas), stack, {
       page: size,
       rasters,
       drawText: drawTextWith,
     })
     return canvas
   } finally {
-    page.close()
     for (const bitmap of rasters.values()) bitmap.close()
   }
 }

@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson } from '@shared/project/types'
+import type { PageEntry } from '@shared/ipc/channels'
 import type { TagDefinition } from '@shared/tags/types'
 import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
@@ -11,7 +12,7 @@ import {
   parseProjectJson,
   serializeProjectJson,
 } from '@shared/project/schema'
-import { defaultManifest, parseManifest, serializeManifest } from '@shared/page/schema'
+import { parseManifest, serializeManifest, unreadablePage } from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import {
   dissolveGroupAt,
@@ -35,12 +36,11 @@ import {
   wouldCycle,
   type ReadingEdge,
 } from '@shared/page/readingGraph'
-import { previewImport, type ImportDiff } from '@shared/project/import'
 import { parentFolder } from '@shared/project/library'
 import { assertDistinctFolders } from '@shared/export/profile'
 import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
-import { DIR_RAWS, SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
+import { SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
 import type { TextStyle } from '@shared/text-style/types'
 import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
@@ -83,6 +83,10 @@ export interface RemovedEntry {
 function shashokuDirOf(rootPath: string): string {
   return joinPath(rootPath, SHASHOKU_DIR)
 }
+
+function sameOrder(listed: readonly string[], files: readonly ProjectFile[]): boolean {
+  return listed.length === files.length && listed.every((id, i) => id === files[i].pageId)
+}
 function joinPath(...parts: string[]): string {
   
   return parts.filter(Boolean).join('/')
@@ -106,10 +110,7 @@ export const useProjectStore = defineStore('project', () => {
   }))
   const dirty = computed(() => metaDirty.value || dirtyPageIds.value.length > 0)
   
-  const rawsDir = computed(() =>
-    rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR, DIR_RAWS),
-  )
-  
+
   const shashokuDir = computed(() =>
     rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR),
   )
@@ -151,11 +152,11 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  async function ingestProject(newRootPath: string, projectMetaRaw: string, pages: Array<{
-    pageId: string
-    pageDir: string
-    badge: 'ok' | 'raw-missing' | 'page-missing' | 'damaged'
-  }>): Promise<void> {
+  async function ingestProject(
+    newRootPath: string,
+    projectMetaRaw: string,
+    pages: readonly PageEntry[],
+  ): Promise<void> {
     // The only place the open project is replaced, so the only place the
     // outgoing one has to be banked. Still addressed by the old rootPath here,
     // which is what makes it land where it came from.
@@ -166,7 +167,7 @@ export const useProjectStore = defineStore('project', () => {
     // written back, so the fix is made once rather than recomputed every open.
     const mended: string[] = []
     for (const p of pages) {
-      let page = defaultManifest()
+      let page = unreadablePage(p.pageId)
       try {
         const raw = await window.api.readPage(p.pageDir)
         const repair = repairPage(parseManifest(raw.manifestRaw))
@@ -184,6 +185,10 @@ export const useProjectStore = defineStore('project', () => {
     metaDirty.value = false
     dirtyPageIds.value = []
     for (const pageId of mended) markPageDirty(pageId)
+    // The open reconciled the list against the directories on disk. Writing
+    // that back now is what keeps a page nobody listed from being taken in
+    // again at every open for the rest of the project's life.
+    if (!sameOrder(meta.pages, loaded)) markMetaDirty()
     // Opening a project is also how its neighbours get found: the folder it
     // sits in becomes somewhere the library looks from now on.
     usePreferencesStore().addScanPoint(parentFolder(newRootPath))
@@ -216,21 +221,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  async function previewRescanImport(): Promise<ImportDiff | null> {
-    if (rootPath.value === null) return null
-    const scan = await window.api.scanRoot(rootPath.value)
-    
-    
-    const rawImages = files.value
-      .filter((f) => f.badge !== 'raw-missing')
-      .map((f) => f.pageId)
-    return previewImport(scan.rootImages, rawImages)
-  }
-
-  
-  async function commitRescanImport(filenames: string[]): Promise<void> {
+  /**
+   * A page for each named image in the project root. Irreversible, and the only
+   * step that reads one: the pixels are copied in, and from then on the project
+   * does not depend on the folder they came from.
+   */
+  async function createPages(sourceNames: string[]): Promise<void> {
     if (rootPath.value === null) return
-    const result = await window.api.importPages(rootPath.value, filenames)
+    const result = await window.api.createPages(rootPath.value, sourceNames)
     await ingestProject(rootPath.value, result.projectMetaRaw, result.pages)
   }
 
@@ -269,9 +267,14 @@ export const useProjectStore = defineStore('project', () => {
         })
       }
       if (metaWasDirty) {
+        // The order is taken from the pages themselves rather than kept in step
+        // with them: two places holding it is two places for it to be wrong.
         await window.api.writeProjectMeta(
           shashokuDirOf(root),
-          serializeProjectJson(projectMeta.value),
+          serializeProjectJson({
+            ...projectMeta.value,
+            pages: files.value.map((f) => f.pageId),
+          }),
         )
       }
     } catch (err) {
@@ -597,28 +600,16 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * What the page turned out to measure, learnt the first time its raw decodes.
-   * Positions on it are page pixels, which mean nothing without this.
-   *
-   * A recorded size is never overwritten: a raw swapped for a scan at another
-   * resolution would put every layer on the page somewhere wrong, and the
-   * console is where that stays until replacing a page's material is a command
-   * rather than something done behind the program's back.
+   * What the page is called in the interface. Its directory name is what
+   * everything else holds, so this touches no path and two pages are free to
+   * answer to the same thing.
    */
-  function recordPageSize(pageId: string, width: number, height: number) {
+  function renamePage(pageId: string, name: string): boolean {
     const file = pageById(pageId)
-    if (!file || width <= 0 || height <= 0) return
-    const { page } = file
-    if (page.width !== undefined && page.height !== undefined) {
-      if (page.width !== width || page.height !== height)
-        console.warn(
-          `${pageId}: 記錄的頁面尺寸 ${page.width}×${page.height} 與原圖的 ${width}×${height} 不符`,
-        )
-      return
-    }
-    page.width = width
-    page.height = height
+    if (!file || name.length === 0 || file.page.name === name) return false
+    file.page.name = name
     markPageDirty(pageId)
+    return true
   }
 
   function moveLabel(pageId: string, labelId: string, x: number, y: number) {
@@ -781,7 +772,6 @@ export const useProjectStore = defineStore('project', () => {
     dirty,
     isOpen,
     metaDirty,
-    rawsDir,
     shashokuDir,
     layersDirOf,
     
@@ -792,12 +782,11 @@ export const useProjectStore = defineStore('project', () => {
     createNewProject,
     openExisting,
     openByPath,
-    previewRescanImport,
-    commitRescanImport,
+    createPages,
     flush: autosave.flush,
     addLabel,
     deleteLabel,
-    recordPageSize,
+    renamePage,
     moveLabel,
     rotateLabel,
     updateLabelText,

@@ -13,6 +13,9 @@ function page(): ProjectFile {
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
       readingOrder: ['a'],
       readingEdges: [],
       layers: [

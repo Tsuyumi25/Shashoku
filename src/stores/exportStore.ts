@@ -4,7 +4,6 @@ import { outputFilename, profileFolderName } from '@shared/export/profile'
 import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage } from '@/lib/pageComposite'
 import { encodePage } from '@/lib/pageEncode'
-import { rawsDirOf } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -134,18 +133,16 @@ export const useExportStore = defineStore('export', () => {
     try {
       for (const [index, file] of pages.entries()) {
         if (abandoned) return stop(written, '已取消')
-        if (file.badge !== 'ok') return stop(written, `${file.pageId}:圖檔不存在`)
+        if (file.badge !== 'ok') return stop(written, `${file.page.name}:頁面無法讀取`)
 
         let page: OffscreenCanvas
         try {
-          const raw = await window.api.readImage(rawsDirOf(root), file.pageId)
           page = await compositePage({
-            raw,
             page: file.page,
             loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
           })
         } catch (err) {
-          return stop(written, `${file.pageId}:${messageOf(err)}`)
+          return stop(written, `${file.page.name}:${messageOf(err)}`)
         }
 
         for (const profile of profiles) {
@@ -156,11 +153,11 @@ export const useExportStore = defineStore('export', () => {
             await window.api.writeExport(
               root,
               folder,
-              outputFilename(profile, file.pageId, index),
+              outputFilename(profile, file.page.name, index),
               bytes,
             )
           } catch (err) {
-            return stop(written, `${file.pageId} → ${folder}/:${messageOf(err)}`)
+            return stop(written, `${file.page.name} → ${folder}/:${messageOf(err)}`)
           }
           written++
           progress.value = { done: written, total: pages.length * profiles.length }

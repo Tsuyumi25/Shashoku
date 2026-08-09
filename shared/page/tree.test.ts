@@ -68,7 +68,7 @@ function raster(id: string): RasterLayerEntry {
 }
 
 function manifest(layers: LayerEntry[], readingOrder: string[]): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, readingOrder, readingEdges: [], layers }
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges: [], layers }
 }
 
 const idsOf = (entries: readonly { id: string }[]): string[] => entries.map((e) => e.id)

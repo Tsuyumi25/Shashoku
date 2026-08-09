@@ -2,7 +2,7 @@
 
 
 import type { Dirent } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
@@ -17,7 +17,6 @@ import {
   DIR_FONTS,
   DIR_LAYERS,
   DIR_PAGES,
-  DIR_RAWS,
   IMAGE_EXTENSIONS,
   PAGE_MANIFEST_FILENAME,
   PAGE_OCR_FILENAME,
@@ -25,10 +24,22 @@ import {
   SENTINEL_FILENAME,
   SHASHOKU_DIR,
 } from "@shared/ssk/constants";
-import { defaultProjectJson, serializeProjectJson } from "@shared/project/schema";
-import { defaultManifest, parseManifest, serializeManifest } from "@shared/page/schema";
+import {
+  defaultProjectJson,
+  parseProjectJson,
+  serializeProjectJson,
+} from "@shared/project/schema";
+import { pageDirName, reconcilePages } from "@shared/project/pages";
+import {
+  baseMapLayer,
+  defaultManifest,
+  generateId,
+  parseManifest,
+  serializeManifest,
+} from "@shared/page/schema";
 import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
+import { importBaseMap } from "./engine";
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -63,12 +74,6 @@ async function listPageDirs(pagesRoot: string): Promise<string[]> {
   } catch {
     return [];
   }
-}
-
-
-function stemOf(filename: string): string {
-  const ext = extname(filename);
-  return ext ? filename.slice(0, -ext.length) : filename;
 }
 
 
@@ -109,13 +114,49 @@ async function projectsUnder(folderPath: string): Promise<ScannedProject[]> {
       .filter((e) => e.isDirectory())
       .map(async (e): Promise<ScannedProject | null> => {
         const path = join(folderPath, e.name);
-        const shashokuDir = join(path, SHASHOKU_DIR);
-        if (!(await exists(join(shashokuDir, SENTINEL_FILENAME)))) return null;
-        const raws = await listImages(join(shashokuDir, DIR_RAWS));
-        return { path, cover: raws[0] ?? null };
+        if (!(await exists(join(path, SHASHOKU_DIR, SENTINEL_FILENAME)))) return null;
+        return { path, cover: await coverOf(path) };
       }),
   );
   return found.filter((p): p is ScannedProject => p !== null);
+}
+
+/**
+ * The bottom raster of the project's first readable page, relative to the
+ * project folder.
+ *
+ * The bottom of a fresh page is its base map, which says which project this is
+ * — and a project whose bottom layer has since been replaced is answered by
+ * whatever the user put there instead, which says it just as well. Composited
+ * covers are deliberately not an option: the sidebar would have to open every
+ * project it lists to read their labels.
+ */
+async function coverOf(rootPath: string): Promise<string | null> {
+  const shashokuDir = join(rootPath, SHASHOKU_DIR);
+  const pagesRoot = join(shashokuDir, DIR_PAGES);
+  let listed: string[] = [];
+  try {
+    const raw = await readFile(join(shashokuDir, PROJECT_JSON_FILENAME), "utf8");
+    listed = parseProjectJson(raw).pages;
+  } catch {
+    // A project whose document will not parse still shows in the sidebar, so
+    // that opening it is how the user finds out rather than its disappearance.
+  }
+  const { order } = reconcilePages(listed, await listPageDirs(pagesRoot));
+  for (const pageId of order) {
+    let layers;
+    try {
+      const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
+      layers = parseManifest(raw).layers;
+    } catch {
+      continue;
+    }
+    const bottom = layers.find((l) => l.kind === "raster");
+    if (bottom?.kind === "raster") {
+      return `${SHASHOKU_DIR}/${DIR_PAGES}/${pageId}/${DIR_LAYERS}/${bottom.file}`;
+    }
+  }
+  return null;
 }
 
 export async function scanRoot(rootPath: string): Promise<ScanRootResult> {
@@ -128,158 +169,118 @@ export async function scanRoot(rootPath: string): Promise<ScanRootResult> {
   return { rootImages, hasShashokuDir, hasSentinel };
 }
 
+/**
+ * The project's pages, in the order the document gives and with what the disk
+ * has to say about each.
+ *
+ * The list decides who comes before whom; the directory decides who exists. The
+ * order that comes back has already taken in anything the list did not mention,
+ * so a page that arrived behind the program's back is a page rather than a
+ * file nobody can reach.
+ */
 async function buildOpenResult(rootPath: string): Promise<OpenProjectResult> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
-  const rawsDir = join(shashokuDir, DIR_RAWS);
   const pagesRoot = join(shashokuDir, DIR_PAGES);
 
   const projectMetaRaw = await readFile(join(shashokuDir, PROJECT_JSON_FILENAME), "utf8");
+  const listed = parseProjectJson(projectMetaRaw).pages;
+  const { order, missing } = reconcilePages(listed, await listPageDirs(pagesRoot));
+  const isMissing = new Set(missing);
 
-  const [rawFiles, pageDirs] = await Promise.all([listImages(rawsDir), listPageDirs(pagesRoot)]);
-
-  
-  
-  const pageDirSet = new Set(pageDirs);
   const pages: PageEntry[] = [];
-  const seenStems = new Set<string>();
-
-  
-  
-  for (const filename of rawFiles) {
-    const stem = stemOf(filename);
-    seenStems.add(stem);
-    const pageDir = join(pagesRoot, stem);
+  for (const pageId of order) {
+    const pageDir = join(pagesRoot, pageId);
     let badge: PageBadge;
-    if (!pageDirSet.has(stem)) {
-      badge = "page-missing";
-    } else if (await manifestIsHealthy(pageDir)) {
-      badge = "ok";
-    } else {
-      badge = "damaged";
-    }
-    pages.push({ pageId: filename, pageDir, badge });
-  }
-
-  
-  for (const stem of pageDirs) {
-    if (seenStems.has(stem)) continue;
-    pages.push({
-      pageId: stem,
-      pageDir: join(pagesRoot, stem),
-      badge: "raw-missing",
-    });
+    if (isMissing.has(pageId)) badge = "missing";
+    else badge = (await manifestIsHealthy(pageDir)) ? "ok" : "damaged";
+    pages.push({ pageId, pageDir, badge });
   }
 
   return { projectMetaRaw, pages };
 }
 
-
-async function initPageEntry(
+/**
+ * One page, made from one source image. The manifest goes last for the reason
+ * it always does: it names the layer file, so writing it after the pixels means
+ * a crash in between leaves a directory with no manifest rather than a page
+ * pointing at something that is not there.
+ *
+ * The directory is taken away again if anything fails, because an empty one
+ * would be adopted at the next open and shown as a damaged page — a fault
+ * invented by the failure rather than reported by it.
+ */
+async function createPage(
   rootPath: string,
-  shashokuDir: string,
-  filename: string,
+  pagesRoot: string,
+  sourceName: string,
+  pageId: string,
 ): Promise<void> {
-  
-  if (/[\\/]/.test(filename)) {
-    throw new Error(`filename 不可含路徑分隔符:${filename}`);
-  }
-  const rawsDir = join(shashokuDir, DIR_RAWS);
-  const pagesRoot = join(shashokuDir, DIR_PAGES);
-  const stem = stemOf(filename);
-  const pageDir = join(pagesRoot, stem);
-  
-  if (await exists(pageDir)) {
-    throw new Error(
-      `頁面 stem 衝突:${filename} 對應的 pages/${stem}/ 已存在(可能有同 stem 不同副檔名的檔案,如 ${stem}.png 與 ${stem}.jpg)`,
+  const pageDir = join(pagesRoot, pageId);
+  const layersDir = join(pageDir, DIR_LAYERS);
+  await mkdir(layersDir, { recursive: true });
+  try {
+    const file = `${generateId()}.png`;
+    const { width, height } = await importBaseMap(
+      join(rootPath, sourceName),
+      join(layersDir, file),
     );
+    const manifest = defaultManifest(sourceName, width, height);
+    manifest.layers = [baseMapLayer(file, width, height)];
+    await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), serializeManifest(manifest));
+  } catch (err) {
+    await rm(pageDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
   }
-  await copyFile(join(rootPath, filename), join(rawsDir, filename));
-  await mkdir(pageDir, { recursive: true });
-  await writeFileAtomic(
-    join(pageDir, PAGE_MANIFEST_FILENAME),
-    serializeManifest(defaultManifest()),
-  );
+}
+
+/**
+ * A page for each named image in the project root, appended to what is already
+ * there.
+ *
+ * Nothing is written to the page list here. The directories are enough — the
+ * open that follows takes them in and the document catches up on the next save,
+ * which is the same mechanism that survives a crash halfway through a batch.
+ */
+export async function createPages(
+  rootPath: string,
+  sourceNames: readonly string[],
+): Promise<OpenProjectResult> {
+  const shashokuDir = join(rootPath, SHASHOKU_DIR);
+  const pagesRoot = join(shashokuDir, DIR_PAGES);
+  const taken = new Set(await listPageDirs(pagesRoot));
+  const at = new Date();
+  for (const sourceName of sourceNames) {
+    const pageId = pageDirName(sourceName, at, taken);
+    taken.add(pageId);
+    await createPage(rootPath, pagesRoot, sourceName, pageId);
+  }
+  return await buildOpenResult(rootPath);
 }
 
 export async function createProject(rootPath: string): Promise<OpenProjectResult> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
-  const rawsDir = join(shashokuDir, DIR_RAWS);
-  const pagesRoot = join(shashokuDir, DIR_PAGES);
-  const fontsDir = join(shashokuDir, DIR_FONTS);
 
-  await mkdir(rawsDir, { recursive: true });
-  await mkdir(pagesRoot, { recursive: true });
-  await mkdir(fontsDir, { recursive: true });
+  await mkdir(join(shashokuDir, DIR_PAGES), { recursive: true });
+  await mkdir(join(shashokuDir, DIR_FONTS), { recursive: true });
 
-  
   await writeFileAtomic(join(shashokuDir, SENTINEL_FILENAME), "shashoku\n");
   await writeFileAtomic(
     join(shashokuDir, PROJECT_JSON_FILENAME),
     serializeProjectJson(defaultProjectJson()),
   );
 
-  
-  
-  
-  const rootImages = await listImages(rootPath);
-  assertNoStemCollision(rootImages);
-  for (const filename of rootImages) {
-    await initPageEntry(rootPath, shashokuDir, filename);
-  }
-
-  return await buildOpenResult(rootPath);
-}
-
-
-export async function importPages(
-  rootPath: string,
-  filenames: string[],
-): Promise<OpenProjectResult> {
-  const shashokuDir = join(rootPath, SHASHOKU_DIR);
-  const rawsFiles = await listImages(join(shashokuDir, DIR_RAWS));
-  const rawsExisting = new Set(rawsFiles);
-  const existingStems = new Set(rawsFiles.map(stemOf));
-  const seenStems = new Set<string>();
-  for (const filename of filenames) {
-    if (rawsExisting.has(filename)) continue;
-    const stem = stemOf(filename);
-    if (existingStems.has(stem)) continue;
-    if (seenStems.has(stem)) continue;
-    seenStems.add(stem);
-    await initPageEntry(rootPath, shashokuDir, filename);
-  }
-  return await buildOpenResult(rootPath);
-}
-
-
-function assertNoStemCollision(filenames: string[]): void {
-  const stemToFiles = new Map<string, string[]>();
-  for (const f of filenames) {
-    const s = stemOf(f);
-    const list = stemToFiles.get(s) ?? [];
-    list.push(f);
-    stemToFiles.set(s, list);
-  }
-  const collisions: string[] = [];
-  for (const [stem, files] of stemToFiles) {
-    if (files.length > 1) collisions.push(`${stem}(${files.join(", ")})`);
-  }
-  if (collisions.length > 0) {
-    throw new Error(
-      `原圖檔名 stem 衝突,請保留單一副檔名:${collisions.join("; ")}`,
-    );
-  }
+  // Every image in the folder still becomes a page. Choosing which ones is what
+  // the source panel is for, and until it exists this is what a new project has
+  // to be for it to be anything at all.
+  return await createPages(rootPath, await listImages(rootPath));
 }
 
 export async function openProject(rootPath: string): Promise<OpenProjectResult> {
-  
-  
-  
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
   const pagesRoot = join(shashokuDir, DIR_PAGES);
   const pageDirs = await listPageDirs(pagesRoot);
-  for (const stem of pageDirs) {
-    await gcOrphanLayers(join(pagesRoot, stem));
+  for (const pageId of pageDirs) {
+    await gcOrphanLayers(join(pagesRoot, pageId));
   }
   return await buildOpenResult(rootPath);
 }
@@ -356,10 +357,10 @@ export async function writePage(pageDir: string, input: WritePageInput): Promise
  * One delivered page.
  *
  * Never the project root, and not for tidiness: listImages reads the root
- * without recursing, so a finished page written beside the raws would be
- * offered back as a new page to import on the next rescan — and importing it
- * would typeset the text a second time onto text already burnt in. Any
- * subfolder is safe, which is why every profile has one.
+ * without recursing, so a finished page written beside the source images would
+ * be offered back as a source to make a page from — and making one would
+ * typeset the text a second time onto text already burnt in. Any subfolder is
+ * safe, which is why every profile has one.
  */
 export async function writeExport(
   rootPath: string,

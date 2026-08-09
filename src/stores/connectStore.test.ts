@@ -36,6 +36,9 @@ function openPage(ids: string[]) {
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
+        name: 'p',
+        width: 1200,
+        height: 1700,
         readingOrder: ids,
         readingEdges: [],
         layers: ids.map(label),

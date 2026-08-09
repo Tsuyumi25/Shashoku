@@ -213,13 +213,60 @@ function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void
   }
 }
 
-export function defaultManifest(): ManifestJson {
+/**
+ * A page with a size and a name and nothing on it. Layers are added by whoever
+ * creates the page — a base map for one made from a source image, none at all
+ * for one made blank.
+ */
+export function defaultManifest(name: string, width: number, height: number): ManifestJson {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
+    name,
+    width,
+    height,
     readingOrder: [],
     readingEdges: [],
     layers: [],
+  }
+}
+
+/**
+ * Stands in for a page whose manifest could not be read, so everything holding
+ * a page can hold one of these without asking first. Nothing draws it — the
+ * entry's badge is what says why it is here.
+ *
+ * A pixel rather than nothing, because a page with no size is a file that will
+ * not parse, and a placeholder must not be able to become one.
+ */
+export function unreadablePage(name: string): ManifestJson {
+  return defaultManifest(name, 1, 1)
+}
+
+/**
+ * The layer a page made from a source image starts with.
+ *
+ * A raster like any other, with no type of its own and therefore no rule that
+ * applies only to it. It arrives locked because it is what everything else gets
+ * drawn on top of, and `locked` is an ordinary property the user can turn off —
+ * which is the whole saving over a background layer that every reader of the
+ * tree would have to remember is different.
+ */
+export function baseMapLayer(file: string, width: number, height: number): RasterLayerEntry {
+  return {
+    kind: 'raster',
+    id: generateId(),
+    visible: true,
+    locked: true,
+    opacity: 1,
+    blendMode: 'normal',
+    name: '底圖',
+    file,
+    x: 0,
+    y: 0,
+    w: width,
+    h: height,
+    alphaLocked: false,
   }
 }
 
@@ -246,12 +293,12 @@ function parseReadingEdges(v: unknown): ReadingEdge[] {
 }
 
 /**
- * Both edges or neither: half a size cannot say what a position was measured
- * against, so it is refused rather than kept as the more useful looking half.
+ * Required, because nothing on the page means anything without it: every
+ * position is in page pixels, and there is no image underneath to measure
+ * instead now that the base map is an ordinary layer.
  */
-function parsePageSize(data: Record<string, unknown>): { width?: number; height?: number } {
+function parsePageSize(data: Record<string, unknown>): { width: number; height: number } {
   const { width, height } = data
-  if (width === undefined && height === undefined) return {}
   for (const [name, v] of [
     ['width', width],
     ['height', height],
@@ -285,6 +332,9 @@ export function parseManifest(raw: string): ManifestJson {
     revision = revisionRaw
   }
 
+  if (typeof data.name !== 'string' || data.name.length === 0)
+    fail('manifest.json.name 必須是非空字串')
+
   const size = parsePageSize(data)
 
   const readingOrderRaw = data.readingOrder
@@ -306,6 +356,7 @@ export function parseManifest(raw: string): ManifestJson {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision,
+    name: data.name,
     ...size,
     readingOrder,
     readingEdges: parseReadingEdges(data.readingEdges),
@@ -374,10 +425,9 @@ export function serializeManifest(m: ManifestJson): string {
   const out: Record<string, unknown> = {
     schemaVersion: m.schemaVersion,
     revision: m.revision,
-  }
-  if (m.width !== undefined && m.height !== undefined) {
-    out.width = m.width
-    out.height = m.height
+    name: m.name,
+    width: m.width,
+    height: m.height,
   }
   out.readingOrder = m.readingOrder
   if (m.readingEdges.length > 0) out.readingEdges = normalizeEdges(m.readingEdges)

@@ -25,19 +25,19 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { ImageOff } from '@lucide/vue'
 import { coverKey, inRenderSlot, renderCover } from '@/lib/pageThumbnail'
-import { rawsDirOf } from '@/stores/libraryStore'
 
 /**
- * A project's first page, read straight from its own copy of the raws rather
- * than the root folder — the same reason the copy exists at all: a project has
- * to keep looking like itself after someone tidies the folder it came from.
+ * The bottom raster of a project's first page, read from inside the project
+ * itself rather than from the folder its images came from — the same reason the
+ * pixels were copied in at all: a project has to keep looking like itself after
+ * someone tidies that folder away.
  *
  * Sized entirely by whoever places it, so the same component serves a row and
  * a grid cell without being told which it is in.
  */
 const props = defineProps<{
   projectPath: string
-  /** Filename inside the project's raws, or null when it holds no image. */
+  /** Where the cover sits inside the project, or null when it has no page. */
   cover: string | null
 }>()
 
@@ -59,8 +59,8 @@ async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array>
   if (cached) return cached
 
   return inRenderSlot(async () => {
-    const raw = await window.api.readImage(rawsDirOf(projectPath), cover)
-    const png = await renderCover(raw)
+    const bytes = await window.api.readImage(projectPath, cover)
+    const png = await renderCover(bytes)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})
     return png

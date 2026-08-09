@@ -1,13 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { buildLibrary, type LibraryEntry } from '@shared/project/library'
-import { SHASHOKU_DIR, DIR_RAWS } from '@shared/ssk/constants'
 import { usePreferencesStore } from '@/stores/preferencesStore'
-
-/** Where a project keeps the raws it does not depend on the root folder for. */
-export function rawsDirOf(projectPath: string): string {
-  return `${projectPath}/${SHASHOKU_DIR}/${DIR_RAWS}`
-}
 
 /** Names beside covers, or covers with names under them. */
 export type LibraryView = 'list' | 'thumbnail'
