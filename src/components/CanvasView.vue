@@ -48,6 +48,7 @@
       <svg
         v-if="imageReady && connecting"
         class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        :style="{ '--line-stroke': `${LINE_STROKE_PX}px` }"
       >
         <defs>
           <marker
@@ -1232,7 +1233,7 @@ useEventListener(window, 'blur', () => {
 }
 .reading-line {
   stroke: var(--primary);
-  stroke-width: 1.5;
+  stroke-width: var(--line-stroke);
 }
 .reading-line-chosen {
   stroke: var(--foreground);
@@ -1240,13 +1241,13 @@ useEventListener(window, 'blur', () => {
 }
 .reading-line-preview {
   stroke: var(--primary);
-  stroke-width: 1.5;
+  stroke-width: var(--line-stroke);
   stroke-dasharray: 4 3;
 }
 /* Refused before the click rather than reported after it. */
 .reading-line-refused {
   stroke: var(--destructive);
-  stroke-width: 1.5;
+  stroke-width: var(--line-stroke);
   stroke-dasharray: 2 4;
 }
 
