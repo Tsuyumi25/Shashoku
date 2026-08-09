@@ -8,6 +8,7 @@ export const CHANNELS = {
   scanLibrary: "shashoku:scan-library",
   createProject: "shashoku:create-project",
   createPage: "shashoku:create-page",
+  deletePage: "shashoku:delete-page",
   openProject: "shashoku:open-project",
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
@@ -103,6 +104,12 @@ export interface ShashokuApi {
    * stop when asked.
    */
   createPage(rootPath: string, sourceName: string): Promise<string>;
+  /**
+   * Takes a page's directory away. Resolves once it is really gone, which is
+   * what lets the caller wait before dropping the page from its list — the
+   * other order lets a page nobody could delete come back at the next open.
+   */
+  deletePage(rootPath: string, pageId: string): Promise<void>;
   openProject(rootPath: string): Promise<OpenProjectResult>;
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;

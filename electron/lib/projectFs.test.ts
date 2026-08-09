@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertPathSegment, createPage, createProject, openProject } from "./projectFs";
+import { assertPathSegment, createPage, createProject, deletePage, openProject } from "./projectFs";
 import { parseManifest } from "@shared/page/schema";
 import { parseProjectJson, serializeProjectJson } from "@shared/project/schema";
 import {
@@ -294,5 +294,58 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
     await mkdir(join(root, "somewhere-else"), { recursive: true });
     const opened = await createProject(root);
     expect(opened.pages).toEqual([]);
+  });
+});
+
+describe.skipIf(!haveEngine)("taking a page away", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "shashoku-delete-"));
+    await writeFile(join(root, "001.png"), sourcePng(4, 4));
+    await writeFile(join(root, "002.png"), sourcePng(4, 4));
+    await createProject(root);
+    await createPage(root, "001.png");
+    await createPage(root, "002.png");
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("removes the directory, so the page is gone at the next open", async () => {
+    const [first] = (await openProject(root)).pages;
+
+    await deletePage(root, first.pageId);
+
+    const opened = await openProject(root);
+    expect(opened.pages.map((p) => p.pageId)).not.toContain(first.pageId);
+    expect(opened.pages).toHaveLength(1);
+  });
+
+  /**
+   * The list can outlive the directory — a sync that only got halfway, a disk
+   * cleared by hand. Clearing that entry has to be possible, so being asked to
+   * delete something already gone is a success rather than a fault.
+   */
+  it("succeeds on a page whose directory is already gone", async () => {
+    const [first] = (await openProject(root)).pages;
+    await rm(join(root, SHASHOKU_DIR, DIR_PAGES, first.pageId), { recursive: true });
+
+    await expect(deletePage(root, first.pageId)).resolves.toBeUndefined();
+  });
+
+  it("refuses a name that is not one directory", async () => {
+    await expect(deletePage(root, "../..")).rejects.toThrow();
+    await expect(deletePage(root, "a/b")).rejects.toThrow();
+  });
+
+  it("leaves the other pages alone", async () => {
+    const [first, second] = (await openProject(root)).pages;
+    await deletePage(root, first.pageId);
+
+    const opened = await openProject(root);
+    expect(opened.pages.map((p) => p.pageId)).toEqual([second.pageId]);
+    expect(opened.pages[0].badge).toBe("ok");
   });
 });

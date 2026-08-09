@@ -28,8 +28,13 @@ export const useExportStore = defineStore('export', () => {
   const activeProfile = ref(0)
 
   const selectedSet = computed(() => new Set(selected.value))
+  /**
+   * Asked of the pages rather than of the count, so that a page deleted out
+   * from under a selection leaves it whole instead of permanently one short of
+   * "all".
+   */
   const allSelected = computed(
-    () => project.files.length > 0 && selected.value.length === project.files.length,
+    () => project.files.length > 0 && project.files.every((f) => selectedSet.value.has(f.pageId)),
   )
 
   function selectAll() {

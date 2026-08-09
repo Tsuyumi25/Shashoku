@@ -276,6 +276,42 @@ export const useProjectStore = defineStore('project', () => {
     abandoned = true
   }
 
+  /**
+   * Moves a page to sit in front of another, or to the end when given nothing.
+   *
+   * Anchored to a neighbour rather than to an index because an index is only
+   * true of the list it was read from, and the one thing that can change this
+   * list without being undoable is deletion. A neighbour that has since gone
+   * lands the page at the end, which is wrong in a way anybody can see.
+   */
+  function movePageBefore(pageId: string, beforeId: string | null): void {
+    const from = files.value.findIndex((f) => f.pageId === pageId)
+    if (from === -1) return
+    const [moved] = files.value.splice(from, 1)
+    const at = beforeId === null ? -1 : files.value.findIndex((f) => f.pageId === beforeId)
+    files.value.splice(at === -1 ? files.value.length : at, 0, moved)
+    markMetaDirty()
+  }
+
+  /**
+   * Takes a page away for good. Not undoable, by construction: the directory
+   * has to go first, and undo cannot bring a directory back.
+   *
+   * The list is only touched once the directory is really gone. Reversed, a
+   * deletion that failed would look like it worked until the next open found
+   * the directory, listed by nobody, and took it back in.
+   */
+  async function deletePage(pageId: string): Promise<void> {
+    const root = rootPath.value
+    if (root === null) return
+    const at = files.value.findIndex((f) => f.pageId === pageId)
+    if (at === -1) return
+    await window.api.deletePage(root, pageId)
+    files.value.splice(at, 1)
+    dirtyPageIds.value = dirtyPageIds.value.filter((id) => id !== pageId)
+    markMetaDirty()
+  }
+
   
   async function openByPath(rootPathToOpen: string): Promise<string | null> {
     const scan = await window.api.scanRoot(rootPathToOpen)
@@ -829,6 +865,8 @@ export const useProjectStore = defineStore('project', () => {
     creating,
     createPages,
     abandonCreating,
+    movePageBefore,
+    deletePage,
     flush: autosave.flush,
     addLabel,
     deleteLabel,

@@ -1375,6 +1375,29 @@ export const useEditorStore = defineStore('editor', () => {
     return true
   }
 
+  /**
+   * A drop in the page grid. The one page-level act that goes on the stack —
+   * reordering is the easiest to do by accident and the hardest to notice, and
+   * putting an array back is free. Making and deleting pages both touch the
+   * disk, which this interface has no way to reverse and no business trying to.
+   *
+   * Held by neighbour rather than by index: a page deleted afterwards cannot be
+   * waited for, so an index recorded now may not mean the same place later.
+   */
+  function cmdMovePage(pageId: string, to: number) {
+    const project = useProjectStore()
+    const ids = project.files.map((f) => f.pageId)
+    const from = ids.indexOf(pageId)
+    if (from === -1 || from === to) return
+    const back = ids[from + 1] ?? null
+    const forward = ids.filter((id) => id !== pageId)[to] ?? null
+    pushCommand({
+      label: `move-page ${pageId}`,
+      do: () => project.movePageBefore(pageId, forward),
+      undo: () => project.movePageBefore(pageId, back),
+    })
+  }
+
   function cmdMoveTag(from: number, to: number) {
     if (from === to) return
     const project = useProjectStore()
@@ -1461,5 +1484,6 @@ export const useEditorStore = defineStore('editor', () => {
     cmdRemoveTag,
     cmdRenameTag,
     cmdMoveTag,
+    cmdMovePage,
   }
 })

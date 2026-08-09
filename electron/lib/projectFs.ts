@@ -290,6 +290,28 @@ export async function createProject(rootPath: string): Promise<OpenProjectResult
   return await buildOpenResult(rootPath);
 }
 
+/**
+ * The directory, and only the directory. Which page list it belonged to is the
+ * caller's to change, and only once this has resolved.
+ *
+ * That order is the one asymmetry in the whole model. Removing the entry first
+ * and failing to remove the directory leaves a page that comes back from the
+ * dead — the next open finds a directory nobody listed and takes it in. This
+ * way round, a directory that will not go leaves everything as it was, and a
+ * list that will not save leaves an entry pointing at nothing, which is shown
+ * as a fault. Two steps that cannot be one are ordered so the failure lands
+ * somewhere visible.
+ */
+export async function deletePage(rootPath: string, pageId: string): Promise<void> {
+  assertPathSegment(pageId, "頁面目錄名");
+  await rm(join(rootPath, SHASHOKU_DIR, DIR_PAGES, pageId), {
+    recursive: true,
+    // A page whose directory is already gone is one the list is still carrying,
+    // and taking that entry away is exactly what this was asked to make possible.
+    force: true,
+  });
+}
+
 export async function openProject(rootPath: string): Promise<OpenProjectResult> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
   const pagesRoot = join(shashokuDir, DIR_PAGES);

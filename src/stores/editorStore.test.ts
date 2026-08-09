@@ -2010,3 +2010,74 @@ describe('drawing lines between text objects', () => {
     expect(project.labelsOf(PAGE).map((l) => l.id)).toEqual(['a', 'b'])
   })
 })
+
+describe('reordering the chapter', () => {
+  function openPages(ids: string[]) {
+    const project = useProjectStore()
+    project.files = ids.map((id) => pageOf(id, []))
+    project.metaDirty = false
+    return { project, editor: useEditorStore() }
+  }
+
+  const order = (project: ReturnType<typeof useProjectStore>) =>
+    project.files.map((f) => f.pageId)
+
+  it('moves a page forward to where it was dropped', () => {
+    const { project, editor } = openPages(['a', 'b', 'c', 'd'])
+    editor.cmdMovePage('a', 2)
+    expect(order(project)).toEqual(['b', 'c', 'a', 'd'])
+  })
+
+  it('moves a page backward to where it was dropped', () => {
+    const { project, editor } = openPages(['a', 'b', 'c', 'd'])
+    editor.cmdMovePage('d', 1)
+    expect(order(project)).toEqual(['a', 'd', 'b', 'c'])
+  })
+
+  it('moves a page to the end', () => {
+    const { project, editor } = openPages(['a', 'b', 'c'])
+    editor.cmdMovePage('a', 2)
+    expect(order(project)).toEqual(['b', 'c', 'a'])
+  })
+
+  /**
+   * The one page-level act that is undoable. It is also the easiest to do by
+   * accident: a page dragged three cells sideways in a chapter of two hundred
+   * is not something anyone notices.
+   */
+  it('takes a drop back, and puts it forward again', () => {
+    const { project, editor } = openPages(['a', 'b', 'c', 'd'])
+    editor.cmdMovePage('d', 1)
+    editor.undo()
+    expect(order(project)).toEqual(['a', 'b', 'c', 'd'])
+    editor.redo()
+    expect(order(project)).toEqual(['a', 'd', 'b', 'c'])
+  })
+
+  it('has nothing to record for a drop that changed nothing', () => {
+    const { project, editor } = openPages(['a', 'b', 'c'])
+    editor.cmdMovePage('b', 1)
+    expect(editor.canUndo).toBe(false)
+    expect(order(project)).toEqual(['a', 'b', 'c'])
+  })
+
+  /**
+   * Deleting a page cannot be undone and so cannot be waited for. A command
+   * that had recorded an index would put the page back a place short; anchored
+   * to the page that used to follow it, it lands where it belongs.
+   */
+  it('still puts a page back after another one has been deleted', () => {
+    const { project, editor } = openPages(['a', 'b', 'c', 'd'])
+    editor.cmdMovePage('d', 0)
+    expect(order(project)).toEqual(['d', 'a', 'b', 'c'])
+    project.files.splice(project.files.findIndex((f) => f.pageId === 'b'), 1)
+    editor.undo()
+    expect(order(project)).toEqual(['a', 'c', 'd'])
+  })
+
+  it('marks the document so the new order reaches disk', () => {
+    const { project, editor } = openPages(['a', 'b'])
+    editor.cmdMovePage('b', 0)
+    expect(project.metaDirty).toBe(true)
+  })
+})

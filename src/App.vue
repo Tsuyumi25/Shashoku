@@ -155,10 +155,25 @@ useEventListener(window, 'keydown', (e) => {
     return
   }
 
-  if (ui.view !== 'translate') return
   // A text box has its own history, and taking Ctrl+Z off it would undo some
   // earlier command while the half-typed line sat there untouched.
   if (isTypingSurface(document.activeElement)) return
+
+  // One stack for the whole project, so the page grid answers these too — a
+  // page dropped in the wrong place is the easiest thing here to do by accident
+  // and the hardest to notice.
+  if (ui.view === 'project-manager') {
+    if (key === 'z' && !e.shiftKey) {
+      e.preventDefault()
+      editor.undo()
+    } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+      e.preventDefault()
+      editor.redo()
+    }
+    return
+  }
+
+  if (ui.view !== 'translate') return
 
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
