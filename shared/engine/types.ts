@@ -279,8 +279,8 @@ export interface ShashokuEngineApi {
   ): EngineMeasure;
   /**
    * A composited page as file bytes. Takes straight RGBA because the
-   * compositing happens on a canvas in the renderer — the engine never
-   * decodes, it only writes what the application just drew.
+   * compositing happens on a canvas in the renderer — what this writes is what
+   * the application just drew, so it has nothing to decode.
    */
   encodeImage(
     rgba: Uint8Array,

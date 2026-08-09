@@ -233,6 +233,7 @@ dependencies = [
  "image-webp",
  "moxcms",
  "num-traits",
+ "png",
  "zune-core",
  "zune-jpeg",
 ]

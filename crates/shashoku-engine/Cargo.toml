@@ -24,11 +24,13 @@ read-fonts = "0.42"
 harfrust = "0.12"
 tiny-skia = "0.12"
 
-# Delivery encoding. Only the codecs that get written are pulled in — nothing
-# here ever decodes, since the compositing happens on a canvas and arrives as
-# RGBA. png is used directly rather than through image because the palette and
-# 1-bit writers are what this is for, and image's PNG encoder offers neither.
-image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
+# Delivery encoding, and importing a source image as a page's base map. A page
+# being encoded arrives as RGBA off a canvas, so that path decodes nothing; the
+# import is the one that does, and it reads the three formats the application
+# accepts. png is used directly rather than through image because the palette,
+# 1-bit and iCCP writers are what this is for, and image's PNG encoder offers
+# none of them.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 png = "0.18"
 color_quant = "2"
 
