@@ -231,13 +231,19 @@ html, body, #app {
   height: 1.375rem;
 }
 
-/* A panel's bottom bar: the count it is showing on the left, what you can do
+/* The page grid's bottom bar: what it is showing on the left, what you can do
    about it on the right. Along the bottom rather than the top because these are
    things you do to what you have just been looking at, and because a strip of
    controls above the content reads as a title for it.
 
-   Global rather than scoped: three panels carry one of these, and a bar that
-   drifted would read as three different kinds of place. */
+   One fixed row, which is what keeps it a bar. The footers beside it stack —
+   they carry a progress line and a button that fills the width — so they are
+   built as columns and deliberately do not wear this.
+
+   What does cross panels is `.bar-head` and `.bar-count` below, and that is why
+   this family is global rather than scoped: a column's name and its count
+   reading differently in two places would say they were different kinds of
+   place. */
 .bar {
   display: flex;
   height: 2.25rem;

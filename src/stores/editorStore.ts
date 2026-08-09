@@ -310,8 +310,11 @@ export const useEditorStore = defineStore('editor', () => {
 
   /**
    * The open page as something a selection can be made on — its name together
-   * with the raw's own pixel size, which is what a mask is measured in. Null
-   * until a page has decoded, since there is nothing to measure before that.
+   * with the page's own grid, which is what a mask is measured in.
+   *
+   * The size is the manifest's, so nothing has to decode for it to be known.
+   * Null only while no page is open, or before the view has said what it is
+   * looking at.
    */
   const maskTarget = computed<MaskTarget | null>(() => {
     const page = currentPageId.value

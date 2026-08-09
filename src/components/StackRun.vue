@@ -15,9 +15,8 @@ import type { RunStackNode } from '@/lib/stackSegments'
 
 /**
  * A run of the page's objects on one canvas, drawn in page coordinates under
- * the view's own transform — the same path the raw page underneath takes, so
- * the two cannot come out at different scales or drift apart when the view
- * turns.
+ * the view's own transform — the same path every other run takes, so no two of
+ * them can come out at different scales or drift apart when the view turns.
  *
  * Sharing a canvas is what makes this affordable. One viewport-sized backing
  * store at a retina scale is tens of megabytes; `stackSegments` decides which

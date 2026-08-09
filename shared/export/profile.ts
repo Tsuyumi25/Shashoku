@@ -27,9 +27,9 @@ export function withFormat(profile: ExportProfile, format: ExportFormat): Export
 }
 
 /**
- * How big the delivered page is. Never enlarged: the raw is the most detail
- * there will ever be, and scaling it up delivers a bigger file that says
- * nothing more.
+ * How big the delivered page is. Never enlarged: the page's own grid is the
+ * most detail there will ever be, and scaling it up delivers a bigger file that
+ * says nothing more.
  */
 export function targetSize(
   page: { w: number; h: number },

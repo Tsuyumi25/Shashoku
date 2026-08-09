@@ -59,9 +59,9 @@ import { inRenderSlot, renderThumbnail, thumbnailKey } from '@/lib/pageThumbnail
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
- * One finished page. Deliberately the composited result rather than the raw:
- * this grid is the last stop before delivery, and "did page 47 get its text"
- * is not a question the raw can answer.
+ * One finished page. Deliberately the composited result rather than the artwork
+ * on its own: this grid is the last stop before delivery, and "did page 47 get
+ * its text" is not a question the artwork can answer.
  */
 const props = defineProps<{ file: ProjectFile; selected: boolean }>()
 const emit = defineEmits<{ pick: [MouseEvent] }>()
