@@ -49,13 +49,26 @@ export const useExportStore = defineStore('export', () => {
     else selectAll()
   }
 
-  // Opening a project delivers all of it: "press export and change nothing" is
-  // the complete chapter, which is what almost every export is.
+  /** The pages this store has already had an answer about. */
+  let answeredFor = new Set<string>()
+
+  // A page arrives selected and keeps whatever it was told after that. Opening
+  // a project therefore still delivers all of it — every page in it is new here
+  // — while making more pages leaves the ones deliberately left out alone.
+  //
+  // The list is replaced wholesale on both, so without the second half a run of
+  // page-making silently ticked the cover and the blank pages back on, and the
+  // next export shipped them.
   watch(
     () => project.files,
     () => {
-      selectAll()
-      anchor.value = project.files[0]?.pageId ?? null
+      const ids = project.files.map((f) => f.pageId)
+      const picked = new Set(selected.value)
+      selected.value = ids.filter((id) => !answeredFor.has(id) || picked.has(id))
+      answeredFor = new Set(ids)
+      if (anchor.value === null || !answeredFor.has(anchor.value)) {
+        anchor.value = ids[0] ?? null
+      }
     },
     { immediate: true },
   )
