@@ -15,7 +15,6 @@ import type {
   WritePageInput,
 } from "@shared/ipc/channels";
 import {
-  DIR_FONTS,
   DIR_LAYERS,
   DIR_PAGES,
   IMAGE_EXTENSIONS,
@@ -277,7 +276,6 @@ export async function createProject(rootPath: string): Promise<OpenProjectResult
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
 
   await mkdir(join(shashokuDir, DIR_PAGES), { recursive: true });
-  await mkdir(join(shashokuDir, DIR_FONTS), { recursive: true });
 
   await writeFileAtomic(join(shashokuDir, SENTINEL_FILENAME), "shashoku\n");
   await writeFileAtomic(

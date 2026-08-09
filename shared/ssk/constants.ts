@@ -41,10 +41,6 @@ export const DIR_PAGES = 'pages'
 
 export const DIR_LAYERS = 'layers'
 
-export const DIR_CACHE = 'cache'
-
-export const DIR_FONTS = 'fonts'
-
 
 /** Where a page's raster layers sit, beside its manifest. */
 export function layersDirOf(pageDir: string): string {
