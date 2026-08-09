@@ -198,7 +198,7 @@ import {
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
-import { compositeArtwork } from '@/lib/pageComposite'
+import { artworkSignature, compositeArtwork } from '@/lib/pageComposite'
 import {
   distanceToSegment,
   nearestAnchor,
@@ -730,24 +730,17 @@ watch(
  * artwork" therefore has no answer, while "what is at this point" always does.
  */
 const artwork = ref<OffscreenCanvas | null>(null)
+/** Which composite the result being awaited belongs to. */
+let artworkRequest = 0
 
-/**
- * What the composite would come out as. Text is left out of it on purpose, so
- * typing a translation does not throw the wand's sample away mid-page.
- */
-const artworkSignature = computed(() => {
+/** What the wand's picture is of, so a change that redraws the page drops it. */
+const artworkKey = computed(() => {
   const file = currentFile.value
-  if (!file) return null
-  return stackedRasterNodes(pageStack(file.page.layers))
-    .map((n) => {
-      const { file: name, x, y, w, h } = n.entry
-      return `${name}|${x},${y},${w},${h}|${n.opacity}|${n.blendMode}`
-    })
-    .join('\n')
+  return file ? artworkSignature(pageStack(file.page.layers)) : null
 })
 
 watch(
-  () => [currentFile.value?.pageDir, artworkSignature.value] as const,
+  () => [currentFile.value?.pageDir, artworkKey.value] as const,
   async ([pageDir]) => {
     artwork.value = null
     // Any gesture belonged to the picture being replaced, and so did the
@@ -755,18 +748,18 @@ watch(
     selection.cancelGesture()
     selectionTool.dropPageSample()
     selectionOverlay.schedulePaint()
+    const mine = ++artworkRequest
     const file = currentFile.value
     if (!pageDir || !file) return
-    const wanted = file.pageId
     try {
       const composited = await compositeArtwork({
         page: file.page,
         loadLayer: (name) => window.api.readImage(layersDirOf(pageDir), name),
       })
-      // The page can have been left, or edited again, while this was out.
-      if (editor.currentPageId === wanted && currentFile.value?.pageDir === pageDir) {
-        artwork.value = composited
-      }
+      // Two edits close together each start one of these, and they can finish
+      // in either order. Only the newest may land, or an older picture would
+      // overwrite it and the wand would read the page as it was.
+      if (mine === artworkRequest) artwork.value = composited
     } catch (err) {
       console.error(err)
     }

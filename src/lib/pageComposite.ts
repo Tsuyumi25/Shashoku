@@ -207,6 +207,36 @@ export async function compositeArtwork(input: CompositeInput): Promise<Offscreen
   return await compositeWith(input, () => {})
 }
 
+/**
+ * Everything `compositeArtwork` would read, as one string — so a caller holding
+ * its result can tell when that result has stopped being true.
+ *
+ * Kept beside the composite it describes, because the two drifting apart is the
+ * failure it exists to prevent: whatever the composite reads has to be in here,
+ * and whatever it ignores must not be.
+ *
+ * Walked whole rather than flattened to the rasters. A folder carries its own
+ * opacity and blend mode, and those reach the page without any layer inside it
+ * having changed — flattening drops them, and the holder would go on trusting a
+ * picture the page no longer matches.
+ *
+ * Text is left out because the composite leaves it out: typing a translation
+ * must not throw away a sample that is still good.
+ */
+export function artworkSignature(nodes: readonly StackNode[]): string {
+  const parts: string[] = []
+  for (const node of nodes) {
+    const paint = `${node.opacity}|${node.blendMode}`
+    if (node.kind === 'raster') {
+      const { file, x, y, w, h } = node.entry
+      parts.push(`r ${file}|${x},${y},${w},${h}|${paint}`)
+    } else if (node.kind === 'buffer') {
+      parts.push(`g ${node.entry.id}|${paint}(${artworkSignature(node.children)})`)
+    }
+  }
+  return parts.join('\n')
+}
+
 async function compositeWith(
   input: CompositeInput,
   drawText: StackPaint['drawText'],
