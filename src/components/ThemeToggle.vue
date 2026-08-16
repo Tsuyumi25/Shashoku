@@ -11,11 +11,28 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick } from 'vue'
+import { nextTick, watch } from 'vue'
 import { useDark } from '@vueuse/core'
 import { Moon, Sun } from '@lucide/vue'
 
 const isDark = useDark({ initialValue: 'light' })
+
+// Hex mirrors of --card / --muted-foreground in index.css: the window buttons
+// are painted by Chromium outside the DOM, so they cannot read CSS variables
+// and have to be handed resolved colors.
+const OVERLAY = {
+  dark: { color: '#2c2c2b', symbolColor: '#b7b5a9' },
+  light: { color: '#f5f4ef', symbolColor: '#6e6d68' },
+}
+
+watch(
+  isDark,
+  (dark) => {
+    const { color, symbolColor } = OVERLAY[dark ? 'dark' : 'light']
+    window.api.windowSetOverlay(color, symbolColor)
+  },
+  { immediate: true },
+)
 
 function toggle(e: MouseEvent) {
   if (!document.startViewTransition) {
@@ -51,12 +68,17 @@ function toggle(e: MouseEvent) {
 </script>
 
 <style scoped>
+/* The app's own button idiom, as the hamburger wears — not the system
+   buttons' shape, which differs per platform (GNOME circles, Windows
+   full-height rectangles). */
 .theme-btn {
   display: flex;
-  height: 100%;
-  width: 2.75rem;
+  height: 1.75rem;
+  width: 1.75rem;
   align-items: center;
   justify-content: center;
+  border-radius: 0.25rem;
+  margin-right: 0.375rem;
   color: var(--muted-foreground);
 }
 .theme-btn:hover {

@@ -38,9 +38,8 @@ const api: ShashokuApi = {
   writeThumbnail: (key, bytes) => ipcRenderer.invoke(CHANNELS.writeThumbnail, key, bytes),
   readPreferences: () => ipcRenderer.invoke(CHANNELS.readPreferences),
   writePreferences: (raw) => ipcRenderer.invoke(CHANNELS.writePreferences, raw),
-  windowMinimize: () => ipcRenderer.send(CHANNELS.windowMinimize),
-  windowMaximize: () => ipcRenderer.send(CHANNELS.windowMaximize),
-  windowClose: () => ipcRenderer.send(CHANNELS.windowClose),
+  windowSetOverlay: (color, symbolColor) =>
+    ipcRenderer.send(CHANNELS.windowSetOverlay, color, symbolColor),
   onWillClose: (handler) => {
     ipcRenderer.on(CHANNELS.windowWillClose, () => handler());
   },

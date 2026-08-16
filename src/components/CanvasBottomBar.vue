@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-7 shrink-0 items-center gap-1 border-t border-border bg-card px-1 select-none">
+  <div class="relative flex h-7 shrink-0 items-center gap-1 border-t border-border bg-card px-1 select-none">
     <button class="page-btn" title="縮小" :disabled="!project.isOpen" @click="editor.zoomBy(1 / 1.25)">
       <ZoomOut :size="14" />
     </button>
@@ -12,6 +12,17 @@
     <button class="page-btn" title="適應視窗" :disabled="!project.isOpen" @click="editor.fitToView()">
       <Maximize :size="13" />
     </button>
+
+    <!--
+      The project's name, centred on the bar rather than flexed between its
+      neighbours, so it does not wander when the page select grows. The dot is
+      the unsaved marker the title bar used to carry.
+    -->
+    <span
+      class="pointer-events-none absolute left-1/2 max-w-[40%] -translate-x-1/2 truncate text-xs text-muted-foreground"
+    >
+      {{ title }}
+    </span>
 
     <div class="flex-1" />
 
@@ -55,6 +66,12 @@ const percentFormat = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 0,
 })
 const scalePercent = computed(() => percentFormat.format(editor.view.scale))
+
+const title = computed(() => {
+  if (!project.isOpen) return ''
+  const dir = project.folderPath?.split('/').pop() ?? ''
+  return `${project.dirty ? '● ' : ''}${dir}`
+})
 
 /** The same act as the arrows beside it, so it leaves the selection alone too. */
 function onSelect(e: Event) {

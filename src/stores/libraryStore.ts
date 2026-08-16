@@ -18,17 +18,38 @@ export const useLibraryStore = defineStore('library', () => {
   const expanded = ref<string[]>([])
   const view = ref<LibraryView>('list')
 
+  let inFlight: Promise<void> | null = null
+  let queued = false
+
+  /**
+   * Coalesced: the shelf and the sidebar mount together on a cold start, and
+   * one walk of the disk serves both. A request arriving mid-scan queues one
+   * more pass instead of joining silently — its scan points may not have
+   * existed when the running scan set out.
+   */
   async function refresh(): Promise<void> {
-    const preferences = usePreferencesStore()
-    scanning.value = true
-    try {
-      // Copied out of the store: structured clone refuses a reactive Proxy,
-      // and says only that an object could not be cloned when it meets one.
-      const scanned = await window.api.scanLibrary([...preferences.prefs.scanPoints])
-      entries.value = buildLibrary(scanned)
-    } finally {
-      scanning.value = false
+    if (inFlight) {
+      queued = true
+      return inFlight
     }
+    inFlight = (async () => {
+      const preferences = usePreferencesStore()
+      do {
+        queued = false
+        scanning.value = true
+        try {
+          // Copied out of the store: structured clone refuses a reactive Proxy,
+          // and says only that an object could not be cloned when it meets one.
+          const scanned = await window.api.scanLibrary([...preferences.prefs.scanPoints])
+          entries.value = buildLibrary(scanned)
+        } finally {
+          scanning.value = false
+        }
+      } while (queued)
+    })().finally(() => {
+      inFlight = null
+    })
+    return inFlight
   }
 
   /**

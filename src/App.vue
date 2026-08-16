@@ -1,98 +1,91 @@
 <template>
-  <div class="relative flex h-full">
-    <!--
-      The window's leftmost column, and a fixed width: a sibling of the splitter
-      rather than a panel in it, so it takes no part in the columns' arithmetic
-      and the saved column sizes go on meaning what they meant.
+  <div class="flex h-full flex-col">
+    <TitleBar />
 
-      It starts below a strip of the title band, which runs unbroken across every
-      column — a rail reaching the top edge would punch a hole in the only place
-      the window can be dragged by.
+    <div class="flex min-h-0 flex-1">
+      <!--
+        The window's leftmost column, and a fixed width: a sibling of the
+        splitter rather than a panel in it, so it takes no part in the columns'
+        arithmetic and the saved column sizes go on meaning what they meant.
 
-      Standing rather than following the workbench. Which tool is up is sticky
-      state that outlives a trip to the project manager, so picking one from
-      there is picking what you will come back to; and a column that came and
-      went would slide everything beside it every time the view changed.
-    -->
-    <div class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
-      <div class="h-9 shrink-0 border-b border-border" style="-webkit-app-region: drag" />
-      <ToolRail class="min-h-0 flex-1" />
-    </div>
+        Standing rather than following the workbench. Which tool is up is
+        sticky state that outlives a trip to the other views, so picking one
+        from there is picking what you will come back to; and a column that
+        came and went would slide everything beside it every time the view
+        changed.
+      -->
+      <div class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
+        <ToolRail class="min-h-0 flex-1" />
+      </div>
 
-    <SplitterGroup direction="horizontal" class="min-w-0 flex-1">
-      <SplitterPanel
-        :order="1"
-        :default-size="20"
-        :min-size="10"
-        class="flex min-w-0 flex-col border-r border-border bg-card"
-      >
-        <!--
-          The header stands; what is under it is whichever view is up. Both
-          stay mounted rather than swapping, for the same reason the workbench
-          does: the buckets hold a series read off disk, and the library holds
-          a scan, and neither is worth doing again for a trip to the other side.
-        -->
-        <SidebarHeader />
-        <div v-show="ui.view === 'translate'" class="flex min-h-0 flex-1 flex-col">
-          <TranslateSidebar />
-        </div>
-        <ProjectLibrary v-show="ui.view === 'project-manager'" />
-      </SplitterPanel>
-
-      <ResizeHandle />
-
-      <SplitterPanel :order="2" :default-size="80" :min-size="40" class="flex min-w-0 flex-col">
-        <div
-          class="flex h-9 shrink-0 items-center justify-end border-b border-border select-none"
-          style="-webkit-app-region: drag"
+      <SplitterGroup direction="horizontal" class="min-w-0 flex-1">
+        <SplitterPanel
+          :order="1"
+          :default-size="20"
+          :min-size="10"
+          class="flex min-w-0 flex-col border-r border-border bg-card"
         >
-          <ThemeToggle />
-          <WindowControls />
-        </div>
-
-        <!--
-          The translate workbench stays mounted while the project manager is
-          up: the canvas holds a view transform worth coming back to, and a
-          font picker that was open should still be open. The manager is the
-          other way round — its thumbnails go stale the moment a page is
-          typeset, so it is built fresh each time it is asked for.
-        -->
-        <div class="relative min-h-0 flex-1">
-          <div v-show="ui.view === 'translate'" class="absolute inset-0">
-            <TranslateMode />
+          <!--
+            The editor's sidebar and the library stay mounted rather than
+            swapping: the buckets hold a series read off disk, and the library
+            holds a scan, and neither is worth doing again for a trip to the
+            other side.
+          -->
+          <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
+            <TranslateSidebar />
           </div>
-          <div v-if="ui.view === 'project-manager'" class="absolute inset-0">
-            <ProjectManagerLayout />
-          </div>
-        </div>
-      </SplitterPanel>
-    </SplitterGroup>
+          <ProjectLibrary v-show="ui.view === 'library'" />
+          <SourcePanel v-if="ui.view === 'pages'" />
+          <ExportPanel v-if="ui.view === 'export'" />
+        </SplitterPanel>
 
-    <div
-      class="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-9 items-center justify-center px-3"
-    >
-      <span class="truncate text-sm text-muted-foreground">{{ title }}</span>
+        <ResizeHandle />
+
+        <SplitterPanel :order="2" :default-size="80" :min-size="40" class="flex min-w-0 flex-col">
+          <!--
+            The workbench stays mounted while another view is up: the canvas
+            holds a view transform worth coming back to, and a font picker
+            that was open should still be open. The others are the other way
+            round — their thumbnails go stale the moment a page is typeset, so
+            they are built fresh each time they are asked for.
+          -->
+          <div class="relative min-h-0 flex-1">
+            <div v-show="ui.view === 'editor'" class="absolute inset-0">
+              <TranslateMode />
+            </div>
+            <div v-if="ui.view === 'library'" class="absolute inset-0 flex flex-col">
+              <Bookshelf />
+            </div>
+            <div v-if="ui.view === 'pages'" class="absolute inset-0">
+              <ProjectManagerMode tab="source" />
+            </div>
+            <div v-if="ui.view === 'export'" class="absolute inset-0">
+              <ProjectManagerMode tab="export" />
+            </div>
+          </div>
+        </SplitterPanel>
+      </SplitterGroup>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import Bookshelf from '@/components/Bookshelf.vue'
+import ExportPanel from '@/components/ExportPanel.vue'
 import ProjectLibrary from '@/components/ProjectLibrary.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
-import SidebarHeader from '@/components/SidebarHeader.vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
+import SourcePanel from '@/components/SourcePanel.vue'
+import TitleBar from '@/components/TitleBar.vue'
 import ToolRail from '@/components/ToolRail.vue'
-import WindowControls from '@/components/WindowControls.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
-import ProjectManagerLayout from '@/modes/ProjectManagerLayout.vue'
+import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useEditorStore } from '@/stores/editorStore'
@@ -120,12 +113,6 @@ window.api.onWillClose(() => {
   )
 })
 
-const title = computed(() => {
-  if (!project.isOpen) return 'Shashoku 写植'
-  const dir = project.folderPath?.split('/').pop() ?? ''
-  return `${project.dirty ? '● ' : ''}${dir}`
-})
-
 useEventListener(window, 'keydown', (e) => {
   if (!e.ctrlKey && !e.metaKey) return
   const key = e.key.toLowerCase()
@@ -150,7 +137,7 @@ useEventListener(window, 'keydown', (e) => {
     if (isTypingSurface(document.activeElement)) return
     e.preventDefault()
     if (e.repeat) return
-    if (ui.view === 'project-manager') exportSelection.selectAll()
+    if (ui.view === 'pages' || ui.view === 'export') exportSelection.selectAll()
     else if (editor.maskTarget) selection.selectAll(editor.maskTarget)
     return
   }
@@ -162,7 +149,7 @@ useEventListener(window, 'keydown', (e) => {
   // One stack for the whole project, so the page grid answers these too — a
   // page dropped in the wrong place is the easiest thing here to do by accident
   // and the hardest to notice.
-  if (ui.view === 'project-manager') {
+  if (ui.view === 'pages' || ui.view === 'export') {
     if (key === 'z' && !e.shiftKey) {
       e.preventDefault()
       editor.undo()
@@ -173,7 +160,7 @@ useEventListener(window, 'keydown', (e) => {
     return
   }
 
-  if (ui.view !== 'translate') return
+  if (ui.view !== 'editor') return
 
   if (key === 'z' && !e.shiftKey) {
     e.preventDefault()
@@ -212,7 +199,7 @@ useEventListener(window, 'keydown', (e) => {
  * whether Ctrl is held, and this key is held by neither side.
  */
 useEventListener(window, 'keydown', (e) => {
-  if (ui.view !== 'translate' || e.key !== 'Backspace') return
+  if (ui.view !== 'editor' || e.key !== 'Backspace') return
   if (!e.altKey || e.ctrlKey || e.metaKey) return
   if (ownsKeyboard(document.activeElement)) return
   e.preventDefault()
@@ -234,7 +221,7 @@ useEventListener(window, 'keydown', (e) => {
  * into is a real input and a row merely selected is not.
  */
 useEventListener(window, 'keydown', (e) => {
-  if (ui.view !== 'translate') return
+  if (ui.view !== 'editor') return
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (ownsKeyboard(document.activeElement)) return
 
@@ -306,7 +293,7 @@ if (devProject) {
       )
       return
     }
-    ui.setView('translate')
+    ui.setView('editor')
   })
 }
 </script>

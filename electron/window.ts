@@ -9,14 +9,24 @@ import { CHANNELS } from "@shared/ipc/channels";
  */
 const CLOSE_GRACE_MS = 3000;
 
+/** Must match the title bar's rendered height, or the buttons sit off-row. */
+export const OVERLAY_HEIGHT = 36;
+
 export function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     // The size the window restores to; it starts maximized regardless.
     width: 1400,
     height: 900,
+    minWidth: 640,
+    minHeight: 480,
     title: "Shashoku",
     backgroundColor: "#262624",
-    frame: false,
+    // System-drawn window buttons over our own bar: a DOM-drawn maximize
+    // button is invisible to the OS, so Windows 11 would never offer Snap
+    // Layouts on it. The colors are stand-ins until the renderer reports the
+    // real theme through windowSetOverlay.
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: "#2c2c2b", symbolColor: "#b7b5a9", height: OVERLAY_HEIGHT },
     show: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
@@ -64,7 +74,9 @@ export function createWindow(): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL);
-    win.webContents.openDevTools();
+    // Undocked: docked-right devtools and the window controls overlay fight
+    // over the same corner (the trade VS Code accepted for WCO too).
+    win.webContents.openDevTools({ mode: "undocked" });
   } else {
     win.loadFile(join(__dirname, "../renderer/index.html"));
   }

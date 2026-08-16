@@ -92,9 +92,11 @@ import ProjectEntryButton from '@/components/ProjectEntryButton.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const library = useLibraryStore()
 const project = useProjectStore()
+const ui = useUiStore()
 const { lastError, createHere, openPicked, openPath } = useOpenProject()
 const toast = useToast()
 
@@ -113,8 +115,11 @@ onMounted(() => {
   void library.refresh()
 })
 
+// A project born from a folder of raw images has no pages yet, and making
+// them is its first job — so arriving in the pages view is arriving at that
+// job, not a detour on the way to an empty canvas.
 async function onCreate() {
-  await createHere()
+  if (await createHere()) ui.setView('pages')
 }
 
 async function onOpen() {

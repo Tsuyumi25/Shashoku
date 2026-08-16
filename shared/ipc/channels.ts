@@ -27,9 +27,7 @@ export const CHANNELS = {
   ocrUnload: "ocr:unload",
   ocrStop: "ocr:stop",
   ocrStatus: "ocr:status",
-  windowMinimize: "window:minimize",
-  windowMaximize: "window:maximize",
-  windowClose: "window:close",
+  windowSetOverlay: "window:set-overlay",
   windowWillClose: "window:will-close",
   windowCloseReady: "window:close-ready",
 } as const;
@@ -150,9 +148,11 @@ export interface ShashokuApi {
   /** Raw preferences.json contents; "" on first run. */
   readPreferences(): Promise<string>;
   writePreferences(raw: string): Promise<void>;
-  windowMinimize(): void;
-  windowMaximize(): void;
-  windowClose(): void;
+  /**
+   * Recolors the system-drawn window buttons. They are painted by Chromium
+   * outside the DOM, so the theme cannot reach them through CSS.
+   */
+  windowSetOverlay(color: string, symbolColor: string): void;
   /**
    * The window is going away and is holding itself open for the answer.
    * Whatever still has to reach disk goes now, then windowCloseReady.
