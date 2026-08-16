@@ -6,6 +6,7 @@ import { useProjectStore } from './projectStore'
 import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 
 const PAGE = 'p001.png'
 const AT = { x: 0, y: 0 }
@@ -23,6 +24,10 @@ function label(id: string): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: [''],
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
   }
 }
@@ -43,6 +48,7 @@ function openPage(ids: string[]) {
         readingEdges: [],
         layers: ids.map(label),
       },
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       badge: 'ok',
     },
   ]

@@ -3,7 +3,7 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useExportStore } from './exportStore'
 import { useProjectStore } from './projectStore'
-import { defaultManifest } from '@shared/page/schema'
+import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { ProjectFile } from '@/types/project'
 
 function page(pageId: string): ProjectFile {
@@ -11,6 +11,7 @@ function page(pageId: string): ProjectFile {
     pageId,
     pageDir: `/root/shashoku/pages/${pageId}`,
     page: defaultManifest(pageId, 1200, 1700),
+    ocr: defaultOcr(1200, 1700),
     badge: 'ok',
   }
 }

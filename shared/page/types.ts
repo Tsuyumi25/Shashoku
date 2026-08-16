@@ -2,9 +2,9 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 9
+export const MANIFEST_SCHEMA_VERSION = 10
 
-export const OCR_SCHEMA_VERSION = 1
+export const OCR_SCHEMA_VERSION = 2
 
 /**
  * A folder with no blending of its own: its children meet whatever is under the
@@ -111,6 +111,38 @@ export interface TextLayerEntry extends LayerEntryBase {
   lines: string[]
 
   /**
+   * Which reading this object stands for, and who decided that.
+   *
+   * ⚠️ `by` is what keeps a rerun from overruling a person. An automatic pass
+   * may only write where `by` is `auto`; where it is `human` the slot is
+   * settled, including when it is settled on nothing.
+   */
+  source: TextSource
+
+  /**
+   * A source someone wrote out themselves, for when no reading says what the
+   * artwork says. Never filled by anything automatic; empty is its ordinary
+   * state and stays legal for ever.
+   */
+  ownSource: string
+
+  /**
+   * Held by the object rather than by the page: a translation is written for
+   * one object, unlike a reading, which was found on the artwork before
+   * anybody knew whose it was.
+   */
+  translations: TranslationCandidate[]
+
+  /**
+   * Which of them this object reads as, or null for the lines above.
+   *
+   * ⭐ A pointer and not a copy: what was there before is still in the pool,
+   * and `lines` — what somebody typed themselves — is never overwritten by
+   * picking a candidate.
+   */
+  translation: string | null
+
+  /**
    * The whole style, held by value — no group to inherit from and no override
    * layered on top. Two objects that look alike are two objects that hold the
    * same seven fields, and nothing changes what one of them looks like except
@@ -124,6 +156,30 @@ export interface TextLayerEntry extends LayerEntryBase {
   style: TextStyle
 }
 
+
+export type SourceHand = 'auto' | 'human'
+
+export interface TextSource {
+  /**
+   * A reading in this page's `ocr.json`, `own` for the object's own written
+   * source, or null for a slot standing empty.
+   */
+  hash: string | 'own' | null
+  by: SourceHand
+}
+
+/**
+ * One way this object could read, once translated.
+ *
+ * ⚠️ Only what a person wrote carries a mark. A model spends no tokens saying
+ * who it is, and the rule that protects the work is stated the other way round:
+ * a marked candidate may not be edited, only appended after.
+ */
+export interface TranslationCandidate {
+  id: string
+  lines: string[]
+  human?: boolean
+}
 
 /**
  * A folder. It means nothing to the translation, but it does carry the base's
@@ -194,16 +250,61 @@ export interface ManifestJson {
 
 
 
-export type OcrBlockLabel = 'bubble' | 'text_bubble' | 'text_free'
+/**
+ * One thing a recognizer read off this page's artwork, kept.
+ *
+ * ⚠️ This file is no longer a cache of the last run. Its entries can be
+ * corrected by hand and text objects point at them, so throwing it away throws
+ * away work. What can still be thrown away freely is any entry nothing points
+ * at — those really are just the last measurement.
+ */
+export interface OcrCandidatePersisted {
+  /**
+   * Fixed when the entry was created and never recomputed, so that correcting
+   * the text below does not move it. See `shared/ocr/identity.ts`.
+   */
+  hash: string
 
-export interface OcrBlockPersisted {
+  /**
+   * Which recognizer said this. Unconstrained: the set of routes is expected
+   * to grow, and a name this file has never heard is still worth keeping.
+   */
+  source: string
+
+  /** What it says now, which anyone may correct. */
+  text: string
+
+  /**
+   * What it said when it was created. Kept for every entry rather than only
+   * for corrected ones, so that "has anyone touched this" is a comparison
+   * rather than a second field to maintain.
+   */
+  original: string
+
+  /**
+   * Where it was read, in the page's own pixels, as of its creation. It does
+   * not follow a later run: this geometry is what the entry falls back to when
+   * it leaves a text object, and a moving target would land it somewhere it
+   * was never read.
+   */
   x: number
   y: number
   w: number
   h: number
-  label: OcrBlockLabel
-  score: number
-  text?: string
+
+  /**
+   * How sure the recognizer was, as a mean probability per character. Every
+   * route reports this the same way, which is the only reason two of them can
+   * be compared at all.
+   */
+  confidence: number
+
+  /**
+   * What the detector called the region this was read from — `text_bubble`
+   * and the rest, or `line` for one that only a line detector ever saw.
+   * Unconstrained for the same reason `source` is.
+   */
+  label: string
 }
 
 export interface OcrJson {
@@ -211,5 +312,5 @@ export interface OcrJson {
 
   width: number
   height: number
-  blocks: OcrBlockPersisted[]
+  candidates: OcrCandidatePersisted[]
 }

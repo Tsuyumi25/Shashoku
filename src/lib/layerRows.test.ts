@@ -17,6 +17,10 @@ function text(id: string, visible = true): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: [id],
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
   }
 }

@@ -20,6 +20,10 @@ function text(id: string): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: [id],
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
   }
 }

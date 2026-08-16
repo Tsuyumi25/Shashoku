@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry } from '@shared/page/types'
-import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
 
@@ -10,6 +10,7 @@ function page(): ProjectFile {
     pageId: '001.png',
     pageDir: '/p/.shashoku/pages/001',
     badge: 'ok',
+    ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
@@ -31,6 +32,10 @@ function page(): ProjectFile {
           tags: [],
           rotation: 0,
           lines: ['ふむ'],
+          source: { hash: null, by: 'auto' },
+          ownSource: '',
+          translations: [],
+          translation: null,
           style: { ...DEFAULT_TEXT_STYLE },
         },
       ],

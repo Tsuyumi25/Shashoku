@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { PageParseError, parseManifest, serializeManifest } from './schema'
-import type { ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
-import { MANIFEST_SCHEMA_VERSION } from './types'
+import {
+  PageParseError,
+  parseManifest,
+  parseOcr,
+  serializeLayers,
+  serializeManifest,
+  serializeOcr,
+} from './schema'
+import type { ManifestJson, OcrJson, RasterLayerEntry, TextLayerEntry } from './types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 
 const UPRIGHT = {
@@ -13,6 +20,8 @@ const UPRIGHT = {
   y: 300,
   tags: [],
   lines: ['hi'],
+  source: { hash: null, by: 'auto' },
+  ownSource: '',
   style: DEFAULT_TEXT_STYLE,
 }
 
@@ -59,8 +68,75 @@ const firstText = (m: ManifestJson): TextLayerEntry => m.layers[0] as TextLayerE
 
 /** `UPRIGHT` as the parser hands it back, for the tests that write one out. */
 function textEntry(extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return { ...(UPRIGHT as unknown as TextLayerEntry), rotation: 0, opacity: 1, blendMode: 'normal', ...extra }
+  return {
+    ...(UPRIGHT as unknown as TextLayerEntry),
+    rotation: 0,
+    opacity: 1,
+    blendMode: 'normal',
+    translations: [],
+    translation: null,
+    ...extra,
+  }
 }
+
+describe('the translation candidates', () => {
+  const two = [
+    { id: 't1', lines: ['妳終於來了'] },
+    { id: 't2', lines: ['你可算是來了'], human: true },
+  ]
+
+  it('reads a page written before objects had translations as having none', () => {
+    const parsed = firstText(parseManifest(raw(UPRIGHT)))
+    expect(parsed.translations).toEqual([])
+    expect(parsed.translation).toBeNull()
+  })
+
+  it('round trips the pool and the slot', () => {
+    const entry = textEntry({ translations: two, translation: 't2' })
+    expect(parseManifest(serializeManifest(manifestWith(entry)))).toEqual(manifestWith(entry))
+  })
+
+  it('writes neither key for an object nobody has translated', () => {
+    const out = JSON.parse(serializeManifest(manifestWith(textEntry())))
+    expect(out.layers[0]).not.toHaveProperty('translations')
+    expect(out.layers[0]).not.toHaveProperty('translation')
+  })
+
+  it('opens a slot naming a candidate that is not there as empty', () => {
+    const parsed = firstText(
+      parseManifest(raw({ ...UPRIGHT, translations: two, translation: 'gone' })),
+    )
+    expect(parsed.translation).toBeNull()
+    expect(parsed.lines).toEqual(['hi'])
+  })
+
+  it('refuses two candidates answering to one id', () => {
+    const same = [two[0], { id: 't1', lines: ['別的'] }]
+    expect(() => parseManifest(raw({ ...UPRIGHT, translations: same }))).toThrow(PageParseError)
+  })
+
+  it('refuses a line with a newline inside it, as on the object itself', () => {
+    const bad = [{ id: 't1', lines: ['a\nb'] }]
+    expect(() => parseManifest(raw({ ...UPRIGHT, translations: bad }))).toThrow(PageParseError)
+  })
+
+  /**
+   * Two objects reading the same way are the same picture. What the list is
+   * holding behind the one in the slot moves nothing, and a thumbnail thrown
+   * away over it is a page of compositing paid for nothing.
+   */
+  it('identifies the drawn page by what the slot resolves to', () => {
+    const held = textEntry({ translations: two, translation: 't1' })
+    const typed = textEntry({ lines: two[0].lines })
+    expect(serializeLayers([held])).toBe(serializeLayers([typed]))
+  })
+
+  it('tells apart two objects reading differently out of one pool', () => {
+    const first = textEntry({ translations: two, translation: 't1' })
+    const second = textEntry({ translations: two, translation: 't2' })
+    expect(serializeLayers([first])).not.toBe(serializeLayers([second]))
+  })
+})
 
 describe('text object rotation', () => {
   it('reads a page written before objects could be turned as upright', () => {
@@ -422,5 +498,164 @@ describe('the lines drawn between objects', () => {
     expect(parseManifest(withEdges([{ from: 'a', to: 'ghost' }])).readingEdges).toEqual([
       { from: 'a', to: 'ghost' },
     ])
+  })
+})
+
+describe("a page's readings", () => {
+  const candidate = (over: Record<string, unknown> = {}) => ({
+    hash: '9f2a1c0b7e4d5a63',
+    source: 'manga-ocr',
+    text: 'ふん！湯気で見間違えたんじゃないの？',
+    original: 'ふん！湯気で見間違えたんじゃないの？',
+    x: 4230,
+    y: 2068,
+    w: 377,
+    h: 1032,
+    confidence: 0.9987,
+    label: 'text_bubble',
+    ...over,
+  })
+
+  const ocrWith = (...candidates: Record<string, unknown>[]) =>
+    JSON.stringify({
+      schemaVersion: OCR_SCHEMA_VERSION,
+      width: 4962,
+      height: 7019,
+      candidates,
+    })
+
+  it('round trips a reading whole', () => {
+    const read = parseOcr(ocrWith(candidate()))
+    expect(read.candidates).toHaveLength(1)
+    expect(parseOcr(serializeOcr(read))).toEqual(read)
+  })
+
+  it('keeps a corrected reading apart from what was read', () => {
+    const read = parseOcr(ocrWith(candidate({ text: 'ふん！湯気で見間違えたんじゃないの？！' })))
+    expect(read.candidates[0].text).not.toBe(read.candidates[0].original)
+  })
+
+  /**
+   * The identity is the one field nothing may be missing, since an entry
+   * without one cannot be recognized on a rerun and would be added a second
+   * time beside itself.
+   */
+  it('refuses a reading with no identity', () => {
+    expect(() => parseOcr(ocrWith(candidate({ hash: '' })))).toThrow(PageParseError)
+    expect(() => parseOcr(ocrWith(candidate({ hash: undefined })))).toThrow(PageParseError)
+  })
+
+  it('refuses a reading that will not say which model made it', () => {
+    expect(() => parseOcr(ocrWith(candidate({ source: '' })))).toThrow(PageParseError)
+  })
+
+  /**
+   * A source or a label this file has never heard of is a reading someone can
+   * still use, and refusing it would lose work to a lookup miss.
+   */
+  it('opens a reading from a model it has never heard of', () => {
+    const read = parseOcr(ocrWith(candidate({ source: 'something-later', label: 'line' })))
+    expect(read.candidates[0].source).toBe('something-later')
+    expect(read.candidates[0].label).toBe('line')
+  })
+
+  it('refuses a reading whose box has negative size', () => {
+    expect(() => parseOcr(ocrWith(candidate({ w: -1 })))).toThrow(PageParseError)
+  })
+
+  /** An empty reading is legal: a recognizer that saw nothing said so. */
+  it('opens a reading of nothing', () => {
+    expect(parseOcr(ocrWith(candidate({ text: '', original: '' }))).candidates[0].text).toBe('')
+  })
+
+  it('refuses a file written by a newer version', () => {
+    const newer = JSON.stringify({
+      schemaVersion: OCR_SCHEMA_VERSION + 1,
+      width: 1,
+      height: 1,
+      candidates: [],
+    })
+    expect(() => parseOcr(newer)).toThrow(PageParseError)
+  })
+
+  it('holds no readings for a page nothing has been run on', () => {
+    const empty: OcrJson = parseOcr(ocrWith())
+    expect(empty.candidates).toEqual([])
+  })
+})
+
+describe("a text object's source", () => {
+  const withSource = (source: unknown, ownSource?: string) =>
+    JSON.stringify({
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      readingOrder: ['a'],
+      layers: [{ ...UPRIGHT, source, ...(ownSource === undefined ? {} : { ownSource }) }],
+    })
+
+  const only = (raw: string) => parseManifest(raw).layers[0] as TextLayerEntry
+
+  /**
+   * A page written before objects had a source opens with an empty one held by
+   * nobody — not by a person. Starting it settled would put every object on
+   * every old page out of reach of the first run that could have filled it.
+   */
+  it('opens a page written before objects had a source', () => {
+    const older = JSON.parse(withSource(undefined))
+    delete older.layers[0].source
+    const object = only(JSON.stringify(older))
+    expect(object.source).toEqual({ hash: null, by: 'auto' })
+    expect(object.ownSource).toBe('')
+  })
+
+  it('carries a reading and who put it there through', () => {
+    expect(only(withSource({ hash: '9f2a1c0b7e4d5a63', by: 'human' })).source).toEqual({
+      hash: '9f2a1c0b7e4d5a63',
+      by: 'human',
+    })
+  })
+
+  /** A slot settled on nothing is a real state, and it is not the same state. */
+  it('tells a slot nobody has touched from one somebody emptied', () => {
+    expect(only(withSource({ hash: null, by: 'human' })).source.by).toBe('human')
+  })
+
+  it('carries a source someone wrote out themselves', () => {
+    expect(only(withSource({ hash: 'own', by: 'human' }, '妖精っ')).ownSource).toBe('妖精っ')
+  })
+
+  it('refuses a hand nobody could have', () => {
+    expect(() => only(withSource({ hash: null, by: 'model' }))).toThrow(PageParseError)
+  })
+
+  it('refuses a reading named by an empty string', () => {
+    expect(() => only(withSource({ hash: '', by: 'auto' }))).toThrow(PageParseError)
+  })
+
+  it('leaves an untouched slot out of the file rather than writing it on each', () => {
+    const page = parseManifest(withSource({ hash: null, by: 'auto' }))
+    const written = JSON.parse(serializeManifest(page))
+    expect(written.layers[0]).not.toHaveProperty('source')
+    expect(written.layers[0]).not.toHaveProperty('ownSource')
+  })
+
+  it('round trips a settled slot', () => {
+    const page = parseManifest(withSource({ hash: 'abc123', by: 'human' }, '妖精っ'))
+    expect(parseManifest(serializeManifest(page))).toEqual(page)
+  })
+
+  /**
+   * What an object was translated from moves no pixel, so it must not reach the
+   * value a thumbnail is keyed on — the same reason tags do not.
+   */
+  it('keeps the source out of what a thumbnail is identified by', () => {
+    const bare = serializeLayers(parseManifest(withSource({ hash: null, by: 'auto' })).layers)
+    const sourced = serializeLayers(
+      parseManifest(withSource({ hash: 'abc123', by: 'human' }, '妖精っ')).layers,
+    )
+    expect(bare).toBe(sourced)
   })
 })

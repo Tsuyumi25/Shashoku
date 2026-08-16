@@ -31,6 +31,10 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: [id],
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
     ...extra,
   }

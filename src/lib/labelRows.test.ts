@@ -4,6 +4,7 @@ import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { buildLabelRows, chapterStops, dropAt, type LabelRow } from '@/lib/labelRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 
 function text(id: string): TextLayerEntry {
   return {
@@ -18,6 +19,10 @@ function text(id: string): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: [id],
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
   }
 }
@@ -35,6 +40,7 @@ function file(
   return {
     pageId,
     pageDir: `/p/${pageId}`,
+    ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
     badge: 'ok',
     page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges, layers },
   }
@@ -180,6 +186,7 @@ describe('buildLabelRows filtered', () => {
     return {
       pageId: name,
       pageDir: `/p/${name}`,
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       badge: 'ok',
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,

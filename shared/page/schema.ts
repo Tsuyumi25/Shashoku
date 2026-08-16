@@ -3,14 +3,16 @@ import type {
   LayerEntry,
   LayerEntryBase,
   ManifestJson,
-  OcrBlockLabel,
-  OcrBlockPersisted,
+  OcrCandidatePersisted,
   OcrJson,
   RasterLayerEntry,
   TextLayerEntry,
+  TextSource,
+  TranslationCandidate,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { normalizeEdges, type ReadingEdge } from './readingGraph'
+import { linesOf, textOf } from './text'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
@@ -36,7 +38,6 @@ export const BLEND_MODE_ALLOWLIST = [
   'luminosity',
 ] as const
 
-const OCR_LABELS: OcrBlockLabel[] = ['bubble', 'text_bubble', 'text_free']
 
 export class PageParseError extends Error {}
 
@@ -161,12 +162,7 @@ function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry 
   // on whole pixels is the rasterizer's output, not this.
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字(頁面像素)`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字(頁面像素)`)
-  if (!Array.isArray(lines)) fail(`${at}.lines 必須是字串陣列`)
-  const parsedLines = lines.map((line, j) => {
-    if (typeof line !== 'string') fail(`${at}.lines[${j}] 必須是字串`)
-    if (/[\r\n]/.test(line)) fail(`${at}.lines[${j}] 不可內嵌換行——斷行請用陣列元素表達`)
-    return line
-  })
+  const parsedLines = parseLines(lines, `${at}.lines`)
 
   let rotation = 0
   if (v.rotation !== undefined) {
@@ -174,6 +170,8 @@ function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry 
       fail(`${at}.rotation 必須是數字(弧度)`)
     rotation = v.rotation
   }
+
+  const translations = parseTranslations(v.translations, `${at}.translations`)
 
   return {
     kind: 'text',
@@ -183,8 +181,77 @@ function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry 
     tags: parseTags(v.tags, `${at}.tags`),
     rotation,
     lines: parsedLines,
+    source: parseTextSource(v.source, `${at}.source`),
+    ownSource: parseOwnSource(v.ownSource, `${at}.ownSource`),
+    translations,
+    translation: parseTranslationSlot(v.translation, translations, `${at}.translation`),
     style: parseTextStyle(v.style, `${at}.style`, fail),
   }
+}
+
+function parseLines(v: unknown, at: string): string[] {
+  if (!Array.isArray(v)) fail(`${at} 必須是字串陣列`)
+  return v.map((line, j) => {
+    if (typeof line !== 'string') fail(`${at}[${j}] 必須是字串`)
+    if (/[\r\n]/.test(line)) fail(`${at}[${j}] 不可內嵌換行——斷行請用陣列元素表達`)
+    return line
+  })
+}
+
+function parseTranslations(v: unknown, at: string): TranslationCandidate[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
+  const seen = new Set<string>()
+  return v.map((entry, i) => {
+    const where = `${at}[${i}]`
+    if (!isRecord(entry)) fail(`${where} 必須是物件`)
+    const { id, human } = entry
+    if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
+    // The slot names one of these, so two of them answering to the same name
+    // would make what the object reads as depend on which was searched first.
+    if (seen.has(id)) fail(`${where}.id「${id}」重複`)
+    seen.add(id)
+    if (human !== undefined && typeof human !== 'boolean') fail(`${where}.human 必須是布林值`)
+    const candidate: TranslationCandidate = { id, lines: parseLines(entry.lines, `${where}.lines`) }
+    if (human) candidate.human = true
+    return candidate
+  })
+}
+
+/**
+ * A slot naming a candidate that is not there opens empty rather than
+ * failing: `lines` still holds the person's own words, and refusing the page
+ * over a dangling pointer would cost the translation to protect the choice.
+ */
+function parseTranslationSlot(
+  v: unknown,
+  pool: readonly TranslationCandidate[],
+  at: string,
+): string | null {
+  if (v === undefined || v === null) return null
+  if (typeof v !== 'string' || v.length === 0) fail(`${at} 必須是非空字串或 null`)
+  return pool.some((c) => c.id === v) ? v : null
+}
+
+/**
+ * A page written before objects had a source opens with an empty slot held by
+ * nobody — not `human`, or every object on it would start settled and out of
+ * reach of the first run.
+ */
+function parseTextSource(v: unknown, at: string): TextSource {
+  if (v === undefined) return { hash: null, by: 'auto' }
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const { hash, by } = v
+  if (hash !== null && hash !== 'own' && (typeof hash !== 'string' || hash.length === 0))
+    fail(`${at}.hash 必須是非空字串、'own' 或 null`)
+  if (by !== 'auto' && by !== 'human') fail(`${at}.by 必須是 auto 或 human`)
+  return { hash: hash as string | 'own' | null, by }
+}
+
+function parseOwnSource(v: unknown, at: string): string {
+  if (v === undefined) return ''
+  if (typeof v !== 'string') fail(`${at} 必須是字串`)
+  return v
 }
 
 function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
@@ -396,6 +463,12 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
   }
   if (l.tags.length > 0) out.tags = normalizeTagSet(l.tags)
   if (l.rotation) out.rotation = l.rotation
+  // An empty slot held by nobody is what a fresh object has, so leaving it out
+  // keeps a page of untouched objects from carrying a line of nothing on each.
+  if (l.source.hash !== null || l.source.by !== 'auto') out.source = l.source
+  if (l.ownSource.length > 0) out.ownSource = l.ownSource
+  if (l.translations.length > 0) out.translations = l.translations
+  if (l.translation !== null) out.translation = l.translation
   out.style = serializeTextStyle(l.style)
   return out
 }
@@ -404,15 +477,24 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
  * The drawn part of a page, on its own — what a thumbnail's identity is made
  * of.
  *
- * A text object's tags are dropped here: they say what an object means, which
- * moves no pixel. Keeping them would throw away every thumbnail in the chapter
- * for a classification pass that changed nothing anybody can see.
+ * A text object's tags and everything about its source go: they move no pixel,
+ * and keeping them would throw away every thumbnail in the chapter for a pass
+ * that changed nothing anybody can see.
+ *
+ * Translations collapse to the resolved text: the one in the slot is on the
+ * artwork, the rest are proposals nobody can see — two objects reading the
+ * same way are the same picture.
  */
 export function serializeLayers(layers: readonly LayerEntry[]): string {
   const drawn = (entry: LayerEntry): Record<string, unknown> => {
     const out = serializeLayerEntry(entry)
     if (entry.kind === 'text') {
       delete out.tags
+      delete out.source
+      delete out.ownSource
+      delete out.translations
+      delete out.translation
+      out.lines = linesOf(textOf(entry))
     } else if (entry.kind === 'group') {
       out.children = entry.children.map(drawn)
     }
@@ -437,27 +519,45 @@ export function serializeManifest(m: ManifestJson): string {
 
 
 
-function parseOcrBlock(v: unknown, i: number): OcrBlockPersisted {
-  const at = `blocks[${i}]`
+function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
+  const at = `candidates[${i}]`
   if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { x, y, w, h, label, score, text } = v
-  if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字`)
-  if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字`)
-  if (typeof w !== 'number' || !Number.isFinite(w) || w < 0) fail(`${at}.w 必須是 ≥ 0 的數字`)
-  if (typeof h !== 'number' || !Number.isFinite(h) || h < 0) fail(`${at}.h 必須是 ≥ 0 的數字`)
-  if (typeof label !== 'string' || !OCR_LABELS.includes(label as OcrBlockLabel))
-    fail(`${at}.label 必須是 ${OCR_LABELS.join(' | ')} 之一`)
-  if (typeof score !== 'number' || !Number.isFinite(score)) fail(`${at}.score 必須是數字`)
-  const parsed: OcrBlockPersisted = { x, y, w, h, label: label as OcrBlockLabel, score }
-  if (text !== undefined) {
-    if (typeof text !== 'string') fail(`${at}.text 必須是字串`)
-    parsed.text = text
+  const { hash, source, text, original, x, y, w, h, confidence, label } = v
+
+  // Free-form on purpose — an unknown source is still a reading someone can
+  // use — but never empty: no identity means unrecognizable on a rerun, and
+  // no source means it cannot say where it came from.
+  const named = (value: unknown, key: string): string => {
+    if (typeof value !== 'string' || value.length === 0) fail(`${at}.${key} 必須是非空字串`)
+    return value as string
   }
-  return parsed
+  const finite = (value: unknown, key: string): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${at}.${key} 必須是數字`)
+    return value as number
+  }
+
+  if (typeof text !== 'string') fail(`${at}.text 必須是字串`)
+  if (typeof original !== 'string') fail(`${at}.original 必須是字串`)
+  const width = finite(w, 'w')
+  const height = finite(h, 'h')
+  if (width < 0 || height < 0) fail(`${at} 的 w 和 h 必須 ≥ 0`)
+
+  return {
+    hash: named(hash, 'hash'),
+    source: named(source, 'source'),
+    text,
+    original,
+    x: finite(x, 'x'),
+    y: finite(y, 'y'),
+    w: width,
+    h: height,
+    confidence: finite(confidence, 'confidence'),
+    label: named(label, 'label'),
+  }
 }
 
 export function defaultOcr(width: number, height: number): OcrJson {
-  return { schemaVersion: OCR_SCHEMA_VERSION, width, height, blocks: [] }
+  return { schemaVersion: OCR_SCHEMA_VERSION, width, height, candidates: [] }
 }
 
 export function parseOcr(raw: string): OcrJson {
@@ -470,18 +570,18 @@ export function parseOcr(raw: string): OcrJson {
     fail(`不支援的 ocr.json 版本:${JSON.stringify(data.schemaVersion)}`)
   }
 
-  const { width, height, blocks } = data
+  const { width, height, candidates } = data
   if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0)
     fail('ocr.json.width 必須是正數')
   if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0)
     fail('ocr.json.height 必須是正數')
-  if (!Array.isArray(blocks)) fail('ocr.json.blocks 必須是陣列')
+  if (!Array.isArray(candidates)) fail('ocr.json.candidates 必須是陣列')
 
   return {
     schemaVersion: OCR_SCHEMA_VERSION,
     width,
     height,
-    blocks: blocks.map((b, i) => parseOcrBlock(b, i)),
+    candidates: candidates.map((c, i) => parseOcrCandidate(c, i)),
   }
 }
 
@@ -491,7 +591,7 @@ export function serializeOcr(o: OcrJson): string {
       schemaVersion: o.schemaVersion,
       width: o.width,
       height: o.height,
-      blocks: o.blocks,
+      candidates: o.candidates,
     },
     null,
     2,

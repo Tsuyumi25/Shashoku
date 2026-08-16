@@ -8,6 +8,7 @@ import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { findEntry } from '@shared/page/tree'
+import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 
 const PAGE = 'p001.png'
 
@@ -24,6 +25,10 @@ function label(id: string, text = ''): TextLayerEntry {
     tags: [],
     rotation: 0,
     lines: linesOf(text),
+    source: { hash: null, by: 'auto' },
+    ownSource: '',
+    translations: [],
+    translation: null,
     style: { ...DEFAULT_TEXT_STYLE },
   }
 }
@@ -34,6 +39,7 @@ function openOnePage(labels: TextLayerEntry[] = []) {
     {
       pageId: PAGE,
       pageDir: `/x/${PAGE}`,
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
@@ -56,6 +62,7 @@ function pageOf(pageId: string, labels: TextLayerEntry[]): ProjectFile {
   return {
     pageId,
     pageDir: `/x/${pageId}`,
+    ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
     page: {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
@@ -603,6 +610,7 @@ describe('layer tree edits', () => {
       {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
+        ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
         page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges: [], layers },
         badge: 'ok',
       },
@@ -950,6 +958,7 @@ describe('layer tree edits', () => {
           readingEdges: [],
           layers: [label('z')],
         },
+        ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
         badge: 'ok',
       })
       editor.selectOnly('a')
@@ -980,6 +989,7 @@ describe('deleteSelection', () => {
     project.files = pages.map((p) => ({
       pageId: p.name,
       pageDir: `/x/${p.name}`,
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,
@@ -1225,6 +1235,7 @@ describe('selectLayerBy', () => {
       {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
+        ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
         page: {
           schemaVersion: MANIFEST_SCHEMA_VERSION,
           revision: 0,
@@ -1328,6 +1339,7 @@ describe('moveObjectsTo', () => {
     project.files = pages.map((p) => ({
       pageId: p.name,
       pageDir: `/x/${p.name}`,
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       page: {
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         revision: 0,

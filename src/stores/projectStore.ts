@@ -4,7 +4,14 @@ import type { ProjectFile, ProjectHeader } from '@/types/project'
 import type { ProjectJson } from '@shared/project/types'
 import type { PageEntry } from '@shared/ipc/channels'
 import type { TagDefinition } from '@shared/tags/types'
-import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
+import type {
+  GroupLayerEntry,
+  LayerEntry,
+  OcrCandidatePersisted,
+  TextLayerEntry,
+  TextSource,
+  TranslationCandidate,
+} from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import {
   defaultColorForTagIndex,
@@ -12,7 +19,15 @@ import {
   parseProjectJson,
   serializeProjectJson,
 } from '@shared/project/schema'
-import { parseManifest, serializeManifest, unreadablePage } from '@shared/page/schema'
+import {
+  defaultOcr,
+  generateId,
+  parseManifest,
+  parseOcr,
+  serializeManifest,
+  serializeOcr,
+  unreadablePage,
+} from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import {
   dissolveGroupAt,
@@ -168,16 +183,20 @@ export const useProjectStore = defineStore('project', () => {
     const mended: string[] = []
     for (const p of pages) {
       let page = unreadablePage(p.pageId)
+      let ocr = defaultOcr(page.width, page.height)
       try {
         const raw = await window.api.readPage(p.pageDir)
         const repair = repairPage(parseManifest(raw.manifestRaw))
         page = repair.manifest
         if (repair.repaired.length > 0) mended.push(p.pageId)
+        // Readings fail on their own: a page whose ocr.json is unreadable is
+        // still a page someone can typeset.
+        ocr = raw.ocrRaw === null ? defaultOcr(page.width, page.height) : parseOcr(raw.ocrRaw)
       } catch {
         // Opens empty rather than taking the whole project down. The page
         // already carries a badge saying its manifest could not be read.
       }
-      loaded.push({ pageId: p.pageId, pageDir: p.pageDir, page, badge: p.badge })
+      loaded.push({ pageId: p.pageId, pageDir: p.pageDir, page, ocr, badge: p.badge })
     }
     rootPath.value = newRootPath
     projectMeta.value = meta
@@ -385,6 +404,9 @@ export const useProjectStore = defineStore('project', () => {
         if (!file || file.badge !== 'ok') continue
         await window.api.writePage(file.pageDir, {
           manifestRaw: serializeManifest(file.page),
+          // On the same trip as the manifest: a text object names a reading,
+          // and the name must not outlive what it names.
+          ocrRaw: serializeOcr(file.ocr),
         })
       }
       if (metaWasDirty) {
@@ -748,10 +770,155 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /**
+   * Typing into the object, wherever what it currently reads as lives — the
+   * list is a view of the pool, not a copy. ⚠️ This must never write into
+   * `lines` while the object is showing something else, which would put the
+   * words somewhere nobody can see them.
+   */
   function updateLabelText(pageId: string, labelId: string, text: string) {
     const label = labelById(pageId, labelId)
     if (!label) return
+    const held = label.translations.find((c) => c.id === label.translation)
+    if (held) held.lines = linesOf(text)
+    else label.lines = linesOf(text)
+    markPageDirty(pageId)
+  }
+
+  /**
+   * The object's own lines, whatever it is reading. Separate from
+   * `updateLabelText` on purpose — that one writes wherever the object is
+   * showing from, right for the canvas and wrong for the row that exists to
+   * show these lines.
+   */
+  function setLabelLines(pageId: string, labelId: string, text: string) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
     label.lines = linesOf(text)
+    markPageDirty(pageId)
+  }
+
+  /** Null reads as the lines somebody typed themselves. */
+  function setLabelTranslation(pageId: string, labelId: string, id: string | null) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
+    if (id !== null && !label.translations.some((c) => c.id === id)) return
+    label.translation = id
+    markPageDirty(pageId)
+  }
+
+  /**
+   * Appended rather than inserted: arrival order is the list's order, and a
+   * proposal that pushed itself in front would be ranking itself.
+   */
+  function addTranslation(
+    pageId: string,
+    labelId: string,
+    lines: string[],
+    by: 'human' | 'model',
+  ): string | null {
+    const label = labelById(pageId, labelId)
+    if (!label) return null
+    const candidate: TranslationCandidate = { id: generateId(), lines }
+    if (by === 'human') candidate.human = true
+    label.translations.push(candidate)
+    markPageDirty(pageId)
+    return candidate.id
+  }
+
+  /**
+   * The order is the object's, not a view's: assigned candidates have no
+   * distance to sort by, so an arrangement made by hand is the whole ranking.
+   */
+  function moveTranslation(pageId: string, labelId: string, from: number, to: number) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
+    const list = label.translations
+    if (from < 0 || from >= list.length || to < 0 || to >= list.length || from === to) return
+    const [moved] = list.splice(from, 1)
+    list.splice(to, 0, moved)
+    markPageDirty(pageId)
+  }
+
+  /**
+   * Typing over a proposal makes it yours: a retyped sentence is no longer
+   * what the model said, and the mark keeps a later pass off it.
+   */
+  function correctTranslation(pageId: string, labelId: string, id: string, text: string) {
+    const label = labelById(pageId, labelId)
+    const candidate = label?.translations.find((c) => c.id === id)
+    if (!candidate) return
+    candidate.lines = linesOf(text)
+    candidate.human = true
+    markPageDirty(pageId)
+  }
+
+  /**
+   * The slot goes with it rather than dangling, so the object falls back to
+   * its typed lines — the one thing deleting a proposal must not reach.
+   */
+  function removeTranslation(pageId: string, labelId: string, id: string) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
+    const at = label.translations.findIndex((c) => c.id === id)
+    if (at === -1) return
+    label.translations.splice(at, 1)
+    if (label.translation === id) label.translation = null
+    markPageDirty(pageId)
+  }
+
+  /**
+   * `by` is the caller's to state and never guessed here — a default would be
+   * this function answering for whoever called it.
+   */
+  function setLabelSource(pageId: string, labelId: string, source: TextSource) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
+    label.source = source
+    markPageDirty(pageId)
+  }
+
+  /** The source a person wrote out for an object themselves. */
+  function setLabelOwnSource(pageId: string, labelId: string, text: string) {
+    const label = labelById(pageId, labelId)
+    if (!label) return
+    label.ownSource = text
+    markPageDirty(pageId)
+  }
+
+  /**
+   * A reading is about the artwork, so a correction lands once in the shared
+   * pool and every object standing on it sees it. The identity is untouched,
+   * which is what keeps the next run of the same model from taking the
+   * correction back.
+   */
+  function correctReading(pageId: string, hash: string, text: string) {
+    const file = pageById(pageId)
+    const reading = file?.ocr.candidates.find((c) => c.hash === hash)
+    if (!reading) return
+    reading.text = text
+    markPageDirty(pageId)
+  }
+
+  function readingsOfPage(pageId: string): readonly OcrCandidatePersisted[] {
+    return pageById(pageId)?.ocr.candidates ?? []
+  }
+
+  /**
+   * For working on the recognizers rather than on a book: changing detection
+   * or cropping changes every identity, so old readings never meet new ones
+   * and the pool only ever grows. Slots are released to `auto` — one still
+   * marked human would sit out the next run and look like the run missed it —
+   * except `own`, which was never a reading.
+   */
+  function forgetReadings(pageId: string) {
+    const file = pageById(pageId)
+    if (!file) return
+    file.ocr.candidates = []
+    for (const label of labelsOf(pageId)) {
+      if (label.source.hash === null || label.source.hash === 'own') continue
+      label.source = { hash: null, by: 'auto' }
+    }
     markPageDirty(pageId)
   }
 
@@ -917,6 +1084,17 @@ export const useProjectStore = defineStore('project', () => {
     rotateLabel,
     updateLabelText,
     setLabelTags,
+    setLabelSource,
+    setLabelOwnSource,
+    setLabelLines,
+    setLabelTranslation,
+    addTranslation,
+    moveTranslation,
+    correctTranslation,
+    removeTranslation,
+    correctReading,
+    readingsOfPage,
+    forgetReadings,
     setLabelStyle,
     allTextObjects,
     setLayerVisible,

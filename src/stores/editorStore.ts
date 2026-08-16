@@ -589,6 +589,10 @@ export const useEditorStore = defineStore('editor', () => {
       tags: [],
       rotation: 0,
       lines: [''],
+      source: { hash: null, by: 'auto' },
+      ownSource: '',
+      translations: [],
+      translation: null,
       style: { ...project.header.seedStyle },
     })
   }
