@@ -2,10 +2,10 @@
   <SplitterGroup
     direction="horizontal"
     class="h-full"
-    auto-save-id="translate:columns:two"
+    auto-save-id="translate:columns:three"
     :storage="preferences.panelStorage"
   >
-    <SplitterPanel :order="1" :default-size="75" :min-size="25" class="flex min-w-0 flex-col">
+    <SplitterPanel :order="1" :default-size="56" :min-size="25" class="flex min-w-0 flex-col">
       <section class="relative min-h-0 flex-1">
         <CanvasView />
         <div
@@ -21,9 +21,43 @@
 
     <ResizeHandle />
 
+    <!--
+      Where the candidates live — what has been read off this page, what it might
+      be translated as, what a model is proposing. All of them are about the
+      artwork rather than about the document, which is why they stand beside the
+      canvas: an entry here names a place on the page, and the list is ordered
+      by measurements taken there. A column away and that cause is invisible.
+    -->
+    <!--
+      Each row as tall as somebody dragged it, and the column scrolls when the
+      rows come to more than it — the arrangement VS Code arrived at for the
+      same shape (microsoft/vscode#64188, closed by making the splitview
+      itself scroll).
+
+      ⭐ What it is not is rows squeezed to share a fixed column height. That
+      way the row below is wherever the row above happens to end, so it moves
+      whenever anything changes; and rows crushed to their minimum leave what
+      is under them undiscoverable, which Baymard's testing puts down to an
+      inner scrollbar being invisible until hovered — cropped reads as absent.
+
+      It is also what the folding rule needs. A row folded away leaves its
+      head where it stands only because the row above it cannot grow into the
+      space: its height is its own.
+    -->
     <SplitterPanel
       :order="2"
-      :default-size="25"
+      :default-size="22"
+      :min-size="12"
+      class="flex min-w-0 flex-col overflow-y-auto border-l border-border bg-card"
+    >
+      <TranslationCandidates />
+    </SplitterPanel>
+
+    <ResizeHandle />
+
+    <SplitterPanel
+      :order="3"
+      :default-size="22"
       :min-size="12"
       class="flex min-w-0 flex-col bg-card"
     >
@@ -168,6 +202,7 @@ import {
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
+import TranslationCandidates from '@/components/TranslationCandidates.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import TagList from '@/components/TagList.vue'
 import LabelList from '@/components/LabelList.vue'

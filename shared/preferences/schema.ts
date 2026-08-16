@@ -1,5 +1,6 @@
 import {
   MAX_FONT_SAMPLE_PX,
+  MIN_SECTION_HEIGHT,
   MIN_FONT_SAMPLE_PX,
   defaultPreferences,
   type Preferences,
@@ -38,6 +39,8 @@ export function parsePreferences(raw: string): Preferences {
     scanPoints,
     panelLayout,
     sidePanel,
+    sectionOpen,
+    sectionHeight,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
@@ -83,6 +86,19 @@ export function parsePreferences(raw: string): Preferences {
   if (sidePanel === "layers" || sidePanel === "labels") {
     prefs.sidePanel = sidePanel;
   }
+  if (isRecord(sectionOpen)) {
+    for (const section of ["source", "translation"] as const) {
+      if (typeof sectionOpen[section] === "boolean") prefs.sectionOpen[section] = sectionOpen[section];
+    }
+  }
+  if (isRecord(sectionHeight)) {
+    for (const section of ["source", "translation"] as const) {
+      const px = sectionHeight[section];
+      if (typeof px === "number" && Number.isFinite(px)) {
+        prefs.sectionHeight[section] = Math.max(MIN_SECTION_HEIGHT, px);
+      }
+    }
+  }
   return prefs;
 }
 
@@ -99,6 +115,8 @@ export function serializePreferences(prefs: Preferences): string {
       scanPoints: prefs.scanPoints,
       panelLayout: prefs.panelLayout,
       sidePanel: prefs.sidePanel,
+      sectionOpen: prefs.sectionOpen,
+      sectionHeight: prefs.sectionHeight,
     },
     null,
     2,

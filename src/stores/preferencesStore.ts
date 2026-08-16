@@ -7,6 +7,8 @@ import {
   MIN_FONT_SAMPLE_PX,
   defaultPreferences,
   type MissingGlyphMode,
+  MIN_SECTION_HEIGHT,
+  type CandidateSection,
   type SidePanel,
 } from '@shared/preferences/types'
 
@@ -125,6 +127,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.sidePanel = panel
   }
 
+  function toggleSection(section: CandidateSection) {
+    prefs.sectionOpen[section] = !prefs.sectionOpen[section]
+  }
+
+  function setSectionHeight(section: CandidateSection, px: number) {
+    prefs.sectionHeight[section] = Math.max(MIN_SECTION_HEIGHT, Math.round(px))
+  }
+
   return {
     prefs,
     hydrate,
@@ -143,5 +153,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMissingGlyphMode,
     setMarkMissingGlyphs,
     setSidePanel,
+    toggleSection,
+    setSectionHeight,
   }
 })

@@ -20,6 +20,35 @@ export type MissingGlyphMode = "hide" | "tofu";
  */
 export type SidePanel = "layers" | "labels";
 
+/** The two sections of the candidate column, by what they hold. */
+export type CandidateSection = "source" | "translation";
+
+/**
+ * Which sections of the candidate column are open.
+ *
+ * ⚠️ Sticky across objects on purpose, and this is the whole reason it is a
+ * preference rather than component state: a section that folded itself away
+ * when the selection changed would move everything beside it on every click,
+ * and somebody who folded one away meant it to stay away.
+ */
+export type SectionOpen = Record<CandidateSection, boolean>;
+
+/**
+ * How tall each section of the candidate column stands, in pixels.
+ *
+ * ⚠️ Set rather than derived, and that is the point: a section as tall as its
+ * contents is a section that changes height every time another object is
+ * picked, so the section below it never sits where you last saw it. A height
+ * somebody dragged holds still, and a list too long for it scrolls inside.
+ */
+export type SectionHeight = Record<CandidateSection, number>;
+
+/**
+ * Below this a section shows one candidate and its own scrollbar, which is no
+ * section at all.
+ */
+export const MIN_SECTION_HEIGHT = 96;
+
 export interface Preferences {
   /** Font families the user starred, in the order they were added. */
   fontFavorites: string[];
@@ -61,6 +90,8 @@ export interface Preferences {
    * re-picking it on each open would be the same click every time.
    */
   sidePanel: SidePanel;
+  sectionOpen: SectionOpen;
+  sectionHeight: SectionHeight;
 }
 
 /**
@@ -80,5 +111,12 @@ export function defaultPreferences(): Preferences {
     panelLayout: {},
     // The reading, because a page is framed and typed before it is stacked.
     sidePanel: "labels",
+    // Both open: what was read and what it becomes are one question asked
+    // twice, and folding either away is something a reader chooses, not
+    // something they have to undo before the column says anything.
+    sectionOpen: { source: true, translation: true },
+    // Room for four or five candidates each, which is what one region read by
+    // every recognizer comes to.
+    sectionHeight: { source: 280, translation: 220 },
   };
 }
