@@ -182,6 +182,16 @@
                 whole point away to a name.
               -->
               <div class="flex min-w-0 flex-1 flex-col">
+                <!--
+                  Source above translation, the order the page is checked in.
+                  A dash rather than nothing when no source is assigned, so
+                  every row keeps the same two-line rhythm and a missing
+                  source is visible instead of merely absent.
+                -->
+                <span
+                  class="text-[10px] leading-snug whitespace-pre-wrap text-muted-foreground"
+                  :class="!sourceOf(element as LabelRow) && 'opacity-50'"
+                >{{ sourceOf(element as LabelRow) ?? '—' }}</span>
                 <textarea
                   v-if="isEditing(element as LabelRow)"
                   :ref="takeFocus"
@@ -371,6 +381,14 @@ function isBlank(row: LabelRow): boolean {
 
 function preview(row: LabelRow): string {
   return isBlank(row) ? '(未翻譯)' : textOf(row.label)
+}
+
+function sourceOf(row: LabelRow): string | null {
+  const { hash } = row.label.source
+  if (hash === null) return null
+  if (hash === 'own') return row.label.ownSource || null
+  const text = project.readingsOfPage(row.pageId).find((c) => c.hash === hash)?.text
+  return text || null
 }
 
 /** Focus follows the input into being, so Enter lands the caret without a click. */
