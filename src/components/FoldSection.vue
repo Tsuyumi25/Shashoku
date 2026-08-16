@@ -18,7 +18,7 @@
     -->
     <div class="fold" :class="[open && 'fold-open']">
       <div class="fold-clip">
-        <div class="fold-body" :style="last ? undefined : { height: `${height}px` }">
+        <div class="fold-body" :style="last || natural ? undefined : { height: `${height}px` }">
           <slot />
         </div>
       </div>
@@ -33,7 +33,7 @@
       change it.
     -->
     <div
-      v-if="open && !last"
+      v-if="open && !last && !natural"
       class="grip"
       :class="[dragging && 'grip-on']"
       @pointerdown="startResize"
@@ -54,6 +54,8 @@ const props = defineProps<{
   count: string
   /** Sits at the bottom of the column, so the column's own end is its end. */
   last?: boolean
+  /** As tall as its content, with no handle — for a block nothing scrolls in. */
+  natural?: boolean
 }>()
 
 /** The head's height, in the px this component's minimum is stated in. */
@@ -69,7 +71,9 @@ const open = computed(() => preferences.prefs.sectionOpen[props.section])
  * section, and an arrangement that changed would otherwise have thrown the
  * height away.
  */
-const height = computed(() => preferences.prefs.sectionHeight[props.section])
+const height = computed(() =>
+  props.section === 'recognizers' ? 0 : preferences.prefs.sectionHeight[props.section],
+)
 
 const dragging = ref(false)
 
@@ -79,12 +83,14 @@ const dragging = ref(false)
  * resizing instead of dropping the gesture wherever it happened to leave.
  */
 function startResize(event: PointerEvent) {
+  const section = props.section
+  if (section === 'recognizers') return
   event.preventDefault()
   const from = event.clientY
   const was = height.value
   dragging.value = true
 
-  const move = (e: PointerEvent) => preferences.setSectionHeight(props.section, was + e.clientY - from)
+  const move = (e: PointerEvent) => preferences.setSectionHeight(section, was + e.clientY - from)
   const stop = () => {
     dragging.value = false
     window.removeEventListener('pointermove', move)

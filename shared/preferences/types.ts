@@ -20,8 +20,15 @@ export type MissingGlyphMode = "hide" | "tofu";
  */
 export type SidePanel = "layers" | "labels";
 
-/** The two sections of the candidate column, by what they hold. */
-export type CandidateSection = "source" | "translation";
+/** The sections of the candidate column, by what they hold. */
+export type CandidateSection = "recognizers" | "source" | "translation";
+
+/**
+ * The sections whose height is dragged rather than taken from their content.
+ * The recognizer section is a fixed block of buttons with nothing to scroll,
+ * so a handle on it would set nothing.
+ */
+export type ResizableSection = "source" | "translation";
 
 /**
  * Which sections of the candidate column are open.
@@ -41,13 +48,40 @@ export type SectionOpen = Record<CandidateSection, boolean>;
  * picked, so the section below it never sits where you last saw it. A height
  * somebody dragged holds still, and a list too long for it scrolls inside.
  */
-export type SectionHeight = Record<CandidateSection, number>;
+export type SectionHeight = Record<ResizableSection, number>;
 
 /**
  * Below this a section shows one candidate and its own scrollbar, which is no
  * section at all.
  */
 export const MIN_SECTION_HEIGHT = 96;
+
+/**
+ * The choice offered is the device, not the runtime: PP-OCR is an ONNX graph
+ * on the processor and a torch model on the card, because no runtime won on
+ * both.
+ */
+export type OcrDevice = "cpu" | "gpu";
+
+/**
+ * Held per model rather than once for all of them: these are not preferences
+ * about OCR, they are facts about each model that a reader is allowed to
+ * disagree with.
+ */
+export function defaultOcrPreference(): OcrModelPreference {
+  return { device: "cpu", onomatopoeia: false };
+}
+
+export interface OcrModelPreference {
+  device: OcrDevice;
+  /**
+   * Whether this model is offered the regions a layout head calls
+   * onomatopoeia — the drawn effects outside the balloons. Off for a model
+   * that answers rubbish on them: an unreadable line is one more candidate to
+   * rule out by hand on every object near it.
+   */
+  onomatopoeia: boolean;
+}
 
 export interface Preferences {
   /** Font families the user starred, in the order they were added. */
@@ -92,6 +126,12 @@ export interface Preferences {
   sidePanel: SidePanel;
   sectionOpen: SectionOpen;
   sectionHeight: SectionHeight;
+  /**
+   * Only what a reader has changed. A model absent from here has never been
+   * touched and takes the default its own route declares, so this file does
+   * not have to be edited every time one is added.
+   */
+  ocr: Record<string, OcrModelPreference>;
 }
 
 /**
@@ -114,9 +154,10 @@ export function defaultPreferences(): Preferences {
     // Both open: what was read and what it becomes are one question asked
     // twice, and folding either away is something a reader chooses, not
     // something they have to undo before the column says anything.
-    sectionOpen: { source: true, translation: true },
+    sectionOpen: { recognizers: true, source: true, translation: true },
     // Room for four or five candidates each, which is what one region read by
     // every recognizer comes to.
     sectionHeight: { source: 280, translation: 220 },
+    ocr: {},
   };
 }

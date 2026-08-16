@@ -38,6 +38,18 @@
       </div>
 
       <!--
+        Where the reading being pointed at in the list was read. Nothing here
+        is an object — it is a mark that lasts as long as the pointer rests.
+      -->
+      <OcrOverlay v-if="ocrPointedBox" :pointed-box="ocrPointedBox" :view="view" />
+
+      <!--
+        The boxes of whichever routes are switched on. Under the pointed mark
+        above so that the one being pointed at still reads as the one.
+      -->
+      <OcrBoxes v-if="ocrBoxes.length" :boxes="ocrBoxes" :routes="OCR_ROUTES" :view="view" />
+
+      <!--
         The lines, under the frames rather than over them: a frame is what says
         an object is there, and a line drawn across one would be covering the
         thing it points at. It takes no pointer of its own — which line a click
@@ -175,6 +187,8 @@
 import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import LabelBox from '@/components/LabelBox.vue'
+import OcrBoxes from '@/components/OcrBoxes.vue'
+import OcrOverlay from '@/components/OcrOverlay.vue'
 import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
@@ -222,6 +236,7 @@ import {
   type TurnedLabel,
 } from '@/stores/editorStore'
 import { useConnectStore } from '@/stores/connectStore'
+import { OCR_ROUTES, useOcrStore } from '@/stores/ocrStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -231,6 +246,7 @@ const project = useProjectStore()
 const editor = useEditorStore()
 const selection = useSelectionStore()
 const connect = useConnectStore()
+const ocr = useOcrStore()
 const ui = useUiStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
@@ -245,6 +261,20 @@ const currentFile = computed(() =>
 
 /** What this page draws and in what order — the same answer the export reads. */
 const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers) : []))
+
+const ocrBoxes = computed(() => {
+  if (!editor.currentPageId || ocr.shown.size === 0) return []
+  return project.readingsOfPage(editor.currentPageId).filter((c) => ocr.shown.has(c.source))
+})
+
+const ocrPointedBox = computed(() => {
+  const hash = ocr.pointedAt
+  if (!hash || hash === 'own' || !editor.currentPageId) return null
+  const found = project
+    .readingsOfPage(editor.currentPageId)
+    .find((c) => c.hash === hash)
+  return found ? { x: found.x, y: found.y, width: found.w, height: found.h } : null
+})
 
 /**
  * Every label's frame, empty ones included: an object with no text still has a

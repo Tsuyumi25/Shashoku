@@ -119,10 +119,10 @@ describe('candidatesFor', () => {
     expect(rows.map((r) => r.hash).sort()).toEqual(['h0', 'h1'])
   })
 
-  it('stands the reading in the slot first, marked as the one it stands for', () => {
+  it('stands the reading in the slot right after the own row, marked', () => {
     const pool = [read({ hash: 'a' }), read({ hash: 'b', x: 200 })]
     const rows = candidatesFor(object({ hash: 'a', by: 'human' }), { x: 150, y: 150 }, pool, PAGE)
-    expect(rows[0]).toMatchObject({ hash: 'a', held: true })
+    expect(rows[1]).toMatchObject({ hash: 'a', held: true })
     expect(rows.filter((r) => r.held)).toHaveLength(1)
   })
 
@@ -130,16 +130,16 @@ describe('candidatesFor', () => {
   it('keeps the reading in the slot even where it is now far out of reach', () => {
     const pool = [read({ hash: 'a' }), read({ hash: 'b', x: 5000, y: 5000 })]
     const rows = candidatesFor(object({ hash: 'b', by: 'human' }), { x: 150, y: 150 }, pool, PAGE)
-    expect(rows[0]).toMatchObject({ hash: 'b', held: true })
+    expect(rows[1]).toMatchObject({ hash: 'b', held: true })
   })
 
   it('lets the slot past the count as well, without costing a place', () => {
     const pool = [0, 1, 2].map((i) => read({ hash: `h${i}`, x: i * 50, y: 0 }))
     const rows = candidatesFor(object({ hash: 'h2', by: 'human' }), { x: 0, y: 0 }, pool, PAGE, 2)
-    expect(rows.map((r) => r.hash)).toEqual(['h2', 'h0', 'h1'])
+    expect(rows.map((r) => r.hash)).toEqual(['own', 'h2', 'h0', 'h1'])
   })
 
-  it("stands the object's own source above the readings, out of the sort", () => {
+  it("stands the object's own source above everything, out of the sort", () => {
     const pool = [read({ confidence: 1 })]
     const rows = candidatesFor(object(empty, '自分で書いた'), { x: 150, y: 150 }, pool, PAGE)
     expect(rows[0]).toMatchObject({ hash: 'own', text: '自分で書いた', confidence: null })
@@ -150,9 +150,10 @@ describe('candidatesFor', () => {
     expect(rows[0]).toMatchObject({ hash: 'own', held: true })
   })
 
-  it('offers no own row until somebody has written one', () => {
+  it('offers the own row even before anybody has written one', () => {
     const rows = candidatesFor(object(), { x: 0, y: 0 }, [], PAGE)
-    expect(rows).toHaveLength(0)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ hash: 'own', text: '', held: false })
   })
 })
 

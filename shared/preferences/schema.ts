@@ -2,7 +2,9 @@ import {
   MAX_FONT_SAMPLE_PX,
   MIN_SECTION_HEIGHT,
   MIN_FONT_SAMPLE_PX,
+  defaultOcrPreference,
   defaultPreferences,
+  type OcrModelPreference,
   type Preferences,
 } from "./types";
 
@@ -41,6 +43,7 @@ export function parsePreferences(raw: string): Preferences {
     sidePanel,
     sectionOpen,
     sectionHeight,
+    ocr,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
@@ -87,7 +90,7 @@ export function parsePreferences(raw: string): Preferences {
     prefs.sidePanel = sidePanel;
   }
   if (isRecord(sectionOpen)) {
-    for (const section of ["source", "translation"] as const) {
+    for (const section of ["recognizers", "source", "translation"] as const) {
       if (typeof sectionOpen[section] === "boolean") prefs.sectionOpen[section] = sectionOpen[section];
     }
   }
@@ -96,6 +99,20 @@ export function parsePreferences(raw: string): Preferences {
       const px = sectionHeight[section];
       if (typeof px === "number" && Number.isFinite(px)) {
         prefs.sectionHeight[section] = Math.max(MIN_SECTION_HEIGHT, px);
+      }
+    }
+  }
+  if (isRecord(ocr)) {
+    // Both halves are read on their own. A file naming a device that no longer
+    // exists still says something about the checkbox beside it, and dropping
+    // the whole entry would quietly turn that back on.
+    for (const [model, value] of Object.entries(ocr)) {
+      if (!isRecord(value)) continue;
+      const kept: Partial<OcrModelPreference> = {};
+      if (value.device === "cpu" || value.device === "gpu") kept.device = value.device;
+      if (typeof value.onomatopoeia === "boolean") kept.onomatopoeia = value.onomatopoeia;
+      if (Object.keys(kept).length > 0) {
+        prefs.ocr[model] = { ...defaultOcrPreference(), ...kept };
       }
     }
   }
@@ -117,6 +134,7 @@ export function serializePreferences(prefs: Preferences): string {
       sidePanel: prefs.sidePanel,
       sectionOpen: prefs.sectionOpen,
       sectionHeight: prefs.sectionHeight,
+      ocr: prefs.ocr,
     },
     null,
     2,

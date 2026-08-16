@@ -9,6 +9,7 @@ import {
   type MissingGlyphMode,
   MIN_SECTION_HEIGHT,
   type CandidateSection,
+  type ResizableSection,
   type SidePanel,
 } from '@shared/preferences/types'
 
@@ -131,7 +132,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.sectionOpen[section] = !prefs.sectionOpen[section]
   }
 
-  function setSectionHeight(section: CandidateSection, px: number) {
+  function setSectionHeight(section: ResizableSection, px: number) {
     prefs.sectionHeight[section] = Math.max(MIN_SECTION_HEIGHT, Math.round(px))
   }
 

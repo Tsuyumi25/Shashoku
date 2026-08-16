@@ -76,10 +76,14 @@ export const CANDIDATE_SPAN = 0.075
  * `centre` is where the object visually sits, not the anchor it is stored by —
  * the anchor means a different corner depending on how the text is aligned.
  *
- * ⚠️ The reading in the slot comes first and is exempt from the near test and
- * the count: an object carried across the page still stands for what somebody
- * said it stands for, and a list that dropped it would report the choice as
- * unmade.
+ * The own row always leads, empty or not: it is the one row that is always
+ * offered, and a row that is always there is what lets there be no separate
+ * "write your own" button.
+ *
+ * ⚠️ The reading in the slot stands right after it, exempt from the near test
+ * and the count: an object carried across the page still stands for what
+ * somebody said it stands for, and a list that dropped it would report the
+ * choice as unmade.
  */
 export function candidatesFor(
   object: { source: TextSource; ownSource: string },
@@ -138,10 +142,9 @@ export function candidatesFor(
   // Outside the sort, both of them: a person's own writing has no confidence
   // to rank against a model's, and the held one is not competing in a list it
   // has been picked out of.
-  const top: SourceCandidate[] = []
-  if (held === 'own') top.push(own(true))
-  else {
-    const standing = held === null ? undefined : pool.find((c) => c.hash === held)
+  const top: SourceCandidate[] = [own(held === 'own')]
+  if (held !== null && held !== 'own') {
+    const standing = pool.find((c) => c.hash === held)
     if (standing) {
       top.push({
         hash: standing.hash,
@@ -153,8 +156,6 @@ export function candidatesFor(
         held: true,
       })
     }
-    // Empty is not a row — the button that makes one is the whole offer.
-    if (object.ownSource.length > 0) top.push(own(false))
   }
   return [...top, ...rows]
 }
