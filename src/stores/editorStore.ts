@@ -24,6 +24,8 @@ import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
+import { sourceForNewObject } from '@shared/ocr/candidates'
+import { drawnLabel } from '@/lib/labelRaster'
 
 export interface Command {
 
@@ -589,7 +591,12 @@ export const useEditorStore = defineStore('editor', () => {
       tags: [],
       rotation: 0,
       lines: [''],
-      source: { hash: null, by: 'auto' },
+      // Nothing near enough leaves the slot unanswered rather than settled,
+      // so a later run is still free to fill it.
+      source: sourceForNewObject(
+        drawnLabel('', project.header.seedStyle, { x, y }, 0).center,
+        project.readingsOfPage(currentPageId.value),
+      ),
       ownSource: '',
       translations: [],
       translation: null,

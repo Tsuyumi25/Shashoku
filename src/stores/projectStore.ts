@@ -12,6 +12,7 @@ import type {
   TextSource,
   TranslationCandidate,
 } from '@shared/page/types'
+import { absorb, type OcrArrival } from '@shared/ocr/pool'
 import { PASS_THROUGH } from '@shared/page/types'
 import {
   defaultColorForTagIndex,
@@ -900,6 +901,20 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /**
+   * Takes a run's readings into a page's pool and says which are new, so the
+   * caller can settle the slots that were waiting for exactly those.
+   */
+  function absorbReadings(pageId: string, arrivals: readonly OcrArrival[]): Set<string> {
+    const file = pageById(pageId)
+    if (!file) return new Set()
+    const { candidates, born } = absorb(file.ocr.candidates, arrivals)
+    if (born.length === 0) return new Set()
+    file.ocr.candidates = candidates
+    markPageDirty(pageId)
+    return new Set(born)
+  }
+
   function readingsOfPage(pageId: string): readonly OcrCandidatePersisted[] {
     return pageById(pageId)?.ocr.candidates ?? []
   }
@@ -1093,6 +1108,7 @@ export const useProjectStore = defineStore('project', () => {
     correctTranslation,
     removeTranslation,
     correctReading,
+    absorbReadings,
     readingsOfPage,
     forgetReadings,
     setLabelStyle,
