@@ -1,0 +1,1 @@
+"""Shashoku's OCR sidecar."""

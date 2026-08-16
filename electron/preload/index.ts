@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ShashokuEngineApi } from "@shared/engine/types";
+import type { OcrStatus, ShashokuOcrApi } from "@shared/ocr/types";
 import { CHANNELS, type ShashokuApi, type WritePageInput } from "@shared/ipc/channels";
 
 // The addon is required here rather than reached through IPC: a sample render
@@ -137,5 +138,27 @@ const engineApi: ShashokuEngineApi = {
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
 };
 
+// ────────────────────────────────────────────────────────────────────────────
+// OCR
+//
+// Reached over IPC rather than required here, unlike the text engine above.
+// The models live in a process of their own, so there is no addon to hold — and
+// the round trip that would have dominated a sample render is nothing beside an
+// inference measured in hundreds of milliseconds.
+
+const ocrApi: ShashokuOcrApi = {
+  models: () => ipcRenderer.invoke(CHANNELS.ocrModels),
+  detect: (model, imagePath, minScore) =>
+    ipcRenderer.invoke(CHANNELS.ocrDetect, model, imagePath, minScore),
+  read: (model, imagePath, crops) =>
+    ipcRenderer.invoke(CHANNELS.ocrRead, model, imagePath, crops),
+  unload: (model) => ipcRenderer.invoke(CHANNELS.ocrUnload, model),
+  stop: () => ipcRenderer.invoke(CHANNELS.ocrStop),
+  onStatus: (handler) => {
+    ipcRenderer.on(CHANNELS.ocrStatus, (_event, status: OcrStatus) => handler(status));
+  },
+};
+
 contextBridge.exposeInMainWorld("api", api);
 contextBridge.exposeInMainWorld("engine", engineApi);
+contextBridge.exposeInMainWorld("ocr", ocrApi);

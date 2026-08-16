@@ -11,3 +11,6 @@ crates/*/*.node
 .env
 .env.local
 .scratch/
+python/.venv/
+python/**/__pycache__/
+python/*.egg-info/

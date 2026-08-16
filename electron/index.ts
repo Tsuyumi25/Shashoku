@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { createWindow } from "./window";
+import { registerOcrHandlers } from "./ipc/ocr";
 import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
@@ -22,6 +23,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  registerOcrHandlers();
   registerPreferencesHandlers();
   registerProjectHandlers();
   registerShashokuProjectHandlers();

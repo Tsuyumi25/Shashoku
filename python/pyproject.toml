@@ -1,0 +1,45 @@
+[project]
+name = "shashoku-ocr"
+version = "0.1.0"
+description = "Shashoku OCR sidecar"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "torch>=2.6",
+    # Transformers 5 warns and falls back to a compatibility image processor
+    # without it. The fallback reads these models correctly today, but it is a
+    # path upstream is walking away from and no published pipeline using these
+    # models is on it — four megabytes to stay where everyone else stands.
+    "torchvision",
+    "pillow>=10",
+    "numpy>=1.26,<3",
+    # The balloon detector is a stock architecture, so transformers alone reads
+    # it; the recognizers below each need their author's own code.
+    "transformers>=5.1,<6",
+    "manga-ocr>=0.1.16",
+    # Pinned to the version the weights were published against, which is what
+    # the author's own load_model.py asks for.
+    "rfdetr==1.7.0",
+    "rapidocr>=3.9.2",
+    # Beside torch rather than instead of it, and only PP-OCR runs on it. That
+    # model is a single convolutional pass with nothing an export could drop,
+    # so freezing it costs nothing and the fused kernels are free speed; the
+    # two recognizers that write a character at a time lose real accuracy the
+    # same way. Fifteen milliseconds to import next to torch.
+    "onnxruntime>=1.28.0",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["shashoku_ocr*"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

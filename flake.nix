@@ -39,6 +39,16 @@
         libGL
         wayland
       ];
+      # What the OCR sidecar's wheels expect to find. They are manylinux
+      # builds, so they link against a distribution's libraries rather than
+      # carrying their own: numpy wants libstdc++, opencv wants the X client
+      # library whether or not anything is ever drawn. Named here rather than
+      # left to whatever the system's nix-ld happens to hold, so a checkout
+      # behaves the same on a machine configured differently.
+      sidecarLibs = with pkgs; [
+        stdenv.cc.cc.lib
+        zlib
+      ];
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -47,9 +57,10 @@
           pnpm_10
           cargo
           rustc
+          uv
         ];
         shellHook = ''
-          export NIX_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath electronLibs}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
+          export NIX_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (electronLibs ++ sidecarLibs)}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
         '';
       };
     };

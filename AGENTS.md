@@ -36,6 +36,7 @@ this repository.
 ```
 pnpm install
 pnpm engine:build
+pnpm sidecar:sync
 pnpm dev
 ```
 
@@ -49,6 +50,11 @@ everyone who installs. Working on the repository therefore needs a Rust
 toolchain (the flake's devShell provides one); people running a packaged
 build do not, since the `.node` ships inside it.
 
+`pnpm sidecar:sync` builds the OCR environment with `uv`, and is separate for
+the same reason: it is a gigabyte of PyTorch that a session may never reach
+for. Weights are not part of it — each model downloads itself the first time
+something asks for it.
+
 ## Architecture
 
 Layout as of this commit — modules land incrementally:
@@ -57,4 +63,6 @@ Layout as of this commit — modules land incrementally:
 - `shared/` — data model, IPC channels, engine surface
 - `crates/shashoku-engine` — Rust text engine, a native Node addon that
   preload requires directly rather than reaching over IPC
+- `python/shashoku_ocr` — the OCR models, in a process the main process
+  spawns and talks to in JSON lines over stdio
 - `src/` — Vue renderer

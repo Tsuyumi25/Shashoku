@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "engine:build": "pnpm --filter @shashoku/engine build",
-    "engine:build:debug": "pnpm --filter @shashoku/engine build:debug"
+    "engine:build:debug": "pnpm --filter @shashoku/engine build:debug",
+    "sidecar:sync": "uv sync --project python"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.7.4",
