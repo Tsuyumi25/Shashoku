@@ -10,3 +10,4 @@ crates/*/index.d.ts
 crates/*/*.node
 .env
 .env.local
+.scratch/
