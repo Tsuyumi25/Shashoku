@@ -380,7 +380,9 @@ export const useProjectStore = defineStore('project', () => {
     try {
       for (const pageId of pages) {
         const file = pageById(pageId)
-        if (!file) continue
+        // A page that could not be read opened as a blank stand-in. Writing
+        // that back would replace a file that may still be recoverable.
+        if (!file || file.badge !== 'ok') continue
         await window.api.writePage(file.pageDir, {
           manifestRaw: serializeManifest(file.page),
         })

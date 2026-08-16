@@ -116,3 +116,51 @@ describe('reading a project back off disk', () => {
     expect(trace.calls.indexOf('writePage')).toBeLessThan(trace.calls.indexOf('openProject'))
   })
 })
+
+describe('saving', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // A page whose manifest could not be read opens as a blank stand-in. Writing
+  // that stand-in back would replace a file that may still be recoverable, so
+  // the save must leave it untouched however the page came to be marked dirty.
+  it('never writes a page that opened as a stand-in', async () => {
+    const project = useProjectStore()
+    const damagedId = 'source-260809-1300'
+    project.rootPath = ROOT
+    project.files = [
+      {
+        pageId: PAGE_ID,
+        pageDir: PAGE_DIR,
+        page: defaultManifest('source', 1200, 1700),
+        badge: 'ok',
+      },
+      {
+        pageId: damagedId,
+        pageDir: `${ROOT}/shashoku/pages/${damagedId}`,
+        page: defaultManifest(damagedId, 1, 1),
+        badge: 'damaged',
+      },
+    ]
+    const written: string[] = []
+    vi.stubGlobal('window', {
+      api: {
+        writePage: async (pageDir: string) => {
+          written.push(pageDir)
+        },
+        writePreferences: async () => {},
+      },
+    })
+
+    project.addLabel(PAGE_ID, label('t3'))
+    project.addLabel(damagedId, label('t4'))
+    await project.flush()
+
+    expect(written).toEqual([PAGE_DIR])
+  })
+})
