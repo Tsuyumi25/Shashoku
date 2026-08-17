@@ -100,6 +100,38 @@ function buildServer(getSource: () => string | undefined): McpServer {
   );
 
   server.registerTool(
+    "withdraw_translation",
+    {
+      title: "Withdraw a candidate this client proposed",
+      description:
+        "Remove one translation candidate from an object's drawer. Only candidates this " +
+        "client itself proposed can be withdrawn, and only while unchosen: human-written " +
+        "candidates, the current choice, and other clients' proposals are all refused. " +
+        "Use this to clean up your own mistaken proposals.",
+      inputSchema: {
+        page_id: z.string(),
+        object_id: z.string(),
+        translation_id: z.string(),
+      },
+    },
+    async ({ page_id, object_id, translation_id }) => {
+      try {
+        await askRenderer("withdraw_translation", {
+          pageId: page_id,
+          objectId: object_id,
+          translationId: translation_id,
+          source: getSource(),
+        });
+        return {
+          content: [{ type: "text", text: `候選 ${translation_id} 已撤回` }],
+        };
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "choose_translation",
     {
       title: "Point an object at one of its translation candidates",

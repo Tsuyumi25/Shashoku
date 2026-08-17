@@ -11,6 +11,7 @@ import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { ProjectFile } from '@/types/project'
 import { collectTexts } from './collect'
 import { planProposal } from './propose'
+import { planWithdraw } from './withdraw'
 import { renderProposeOutcomes, renderTexts } from '@shared/mcp/render'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
@@ -190,6 +191,34 @@ describe('planProposal', () => {
     expect(planProposal(base(), []).action).toBe('refuse')
     expect(planProposal(base(), ['有\n換行']).action).toBe('refuse')
     expect(planProposal(base(), ['', ' ']).action).toBe('refuse')
+  })
+})
+
+describe('planWithdraw', () => {
+  const CLIENT = 'claude-code 2.1.219'
+  const drawer = (extra: Partial<TextLayerEntry> = {}) =>
+    text('a', {
+      translations: [
+        { id: 'mine', lines: ['本 client 提的'], source: CLIENT },
+        { id: 'theirs', lines: ['別的 client 提的'], source: 'codex 1.0' },
+        { id: 'yours', lines: ['人寫的'], human: true },
+        { id: 'old', lines: ['署名機制前的'] },
+      ],
+      ...extra,
+    })
+
+  it('removes only an unchosen candidate stamped with the same client', () => {
+    expect(planWithdraw(drawer(), 'mine', CLIENT)).toEqual({ action: 'remove' })
+  })
+
+  it('refuses everything that is not its own unchosen stamp', () => {
+    expect(planWithdraw(undefined, 'mine', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer(), 'gone', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer(), 'yours', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer({ translation: 'mine' }), 'mine', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer(), 'theirs', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer(), 'old', CLIENT).action).toBe('refuse')
+    expect(planWithdraw(drawer(), 'mine', undefined).action).toBe('refuse')
   })
 })
 

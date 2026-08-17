@@ -1,7 +1,14 @@
-import type { ChooseParams, McpQuery, ProposeOutcome, ProposeParams } from '@shared/mcp/types'
+import type {
+  ChooseParams,
+  McpQuery,
+  ProposeOutcome,
+  ProposeParams,
+  WithdrawParams,
+} from '@shared/mcp/types'
 import { useProjectStore } from '@/stores/projectStore'
 import { collectTexts } from './collect'
 import { planProposal } from './propose'
+import { planWithdraw } from './withdraw'
 
 function openProject() {
   const project = useProjectStore()
@@ -56,6 +63,16 @@ async function chooseTranslation(params: ChooseParams): Promise<void> {
   await project.flush()
 }
 
+async function withdrawTranslation(params: WithdrawParams): Promise<void> {
+  const project = openProject()
+  writablePage(project, params.pageId)
+  const entry = project.labelById(params.pageId, params.objectId)
+  const plan = planWithdraw(entry, params.translationId, params.source)
+  if (plan.action === 'refuse') throw new Error(plan.reason)
+  project.removeTranslation(params.pageId, params.objectId, params.translationId)
+  await project.flush()
+}
+
 async function answer(query: McpQuery): Promise<unknown> {
   switch (query.method) {
     case 'get_texts': {
@@ -66,6 +83,10 @@ async function answer(query: McpQuery): Promise<unknown> {
     }
     case 'choose_translation': {
       await chooseTranslation(query.params as ChooseParams)
+      return null
+    }
+    case 'withdraw_translation': {
+      await withdrawTranslation(query.params as WithdrawParams)
       return null
     }
   }

@@ -6,7 +6,11 @@ import type { PageBadge } from "../ipc/channels";
  * envelopes are that correlation: the id is minted by the asker and echoed by
  * the answer, nothing else ties a reply to its question.
  */
-export type McpQueryMethod = "get_texts" | "propose_translations" | "choose_translation";
+export type McpQueryMethod =
+  | "get_texts"
+  | "propose_translations"
+  | "choose_translation"
+  | "withdraw_translation";
 
 export interface McpQuery {
   id: string;
@@ -67,4 +71,12 @@ export interface ChooseParams {
   pageId: string;
   objectId: string;
   translationId: string;
+}
+
+export interface WithdrawParams {
+  pageId: string;
+  objectId: string;
+  translationId: string;
+  /** The withdrawing client's clientInfo — must match the candidate's stamp. */
+  source?: string;
 }
