@@ -137,6 +137,13 @@ describe('renderTexts', () => {
             candidates: [
               { id: 't1', text: '你在說什麼啊', human: false, chosen: true },
               { id: 't2', text: '少騙人了', human: true, chosen: false },
+              {
+                id: 't3',
+                text: '才不是那樣呢',
+                human: false,
+                chosen: false,
+                source: 'claude-code 2.1.219',
+              },
             ],
           },
           { id: 'b', source: null, translation: '', candidates: [] },
@@ -147,7 +154,9 @@ describe('renderTexts', () => {
     expect(rendered).toContain('2 頁 · 2 個文字物件')
     expect(rendered).toContain('原文: 何言ってんの')
     expect(rendered).toContain('譯文: 你在說什麼啊')
-    expect(rendered).toContain('候選: ✓t1「你在說什麼啊」 ／ t2「少騙人了」（human）')
+    expect(rendered).toContain(
+      '候選: ✓t1「你在說什麼啊」 ／ t2「少騙人了」（human） ／ t3「才不是那樣呢」（claude-code 2.1.219）',
+    )
     expect(rendered).toContain('原文: （無）')
     expect(rendered).toContain('譯文: （未翻）')
     expect(rendered).toContain('頁 002 ·（damaged，內容不可讀）')

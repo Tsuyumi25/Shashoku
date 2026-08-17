@@ -120,6 +120,14 @@ describe('the translation candidates', () => {
     expect(() => parseManifest(raw({ ...UPRIGHT, translations: bad }))).toThrow(PageParseError)
   })
 
+  it('round trips who proposed a candidate, and refuses an empty name', () => {
+    const signed = [{ id: 't1', lines: ['妳終於來了'], source: 'claude-code 2.1.219' }]
+    const entry = textEntry({ translations: signed })
+    expect(parseManifest(serializeManifest(manifestWith(entry)))).toEqual(manifestWith(entry))
+    const blank = [{ id: 't1', lines: ['妳終於來了'], source: '' }]
+    expect(() => parseManifest(raw({ ...UPRIGHT, translations: blank }))).toThrow(PageParseError)
+  })
+
   /**
    * Two objects reading the same way are the same picture. What the list is
    * holding behind the one in the slot moves nothing, and a thumbnail thrown

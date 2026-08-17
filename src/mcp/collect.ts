@@ -26,6 +26,7 @@ export function collectTexts(files: readonly ProjectFile[]): PageTexts[] {
           text: c.lines.join('\n'),
           human: c.human === true,
           chosen: entry.translation === c.id,
+          ...(c.source ? { source: c.source } : {}),
         })),
       })),
     }

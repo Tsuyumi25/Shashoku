@@ -25,7 +25,13 @@ async function proposeTranslations(params: ProposeParams): Promise<ProposeOutcom
     if (plan.action === 'refuse') {
       return { objectId: item.objectId, ok: false, reason: plan.reason }
     }
-    const translationId = project.addTranslation(params.pageId, item.objectId, item.lines, 'model')
+    const translationId = project.addTranslation(
+      params.pageId,
+      item.objectId,
+      item.lines,
+      'model',
+      params.source,
+    )
     if (translationId === null) {
       return { objectId: item.objectId, ok: false, reason: '物件不存在' }
     }

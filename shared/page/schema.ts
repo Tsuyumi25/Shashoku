@@ -205,15 +205,18 @@ function parseTranslations(v: unknown, at: string): TranslationCandidate[] {
   return v.map((entry, i) => {
     const where = `${at}[${i}]`
     if (!isRecord(entry)) fail(`${where} 必須是物件`)
-    const { id, human } = entry
+    const { id, human, source } = entry
     if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
     // The slot names one of these, so two of them answering to the same name
     // would make what the object reads as depend on which was searched first.
     if (seen.has(id)) fail(`${where}.id「${id}」重複`)
     seen.add(id)
     if (human !== undefined && typeof human !== 'boolean') fail(`${where}.human 必須是布林值`)
+    if (source !== undefined && (typeof source !== 'string' || source.length === 0))
+      fail(`${where}.source 必須是非空字串`)
     const candidate: TranslationCandidate = { id, lines: parseLines(entry.lines, `${where}.lines`) }
     if (human) candidate.human = true
+    if (typeof source === 'string' && source.length > 0) candidate.source = source
     return candidate
   })
 }

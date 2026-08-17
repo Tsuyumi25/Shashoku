@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { app } from "electron";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -15,10 +18,35 @@ const DEFAULT_PORT = 8747;
  * agent the user connected, however local the socket is. clientInfo is
  * self-reported and the spec forbids trusting it, so this header is the only
  * authentication there is.
+ *
+ * Minted once and kept in userData, because the client keeps it too: a token
+ * that changed every launch would have the user re-pairing every agent every
+ * morning. Empty until loadToken resolves, and the listener only starts after
+ * it has — an empty token never authenticates anything.
  */
-const token = process.env.SHASHOKU_MCP_TOKEN ?? randomBytes(16).toString("hex");
+let token = "";
 
-function buildServer(): McpServer {
+async function loadToken(): Promise<string> {
+  const fromEnv = process.env.SHASHOKU_MCP_TOKEN;
+  if (fromEnv) return fromEnv;
+  const path = join(app.getPath("userData"), "mcp-token");
+  try {
+    const held = (await readFile(path, "utf8")).trim();
+    if (held !== "") return held;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const minted = randomBytes(16).toString("hex");
+  await writeFile(path, `${minted}\n`, { mode: 0o600 });
+  return minted;
+}
+
+/**
+ * `getSource` answers with the session's clientInfo at call time — the
+ * handshake happens after construction, so it cannot be read here and held.
+ * It is the server stamping who spoke, not the model signing itself.
+ */
+function buildServer(getSource: () => string | undefined): McpServer {
   const server = new McpServer({ name: "shashoku", version: "0.0.0" });
 
   server.registerTool(
@@ -62,6 +90,7 @@ function buildServer(): McpServer {
         const outcomes = await askRenderer<ProposeOutcome[]>("propose_translations", {
           pageId: page_id,
           items: items.map((i) => ({ objectId: i.object_id, lines: i.lines })),
+          source: getSource(),
         });
         return { content: [{ type: "text", text: renderProposeOutcomes(outcomes) }] };
       } catch (err) {
@@ -110,7 +139,19 @@ function toolError(err: unknown) {
   };
 }
 
-async function handleMcp(req: IncomingMessage, res: ServerResponse) {
+/**
+ * Sessions rather than stateless, because identity lives in the handshake:
+ * clientInfo arrives once at initialize, and a per-request server would be
+ * meeting every tool call as a stranger.
+ */
+const transports = new Map<string, StreamableHTTPServerTransport>();
+
+function clientLabel(server: McpServer): string | undefined {
+  const info = server.server.getClientVersion();
+  return info ? `${info.name} ${info.version}` : undefined;
+}
+
+async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number) {
   if (req.headers.authorization !== `Bearer ${token}`) {
     res.writeHead(401, { "content-type": "application/json" }).end(
       JSON.stringify({
@@ -121,14 +162,30 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse) {
     );
     return;
   }
-  // Stateless: a fresh server per request keeps request ids from colliding
-  // across concurrent clients, and there is no session state worth keeping yet.
-  const server = buildServer();
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on("close", () => {
-    void transport.close();
-    void server.close();
+  const sessionId = req.headers["mcp-session-id"];
+  if (typeof sessionId === "string") {
+    const held = transports.get(sessionId);
+    if (held) {
+      await held.handleRequest(req, res);
+      return;
+    }
+  }
+  // No session yet: only an initialize opens one; the transport itself
+  // answers anything else with the right protocol error.
+  const server: McpServer = buildServer(() => clientLabel(server));
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (id) => {
+      transports.set(id, transport);
+    },
+    // Kills DNS rebinding as a class: a rebound page's request arrives with
+    // the attacker's Host and is refused before the token even matters.
+    enableDnsRebindingProtection: true,
+    allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
   });
+  transport.onclose = () => {
+    if (transport.sessionId) transports.delete(transport.sessionId);
+  };
   await server.connect(transport);
   await transport.handleRequest(req, res);
 }
@@ -140,7 +197,7 @@ export function startMcpServer() {
       res.writeHead(404).end();
       return;
     }
-    void handleMcp(req, res).catch((err) => {
+    void handleMcp(req, res, port).catch((err) => {
       console.error("[mcp] request failed", err);
       if (!res.headersSent) res.writeHead(500).end();
     });
@@ -148,9 +205,16 @@ export function startMcpServer() {
   httpServer.on("error", (err) => {
     console.error("[mcp] server error — MCP endpoint unavailable", err);
   });
-  httpServer.listen(port, "127.0.0.1", () => {
-    console.log(`[mcp] listening on http://127.0.0.1:${port}/mcp`);
-    console.log(`[mcp] bearer token: ${token}`);
-  });
+  void loadToken()
+    .then((held) => {
+      token = held;
+      httpServer.listen(port, "127.0.0.1", () => {
+        console.log(`[mcp] listening on http://127.0.0.1:${port}/mcp`);
+        console.log(`[mcp] bearer token: ${token}`);
+      });
+    })
+    .catch((err) => {
+      console.error("[mcp] token unavailable — MCP endpoint not started", err);
+    });
   return httpServer;
 }

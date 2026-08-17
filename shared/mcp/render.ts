@@ -21,7 +21,10 @@ export function renderTexts(pages: PageTexts[]): string {
       out.push(`  譯文: ${obj.translation === "" ? "（未翻）" : obj.translation}`);
       if (obj.candidates.length > 0) {
         const drawer = obj.candidates
-          .map((c) => `${c.chosen ? "✓" : ""}${c.id}「${c.text}」${c.human ? "（human）" : ""}`)
+          .map((c) => {
+            const who = c.human ? "（human）" : c.source ? `（${c.source}）` : "";
+            return `${c.chosen ? "✓" : ""}${c.id}「${c.text}」${who}`;
+          })
           .join(" ／ ");
         out.push(`  候選: ${drawer}`);
       }

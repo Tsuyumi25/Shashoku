@@ -122,7 +122,7 @@ const rows = computed<Row[]>(() => {
     ...o.translations.map((c) => ({
       id: c.id,
       text: c.lines.join('\n'),
-      by: c.human ? '你寫的' : '模型',
+      by: c.human ? '你寫的' : (c.source ?? '模型'),
     })),
   ]
 })

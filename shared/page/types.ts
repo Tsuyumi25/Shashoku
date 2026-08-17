@@ -179,6 +179,12 @@ export interface TranslationCandidate {
   id: string
   lines: string[]
   human?: boolean
+  /**
+   * Who proposed this, for telling drawers apart — the MCP handshake's
+   * clientInfo, stamped by the server, costing the model nothing. Display
+   * only: the mark that protects work is `human`, never this.
+   */
+  source?: string
 }
 
 /**

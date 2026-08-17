@@ -817,11 +817,13 @@ export const useProjectStore = defineStore('project', () => {
     labelId: string,
     lines: string[],
     by: 'human' | 'model',
+    source?: string,
   ): string | null {
     const label = labelById(pageId, labelId)
     if (!label) return null
     const candidate: TranslationCandidate = { id: generateId(), lines }
     if (by === 'human') candidate.human = true
+    else if (source) candidate.source = source
     label.translations.push(candidate)
     markPageDirty(pageId)
     return candidate.id

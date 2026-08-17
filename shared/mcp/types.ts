@@ -28,6 +28,8 @@ export interface TranslationCandidateView {
   human: boolean;
   /** Where the slot points today. */
   chosen: boolean;
+  /** Which client proposed it — clientInfo stamped by the server, display only. */
+  source?: string;
 }
 
 export interface TextObjectTexts {
@@ -53,6 +55,8 @@ export interface ProposeItem {
 export interface ProposeParams {
   pageId: string;
   items: ProposeItem[];
+  /** The proposing client, from the session's clientInfo — not model-supplied. */
+  source?: string;
 }
 
 export type ProposeOutcome =
