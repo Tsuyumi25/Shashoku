@@ -130,7 +130,8 @@ async function withdrawTranslation(
   }
 }
 
-async function answer(query: McpQuery): Promise<unknown> {
+/** Exported so tests can drive the same dispatch the bridge drives. */
+export async function answer(query: McpQuery): Promise<unknown> {
   switch (query.method) {
     case 'get_texts': {
       return collectTexts(openProject().files)
