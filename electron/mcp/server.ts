@@ -184,8 +184,24 @@ function toolError(err: unknown) {
  * Sessions rather than stateless, because identity lives in the handshake:
  * clientInfo arrives once at initialize, and a per-request server would be
  * meeting every tool call as a stranger.
+ *
+ * They also have to be reaped here: the SDK fires onclose only on an explicit
+ * DELETE, and a CLI agent invoked once per task just terminates — without the
+ * sweep every such run would stay in this map for the life of the process.
  */
-const transports = new Map<string, StreamableHTTPServerTransport>();
+const sessions = new Map<string, { transport: StreamableHTTPServerTransport; lastSeen: number }>();
+
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+function reapIdleSessions() {
+  const cutoff = Date.now() - SESSION_IDLE_MS;
+  for (const [id, held] of sessions) {
+    if (held.lastSeen < cutoff) {
+      sessions.delete(id);
+      void held.transport.close();
+    }
+  }
+}
 
 function clientLabel(server: McpServer): string | undefined {
   const info = server.server.getClientVersion();
@@ -209,11 +225,22 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
   }
   const sessionId = req.headers["mcp-session-id"];
   if (typeof sessionId === "string") {
-    const held = transports.get(sessionId);
+    const held = sessions.get(sessionId);
     if (held) {
-      await held.handleRequest(req, res);
+      held.lastSeen = Date.now();
+      await held.transport.handleRequest(req, res);
       return;
     }
+    // A session id we no longer hold was reaped (or the app restarted).
+    // 404 is the spec's word for it: the client re-initializes on its own.
+    res.writeHead(404, { "content-type": "application/json" }).end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32001, message: "session not found: re-initialize" },
+        id: null,
+      }),
+    );
+    return;
   }
   // No session yet: only an initialize opens one; the transport itself
   // answers anything else with the right protocol error.
@@ -221,7 +248,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (id) => {
-      transports.set(id, transport);
+      sessions.set(id, { transport, lastSeen: Date.now() });
       if (process.env.SHASHOKU_MCP_DEBUG) {
         console.log(
           "[mcp:debug] session",
@@ -237,7 +264,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
     allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
   });
   transport.onclose = () => {
-    if (transport.sessionId) transports.delete(transport.sessionId);
+    if (transport.sessionId) sessions.delete(transport.sessionId);
   };
   await server.connect(transport);
   await transport.handleRequest(req, res);
@@ -258,6 +285,7 @@ export function startMcpServer() {
   httpServer.on("error", (err) => {
     console.error("[mcp] server error — MCP endpoint unavailable", err);
   });
+  setInterval(reapIdleSessions, 5 * 60 * 1000).unref();
   void loadToken()
     .then((held) => {
       token = held;
