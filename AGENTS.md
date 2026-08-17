@@ -16,8 +16,12 @@ this repository.
 - All commit messages in English.
 - Format: `type(scope): short effect` — feat / fix / refactor / docs /
   style / perf / test / build / ci / chore.
-- Body only when there is a real WHY. Do not narrate process ("tried X,
-  then Y, then Z"). Write the conclusion, not the journey.
+- The subject is an index: imperative mood, the trade's shared
+  vocabulary, ten words at most. Someone grepping the log knows
+  `migrate`, `cache`, `undo` — not our metaphors.
+- The prose goes in the body: the effect, the invariant that now holds,
+  the WHY. Body only when there is a real WHY. Do not narrate process
+  ("tried X, then Y, then Z"). Write the conclusion, not the journey.
 
 ## Language
 
