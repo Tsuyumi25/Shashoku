@@ -12,15 +12,20 @@ import type {
  * the text they name, and an empty answer is said out loud — a blank line
  * would read as "nothing here" when it means "not translated yet".
  */
+/** Line breaks inside a text become ／ so one script row stays one fact. */
+function flat(text: string): string {
+  return text.replaceAll("\n", "／");
+}
+
 export function renderObject(obj: TextObjectTexts): string {
   const out: string[] = [obj.id];
-  out.push(`  原文: ${obj.source ?? "（無）"}`);
-  out.push(`  譯文: ${obj.translation === "" ? "（未翻）" : obj.translation}`);
+  out.push(`  原文: ${obj.source === null ? "（無）" : flat(obj.source)}`);
+  out.push(`  譯文: ${obj.translation === "" ? "（未翻）" : flat(obj.translation)}`);
   if (obj.candidates.length > 0) {
     const drawer = obj.candidates
       .map((c) => {
         const who = c.human ? "（human）" : c.source ? `（${c.source}）` : "";
-        return `${c.chosen ? "✓" : ""}${c.id}「${c.text}」${who}`;
+        return `${c.chosen ? "✓" : ""}${c.id}「${flat(c.text)}」${who}`;
       })
       .join(" ／ ");
     out.push(`  候選: ${drawer}`);
