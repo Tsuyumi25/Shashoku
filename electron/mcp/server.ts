@@ -123,7 +123,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
           source: getSource(),
         });
         return {
-          content: [{ type: "text", text: `候選 ${translation_id} 已撤回` }],
+          content: [
+            { type: "text", text: `候選 ${translation_id} 已撤回（現值未動——受拒絕條件保證）` },
+          ],
         };
       } catch (err) {
         return toolError(err);
