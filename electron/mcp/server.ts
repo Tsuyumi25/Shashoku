@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { app } from "electron";
@@ -50,6 +50,13 @@ async function loadToken(): Promise<string> {
   const minted = randomBytes(16).toString("hex");
   await writeFile(path, `${minted}\n`, { mode: 0o600 });
   return minted;
+}
+
+function authenticates(header: string | string[] | undefined): boolean {
+  if (token === "" || typeof header !== "string") return false;
+  const expected = Buffer.from(`Bearer ${token}`);
+  const held = Buffer.from(header);
+  return held.length === expected.length && timingSafeEqual(held, expected);
 }
 
 /**
@@ -213,7 +220,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
     const { authorization, ...rest } = req.headers;
     console.log("[mcp:debug]", req.method, req.url, JSON.stringify(rest));
   }
-  if (req.headers.authorization !== `Bearer ${token}`) {
+  if (!authenticates(req.headers.authorization)) {
     res.writeHead(401, { "content-type": "application/json" }).end(
       JSON.stringify({
         jsonrpc: "2.0",
