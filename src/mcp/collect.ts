@@ -21,6 +21,12 @@ export function collectTexts(files: readonly ProjectFile[]): PageTexts[] {
         id: entry.id,
         source: sourceTextOf(entry, readings),
         translation: textOf(entry),
+        candidates: entry.translations.map((c) => ({
+          id: c.id,
+          text: c.lines.join('\n'),
+          human: c.human === true,
+          chosen: entry.translation === c.id,
+        })),
       })),
     }
   })

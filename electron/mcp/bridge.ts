@@ -30,7 +30,7 @@ export function registerMcpBridge(windowGetter: () => BrowserWindow | null) {
   });
 }
 
-export function askRenderer<T>(method: McpQueryMethod): Promise<T> {
+export function askRenderer<T>(method: McpQueryMethod, params?: unknown): Promise<T> {
   const win = getWindow();
   if (!win || win.isDestroyed()) {
     return Promise.reject(new Error("Shashoku window is not open"));
@@ -42,6 +42,6 @@ export function askRenderer<T>(method: McpQueryMethod): Promise<T> {
       reject(new Error("renderer did not answer in time"));
     }, ANSWER_TIMEOUT_MS);
     pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
-    win.webContents.send(CHANNELS.mcpQuery, { id, method });
+    win.webContents.send(CHANNELS.mcpQuery, { id, method, params });
   });
 }

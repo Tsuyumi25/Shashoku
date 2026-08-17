@@ -3,9 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 import { askRenderer } from "./bridge";
-import { renderTexts } from "@shared/mcp/render";
-import type { PageTexts } from "@shared/mcp/types";
+import { renderProposeOutcomes, renderTexts } from "@shared/mcp/render";
+import type { PageTexts, ProposeOutcome } from "@shared/mcp/types";
 
 const DEFAULT_PORT = 8747;
 
@@ -34,15 +35,79 @@ function buildServer(): McpServer {
         const pages = await askRenderer<PageTexts[]>("get_texts");
         return { content: [{ type: "text", text: renderTexts(pages) }] };
       } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "propose_translations",
+    {
+      title: "Propose translation candidates",
+      description:
+        "Append translation candidates to text objects on one page. Never overwrites: every " +
+        "item lands in the object's candidate drawer. Where the object currently reads as " +
+        "nothing at all, the new candidate also takes effect immediately; anywhere else the " +
+        "person keeps what they chose and picks from the drawer. items[].lines is one array " +
+        "entry per rendered line — no embedded newlines.",
+      inputSchema: {
+        page_id: z.string(),
+        items: z
+          .array(z.object({ object_id: z.string(), lines: z.array(z.string()) }))
+          .min(1),
+      },
+    },
+    async ({ page_id, items }) => {
+      try {
+        const outcomes = await askRenderer<ProposeOutcome[]>("propose_translations", {
+          pageId: page_id,
+          items: items.map((i) => ({ objectId: i.object_id, lines: i.lines })),
+        });
+        return { content: [{ type: "text", text: renderProposeOutcomes(outcomes) }] };
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "choose_translation",
+    {
+      title: "Point an object at one of its translation candidates",
+      description:
+        "Move a text object's translation slot to a candidate already in its drawer " +
+        "(candidate ids are listed by get_texts). Nothing is deleted: the previous choice " +
+        "stays in the drawer.",
+      inputSchema: {
+        page_id: z.string(),
+        object_id: z.string(),
+        translation_id: z.string(),
+      },
+    },
+    async ({ page_id, object_id, translation_id }) => {
+      try {
+        await askRenderer("choose_translation", {
+          pageId: page_id,
+          objectId: object_id,
+          translationId: translation_id,
+        });
         return {
-          content: [{ type: "text", text: String(err instanceof Error ? err.message : err) }],
-          isError: true,
+          content: [{ type: "text", text: `${object_id} 現在讀作候選 ${translation_id}` }],
         };
+      } catch (err) {
+        return toolError(err);
       }
     },
   );
 
   return server;
+}
+
+function toolError(err: unknown) {
+  return {
+    content: [{ type: "text" as const, text: String(err instanceof Error ? err.message : err) }],
+    isError: true,
+  };
 }
 
 async function handleMcp(req: IncomingMessage, res: ServerResponse) {

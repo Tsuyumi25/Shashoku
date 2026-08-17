@@ -10,7 +10,8 @@ import type {
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { ProjectFile } from '@/types/project'
 import { collectTexts } from './collect'
-import { renderTexts } from '@shared/mcp/render'
+import { planProposal } from './propose'
+import { renderProposeOutcomes, renderTexts } from '@shared/mcp/render'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
   return {
@@ -83,7 +84,14 @@ describe('collectTexts', () => {
       {
         pageId: '001',
         badge: 'ok',
-        objects: [{ id: 'a', source: '何言ってんの', translation: 'from slot' }],
+        objects: [
+          {
+            id: 'a',
+            source: '何言ってんの',
+            translation: 'from slot',
+            candidates: [{ id: 't1', text: 'from slot', human: false, chosen: true }],
+          },
+        ],
       },
     ])
   })
@@ -95,13 +103,15 @@ describe('collectTexts', () => {
       lines: ['沙沙'],
     })
     const [page] = collectTexts([file('001', [entry], ['a'])])
-    expect(page.objects).toEqual([{ id: 'a', source: 'ザワザワ', translation: '沙沙' }])
+    expect(page.objects).toEqual([
+      { id: 'a', source: 'ザワザワ', translation: '沙沙', candidates: [] },
+    ])
   })
 
   it('reports nothing rather than something for an empty slot and a dangling hash', () => {
     const entry = text('a', { source: { hash: 'gone', by: 'auto' } })
     const [page] = collectTexts([file('001', [entry], ['a'])])
-    expect(page.objects).toEqual([{ id: 'a', source: null, translation: '' }])
+    expect(page.objects).toEqual([{ id: 'a', source: null, translation: '', candidates: [] }])
   })
 
   it('walks pages in reading order and keeps damaged pages listed but empty', () => {
@@ -120,8 +130,16 @@ describe('renderTexts', () => {
         pageId: '001',
         badge: 'ok',
         objects: [
-          { id: 'a', source: '何言ってんの', translation: '你在說什麼啊' },
-          { id: 'b', source: null, translation: '' },
+          {
+            id: 'a',
+            source: '何言ってんの',
+            translation: '你在說什麼啊',
+            candidates: [
+              { id: 't1', text: '你在說什麼啊', human: false, chosen: true },
+              { id: 't2', text: '少騙人了', human: true, chosen: false },
+            ],
+          },
+          { id: 'b', source: null, translation: '', candidates: [] },
         ],
       },
       { pageId: '002', badge: 'damaged', objects: [] },
@@ -129,8 +147,53 @@ describe('renderTexts', () => {
     expect(rendered).toContain('2 頁 · 2 個文字物件')
     expect(rendered).toContain('原文: 何言ってんの')
     expect(rendered).toContain('譯文: 你在說什麼啊')
+    expect(rendered).toContain('候選: ✓t1「你在說什麼啊」 ／ t2「少騙人了」（human）')
     expect(rendered).toContain('原文: （無）')
     expect(rendered).toContain('譯文: （未翻）')
     expect(rendered).toContain('頁 002 ·（damaged，內容不可讀）')
+  })
+})
+
+describe('planProposal', () => {
+  const base = () => text('a')
+
+  it('appends and fills where the object reads as nothing at all', () => {
+    expect(planProposal(base(), ['新譯'])).toEqual({ action: 'append', fillSlot: true })
+  })
+
+  it('appends without touching typed lines nobody chose', () => {
+    expect(planProposal(text('a', { lines: ['人打的'] }), ['新譯'])).toEqual({
+      action: 'append',
+      fillSlot: false,
+    })
+  })
+
+  it('appends without touching a settled slot', () => {
+    const entry = text('a', {
+      translations: [{ id: 't1', lines: ['已選'] }],
+      translation: 't1',
+    })
+    expect(planProposal(entry, ['新譯'])).toEqual({ action: 'append', fillSlot: false })
+  })
+
+  it('refuses what it cannot store, saying why', () => {
+    expect(planProposal(undefined, ['x'])).toEqual({ action: 'refuse', reason: '物件不存在' })
+    expect(planProposal(base(), []).action).toBe('refuse')
+    expect(planProposal(base(), ['有\n換行']).action).toBe('refuse')
+    expect(planProposal(base(), ['', ' ']).action).toBe('refuse')
+  })
+})
+
+describe('renderProposeOutcomes', () => {
+  it('says what landed, what took effect, and what was refused', () => {
+    const rendered = renderProposeOutcomes([
+      { objectId: 'a', ok: true, translationId: 't1', filledSlot: true },
+      { objectId: 'b', ok: true, translationId: 't2', filledSlot: false },
+      { objectId: 'c', ok: false, reason: '物件不存在' },
+    ])
+    expect(rendered).toContain('收下 2 則，拒絕 1 則')
+    expect(rendered).toContain('a → 候選 t1（物件原本空白，已直接生效）')
+    expect(rendered).toContain('b → 候選 t2（進入抽屜，現值未動）')
+    expect(rendered).toContain('c ✗ 物件不存在')
   })
 })

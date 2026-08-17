@@ -1,4 +1,4 @@
-import type { PageTexts } from "./types";
+import type { PageTexts, ProposeOutcome } from "./types";
 
 /**
  * The wire answer is a script for a model to read, not JSON: ids stay next to
@@ -19,6 +19,29 @@ export function renderTexts(pages: PageTexts[]): string {
       out.push(obj.id);
       out.push(`  原文: ${obj.source ?? "（無）"}`);
       out.push(`  譯文: ${obj.translation === "" ? "（未翻）" : obj.translation}`);
+      if (obj.candidates.length > 0) {
+        const drawer = obj.candidates
+          .map((c) => `${c.chosen ? "✓" : ""}${c.id}「${c.text}」${c.human ? "（human）" : ""}`)
+          .join(" ／ ");
+        out.push(`  候選: ${drawer}`);
+      }
+    }
+  }
+  return out.join("\n");
+}
+
+export function renderProposeOutcomes(outcomes: ProposeOutcome[]): string {
+  const taken = outcomes.filter((o) => o.ok);
+  const refused = outcomes.filter((o) => !o.ok);
+  const out: string[] = [`收下 ${taken.length} 則，拒絕 ${refused.length} 則`];
+  for (const o of outcomes) {
+    if (o.ok) {
+      out.push(
+        `${o.objectId} → 候選 ${o.translationId}` +
+          (o.filledSlot ? "（物件原本空白，已直接生效）" : "（進入抽屜，現值未動）"),
+      );
+    } else {
+      out.push(`${o.objectId} ✗ ${o.reason}`);
     }
   }
   return out.join("\n");
