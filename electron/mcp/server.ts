@@ -291,7 +291,10 @@ export function startMcpServer() {
       token = held;
       httpServer.listen(port, "127.0.0.1", () => {
         console.log(`[mcp] listening on http://127.0.0.1:${port}/mcp`);
-        console.log(`[mcp] bearer token: ${token}`);
+        const home = process.env.SHASHOKU_MCP_TOKEN
+          ? "env SHASHOKU_MCP_TOKEN"
+          : join(app.getPath("userData"), "mcp-token");
+        console.log(`[mcp] bearer token in ${home}`);
       });
     })
     .catch((err) => {
