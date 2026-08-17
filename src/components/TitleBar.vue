@@ -31,6 +31,11 @@
               <span>立即儲存</span>
               <span class="ml-auto text-xs tracking-widest text-muted-foreground">Ctrl+S</span>
             </DropdownMenuItem>
+            <DropdownMenuSeparator class="dropdown-separator" />
+            <DropdownMenuItem class="dropdown-item" @select="ui.settingsOpen = true">
+              <Settings :size="14" />
+              <span>設定</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenuPortal>
       </DropdownMenuRoot>
@@ -99,12 +104,13 @@
 </template>
 
 <script setup lang="ts">
-import { LibraryBig, Menu, Save } from '@lucide/vue'
+import { LibraryBig, Menu, Save, Settings } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuPortal,
   DropdownMenuRoot,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from 'reka-ui'
 import ThemeToggle from '@/components/ThemeToggle.vue'

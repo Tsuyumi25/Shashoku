@@ -35,6 +35,16 @@
     >
       <Contrast :size="15" />
     </button>
+
+    <!--
+      Not a tool but a door, parked at the rail's foot where editors keep
+      their manage gear. The rail is the one column standing in every view,
+      so settings is reachable wherever the reader happens to be.
+    -->
+    <div class="rail-divider" />
+    <button type="button" class="rail-btn" title="設定" @click="ui.settingsOpen = true">
+      <Settings :size="15" />
+    </button>
   </div>
 </template>
 
@@ -49,6 +59,7 @@ import {
   MousePointer2,
   MousePointerClick,
   Paintbrush,
+  Settings,
   SquareDashed,
   Type,
   Wand,
@@ -57,9 +68,11 @@ import {
 import { useToolChoice } from '@/composables/useToolChoice'
 import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
+const ui = useUiStore()
 const { chooseTool } = useToolChoice()
 
 /**

@@ -66,6 +66,8 @@
         </SplitterPanel>
       </SplitterGroup>
     </div>
+
+    <SettingsPopup />
   </div>
 </template>
 
@@ -76,6 +78,7 @@ import Bookshelf from '@/components/Bookshelf.vue'
 import ExportPanel from '@/components/ExportPanel.vue'
 import ProjectLibrary from '@/components/ProjectLibrary.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
+import SettingsPopup from '@/components/SettingsPopup.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import ToolRail from '@/components/ToolRail.vue'
@@ -113,7 +116,10 @@ window.api.onWillClose(() => {
   )
 })
 
+// All three listeners stand down while the settings panel is up: these keys
+// act on the document, and the document is underneath it.
 useEventListener(window, 'keydown', (e) => {
+  if (ui.settingsOpen) return
   if (!e.ctrlKey && !e.metaKey) return
   const key = e.key.toLowerCase()
 
@@ -199,6 +205,7 @@ useEventListener(window, 'keydown', (e) => {
  * whether Ctrl is held, and this key is held by neither side.
  */
 useEventListener(window, 'keydown', (e) => {
+  if (ui.settingsOpen) return
   if (ui.view !== 'editor' || e.key !== 'Backspace') return
   if (!e.altKey || e.ctrlKey || e.metaKey) return
   if (ownsKeyboard(document.activeElement)) return
@@ -221,6 +228,7 @@ useEventListener(window, 'keydown', (e) => {
  * into is a real input and a row merely selected is not.
  */
 useEventListener(window, 'keydown', (e) => {
+  if (ui.settingsOpen) return
   if (ui.view !== 'editor') return
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (ownsKeyboard(document.activeElement)) return

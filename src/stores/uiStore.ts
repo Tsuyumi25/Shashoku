@@ -16,5 +16,12 @@ export const useUiStore = defineStore("ui", () => {
     view.value = v;
   }
 
-  return { view, setView };
+  /**
+   * A floating panel over whatever view is up, not a fifth view: the views
+   * are places to work, and settings is a form filled out and left. Where you
+   * were stays under it, untouched.
+   */
+  const settingsOpen = ref(false);
+
+  return { view, setView, settingsOpen };
 });
