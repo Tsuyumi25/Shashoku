@@ -67,16 +67,37 @@ export type ProposeOutcome =
   | { objectId: string; ok: true; translationId: string; filledSlot: boolean }
   | { objectId: string; ok: false; reason: string };
 
-export interface ChooseParams {
-  pageId: string;
+export interface ChooseItem {
   objectId: string;
   translationId: string;
 }
 
+export interface ChooseParams {
+  pageId: string;
+  items: ChooseItem[];
+}
+
+export type ChooseOutcome =
+  | { objectId: string; translationId: string; ok: true }
+  | { objectId: string; translationId: string; ok: false; reason: string };
+
 export interface WithdrawParams {
   pageId: string;
-  objectId: string;
-  translationId: string;
-  /** The withdrawing client's clientInfo — must match the candidate's stamp. */
+  items: ChooseItem[];
+  /** The withdrawing client's clientInfo — must match each candidate's stamp. */
   source?: string;
+}
+
+export type WithdrawOutcome =
+  | { objectId: string; translationId: string; ok: true; clearedSlot: boolean }
+  | { objectId: string; translationId: string; ok: false; reason: string };
+
+/**
+ * Every write answers with the touched objects' full current state, so a
+ * caller audits what actually happened in the same breath rather than by a
+ * second read.
+ */
+export interface WriteResult<Outcome> {
+  outcomes: Outcome[];
+  objects: TextObjectTexts[];
 }

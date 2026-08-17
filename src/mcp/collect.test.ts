@@ -12,7 +12,7 @@ import type { ProjectFile } from '@/types/project'
 import { collectTexts } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
-import { renderProposeOutcomes, renderTexts } from '@shared/mcp/render'
+import { renderProposeResult, renderTexts, renderWithdrawResult } from '@shared/mcp/render'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
   return {
@@ -228,16 +228,42 @@ describe('planWithdraw', () => {
   })
 })
 
-describe('renderProposeOutcomes', () => {
-  it('says what landed, what took effect, and what was refused', () => {
-    const rendered = renderProposeOutcomes([
-      { objectId: 'a', ok: true, translationId: 't1', filledSlot: true },
-      { objectId: 'b', ok: true, translationId: 't2', filledSlot: false },
-      { objectId: 'c', ok: false, reason: '物件不存在' },
-    ])
+describe('renderProposeResult', () => {
+  it('says what landed, what took effect, what was refused, then the state', () => {
+    const rendered = renderProposeResult({
+      outcomes: [
+        { objectId: 'a', ok: true, translationId: 't1', filledSlot: true },
+        { objectId: 'b', ok: true, translationId: 't2', filledSlot: false },
+        { objectId: 'c', ok: false, reason: '物件不存在' },
+      ],
+      objects: [
+        {
+          id: 'a',
+          source: null,
+          translation: '新譯',
+          candidates: [{ id: 't1', text: '新譯', human: false, chosen: true }],
+        },
+      ],
+    })
     expect(rendered).toContain('收下 2 則，拒絕 1 則')
     expect(rendered).toContain('a → 候選 t1（物件原本空白，已直接生效）')
     expect(rendered).toContain('b → 候選 t2（進入抽屜，現值未動）')
     expect(rendered).toContain('c ✗ 物件不存在')
+    expect(rendered).toContain('操作後的物件狀態：')
+    expect(rendered).toContain('✓t1「新譯」')
+  })
+})
+
+describe('renderWithdrawResult', () => {
+  it('reports per item and shows whether a slot cleared', () => {
+    const rendered = renderWithdrawResult({
+      outcomes: [
+        { objectId: 'a', translationId: 't1', ok: true, clearedSlot: true },
+        { objectId: 'a', translationId: 't2', ok: false, reason: '這是人寫過的候選——不可撤' },
+      ],
+      objects: [],
+    })
+    expect(rendered).toContain('候選 t1 已撤回（原為現值，物件已回退為自己的字）')
+    expect(rendered).toContain('候選 t2 ✗ 這是人寫過的候選——不可撤')
   })
 })

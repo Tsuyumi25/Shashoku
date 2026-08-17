@@ -1,12 +1,16 @@
 import type {
+  ChooseOutcome,
   ChooseParams,
   McpQuery,
   ProposeOutcome,
   ProposeParams,
+  TextObjectTexts,
+  WithdrawOutcome,
   WithdrawParams,
+  WriteResult,
 } from '@shared/mcp/types'
 import { useProjectStore } from '@/stores/projectStore'
-import { collectTexts } from './collect'
+import { collectTexts, readingsOf, textsOfEntry } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
 
@@ -23,7 +27,29 @@ function writablePage(project: ReturnType<typeof useProjectStore>, pageId: strin
   return file
 }
 
-async function proposeTranslations(params: ProposeParams): Promise<ProposeOutcome[]> {
+/** The touched objects' state as of after the batch, in first-touch order. */
+function statesOf(
+  project: ReturnType<typeof useProjectStore>,
+  pageId: string,
+  objectIds: readonly string[],
+): TextObjectTexts[] {
+  const file = project.pageById(pageId)
+  if (!file) return []
+  const readings = readingsOf(file)
+  const seen = new Set<string>()
+  const out: TextObjectTexts[] = []
+  for (const id of objectIds) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    const entry = project.labelById(pageId, id)
+    if (entry) out.push(textsOfEntry(entry, readings))
+  }
+  return out
+}
+
+async function proposeTranslations(
+  params: ProposeParams,
+): Promise<WriteResult<ProposeOutcome>> {
   const project = openProject()
   writablePage(project, params.pageId)
   const outcomes: ProposeOutcome[] = params.items.map((item) => {
@@ -48,30 +74,60 @@ async function proposeTranslations(params: ProposeParams): Promise<ProposeOutcom
   // Landed before the reply: an answer that only reached memory would report
   // success right up until a crash took it back.
   await project.flush()
-  return outcomes
-}
-
-async function chooseTranslation(params: ChooseParams): Promise<void> {
-  const project = openProject()
-  writablePage(project, params.pageId)
-  const entry = project.labelById(params.pageId, params.objectId)
-  if (!entry) throw new Error(`物件 ${params.objectId} 不存在`)
-  if (!entry.translations.some((c) => c.id === params.translationId)) {
-    throw new Error(`候選 ${params.translationId} 不在這個物件的抽屜裡`)
+  return {
+    outcomes,
+    objects: statesOf(
+      project,
+      params.pageId,
+      params.items.map((i) => i.objectId),
+    ),
   }
-  project.setLabelTranslation(params.pageId, params.objectId, params.translationId)
-  await project.flush()
 }
 
-async function withdrawTranslation(params: WithdrawParams): Promise<{ clearedSlot: boolean }> {
+async function chooseTranslation(params: ChooseParams): Promise<WriteResult<ChooseOutcome>> {
   const project = openProject()
   writablePage(project, params.pageId)
-  const entry = project.labelById(params.pageId, params.objectId)
-  const plan = planWithdraw(entry, params.translationId, params.source)
-  if (plan.action === 'refuse') throw new Error(plan.reason)
-  project.removeTranslation(params.pageId, params.objectId, params.translationId)
+  const outcomes: ChooseOutcome[] = params.items.map(({ objectId, translationId }) => {
+    const entry = project.labelById(params.pageId, objectId)
+    if (!entry) return { objectId, translationId, ok: false, reason: '物件不存在' }
+    if (!entry.translations.some((c) => c.id === translationId)) {
+      return { objectId, translationId, ok: false, reason: '候選不在這個物件的抽屜裡' }
+    }
+    project.setLabelTranslation(params.pageId, objectId, translationId)
+    return { objectId, translationId, ok: true }
+  })
   await project.flush()
-  return { clearedSlot: plan.wasChosen }
+  return {
+    outcomes,
+    objects: statesOf(
+      project,
+      params.pageId,
+      params.items.map((i) => i.objectId),
+    ),
+  }
+}
+
+async function withdrawTranslation(
+  params: WithdrawParams,
+): Promise<WriteResult<WithdrawOutcome>> {
+  const project = openProject()
+  writablePage(project, params.pageId)
+  const outcomes: WithdrawOutcome[] = params.items.map(({ objectId, translationId }) => {
+    const entry = project.labelById(params.pageId, objectId)
+    const plan = planWithdraw(entry, translationId, params.source)
+    if (plan.action === 'refuse') return { objectId, translationId, ok: false, reason: plan.reason }
+    project.removeTranslation(params.pageId, objectId, translationId)
+    return { objectId, translationId, ok: true, clearedSlot: plan.wasChosen }
+  })
+  await project.flush()
+  return {
+    outcomes,
+    objects: statesOf(
+      project,
+      params.pageId,
+      params.items.map((i) => i.objectId),
+    ),
+  }
 }
 
 async function answer(query: McpQuery): Promise<unknown> {
@@ -83,8 +139,7 @@ async function answer(query: McpQuery): Promise<unknown> {
       return proposeTranslations(query.params as ProposeParams)
     }
     case 'choose_translation': {
-      await chooseTranslation(query.params as ChooseParams)
-      return null
+      return chooseTranslation(query.params as ChooseParams)
     }
     case 'withdraw_translation': {
       return withdrawTranslation(query.params as WithdrawParams)

@@ -8,8 +8,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { askRenderer } from "./bridge";
-import { renderProposeOutcomes, renderTexts } from "@shared/mcp/render";
-import type { PageTexts, ProposeOutcome } from "@shared/mcp/types";
+import {
+  renderChooseResult,
+  renderProposeResult,
+  renderTexts,
+  renderWithdrawResult,
+} from "@shared/mcp/render";
+import type {
+  ChooseOutcome,
+  PageTexts,
+  ProposeOutcome,
+  WithdrawOutcome,
+  WriteResult,
+} from "@shared/mcp/types";
 
 const DEFAULT_PORT = 8747;
 
@@ -87,12 +98,12 @@ function buildServer(getSource: () => string | undefined): McpServer {
     },
     async ({ page_id, items }) => {
       try {
-        const outcomes = await askRenderer<ProposeOutcome[]>("propose_translations", {
+        const result = await askRenderer<WriteResult<ProposeOutcome>>("propose_translations", {
           pageId: page_id,
           items: items.map((i) => ({ objectId: i.object_id, lines: i.lines })),
           source: getSource(),
         });
-        return { content: [{ type: "text", text: renderProposeOutcomes(outcomes) }] };
+        return { content: [{ type: "text", text: renderProposeResult(result) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -102,33 +113,28 @@ function buildServer(getSource: () => string | undefined): McpServer {
   server.registerTool(
     "withdraw_translation",
     {
-      title: "Withdraw a candidate this client proposed",
+      title: "Withdraw candidates this client proposed",
       description:
-        "Remove one translation candidate from an object's drawer. Only candidates this " +
-        "client itself proposed can be withdrawn: human-written candidates and other " +
-        "clients' proposals are refused. Withdrawing the current choice falls the object " +
-        "back to its own typed lines. Use this to clean up your own mistaken proposals.",
+        "Remove translation candidates from objects' drawers, in one batch. Only " +
+        "candidates this client itself proposed can be withdrawn: human-written " +
+        "candidates and other clients' proposals are refused per item. Withdrawing a " +
+        "current choice falls that object back to its own typed lines. Replies with " +
+        "each object's full state afterwards.",
       inputSchema: {
         page_id: z.string(),
-        object_id: z.string(),
-        translation_id: z.string(),
+        items: z
+          .array(z.object({ object_id: z.string(), translation_id: z.string() }))
+          .min(1),
       },
     },
-    async ({ page_id, object_id, translation_id }) => {
+    async ({ page_id, items }) => {
       try {
-        const { clearedSlot } = await askRenderer<{ clearedSlot: boolean }>(
-          "withdraw_translation",
-          {
-            pageId: page_id,
-            objectId: object_id,
-            translationId: translation_id,
-            source: getSource(),
-          },
-        );
-        const slotNote = clearedSlot ? "原為現值，物件已回退為自己的字" : "現值未動";
-        return {
-          content: [{ type: "text", text: `候選 ${translation_id} 已撤回（${slotNote}）` }],
-        };
+        const result = await askRenderer<WriteResult<WithdrawOutcome>>("withdraw_translation", {
+          pageId: page_id,
+          items: items.map((i) => ({ objectId: i.object_id, translationId: i.translation_id })),
+          source: getSource(),
+        });
+        return { content: [{ type: "text", text: renderWithdrawResult(result) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -138,27 +144,26 @@ function buildServer(getSource: () => string | undefined): McpServer {
   server.registerTool(
     "choose_translation",
     {
-      title: "Point an object at one of its translation candidates",
+      title: "Point objects at candidates in their drawers",
       description:
-        "Move a text object's translation slot to a candidate already in its drawer " +
-        "(candidate ids are listed by get_texts). Nothing is deleted: the previous choice " +
-        "stays in the drawer.",
+        "Move text objects' translation slots to candidates already in their drawers " +
+        "(candidate ids are listed by get_texts), in one batch. Nothing is deleted: the " +
+        "previous choices stay in the drawers. Replies with each object's full state " +
+        "afterwards.",
       inputSchema: {
         page_id: z.string(),
-        object_id: z.string(),
-        translation_id: z.string(),
+        items: z
+          .array(z.object({ object_id: z.string(), translation_id: z.string() }))
+          .min(1),
       },
     },
-    async ({ page_id, object_id, translation_id }) => {
+    async ({ page_id, items }) => {
       try {
-        await askRenderer("choose_translation", {
+        const result = await askRenderer<WriteResult<ChooseOutcome>>("choose_translation", {
           pageId: page_id,
-          objectId: object_id,
-          translationId: translation_id,
+          items: items.map((i) => ({ objectId: i.object_id, translationId: i.translation_id })),
         });
-        return {
-          content: [{ type: "text", text: `${object_id} 現在讀作候選 ${translation_id}` }],
-        };
+        return { content: [{ type: "text", text: renderChooseResult(result) }] };
       } catch (err) {
         return toolError(err);
       }
