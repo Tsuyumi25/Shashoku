@@ -44,6 +44,10 @@ const api: ShashokuApi = {
     ipcRenderer.on(CHANNELS.windowWillClose, () => handler());
   },
   windowCloseReady: () => ipcRenderer.send(CHANNELS.windowCloseReady),
+  onMcpQuery: (handler) => {
+    ipcRenderer.on(CHANNELS.mcpQuery, (_e, query) => handler(query));
+  },
+  mcpReply: (reply) => ipcRenderer.send(CHANNELS.mcpReply, reply),
 };
 
 const engineApi: ShashokuEngineApi = {

@@ -1,4 +1,5 @@
 import type { ScannedScanPoint } from "../project/library";
+import type { McpQuery, McpReply } from "../mcp/types";
 
 export const CHANNELS = {
   pickRoot: "shashoku:pick-root",
@@ -30,6 +31,8 @@ export const CHANNELS = {
   windowSetOverlay: "window:set-overlay",
   windowWillClose: "window:will-close",
   windowCloseReady: "window:close-ready",
+  mcpQuery: "mcp:query",
+  mcpReply: "mcp:reply",
 } as const;
 
 export interface ScanRootResult {
@@ -159,4 +162,10 @@ export interface ShashokuApi {
    */
   onWillClose(handler: () => void): void;
   windowCloseReady(): void;
+  /**
+   * The MCP endpoint asking the renderer, where the open project actually
+   * lives. Answers go back through mcpReply carrying the question's id.
+   */
+  onMcpQuery(handler: (query: McpQuery) => void): void;
+  mcpReply(reply: McpReply): void;
 }

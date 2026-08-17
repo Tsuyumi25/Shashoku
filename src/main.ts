@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import Toast, { POSITION, type PluginOptions } from "vue-toastification";
 import App from "./App.vue";
 import { usePreferencesStore } from "./stores/preferencesStore";
+import { registerMcpAnswers } from "./mcp/answers";
 import "vue-toastification/dist/index.css";
 import "./index.css";
 
@@ -28,6 +29,8 @@ const toastOptions: PluginOptions = {
 };
 
 const app = createApp(App).use(createPinia()).use(Toast, toastOptions);
+
+registerMcpAnswers();
 
 // Panel geometry has to be on hand before the first render, so preferences are
 // loaded before mounting rather than in a component.

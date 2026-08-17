@@ -5,6 +5,8 @@ import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
 import { registerWindowHandlers } from "./ipc/window";
+import { registerMcpBridge } from "./mcp/bridge";
+import { startMcpServer } from "./mcp/server";
 import { sweepThumbnails } from "./lib/thumbnailCache";
 
 let mainWindow: BrowserWindow | null = null;
@@ -28,6 +30,8 @@ app.whenReady().then(() => {
   registerProjectHandlers();
   registerShashokuProjectHandlers();
   registerWindowHandlers();
+  registerMcpBridge(() => mainWindow);
+  startMcpServer();
   mainWindow = createWindow();
   mainWindow.once("closed", () => {
     mainWindow = null;

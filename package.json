@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@shashoku/engine": "workspace:*",
     "@tanstack/vue-virtual": "^3.13.34",
     "@vueuse/core": "^14.3.0",
