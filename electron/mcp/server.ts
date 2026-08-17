@@ -152,6 +152,10 @@ function clientLabel(server: McpServer): string | undefined {
 }
 
 async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number) {
+  if (process.env.SHASHOKU_MCP_DEBUG) {
+    const { authorization, ...rest } = req.headers;
+    console.log("[mcp:debug]", req.method, req.url, JSON.stringify(rest));
+  }
   if (req.headers.authorization !== `Bearer ${token}`) {
     res.writeHead(401, { "content-type": "application/json" }).end(
       JSON.stringify({
@@ -177,6 +181,14 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (id) => {
       transports.set(id, transport);
+      if (process.env.SHASHOKU_MCP_DEBUG) {
+        console.log(
+          "[mcp:debug] session",
+          id,
+          "clientInfo:",
+          JSON.stringify(server.server.getClientVersion()),
+        );
+      }
     },
     // Kills DNS rebinding as a class: a rebound page's request arrives with
     // the attacker's Host and is refused before the token even matters.
