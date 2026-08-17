@@ -106,6 +106,17 @@ describe('replaying the field sequence', () => {
     expect(project.labelById(PAGE_ID, 'obj')!.translation).toBe(a)
   })
 
+  it('withdrawing the chosen own candidate falls the object back to its lines', () => {
+    const project = useProjectStore()
+    openWith(project, label('obj', { lines: ['自己打的'] }))
+    const a = propose(project, 'obj', ['模型版'])
+    project.setLabelTranslation(PAGE_ID, 'obj', a)
+    withdraw(project, 'obj', a)
+    const entry = project.labelById(PAGE_ID, 'obj')!
+    expect(entry.translation).toBeNull()
+    expect(entry.lines).toEqual(['自己打的'])
+  })
+
   it('drawer mutations reach a computed watcher without reselecting', () => {
     const project = useProjectStore()
     openWith(project, label('obj', { translations: [{ id: 'm1', lines: ['甲'], source: CLIENT }] }))

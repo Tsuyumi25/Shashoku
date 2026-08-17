@@ -105,9 +105,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
       title: "Withdraw a candidate this client proposed",
       description:
         "Remove one translation candidate from an object's drawer. Only candidates this " +
-        "client itself proposed can be withdrawn, and only while unchosen: human-written " +
-        "candidates, the current choice, and other clients' proposals are all refused. " +
-        "Use this to clean up your own mistaken proposals.",
+        "client itself proposed can be withdrawn: human-written candidates and other " +
+        "clients' proposals are refused. Withdrawing the current choice falls the object " +
+        "back to its own typed lines. Use this to clean up your own mistaken proposals.",
       inputSchema: {
         page_id: z.string(),
         object_id: z.string(),
@@ -116,16 +116,18 @@ function buildServer(getSource: () => string | undefined): McpServer {
     },
     async ({ page_id, object_id, translation_id }) => {
       try {
-        await askRenderer("withdraw_translation", {
-          pageId: page_id,
-          objectId: object_id,
-          translationId: translation_id,
-          source: getSource(),
-        });
+        const { clearedSlot } = await askRenderer<{ clearedSlot: boolean }>(
+          "withdraw_translation",
+          {
+            pageId: page_id,
+            objectId: object_id,
+            translationId: translation_id,
+            source: getSource(),
+          },
+        );
+        const slotNote = clearedSlot ? "原為現值，物件已回退為自己的字" : "現值未動";
         return {
-          content: [
-            { type: "text", text: `候選 ${translation_id} 已撤回（現值未動——受拒絕條件保證）` },
-          ],
+          content: [{ type: "text", text: `候選 ${translation_id} 已撤回（${slotNote}）` }],
         };
       } catch (err) {
         return toolError(err);

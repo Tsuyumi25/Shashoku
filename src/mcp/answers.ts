@@ -63,7 +63,7 @@ async function chooseTranslation(params: ChooseParams): Promise<void> {
   await project.flush()
 }
 
-async function withdrawTranslation(params: WithdrawParams): Promise<void> {
+async function withdrawTranslation(params: WithdrawParams): Promise<{ clearedSlot: boolean }> {
   const project = openProject()
   writablePage(project, params.pageId)
   const entry = project.labelById(params.pageId, params.objectId)
@@ -71,6 +71,7 @@ async function withdrawTranslation(params: WithdrawParams): Promise<void> {
   if (plan.action === 'refuse') throw new Error(plan.reason)
   project.removeTranslation(params.pageId, params.objectId, params.translationId)
   await project.flush()
+  return { clearedSlot: plan.wasChosen }
 }
 
 async function answer(query: McpQuery): Promise<unknown> {
@@ -86,8 +87,7 @@ async function answer(query: McpQuery): Promise<unknown> {
       return null
     }
     case 'withdraw_translation': {
-      await withdrawTranslation(query.params as WithdrawParams)
-      return null
+      return withdrawTranslation(query.params as WithdrawParams)
     }
   }
 }

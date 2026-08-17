@@ -207,15 +207,21 @@ describe('planWithdraw', () => {
       ...extra,
     })
 
-  it('removes only an unchosen candidate stamped with the same client', () => {
-    expect(planWithdraw(drawer(), 'mine', CLIENT)).toEqual({ action: 'remove' })
+  it('removes a candidate stamped with the same client', () => {
+    expect(planWithdraw(drawer(), 'mine', CLIENT)).toEqual({ action: 'remove', wasChosen: false })
   })
 
-  it('refuses everything that is not its own unchosen stamp', () => {
+  it('removes even the chosen one, saying the slot will clear', () => {
+    expect(planWithdraw(drawer({ translation: 'mine' }), 'mine', CLIENT)).toEqual({
+      action: 'remove',
+      wasChosen: true,
+    })
+  })
+
+  it("refuses everything that is not its own stamp", () => {
     expect(planWithdraw(undefined, 'mine', CLIENT).action).toBe('refuse')
     expect(planWithdraw(drawer(), 'gone', CLIENT).action).toBe('refuse')
     expect(planWithdraw(drawer(), 'yours', CLIENT).action).toBe('refuse')
-    expect(planWithdraw(drawer({ translation: 'mine' }), 'mine', CLIENT).action).toBe('refuse')
     expect(planWithdraw(drawer(), 'theirs', CLIENT).action).toBe('refuse')
     expect(planWithdraw(drawer(), 'old', CLIENT).action).toBe('refuse')
     expect(planWithdraw(drawer(), 'mine', undefined).action).toBe('refuse')
