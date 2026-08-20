@@ -204,12 +204,7 @@ pub fn uncovered_clusters(
 pub fn parse_hex_rgba(hex: &str) -> Result<Rgba, String> {
     let s = hex.trim().trim_start_matches('#');
     let (r, g, b, a) = match s.len() {
-        6 => (
-            hex_pair(s, 0)?,
-            hex_pair(s, 2)?,
-            hex_pair(s, 4)?,
-            255u8,
-        ),
+        6 => (hex_pair(s, 0)?, hex_pair(s, 2)?, hex_pair(s, 4)?, 255u8),
         8 => (
             hex_pair(s, 0)?,
             hex_pair(s, 2)?,
@@ -226,7 +221,8 @@ pub fn parse_hex_rgba(hex: &str) -> Result<Rgba, String> {
 }
 
 fn hex_pair(s: &str, i: usize) -> Result<u8, String> {
-    u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| format!("bad hex pair at {i}: {:?}", &s[i..i + 2]))
+    u8::from_str_radix(&s[i..i + 2], 16)
+        .map_err(|_| format!("bad hex pair at {i}: {:?}", &s[i..i + 2]))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -403,8 +399,7 @@ fn build_horizontal_path(
 
     for (line_idx, (line_offset, glyphs)) in lines.iter().enumerate() {
         let baseline_y = padding as f32 + phase.y + ascent + line_idx as f32 * line_height;
-        let mut pen_x =
-            padding as f32 + phase.x + (max_width - widths[line_idx]) * align.share();
+        let mut pen_x = padding as f32 + phase.x + (max_width - widths[line_idx]) * align.share();
         for g in glyphs {
             let gid = GlyphId::new(g.gid);
             if let Some(glyph) = outlines.get(gid) {
@@ -481,7 +476,8 @@ fn build_vertical_path(
 
     for (col_idx, (col_offset, glyphs)) in columns.iter().enumerate() {
         // Column 0 sits at the right edge, later columns walk leftward.
-        let col_center_x = (w as f32) - padding as f32 + phase.x - column_width * 0.5
+        let col_center_x = (w as f32) - padding as f32 + phase.x
+            - column_width * 0.5
             - (col_idx as f32) * column_width;
         let col_origin_y = origin_y + (max_height - heights[col_idx]) * align.share();
         let mut pen_x = 0.0f32;
@@ -623,12 +619,10 @@ fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
 
     // About the run's own middle, then out to the middle of the bitmap that
     // now holds it, so the two centres coincide however far the box grew.
-    let turn = Transform::from_translate((width as f32 - w) * 0.5, (height as f32 - h) * 0.5)
-        .pre_concat(Transform::from_rotate_at(
-            radians.to_degrees(),
-            w * 0.5,
-            h * 0.5,
-        ));
+    let turn =
+        Transform::from_translate((width as f32 - w) * 0.5, (height as f32 - h) * 0.5).pre_concat(
+            Transform::from_rotate_at(radians.to_degrees(), w * 0.5, h * 0.5),
+        );
 
     BuiltRun {
         path: run.path.and_then(|drawn| drawn.transform(turn)),
@@ -1160,7 +1154,8 @@ mod spin_tests {
             FILL,
             None,
             0.0,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1283,7 +1278,8 @@ mod notdef_tests {
             FILL,
             None,
             0.0,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn alpha_at(bmp: &TextBitmap, x: u32, y: u32) -> u8 {
@@ -1324,7 +1320,10 @@ mod notdef_tests {
     #[test]
     fn the_grid_deepens_with_the_line_count() {
         let bmp = notdef("a\nb", false);
-        assert_eq!(bmp.height, (SIDE * NOTDEF_LINE_EM * 2.0).ceil() as u32 + PAD * 2);
+        assert_eq!(
+            bmp.height,
+            (SIDE * NOTDEF_LINE_EM * 2.0).ceil() as u32 + PAD * 2
+        );
         // One character wide, since that is the longest line.
         assert_eq!(bmp.width, SIDE as u32 + PAD * 2);
     }
@@ -1366,7 +1365,11 @@ mod notdef_tests {
         );
         // And the gap above the first row, inside the padding-free area.
         let (cx, _) = box_centre(0.0, 0);
-        assert_eq!(alpha_at(&bmp, cx, PAD + 1), 0, "the box reached the row edge");
+        assert_eq!(
+            alpha_at(&bmp, cx, PAD + 1),
+            0,
+            "the box reached the row edge"
+        );
     }
 
     #[test]
@@ -1429,8 +1432,7 @@ mod notdef_tests {
     fn the_phase_moves_the_grid_without_resizing_the_bitmap() {
         let (_, row) = box_centre(0.0, 0);
         let square = notdef("字", false);
-        let shifted =
-            render_notdef(
+        let shifted = render_notdef(
             "字",
             SIDE,
             PAD,
@@ -1441,7 +1443,8 @@ mod notdef_tests {
             FILL,
             None,
             0.0,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Where the box starts, which is the cell edge plus its side bearing.
         let bearing = ((SIDE - SIDE * NOTDEF_BOX_EM) * 0.5) as u32;
@@ -1464,7 +1467,8 @@ mod notdef_tests {
             red,
             None,
             0.0,
-        ).unwrap();
+        )
+        .unwrap();
         let (cx, cy) = box_centre(0.0, 0);
         // On the left rule of the box.
         let at = ((cy * bmp.width + cx - half_box() + 1) * 4) as usize;
@@ -1490,7 +1494,8 @@ mod notdef_tests {
             FILL,
             None,
             0.0,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(bmp.width >= 1 && bmp.height >= 1);
     }
 }
@@ -1720,7 +1725,7 @@ mod stroke_tests {
                 position: StrokePosition::Outside,
             }),
             0.0,
-)
+        )
         .unwrap();
         // The fill's own edge is buried under the band, so every soft pixel
         // left belongs to the stroke.
@@ -1737,7 +1742,13 @@ mod stroke_tests {
     fn a_pen_wider_than_the_shape_still_fills_solid() {
         // The case the path stroker cannot do: the pen reaches past the far
         // side of the contour, so its inner offset inverts on itself.
-        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside)), 0.0).unwrap();
+        let bmp = paint_run(
+            disc_run(3.0),
+            FILL,
+            Some(spec(8.0, StrokePosition::Outside)),
+            0.0,
+        )
+        .unwrap();
         for step in 0..10 {
             for angle in ANGLES {
                 let (alpha, _) = probe(&bmp, step as f32, angle);
@@ -1754,7 +1765,7 @@ mod stroke_tests {
             FILL,
             Some(spec(pen, StrokePosition::Outside)),
             0.0,
-)
+        )
         .unwrap();
         for angle in ANGLES {
             let (inner_alpha, inner_is_ink) = probe(&bmp, radius - 2.0, angle);
@@ -1778,7 +1789,7 @@ mod stroke_tests {
             FILL,
             Some(spec(pen, StrokePosition::Inside)),
             0.0,
-)
+        )
         .unwrap();
         for angle in ANGLES {
             let (past_alpha, _) = probe(&bmp, radius + 2.0, angle);
@@ -1801,7 +1812,7 @@ mod stroke_tests {
             FILL,
             Some(spec(pen, StrokePosition::Center)),
             0.0,
-)
+        )
         .unwrap();
         for angle in ANGLES {
             let (outer_alpha, outer_is_ink) = probe(&bmp, radius + pen / 4.0, angle);
@@ -1911,7 +1922,10 @@ mod stroke_tests {
             assert!(band_is_ink, "band is not stroke coloured at {angle}deg");
 
             let (past_alpha, _) = probe(&bmp, radius + weight + pen + 2.0, angle);
-            assert_eq!(past_alpha, 0, "ink past the thinned pen width at {angle}deg");
+            assert_eq!(
+                past_alpha, 0,
+                "ink past the thinned pen width at {angle}deg"
+            );
         }
     }
 
@@ -1922,8 +1936,13 @@ mod stroke_tests {
     /// must come back solid, not as an annulus with a hole around the dot.
     #[test]
     fn a_dot_narrower_than_the_pen_keeps_a_solid_band() {
-        let bmp = paint_run(disc_run(3.0), FILL, Some(spec(8.0, StrokePosition::Outside)), 0.0)
-            .unwrap();
+        let bmp = paint_run(
+            disc_run(3.0),
+            FILL,
+            Some(spec(8.0, StrokePosition::Outside)),
+            0.0,
+        )
+        .unwrap();
         // From the centre out to the pen's reach: no cancelled ring anywhere.
         for step in 0..10 {
             for angle in ANGLES {
@@ -1935,8 +1954,13 @@ mod stroke_tests {
 
     #[test]
     fn a_stroke_of_no_width_is_just_the_fill() {
-        let bmp =
-            paint_run(disc_run(20.0), FILL, Some(spec(0.0, StrokePosition::Outside)), 0.0).unwrap();
+        let bmp = paint_run(
+            disc_run(20.0),
+            FILL,
+            Some(spec(0.0, StrokePosition::Outside)),
+            0.0,
+        )
+        .unwrap();
         for angle in ANGLES {
             let (_, is_ink) = probe(&bmp, 10.0, angle);
             assert!(!is_ink);
@@ -1961,17 +1985,12 @@ mod stroke_tests {
         };
         let ink = spec(4.0, StrokePosition::Outside);
         for size in [40.0f32, 200.0] {
-            let run = build_horizontal_path(
-                &bytes,
-                TEXT,
-                size,
-                8,
-                face,
-                Phase::default(),
-                Align::Start,
-            )
-            .unwrap();
-            let Some(path) = run.path.clone() else { continue };
+            let run =
+                build_horizontal_path(&bytes, TEXT, size, 8, face, Phase::default(), Align::Start)
+                    .unwrap();
+            let Some(path) = run.path.clone() else {
+                continue;
+            };
             let (w, h) = (run.width, run.height);
 
             let cov = coverage_of(&path, w, h).unwrap();
@@ -1986,7 +2005,10 @@ mod stroke_tests {
                     worst = worst.max(reference - got);
                 }
             }
-            assert!(worst < 0.35, "deficit {worst} against the field at {size}px");
+            assert!(
+                worst < 0.35,
+                "deficit {worst} against the field at {size}px"
+            );
         }
     }
 }
@@ -2058,8 +2080,17 @@ mod measure_tests {
             return;
         };
         for turn in TURNS {
-            let m = measure_text(&bytes, "Hg\ngh", SIZE, PADDING, face, turn, PHASE, Align::Center)
-                .unwrap();
+            let m = measure_text(
+                &bytes,
+                "Hg\ngh",
+                SIZE,
+                PADDING,
+                face,
+                turn,
+                PHASE,
+                Align::Center,
+            )
+            .unwrap();
             let r = render_text(
                 &bytes,
                 "Hg\ngh",
@@ -2085,9 +2116,17 @@ mod measure_tests {
             return;
         };
         for turn in TURNS {
-            let m =
-                measure_vertical(&bytes, "Hg\ngh", SIZE, PADDING, face, turn, PHASE, Align::End)
-                    .unwrap();
+            let m = measure_vertical(
+                &bytes,
+                "Hg\ngh",
+                SIZE,
+                PADDING,
+                face,
+                turn,
+                PHASE,
+                Align::End,
+            )
+            .unwrap();
             let r = render_vertical(
                 &bytes,
                 "Hg\ngh",
@@ -2110,7 +2149,8 @@ mod measure_tests {
     fn a_measured_notdef_grid_is_the_frame_its_render_comes_back_in() {
         for vertical in [false, true] {
             for turn in TURNS {
-                let m = measure_notdef("ab\nc", SIZE, PADDING, vertical, turn, PHASE, Align::Center);
+                let m =
+                    measure_notdef("ab\nc", SIZE, PADDING, vertical, turn, PHASE, Align::Center);
                 let r = render_notdef(
                     "ab\nc",
                     SIZE,
@@ -2187,7 +2227,9 @@ mod phase_tests {
 
     #[test]
     fn moving_the_run_inside_the_bitmap_does_not_resize_it() {
-        let Some((bytes, face)) = any_face() else { return };
+        let Some((bytes, face)) = any_face() else {
+            return;
+        };
         let at_rest = draw(&bytes, face, Phase::default());
         let moved = draw(&bytes, face, Phase { x: 0.5, y: 0.75 });
         assert_eq!((at_rest.width, at_rest.height), (moved.width, moved.height));
@@ -2197,7 +2239,9 @@ mod phase_tests {
     /// area, so the ink softens rather than moving to another cell.
     #[test]
     fn half_a_pixel_of_phase_spreads_the_ink_without_losing_it() {
-        let Some((bytes, face)) = any_face() else { return };
+        let Some((bytes, face)) = any_face() else {
+            return;
+        };
         let ink = |bmp: &TextBitmap| -> u64 {
             (0..bmp.width * bmp.height)
                 .map(|i| bmp.rgba[(i * 4 + 3) as usize] as u64)
@@ -2225,7 +2269,9 @@ mod phase_tests {
     /// Both are measured on the bitmap, so both have to follow what it holds.
     #[test]
     fn the_baseline_and_the_clusters_travel_with_the_run() {
-        let Some((bytes, face)) = any_face() else { return };
+        let Some((bytes, face)) = any_face() else {
+            return;
+        };
         let at_rest = draw(&bytes, face, Phase::default());
         let moved = draw(&bytes, face, Phase { x: 0.25, y: 0.5 });
 
@@ -2238,22 +2284,23 @@ mod phase_tests {
     /// down them, so the axis its phase lands on is the other one.
     #[test]
     fn a_vertical_run_moves_on_both_axes_too() {
-        let Some((bytes, face)) = any_face() else { return };
-        let at_rest =
-            render_vertical(
-                &bytes,
-                TEXT,
-                SIZE,
-                PADDING,
-                face,
-                0.0,
-                Phase::default(),
-                Align::default(),
-                BLACK,
-                None,
-                0.0,
-            )
-            .unwrap();
+        let Some((bytes, face)) = any_face() else {
+            return;
+        };
+        let at_rest = render_vertical(
+            &bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::default(),
+            BLACK,
+            None,
+            0.0,
+        )
+        .unwrap();
         let moved = render_vertical(
             &bytes,
             TEXT,
@@ -2291,25 +2338,31 @@ mod tests {
 
     #[test]
     fn one_glyph_per_cluster_passes_through() {
-        let input = [rect(0, 0.0, 0.0, 10.0, 20.0), rect(3, 10.0, 0.0, 10.0, 20.0)];
+        let input = [
+            rect(0, 0.0, 0.0, 10.0, 20.0),
+            rect(3, 10.0, 0.0, 10.0, 20.0),
+        ];
         assert_eq!(merge_cluster_rects(&input), input.to_vec());
     }
 
     #[test]
     fn glyphs_sharing_a_cluster_merge_into_their_union() {
         // A base glyph plus a mark drawn above it: one character, two glyphs.
-        let input = [
-            rect(0, 10.0, 5.0, 10.0, 20.0),
-            rect(0, 12.0, 0.0, 6.0, 8.0),
-        ];
-        assert_eq!(merge_cluster_rects(&input), vec![rect(0, 10.0, 0.0, 10.0, 25.0)]);
+        let input = [rect(0, 10.0, 5.0, 10.0, 20.0), rect(0, 12.0, 0.0, 6.0, 8.0)];
+        assert_eq!(
+            merge_cluster_rects(&input),
+            vec![rect(0, 10.0, 0.0, 10.0, 25.0)]
+        );
     }
 
     #[test]
     fn a_ligature_keeps_the_cluster_of_its_first_character() {
         // Shaping merges clusters, so both characters report the lower offset.
         let input = [rect(0, 0.0, 0.0, 18.0, 20.0)];
-        assert_eq!(merge_cluster_rects(&input), vec![rect(0, 0.0, 0.0, 18.0, 20.0)]);
+        assert_eq!(
+            merge_cluster_rects(&input),
+            vec![rect(0, 0.0, 0.0, 18.0, 20.0)]
+        );
     }
 
     #[test]
@@ -2359,9 +2412,6 @@ mod tests {
     fn every_flagged_cluster_is_reported_once_in_text_order() {
         // Several glyphs can share a cluster, and shaping visits runs in its own
         // order, so the same offset can arrive more than once and out of order.
-        assert_eq!(
-            reportable_offsets("永a字b", &mut vec![7, 3, 7]),
-            vec![3, 7]
-        );
+        assert_eq!(reportable_offsets("永a字b", &mut vec![7, 3, 7]), vec![3, 7]);
     }
 }

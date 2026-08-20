@@ -118,7 +118,7 @@
             <button
               type="button"
               class="panel-action"
-              title="用前景色填充選區，成為新的圖層（Alt+Backspace）"
+              title="用前景色填充選區，寫進當前圖層（Alt+Backspace）"
               :disabled="!canFill"
               @click="onFill"
             >

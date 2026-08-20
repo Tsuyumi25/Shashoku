@@ -136,7 +136,13 @@ fn quantize(rgb: &[u8], colors: usize) -> (Vec<u8>, Vec<u8>) {
     (indexes, palette)
 }
 
-fn encode_jpeg(rgb: &[u8], width: u32, height: u32, gray: bool, quality: u8) -> Result<Vec<u8>, String> {
+fn encode_jpeg(
+    rgb: &[u8],
+    width: u32,
+    height: u32,
+    gray: bool,
+    quality: u8,
+) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let encoder = JpegEncoder::new_with_quality(&mut out, quality);
     let (data, color) = if gray {
@@ -355,7 +361,9 @@ mod tests {
     #[test]
     fn bilevel_packs_eight_pixels_to_a_byte() {
         let out = encode(&page(16, 4), 16, 4, &spec(Format::Png, ColorMode::Bilevel)).unwrap();
-        let decoded = png::Decoder::new(std::io::Cursor::new(&out)).read_info().unwrap();
+        let decoded = png::Decoder::new(std::io::Cursor::new(&out))
+            .read_info()
+            .unwrap();
         assert_eq!(decoded.info().bit_depth, BitDepth::One);
         assert_eq!(decoded.info().color_type, PngColorType::Grayscale);
     }
@@ -363,7 +371,9 @@ mod tests {
     #[test]
     fn png8_carries_a_palette() {
         let out = encode(&page(32, 32), 32, 32, &spec(Format::Png8, ColorMode::Color)).unwrap();
-        let decoded = png::Decoder::new(std::io::Cursor::new(&out)).read_info().unwrap();
+        let decoded = png::Decoder::new(std::io::Cursor::new(&out))
+            .read_info()
+            .unwrap();
         assert_eq!(decoded.info().color_type, PngColorType::Indexed);
         assert!(decoded.info().palette.is_some());
     }
@@ -394,7 +404,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(tight.len() < loose.len(), "{} vs {}", tight.len(), loose.len());
+        assert!(
+            tight.len() < loose.len(),
+            "{} vs {}",
+            tight.len(),
+            loose.len()
+        );
     }
 
     #[test]
@@ -428,6 +443,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(tight.len() < loose.len(), "{} vs {}", tight.len(), loose.len());
+        assert!(
+            tight.len() < loose.len(),
+            "{} vs {}",
+            tight.len(),
+            loose.len()
+        );
     }
 }

@@ -10,6 +10,7 @@ use skrifa::{FontRef, MetadataProvider, string::StringId};
 mod encode;
 mod enumerate;
 mod import;
+mod raster;
 mod render;
 mod stroke;
 pub mod tile;
@@ -466,6 +467,132 @@ pub fn encode_image(
     let bytes =
         encode::encode(rgba.as_ref(), width, height, &spec).map_err(napi::Error::from_reason)?;
     Ok(bytes.into())
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Raster layers
+//
+// Unlike everything above, these calls are stateful: the engine holds a layer's
+// pixels between them. A layer is handed over whole on its first edit and let go
+// when the page is turned, so "does the engine have this" is a moment rather
+// than something anyone has to infer from what happened earlier.
+
+/// A rectangle in page pixels.
+#[napi(object)]
+pub struct LayerFrame {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+fn to_rect(frame: &LayerFrame) -> raster::Rect {
+    raster::Rect {
+        x: frame.x,
+        y: frame.y,
+        w: frame.w,
+        h: frame.h,
+    }
+}
+
+fn to_frame(rect: raster::Rect) -> LayerFrame {
+    LayerFrame {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+    }
+}
+
+/// What a write left behind.
+#[napi(object)]
+pub struct LayerPatch {
+    /// What to name when asking for this write to be taken back. Empty on a
+    /// patch that came from applying a record, since applying it again is what
+    /// puts it back and the caller already knows which record it asked for.
+    pub journal: String,
+    /// The layer's frame after the write. A write reaching past an edge moves
+    /// it, and the manifest has to be told.
+    pub frame: LayerFrame,
+    /// The part of the page `rgba` describes. Equal to `frame` whenever the
+    /// frame moved, because a picture of the old size has nowhere to put a
+    /// patch of the new one.
+    pub changed: LayerFrame,
+    /// Straight RGBA of `changed`, row-major.
+    pub rgba: Buffer,
+}
+
+fn to_patch(journal: String, patch: raster::Patch) -> LayerPatch {
+    LayerPatch {
+        journal,
+        frame: to_frame(patch.frame),
+        changed: to_frame(patch.changed),
+        rgba: patch.rgba.into(),
+    }
+}
+
+/// Hands a layer's whole pixels over, to be called once on its first edit.
+///
+/// Whole rather than lazily, and once rather than per region: the crossing costs
+/// about 40 ms for a full page layer against three orders of magnitude of
+/// headroom, and it buys the guarantee that the engine and the renderer never
+/// hold two answers to what a layer contains.
+#[napi]
+pub fn raster_take(id: String, rgba: Buffer, frame: LayerFrame) -> napi::Result<()> {
+    raster::take(&id, rgba.as_ref(), to_rect(&frame)).map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn raster_holds(id: String) -> bool {
+    raster::holds(&id)
+}
+
+#[napi]
+pub fn raster_release(id: String) {
+    raster::release(&id);
+}
+
+/// Lets go of every held layer. Turning the page.
+#[napi]
+pub fn raster_release_all() {
+    raster::release_all();
+}
+
+/// Fills the covered part of `mask` with `color` on a held layer.
+///
+/// `mask` is A8 coverage over `maskFrame` in page pixels. Nothing comes back
+/// when the coverage is empty or the colour fully transparent — a write that
+/// changes nothing is not a step worth being able to take back.
+#[napi]
+pub fn raster_fill(
+    id: String,
+    mask: Buffer,
+    mask_frame: LayerFrame,
+    color: String,
+) -> napi::Result<Option<LayerPatch>> {
+    let rgba = parse_hex_rgba(&color).map_err(napi::Error::from_reason)?;
+    let filled = raster::fill(
+        &id,
+        mask.as_ref(),
+        to_rect(&mask_frame),
+        [rgba.0, rgba.1, rgba.2, rgba.3],
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(filled.map(|(journal, patch)| to_patch(journal, patch)))
+}
+
+/// Swaps a record against its layer. Undo and redo are this same call, because
+/// swapping is its own inverse. Nothing comes back when the record or its layer
+/// has been let go.
+#[napi]
+pub fn raster_apply_journal(journal: String) -> Option<LayerPatch> {
+    raster::apply_journal(&journal).map(|patch| to_patch(String::new(), patch))
+}
+
+/// Forgets a record — what history falling off the bottom means.
+#[napi]
+pub fn raster_drop_journal(journal: String) {
+    raster::drop_journal(&journal);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

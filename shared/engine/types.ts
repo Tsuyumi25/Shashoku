@@ -142,6 +142,37 @@ export interface EngineEncodeInput {
   quality?: number;
 }
 
+/** A rectangle in page pixels. */
+export interface EngineLayerFrame {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** What a write to a held layer left behind. */
+export interface EngineLayerPatch {
+  /**
+   * What to name when asking for this write to be taken back. Empty on a patch
+   * that came from applying a record, since applying it again is what puts it
+   * back and the caller already knows which record it asked for.
+   */
+  journal: string;
+  /**
+   * The layer's frame after the write. A write reaching past an edge moves it,
+   * and the manifest has to be told.
+   */
+  frame: EngineLayerFrame;
+  /**
+   * The part of the page `rgba` describes. Equal to `frame` whenever the frame
+   * moved, because a picture of the old size has nowhere to put a patch of the
+   * new one — which is what keeps the caller to one paste path.
+   */
+  changed: EngineLayerFrame;
+  /** Straight RGBA of `changed`, row-major. */
+  rgba: Uint8Array;
+}
+
 export interface ShashokuEngineApi {
   version(): string;
   /**
@@ -288,4 +319,43 @@ export interface ShashokuEngineApi {
     height: number,
     input: EngineEncodeInput,
   ): Uint8Array;
+
+  /**
+   * Hands a layer's whole pixels over, once, on its first edit.
+   *
+   * Whole rather than lazily and once rather than per region: the crossing is
+   * about 40 ms for a full-page layer against three orders of magnitude of
+   * headroom, and it buys the guarantee that the engine and the renderer never
+   * hold two answers to what a layer contains. Whether the engine has taken a
+   * layer over is then a moment, not something to be inferred from what
+   * happened earlier.
+   */
+  rasterTake(id: string, rgba: Uint8Array, frame: EngineLayerFrame): void;
+  rasterHolds(id: string): boolean;
+  rasterRelease(id: string): void;
+  /** Lets go of every held layer. Turning the page. */
+  rasterReleaseAll(): void;
+  /**
+   * Fills the covered part of `mask` with `color` on a held layer, in one
+   * transaction against its tiles.
+   *
+   * `mask` is A8 coverage over `maskFrame` in page pixels; `color` is
+   * "#RRGGBB" or "#RRGGBBAA". Null when the coverage is empty or the colour
+   * fully transparent — a write that changes nothing is not a step worth being
+   * able to take back.
+   */
+  rasterFill(
+    id: string,
+    mask: Uint8Array,
+    maskFrame: EngineLayerFrame,
+    color: string,
+  ): EngineLayerPatch | null;
+  /**
+   * Swaps a record against its layer. Undo and redo are this same call, because
+   * swapping is its own inverse. Null when the record or its layer has been let
+   * go.
+   */
+  rasterApplyJournal(journal: string): EngineLayerPatch | null;
+  /** Forgets a record — what history falling off the bottom means. */
+  rasterDropJournal(journal: string): void;
 }

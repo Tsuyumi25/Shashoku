@@ -97,6 +97,35 @@ export function isLocked(layers: readonly LayerEntry[], id: string): boolean {
 
 
 /**
+ * Whether an entry is off, its own switch or a folder's.
+ *
+ * Inherited the same way locking is, and for the same reason `pageStack` draws
+ * it that way: a folder that is off takes everything under it with it, whatever
+ * those objects say about themselves.
+ *
+ * This is the second half of "who may be written to". Refusing a hidden layer is
+ * not a rule about hiding — it is that a write you cannot see land is a write
+ * you cannot tell went wrong, so the only honest answer is to say so instead.
+ *
+ * An entry that is not on this page answers false, as `isLocked` does: a tree
+ * cannot speak for an id it does not hold.
+ */
+export function isHidden(layers: readonly LayerEntry[], id: string): boolean {
+  const walk = (entries: readonly LayerEntry[], inherited: boolean): boolean | null => {
+    for (const entry of entries) {
+      const hidden = inherited || !entry.visible
+      if (entry.id === id) return hidden
+      if (entry.kind === 'group') {
+        const found = walk(entry.children, hidden)
+        if (found !== null) return found
+      }
+    }
+    return null
+  }
+  return walk(layers, false) ?? false
+}
+
+/**
  * Whether a node can be merged: pixels, or a container of nothing but pixels.
  *
  * Merge exists to turn several appearances into one surface that can still be

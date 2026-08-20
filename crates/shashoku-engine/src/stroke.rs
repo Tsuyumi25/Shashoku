@@ -261,6 +261,10 @@ mod tests {
             coverage[y * w + 4] = 1.0;
         }
         let field = signed_distance_field(&coverage, w, h);
-        assert!((field[1 * w + 3] - 0.2).abs() < 0.05, "{}", field[1 * w + 3]);
+        assert!(
+            (field[1 * w + 3] - 0.2).abs() < 0.05,
+            "{}",
+            field[1 * w + 3]
+        );
     }
 }

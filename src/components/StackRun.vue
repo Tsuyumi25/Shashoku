@@ -12,6 +12,7 @@ import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
+import { useRasterStore } from '@/stores/rasterStore'
 
 /**
  * A run of the page's objects on one canvas, drawn in page coordinates under
@@ -47,6 +48,8 @@ const props = defineProps<{
 }>()
 
 const dpr = window.devicePixelRatio || 1
+
+const raster = useRasterStore()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
@@ -164,19 +167,25 @@ function paint() {
       continue
     }
     if (!drawable(node)) continue
-    const bitmap = bitmaps.value.get(node.entry.file)
-    if (!bitmap) continue
-    const { x, y, w: fw, h: fh } = node.entry
+    // A layer the engine holds draws from the canvas its patches are pasted
+    // into, not from the file — the file is one write behind for as long as an
+    // edit is being made, and that canvas is what an edit changes. Its frame
+    // comes from there too, because the manifest is not told a layer grew until
+    // the file naming the new frame is safely on disk.
+    const live = raster.liveLayer(node.entry.id)
+    const source = live?.canvas ?? bitmaps.value.get(node.entry.file)
+    if (!source) continue
+    const { x, y, w: fw, h: fh } = live?.frame ?? node.entry
     if (props.place) {
       // Around the layer's own middle, and undone afterwards so a preview can
       // never leak onto whatever else this canvas holds.
       ctx.save()
       applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
-      ctx.drawImage(bitmap, 0, 0, fw, fh)
+      ctx.drawImage(source, 0, 0, fw, fh)
       ctx.restore()
       continue
     }
-    ctx.drawImage(bitmap, x, y, fw, fh)
+    ctx.drawImage(source, x, y, fw, fh)
   }
   ctx.globalAlpha = 1
 }
@@ -234,6 +243,14 @@ watch(
 
 /** Typeset text already tracks its own inputs; this is only the repaint. */
 watch(drawnTexts, schedulePaint)
+
+/**
+ * An edit lands on screen in the same call stack that made it, rather than on
+ * the next frame. Drawing is what says the write happened, so anything between
+ * the two is a hand the picture is behind — and there is no version number to
+ * reconcile because the act of painting is itself the signal.
+ */
+watch(() => raster.revision, paint, { flush: 'sync' })
 
 watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 

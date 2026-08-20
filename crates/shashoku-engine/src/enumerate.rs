@@ -63,7 +63,10 @@ fn is_font_file(path: &Path) -> bool {
 /// them — hand-lettered CJK families routinely carry an empty Macintosh record
 /// beside a correct Windows one — and its language is "en", so taking it would
 /// leave a font with no name that the catalogue can key on.
-fn choose_localized<'a>(entries: &[(Option<String>, &'a str)], locales: &[String]) -> Option<&'a str> {
+fn choose_localized<'a>(
+    entries: &[(Option<String>, &'a str)],
+    locales: &[String],
+) -> Option<&'a str> {
     let named = |value: &str| !value.trim().is_empty();
 
     for wanted in locales {
@@ -147,7 +150,9 @@ fn decoded_entries(font: &FontRef, id: StringId) -> Vec<DecodedName> {
         .zip(languages)
         .filter_map(|(record, language)| {
             let start = record.string_offset().non_null().unwrap_or(0);
-            let bytes = data.as_bytes().get(start..start + record.length() as usize)?;
+            let bytes = data
+                .as_bytes()
+                .get(start..start + record.length() as usize)?;
             // All platform-3 strings are UTF-16BE — the encoding ID names a
             // character repertoire, not an encoding. read-fonts (and HarfBuzz)
             // decode only a shortlist of those IDs and hand back nothing for
@@ -220,7 +225,9 @@ fn read_faces(path: &Path, locales: &[String], out: &mut Vec<FaceInfo>) {
     let Ok(map) = (unsafe { Mmap::map(&file) }) else {
         return;
     };
-    let Some(path_text) = path.to_str() else { return };
+    let Some(path_text) = path.to_str() else {
+        return;
+    };
 
     let mut face_index = 0u32;
     while let Ok(font) = FontRef::from_index(&map, face_index) {
@@ -280,14 +287,18 @@ fn dirs_in_config(config: &str) -> Vec<(Option<String>, String)> {
     let mut rest = config;
     while let Some(at) = rest.find("<dir") {
         rest = &rest[at + 4..];
-        let Some(open_end) = rest.find('>') else { break };
+        let Some(open_end) = rest.find('>') else {
+            break;
+        };
         let attributes = &rest[..open_end];
         // "<directory>" or similar would match "<dir" too.
         if !attributes.is_empty() && !attributes.starts_with([' ', '\t', '\n', '\r', '/']) {
             continue;
         }
         rest = &rest[open_end + 1..];
-        let Some(close) = rest.find("</dir>") else { break };
+        let Some(close) = rest.find("</dir>") else {
+            break;
+        };
         let value = rest[..close].trim();
         rest = &rest[close + 6..];
         if value.is_empty() {
@@ -419,22 +430,34 @@ mod tests {
 
     #[test]
     fn locale_preference_is_ordered_not_merely_matched() {
-        let names = entries(&[(Some("ja-JP"), "源ノ角ゴシック"), (Some("zh-Hant-TW"), "思源黑體")]);
+        let names = entries(&[
+            (Some("ja-JP"), "源ノ角ゴシック"),
+            (Some("zh-Hant-TW"), "思源黑體"),
+        ]);
         let locales = vec!["ja".to_string(), "zh-Hant".to_string()];
         assert_eq!(choose_localized(&names, &locales), Some("源ノ角ゴシック"));
     }
 
     #[test]
     fn a_simplified_name_does_not_satisfy_a_traditional_request() {
-        let names = entries(&[(Some("zh-Hans-CN"), "思源黑体"), (Some("en-US"), "Source Han Sans")]);
+        let names = entries(&[
+            (Some("zh-Hans-CN"), "思源黑体"),
+            (Some("en-US"), "Source Han Sans"),
+        ]);
         let locales = vec!["zh-Hant".to_string()];
         assert_eq!(choose_localized(&names, &locales), Some("Source Han Sans"));
     }
 
     #[test]
     fn english_answers_when_no_locale_matches() {
-        let names = entries(&[(Some("ja-JP"), "源ノ角ゴシック"), (Some("en-GB"), "Source Han Sans")]);
-        assert_eq!(choose_localized(&names, &["ko".to_string()]), Some("Source Han Sans"));
+        let names = entries(&[
+            (Some("ja-JP"), "源ノ角ゴシック"),
+            (Some("en-GB"), "Source Han Sans"),
+        ]);
+        assert_eq!(
+            choose_localized(&names, &["ko".to_string()]),
+            Some("Source Han Sans")
+        );
     }
 
     #[test]
@@ -446,7 +469,10 @@ mod tests {
     #[test]
     fn a_font_naming_no_language_still_yields_its_name() {
         let names = entries(&[(None, "王漢宗中明體")]);
-        assert_eq!(choose_localized(&names, &["zh-Hant".to_string()]), Some("王漢宗中明體"));
+        assert_eq!(
+            choose_localized(&names, &["zh-Hant".to_string()]),
+            Some("王漢宗中明體")
+        );
     }
 
     /**

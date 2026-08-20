@@ -9,6 +9,7 @@ import {
   moveEntry,
   restoreGroupAt,
   insertAtPath,
+  isHidden,
   isLocked,
   isMergeable,
   outermostEntries,
@@ -328,6 +329,41 @@ describe('isLocked', () => {
   // Nothing is protected by a lock it does not have.
   it('answers false for an entry that is not on this page', () => {
     expect(isLocked([text('a')], 'elsewhere')).toBe(false)
+  })
+})
+
+describe('isHidden', () => {
+  const off = <T extends LayerEntry>(entry: T): T => ({ ...entry, visible: false })
+
+  it('answers a switch an entry threw itself', () => {
+    expect(isHidden([off(text('a')), text('b')], 'a')).toBe(true)
+    expect(isHidden([off(text('a')), text('b')], 'b')).toBe(false)
+  })
+
+  // The same rule `pageStack` draws by: a folder that is off takes everything
+  // under it with it, whatever those objects say about themselves.
+  it("passes a folder's switch down to what it holds", () => {
+    const layers = [off(group('g', [text('a')])), text('b')]
+    expect(isHidden(layers, 'a')).toBe(true)
+    expect(isHidden(layers, 'b')).toBe(false)
+  })
+
+  it('stays hidden under a folder that is on', () => {
+    expect(isHidden([group('g', [off(text('a'))])], 'a')).toBe(true)
+  })
+
+  it('reaches down however many folders deep it has to', () => {
+    const layers = [off(group('g', [group('h', [group('i', [text('a')])])]))]
+    expect(isHidden(layers, 'a')).toBe(true)
+  })
+
+  it('leaves a sibling branch alone', () => {
+    const layers = [off(group('g', [text('a')])), group('h', [text('b')])]
+    expect(isHidden(layers, 'b')).toBe(false)
+  })
+
+  it('answers false for an entry that is not on this page', () => {
+    expect(isHidden([text('a')], 'elsewhere')).toBe(false)
   })
 })
 

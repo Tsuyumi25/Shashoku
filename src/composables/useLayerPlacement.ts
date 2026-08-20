@@ -28,6 +28,7 @@ import { context2d, encodePng } from '@/lib/pageComposite'
 import type { Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useRasterStore } from '@/stores/rasterStore'
 
 /**
  * Moving, turning and scaling a raster layer, and writing the result down.
@@ -211,6 +212,14 @@ export function useLayerPlacement() {
       const place = gesture.place
       const frame = placedFrame(entry, place)
       const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
+      /*
+       * Whatever the engine is holding for this layer speaks in coordinates
+       * measured from the frame it was handed over at, and this moves that
+       * frame. Letting it go here is what makes the next edit hand over the
+       * layer as it now stands, rather than paint into a grid that is one
+       * gesture behind.
+       */
+      useRasterStore().release(entry.id)
       // A pure translation moves the frame and leaves the pixels alone, which
       // is the one gesture that costs nothing — a copy rather than an average.
       if (place.scale === 1 && place.rotation === 0) {

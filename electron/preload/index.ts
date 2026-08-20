@@ -138,6 +138,13 @@ const engineApi: ShashokuEngineApi = {
   measureNotdef: (text, sizePx, padding, vertical, rotation, phaseX, phaseY, align) =>
     engine.measureNotdef(text, sizePx, padding, vertical, rotation, phaseX, phaseY, align),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
+  rasterTake: (id, rgba, frame) => engine.rasterTake(id, rgba, frame),
+  rasterHolds: (id) => engine.rasterHolds(id),
+  rasterRelease: (id) => engine.rasterRelease(id),
+  rasterReleaseAll: () => engine.rasterReleaseAll(),
+  rasterFill: (id, mask, maskFrame, color) => engine.rasterFill(id, mask, maskFrame, color),
+  rasterApplyJournal: (journal) => engine.rasterApplyJournal(journal),
+  rasterDropJournal: (journal) => engine.rasterDropJournal(journal),
 };
 
 // ────────────────────────────────────────────────────────────────────────────
