@@ -14,13 +14,6 @@
   >
     <template v-if="currentFile && pageReady">
       <!--
-        Its own canvas rather than a mark on the ones the layers are drawn into:
-        the ants crawl on their own clock, and the page has no reason to be
-        redrawn for them.
-      -->
-      <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
-
-      <!--
         Outside the transformed stage on purpose: these carry their own pixels
         and place themselves in screen coordinates. The layer itself is
         transparent to the pointer so a drag on bare page still reaches the
@@ -36,6 +29,18 @@
           :held="heldLayer"
         />
       </div>
+
+      <!--
+        Its own canvas rather than a mark on the ones the layers are drawn into:
+        the ants crawl on their own clock, and the page has no reason to be
+        redrawn for them.
+
+        After the layers and never before them. Nothing on this canvas sets a
+        z-index, so what is written later is painted later — and an overlay
+        written above the page is an overlay drawn under the base map, which
+        covers every page edge to edge. The ants would simply never be seen.
+      -->
+      <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
       <!--
         Where the reading being pointed at in the list was read. Nothing here
