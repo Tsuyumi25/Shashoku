@@ -85,3 +85,8 @@ export function rectBetween(a: Point, b: Point): Rect {
     h: Math.abs(b.y - a.y),
   }
 }
+
+/** Whether two rectangles describe the same box. */
+export function sameRect(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+}

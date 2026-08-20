@@ -173,6 +173,29 @@ export interface EngineLayerPatch {
   rgba: Uint8Array;
 }
 
+/**
+ * Which page the selection is on, how big that page is, and where its edges
+ * are.
+ *
+ * One shape rather than three calls, because a caller that has any of them
+ * wants all of them: they change together, and asking separately is three
+ * chances to act on a half-updated answer.
+ */
+export interface EngineMaskState {
+  /**
+   * Absent when nothing is selected anywhere.
+   *
+   * Optional rather than nullable because that is what the addon really
+   * answers: napi leaves a `None` field off the object rather than setting it
+   * to null, and saying otherwise here would be a contract nothing keeps.
+   */
+  page?: string;
+  width: number;
+  height: number;
+  /** The tight box of everything selected. Absent when nothing is selected. */
+  bounds?: EngineLayerFrame;
+}
+
 export interface ShashokuEngineApi {
   version(): string;
   /**
@@ -393,4 +416,53 @@ export interface ShashokuEngineApi {
    * cannot be reached past.
    */
   rasterTrimHistory(floor: number, ceiling: number): string[];
+
+  /**
+   * The selection, held on the same grid the pixels are — one byte a pixel
+   * instead of four, and the same growth, origin and copy-on-write.
+   *
+   * Its identity is unchanged by that: it is editor state, it dies with the
+   * project, it is not in the manifest and it is not on the layer tree. What
+   * changes is the bill. A full-page mask at the largest page is 139 MB, and
+   * selecting all or inverting has the whole page as its changed region, so two
+   * of those in history is 278 MB for one command; as tiles it is tens of
+   * thousands of pointers at a single four-kilobyte block.
+   *
+   * Every mutation hands back the name of a record that puts the selection
+   * back — page, size, edges and coverage together — so undoing across a page
+   * change is the same step as undoing a marquee.
+   */
+  maskState(): EngineMaskState;
+  /**
+   * The selection's own bytes over a rectangle, row by row, one per pixel. Zero
+   * where nothing is selected, and zero outside the page.
+   */
+  maskRead(region: EngineLayerFrame): Uint8Array;
+  /** Starts an empty selection for a page, putting away whatever was held. */
+  maskHold(page: string, width: number, height: number): string;
+  maskDeselect(): string;
+  /**
+   * Writes coverage over a region and works out where the edges are now.
+   * `bytes` is one per pixel of `region`, row by row; the part of the region
+   * outside the page is dropped.
+   */
+  maskWrite(region: EngineLayerFrame, bytes: Uint8Array): string;
+  maskSelectAll(): string;
+  maskInvert(): string;
+  /** Swaps a record against the selection. Undo and redo are this same call. */
+  maskApplyJournal(journal: string): void;
+  maskDropJournal(journal: string): void;
+  /**
+   * Folds a later record into an earlier one and forgets the later.
+   *
+   * A brush stroke is one step however many segments it is made of, so its
+   * segments write one after another and their records collapse into the
+   * first — without which a stroke of two hundred segments would hold two
+   * hundred copies of every tile it crossed.
+   */
+  maskAbsorbJournal(into: string, later: string): void;
+  /** What the selection and its records hold, counting a shared block once. */
+  maskBytesHeld(): number;
+  /** Everything forgotten — a selection belongs to the project that made it. */
+  maskReset(): void;
 }

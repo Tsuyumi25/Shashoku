@@ -7,6 +7,13 @@ import type { ShapeRaster } from '@/lib/selection/raster'
  * Every consumer multiplies its own strength by `mask/255` rather than clipping,
  * which is what makes a feathered or anti-aliased edge mean anything.
  *
+ * What is here is the arithmetic. The coverage itself lives in the engine's
+ * tiles, so everything works over a window — a rectangle of the mask and the
+ * bytes inside it — rather than over a page-sized array. That is the one thing
+ * these functions used to assume and the one thing the tiles exist to make
+ * unnecessary: a page of them is 139 MB at the largest page, and a selection in
+ * one corner should not cost what the page costs.
+ *
  * Nothing here is reactive and nothing here is stored. A mask is editor state
  * that dies with the project, and a `Uint8ClampedArray` handed to `reactive()`
  * comes back unwrapped and unwatched without a warning, so it must never be
@@ -25,12 +32,6 @@ export interface MaskTarget {
 
 /** The 50% contour, which is where Photoshop draws the marching ants. */
 export const ANTS_THRESHOLD = 128
-
-export function fullMask(w: number, h: number): Uint8ClampedArray {
-  const mask = new Uint8ClampedArray(w * h)
-  mask.fill(255)
-  return mask
-}
 
 /**
  * The bounding box of everything selected, or null when nothing is.
@@ -154,42 +155,55 @@ export function composeInto(
   }
 }
 
-/** Every value in a mask inverted, feathered edges included. */
-export function invertInto(dst: Uint8ClampedArray, src: Uint8ClampedArray | null): void {
-  if (src === null) {
-    dst.fill(255)
-    return
+/**
+ * A rectangle of the mask and the bytes inside it, row by row.
+ *
+ * The unit everything works in now that the mask itself is tiles in the engine.
+ * A page-sized array is what the tiles exist to avoid — 139 MB at the largest
+ * page — and every algorithm here already worked inside a bounded region, so
+ * what changed is only where the bytes come from.
+ */
+export interface MaskWindow {
+  region: Rect
+  bytes: Uint8ClampedArray
+}
+
+/** The same shape, measured from a different origin. Coverage is not copied. */
+function shifted(shape: ShapeRaster, dx: number, dy: number): ShapeRaster {
+  return {
+    coverage: shape.coverage,
+    bounds: { x: shape.bounds.x + dx, y: shape.bounds.y + dy, w: shape.bounds.w, h: shape.bounds.h },
   }
-  for (let i = 0; i < dst.length; i++) dst[i] = 255 - src[i]
 }
 
 /**
- * The bytes inside a region, laid out row by row — what a command holds so it
- * can put them back. A whole page is never copied: a selection command records
- * the box it touched, so undoing a rectangle dragged in one corner costs that
- * corner.
+ * `composeInto` over a window rather than a page.
+ *
+ * The composition itself is untouched: the window is handed its own width as
+ * the stride and everything is measured from its corner, which is the same
+ * arithmetic a page did with the page's corner at the origin.
  */
-export function readPatch(mask: Uint8ClampedArray, w: number, region: Rect): Uint8ClampedArray {
-  if (isEmptyRect(region)) return new Uint8ClampedArray(0)
-  const out = new Uint8ClampedArray(region.w * region.h)
-  for (let row = 0; row < region.h; row++) {
-    const from = (region.y + row) * w + region.x
-    out.set(mask.subarray(from, from + region.w), row * region.w)
-  }
+export function composeWindow(
+  base: Uint8ClampedArray | null,
+  shape: ShapeRaster,
+  op: SelectionOp,
+  region: Rect,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(Math.max(0, region.w * region.h))
+  if (isEmptyRect(region)) return out
+  composeInto(out, base, region.w, region.h, shifted(shape, -region.x, -region.y), op, {
+    x: 0,
+    y: 0,
+    w: region.w,
+    h: region.h,
+  })
   return out
 }
 
-export function writePatch(
-  mask: Uint8ClampedArray,
-  w: number,
-  region: Rect,
-  bytes: Uint8ClampedArray,
-): void {
-  if (isEmptyRect(region)) return
-  for (let row = 0; row < region.h; row++) {
-    mask.set(
-      bytes.subarray(row * region.w, row * region.w + region.w),
-      (region.y + row) * w + region.x,
-    )
-  }
+/** `boundsOfMask` over a window, answering in page coordinates. */
+export function boundsOfWindow(window: MaskWindow): Rect | null {
+  const { region, bytes } = window
+  if (isEmptyRect(region)) return null
+  const found = boundsOfMask(bytes, region.w, region.h)
+  return found === null ? null : { ...found, x: found.x + region.x, y: found.y + region.y }
 }

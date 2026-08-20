@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRequire } from 'node:module'
 import { createPinia, setActivePinia } from 'pinia'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
@@ -8,6 +9,13 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+
+/**
+ * The real engine, not a stand-in. The selection's coverage lives in its tiles,
+ * so making a selection here goes through the same addon preload hands the
+ * renderer — which is why `pnpm test` needs `pnpm engine:build` to have run.
+ */
+const engine = createRequire(import.meta.url)('@shashoku/engine') as Window['engine']
 
 const PAGE_ID = 'source-260809-1200'
 const PAGE = { page: PAGE_ID, w: 1200, h: 1700 }
@@ -74,7 +82,12 @@ function selectSomething() {
   useSelectionStore().applyShape(PAGE, rasterizeRect(PAGE, { x: 10, y: 10, w: 20, h: 20 }), 'new', 'test')
 }
 
+beforeAll(() => {
+  vi.stubGlobal('window', { engine })
+})
+
 beforeEach(() => {
+  engine.maskReset()
   setActivePinia(createPinia())
 })
 

@@ -66,6 +66,23 @@ impl<P: PixelFormat> TileJournal<P> {
         self.entries.push((coord, held));
     }
 
+    /// Folds a later record into this one, keeping what this one already says.
+    ///
+    /// First record wins, which is the same rule a transaction keeps and for the
+    /// same reason: one gesture is one step, so what it must be able to put back
+    /// is the state it opened on, not the state halfway through. A stroke made
+    /// of two hundred segments would otherwise hold two hundred copies of every
+    /// tile it crossed; the copies the later records held are dropped here.
+    pub fn absorb(&mut self, later: TileJournal<P>) {
+        let mine: HashSet<TileCoord> = self.entries.iter().map(|(coord, _)| *coord).collect();
+        self.entries.extend(
+            later
+                .entries
+                .into_iter()
+                .filter(|(coord, _)| !mine.contains(coord)),
+        );
+    }
+
     /// Swaps this journal's contents with the grid's, leaving the journal
     /// holding what the grid held. Applying it a second time puts everything
     /// back, which is why undo and redo need no separate implementation.
@@ -217,6 +234,36 @@ mod tests {
 
         assert_eq!(journal.len(), 100);
         assert_eq!(journal.bytes_held(), 16 * 1024);
+    }
+
+    /// One gesture is one step, so what it must be able to put back is the state
+    /// it opened on. The copies the later records held go with them.
+    #[test]
+    fn a_record_folded_in_later_keeps_what_the_earlier_one_said() {
+        let mut grid = TileGrid::<Rgba8>::new();
+        drop(paint(&mut grid, 0, 0, &RED));
+
+        let mut first = paint(&mut grid, 1, 0, &BLUE);
+        let second = paint(&mut grid, 2, 0, &RED);
+        first.absorb(second);
+
+        assert_eq!(first.len(), 1);
+        first.apply(&mut grid);
+        assert_eq!(grid.pixel(0, 0), Some(&RED[..]));
+        assert_eq!(grid.pixel(1, 0), Some(&[0, 0, 0, 0][..]));
+        assert_eq!(grid.pixel(2, 0), Some(&[0, 0, 0, 0][..]));
+    }
+
+    #[test]
+    fn a_record_folded_in_brings_the_tiles_the_earlier_one_never_touched() {
+        let mut grid = TileGrid::<Rgba8>::new();
+        let mut first = paint(&mut grid, 0, 0, &RED);
+        let second = paint(&mut grid, TILE_SIZE, 0, &BLUE);
+        first.absorb(second);
+
+        assert_eq!(first.len(), 2);
+        first.apply(&mut grid);
+        assert_eq!(grid.tile_count(), 0);
     }
 
     #[test]

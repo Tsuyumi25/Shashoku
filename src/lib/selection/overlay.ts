@@ -1,4 +1,5 @@
 import { contentToScreenPx, type ViewTransform } from '@/lib/coords'
+import type { MaskWindow } from '@/lib/selection/mask'
 import type { Point, Rect } from '@/lib/selection/rect'
 
 /** Dash length in device pixels, so the crawl looks the same on any display. */
@@ -106,24 +107,26 @@ export function strokeBuildingPath(ctx: CanvasRenderingContext2D, path: Path2D):
  * selection for one stamp was the whole of the stall it used to cause.
  * `putImageData` replaces rather than blends, which is what lets an erase
  * stroke patch the same way a paint stroke does.
+ *
+ * `at` is in page coordinates and must lie inside the window; the canvas is
+ * page-sized, so what is painted lands where the mask says it is.
  */
 export function paintMaskRegion(
   ctx: OffscreenCanvasRenderingContext2D,
-  mask: Uint8ClampedArray,
-  pageWidth: number,
-  region: Rect,
+  window: MaskWindow,
+  at: Rect,
 ): void {
-  if (region.w <= 0 || region.h <= 0) return
-  const image = ctx.createImageData(region.w, region.h)
+  if (at.w <= 0 || at.h <= 0) return
+  const image = ctx.createImageData(at.w, at.h)
   const out = image.data
-  for (let row = 0; row < region.h; row++) {
-    const from = (region.y + row) * pageWidth + region.x
-    for (let i = 0; i < region.w; i++) {
-      const at = (row * region.w + i) * 4
-      out[at] = 255
+  for (let row = 0; row < at.h; row++) {
+    const from = (at.y + row - window.region.y) * window.region.w + (at.x - window.region.x)
+    for (let i = 0; i < at.w; i++) {
+      const at4 = (row * at.w + i) * 4
+      out[at4] = 255
       // Half strength, as Quick Mask is, so the artwork stays readable under it.
-      out[at + 3] = mask[from + i] >> 1
+      out[at4 + 3] = window.bytes[from + i] >> 1
     }
   }
-  ctx.putImageData(image, region.x, region.y)
+  ctx.putImageData(image, at.x, at.y)
 }

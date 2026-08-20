@@ -10,14 +10,12 @@ import {
   type MaskBrushMode,
 } from '@/lib/selection/brushMask'
 import {
-  boundsOfMask,
-  composeInto,
-  invertInto,
+  boundsOfWindow,
+  composeWindow,
   normalizeOp,
-  readPatch,
   regionFor,
-  writePatch,
   type MaskTarget,
+  type MaskWindow,
   type SelectionOp,
 } from '@/lib/selection/mask'
 import { marqueeRect } from '@/lib/selection/marquee'
@@ -81,11 +79,8 @@ export interface GestureModifiers {
 }
 
 /** The mask as it should be shown, which during a drag is not the held one. */
-export interface SelectionDisplay {
-  mask: Uint8ClampedArray
+export interface SelectionDisplay extends MaskWindow {
   page: string
-  w: number
-  h: number
   bounds: Rect | null
 }
 
@@ -95,23 +90,23 @@ export interface SelectionDisplay {
  * reaches `manifest.json` — a selection is editor state that dies with the
  * project, exactly as in Photoshop.
  *
- * The mask itself is deliberately not part of the store's state. Pinia's
- * devtools plugin walks `$state` key by key and reads every value, with no
- * length limit and no way to opt a field out, so a page-sized byte array put
- * there would be stringified on every mutation while the panel is open —
- * `shallowRef` and `markRaw` only turn off Vue's proxy and do nothing to that
- * path. The reactive half is what is small enough to be worth watching: where
- * the selection is, and a counter saying it moved.
+ * The coverage itself lives in the engine, on the same tile grid the pixels use:
+ * same growth, same origin, same copy-on-write, one byte a pixel instead of
+ * four. Nothing about what a selection *is* changed with it — what changed is
+ * the bill. A full-page mask at the largest page is 139 MB, and selecting all or
+ * inverting has the whole page as its changed region, so two of those in history
+ * was 278 MB for one command; as tiles it is tens of thousands of pointers at a
+ * single four-kilobyte block.
+ *
+ * What is left here is the reactive half, which is small enough to be worth
+ * watching: where the selection is, which page it is on, and a counter saying it
+ * moved. Pinia's devtools plugin walks `$state` key by key with no length limit,
+ * so a page of bytes put there would be stringified on every mutation — the
+ * arrays that pass through are deliberately plain locals.
  */
 export const useSelectionStore = defineStore('selection', () => {
-  let mask: Uint8ClampedArray | null = null
+  /** Mirrored from the engine after every change, never written to directly. */
   let held: MaskTarget | null = null
-  /**
-   * The page a drag is previewed into, so the held mask is untouched until the
-   * release — which is what makes cancelling a gesture free.
-   */
-  let scratch: Uint8ClampedArray | null = null
-  let previewDirty: Rect = EMPTY_RECT
 
   const bounds = ref<Rect | null>(null)
   /** Bumped whenever what should be on screen changed, gestures included. */
@@ -132,9 +127,25 @@ export const useSelectionStore = defineStore('selection', () => {
   const hasSelection = computed(() => bounds.value !== null)
   const isDrawing = computed(() => gesture.value !== null)
 
+  /**
+   * Takes the engine's answer as this store's own.
+   *
+   * Which page, how big and where the edges are all move together, so they are
+   * read together — asking separately is three chances to act on a half-updated
+   * answer.
+   */
+  function sync(): void {
+    const state = window.engine.maskState()
+    const at = state.bounds
+    held =
+      state.page === undefined
+        ? null
+        : { page: state.page, w: state.width, h: state.height }
+    bounds.value = at === undefined ? null : { x: at.x, y: at.y, w: at.w, h: at.h }
+  }
+
   function isHeldFor(target: MaskTarget): boolean {
     return (
-      mask !== null &&
       held !== null &&
       held.page === target.page &&
       held.w === target.w &&
@@ -142,121 +153,68 @@ export const useSelectionStore = defineStore('selection', () => {
     )
   }
 
-  /**
-   * The mask for this page, allocating one if what is held is for somewhere
-   * else. Replacing it is what "one selection" means: making a selection on
-   * another page is what takes the last one away, not turning to that page.
-   */
-  function ensureMask(target: MaskTarget): Uint8ClampedArray {
-    if (isHeldFor(target)) return mask as Uint8ClampedArray
-    mask = new Uint8ClampedArray(target.w * target.h)
-    held = { ...target }
-    bounds.value = null
-    return mask
+  /** The mask's own bytes over a rectangle, row by row. */
+  function readWindow(region: Rect): MaskWindow {
+    const at = held === null ? EMPTY_RECT : clampToPage(region, held.w, held.h)
+    if (isEmptyRect(at)) return { region: EMPTY_RECT, bytes: new Uint8ClampedArray(0) }
+    return { region: at, bytes: new Uint8ClampedArray(window.engine.maskRead(at)) }
   }
 
-  /**
-   * `scan` must contain the answer. An operation's changed region unioned with
-   * the previous bounds always does, and saying so turns a page-wide sweep into
-   * a look at the box that moved.
-   */
-  function refreshBounds(scan: Rect): void {
-    if (mask === null || held === null) {
-      bounds.value = null
-      return
-    }
-    bounds.value = boundsOfMask(mask, held.w, held.h, scan)
-  }
-
-  /**
-   * Enough of a mask to put it back. A command holds two of these; `page: null`
-   * is the state of having no selection at all, which is what deselecting
-   * undoes to and what the first selection of a session undoes to.
-   *
-   * A snapshot of a whole page's selection is only taken where one is really
-   * being destroyed — deselecting, or selecting on a different page. Every
-   * ordinary operation records the box it touched.
-   */
-  type MaskSnapshot =
-    | { page: null }
-    | { page: string; w: number; h: number; region: Rect; bytes: Uint8ClampedArray }
-
-  function snapshotRegion(region: Rect): MaskSnapshot {
-    if (mask === null || held === null) return { page: null }
-    return {
-      page: held.page,
-      w: held.w,
-      h: held.h,
-      region,
-      bytes: readPatch(mask, held.w, region),
-    }
-  }
-
-  function snapshotAll(): MaskSnapshot {
-    return snapshotRegion(bounds.value ?? EMPTY_RECT)
-  }
-
-  /**
-   * `focus` is the page the command acted on, for the side of it that holds no
-   * mask: undoing the first selection of a session leaves nothing to look at,
-   * and the page it was made on is still where the person should be looking.
-   */
-  function restore(snapshot: MaskSnapshot, focus: string): void {
-    // A gesture is a preview over a mask that is about to be replaced under it,
-    // so it cannot outlive the replacement.
-    cancelGesture()
-    if (snapshot.page === null) {
-      mask = null
-      held = null
-      scratch = null
-      bounds.value = null
-      revision.value++
-      useEditorStore().showPage(focus)
-      return
-    }
-    const target = { page: snapshot.page, w: snapshot.w, h: snapshot.h }
-    const previous = bounds.value
-    const replaced = !isHeldFor(target)
-    const live = ensureMask(target)
-    writePatch(live, target.w, snapshot.region, snapshot.bytes)
-    scratch = null
-    refreshBounds(replaced ? snapshot.region : unionRect(previous ?? EMPTY_RECT, snapshot.region))
-    revision.value++
-    // Undoing something you have navigated away from should show you what it
-    // undid. Navigation itself is not history, so this rides along on the
-    // command rather than being a step of its own.
-    useEditorStore().showPage(snapshot.page)
+  function writeWindow(window_: MaskWindow): string {
+    return window.engine.maskWrite(window_.region, new Uint8Array(window_.bytes))
   }
 
   /**
    * Selection history joins the document's own command stack, so one Ctrl+Z
    * means one thing. It leaves the project clean: nothing here writes a page,
    * so nothing here dirties one or moves its `revision` on.
+   *
+   * A step can be several records — starting a selection on another page puts
+   * the old one away and then writes, and both have to come back together. Undo
+   * runs them backwards because each is its own inverse, so the last to happen
+   * is the first to be taken back.
+   *
+   * `focus` is the page the command acted on, for the side of it that holds no
+   * mask: undoing the first selection of a session leaves nothing to look at,
+   * and the page it was made on is still where the person should be looking.
    */
-  function pushMaskCommand(
-    label: string,
-    focus: string,
-    before: MaskSnapshot,
-    after: MaskSnapshot,
-  ): void {
+  function pushMaskCommand(label: string, journals: readonly string[], focus: string): void {
+    if (journals.length === 0) return
+    const run = (order: readonly string[]) => {
+      // A gesture is a preview over a mask that is about to be replaced under
+      // it, so it cannot outlive the replacement.
+      cancelGesture()
+      for (const journal of order) window.engine.maskApplyJournal(journal)
+      sync()
+      revision.value++
+      // Undoing something you have navigated away from should show you what it
+      // undid. Navigation itself is not history, so this rides along on the
+      // command rather than being a step of its own.
+      useEditorStore().showPage(held?.page ?? focus)
+    }
+    const forwards = [...journals]
+    const backwards = [...journals].reverse()
     useEditorStore().pushCommand(
-      { label, do: () => restore(after, focus), undo: () => restore(before, focus) },
+      {
+        label,
+        do: () => run(forwards),
+        undo: () => run(backwards),
+        forget: () => {
+          for (const journal of journals) window.engine.maskDropJournal(journal)
+        },
+      },
       { alreadyApplied: true },
     )
   }
 
-  function maskFor(page: string): Uint8ClampedArray | null {
-    return held !== null && held.page === page ? mask : null
-  }
-
   /**
    * The selection's own bytes inside a region, row by row — what anything
-   * turning a selection into pixels needs, without the page-wide array leaving
-   * this store. Null when the page holds no selection.
+   * turning a selection into pixels needs. Null when the page holds no
+   * selection.
    */
   function maskPatchOf(page: string, region: Rect): Uint8ClampedArray | null {
-    if (mask === null || held === null || held.page !== page) return null
-    return readPatch(mask, held.w, clampToPage(region, held.w, held.h))
+    if (held === null || held.page !== page) return null
+    return readWindow(region).bytes
   }
 
   /** Where a selection is being held, whether or not that page is on screen. */
@@ -286,53 +244,43 @@ export const useSelectionStore = defineStore('selection', () => {
 
     const region = clampToPage(regionFor(effective, heldBounds, shape.bounds), target.w, target.h)
     if (isEmptyRect(region)) return
-    const before = sameHeld ? snapshotRegion(region) : snapshotAll()
 
-    const live = ensureMask(target)
-    composeInto(live, live, target.w, target.h, shape, effective, region)
-    refreshBounds(unionRect(heldBounds ?? EMPTY_RECT, region))
+    const journals: string[] = []
+    if (!sameHeld) journals.push(window.engine.maskHold(target.page, target.w, target.h))
+    const base = sameHeld ? readWindow(region).bytes : null
+    journals.push(writeWindow({ region, bytes: composeWindow(base, shape, effective, region) }))
+    sync()
     revision.value++
-    pushMaskCommand(label, target.page, before, snapshotRegion(region))
+    pushMaskCommand(label, journals, target.page)
   }
 
   function deselect(): void {
     // An emptied mask is a page of zeroes rather than a selection, and there is
     // nothing for history to take back from it.
-    if (mask === null || held === null || bounds.value === null) return
+    if (held === null || bounds.value === null) return
     const focus = held.page
-    const before = snapshotAll()
-    mask = null
-    held = null
-    scratch = null
-    bounds.value = null
+    const journal = window.engine.maskDeselect()
+    sync()
     revision.value++
-    pushMaskCommand('deselect', focus, before, { page: null })
+    pushMaskCommand('deselect', [journal], focus)
   }
 
   function selectAll(target: MaskTarget): void {
-    const whole = { x: 0, y: 0, w: target.w, h: target.h }
-    const sameHeld = isHeldFor(target)
-    const before = sameHeld ? snapshotRegion(whole) : snapshotAll()
-    const live = ensureMask(target)
-    live.fill(255)
-    bounds.value = { ...whole }
+    const journals: string[] = []
+    if (!isHeldFor(target)) journals.push(window.engine.maskHold(target.page, target.w, target.h))
+    journals.push(window.engine.maskSelectAll())
+    sync()
     revision.value++
-    pushMaskCommand('select-all', target.page, before, snapshotRegion(whole))
+    pushMaskCommand('select-all', journals, target.page)
   }
 
   function invert(target: MaskTarget): void {
-    const whole = { x: 0, y: 0, w: target.w, h: target.h }
-    const sameHeld = isHeldFor(target)
-    const before = sameHeld ? snapshotRegion(whole) : snapshotAll()
-    const source = sameHeld ? mask : null
-    const next = new Uint8ClampedArray(target.w * target.h)
-    invertInto(next, source)
-    mask = next
-    held = { ...target }
-    scratch = null
-    refreshBounds(whole)
+    const journals: string[] = []
+    if (!isHeldFor(target)) journals.push(window.engine.maskHold(target.page, target.w, target.h))
+    journals.push(window.engine.maskInvert())
+    sync()
     revision.value++
-    pushMaskCommand('invert-selection', target.page, before, snapshotRegion(whole))
+    pushMaskCommand('invert-selection', journals, target.page)
   }
 
   // ---- gestures ------------------------------------------------------------
@@ -362,11 +310,6 @@ export const useSelectionStore = defineStore('selection', () => {
       pointerDown: true,
       undone: [],
     }
-    // Copied once per gesture rather than per frame: every frame then rewrites
-    // only what it dirties, and everything else is already what is held.
-    scratch = new Uint8ClampedArray(target.w * target.h)
-    if (isHeldFor(target) && mask !== null) scratch.set(mask)
-    previewDirty = EMPTY_RECT
     revision.value++
   }
 
@@ -438,7 +381,7 @@ export const useSelectionStore = defineStore('selection', () => {
 
   /**
    * The one place a gesture becomes a shape. Preview and commit both come
-   * through here and then through `composeInto`, which is what stops what is
+   * through here and then through `composeWindow`, which is what stops what is
    * drawn during a drag from disagreeing with what the release leaves behind.
    */
   function gestureShape(g: SelectionGesture): ShapeRaster {
@@ -470,8 +413,6 @@ export const useSelectionStore = defineStore('selection', () => {
     const shape = currentShape()
     if (shape === null) return
     gesture.value = null
-    scratch = null
-    previewDirty = EMPTY_RECT
     applyShape({ page: g.page, w: g.w, h: g.h }, shape, g.op, `select-${g.kind}`)
     revision.value++
   }
@@ -479,8 +420,6 @@ export const useSelectionStore = defineStore('selection', () => {
   function cancelGesture(): void {
     if (gesture.value === null) return
     gesture.value = null
-    scratch = null
-    previewDirty = EMPTY_RECT
     revision.value++
   }
 
@@ -526,10 +465,14 @@ export const useSelectionStore = defineStore('selection', () => {
     target: MaskTarget
     mode: MaskBrushMode
     from: Point
-    /** The mask as the stroke found it, for the one patch the stroke records. */
-    baseline: Uint8ClampedArray
-    /** Set only where the stroke took a selection away from another page. */
-    outgoing: MaskSnapshot | null
+    /** Where the mask was put away to start this stroke, when it had to be. */
+    opened: string[]
+    /**
+     * The one record the whole stroke comes to. Every segment writes its own and
+     * is folded into this, which keeps a stroke that crosses a tile two hundred
+     * times from holding two hundred copies of it.
+     */
+    record: string | null
     dirty: Rect
   }
   let stroke: Stroke | null = null
@@ -544,16 +487,12 @@ export const useSelectionStore = defineStore('selection', () => {
    * split every drag on this canvas uses.
    */
   function beginStroke(target: MaskTarget, mode: MaskBrushMode, at: Point): void {
-    const outgoing = isHeldFor(target) ? null : snapshotAll()
-    const live = ensureMask(target)
-    stroke = {
-      target,
-      mode,
-      from: at,
-      baseline: new Uint8ClampedArray(live),
-      outgoing,
-      dirty: EMPTY_RECT,
+    const opened: string[] = []
+    if (!isHeldFor(target)) {
+      opened.push(window.engine.maskHold(target.page, target.w, target.h))
+      sync()
     }
+    stroke = { target, mode, from: at, opened, record: null, dirty: EMPTY_RECT }
     strokeTo(at)
   }
 
@@ -589,22 +528,56 @@ export const useSelectionStore = defineStore('selection', () => {
     return want === revision.value + 1 ? out : null
   }
 
-  function strokeTo(at: Point): void {
-    const s = stroke
-    if (s === null || mask === null) return
-    const dirty = strokeMask(
-      mask,
+  /**
+   * How far past the segment a stamp can reach, which is the window the stroke
+   * has to read before it can write. Anything narrower would clip the brush's
+   * own falloff at the edge of what was fetched.
+   */
+  function strokeWindowFor(s: Stroke, to: Point, radius: number): Rect {
+    const pad = Math.ceil(radius) + 2
+    const x = Math.min(s.from.x, to.x) - pad
+    const y = Math.min(s.from.y, to.y) - pad
+    return clampToPage(
+      {
+        x: Math.floor(x),
+        y: Math.floor(y),
+        w: Math.ceil(Math.abs(to.x - s.from.x)) + pad * 2 + 1,
+        h: Math.ceil(Math.abs(to.y - s.from.y)) + pad * 2 + 1,
+      },
       s.target.w,
       s.target.h,
-      s.from,
-      at,
-      brushRadiusFor(s.mode),
+    )
+  }
+
+  function strokeTo(at: Point): void {
+    const s = stroke
+    if (s === null) return
+    const radius = brushRadiusFor(s.mode)
+    const region = strokeWindowFor(s, at, radius)
+    if (isEmptyRect(region)) {
+      s.from = at
+      return
+    }
+    const window_ = readWindow(region)
+    const local = strokeMask(
+      window_.bytes,
+      region.w,
+      region.h,
+      { x: s.from.x - region.x, y: s.from.y - region.y },
+      { x: at.x - region.x, y: at.y - region.y },
+      radius,
       brushes.value[s.mode].hardness,
       s.mode,
     )
     s.from = at
+    if (isEmptyRect(local)) return
+
+    const dirty = { ...local, x: local.x + region.x, y: local.y + region.y }
+    const journal = writeWindow(window_)
+    if (s.record === null) s.record = journal
+    else window.engine.maskAbsorbJournal(s.record, journal)
+    sync()
     s.dirty = unionRect(s.dirty, dirty)
-    refreshBounds(unionRect(bounds.value ?? EMPTY_RECT, dirty))
     revision.value++
     dirtyLog.push({ rev: revision.value, rect: dirty })
     if (dirtyLog.length > DIRTY_LOG_LIMIT) dirtyLog.shift()
@@ -613,23 +586,27 @@ export const useSelectionStore = defineStore('selection', () => {
   function endStroke(): void {
     const s = stroke
     stroke = null
-    if (s === null || mask === null) return
-    const region = clampToPage(s.dirty, s.target.w, s.target.h)
-    if (isEmptyRect(region)) return
-    const before: MaskSnapshot =
-      s.outgoing ??
-      {
-        page: s.target.page,
-        w: s.target.w,
-        h: s.target.h,
-        region,
-        bytes: readPatch(s.baseline, s.target.w, region),
+    if (s === null) return
+    /*
+     * A stroke that drew nothing — a brush sized to nothing, a press with no
+     * travel outside the page — is not a step. Anything it did to get ready is
+     * taken back here rather than left standing: putting the last selection
+     * away and then drawing nothing would otherwise destroy it with no step in
+     * the stack to take that back.
+     */
+    if (s.record === null) {
+      for (const journal of [...s.opened].reverse()) {
+        window.engine.maskApplyJournal(journal)
+        window.engine.maskDropJournal(journal)
       }
+      sync()
+      revision.value++
+      return
+    }
     pushMaskCommand(
       s.mode === 'paint' ? 'paint-selection' : 'erase-selection',
+      [...s.opened, s.record],
       s.target.page,
-      before,
-      snapshotRegion(region),
     )
   }
 
@@ -657,36 +634,36 @@ export const useSelectionStore = defineStore('selection', () => {
   let outlineCache: Point[][] = []
   let outlinesAt = -1
 
+  /** The selection as it stands, with no gesture over it. */
+  function heldDisplay(): SelectionDisplay | null {
+    if (held === null || bounds.value === null) return null
+    return { ...readWindow(bounds.value), page: held.page, bounds: bounds.value }
+  }
+
+  /**
+   * What a drag is describing, over the selection it will land on.
+   *
+   * The window spans everything the two of them together could cover, so the
+   * ants and the wash see the whole answer rather than the part that moved. It
+   * is bounded by the selection, not by the page — which is the one thing the
+   * page-sized buffer this replaced could not say.
+   */
   function computeDisplay(): SelectionDisplay | null {
-    const live =
-      mask !== null && held !== null
-        ? { mask, page: held.page, w: held.w, h: held.h, bounds: bounds.value }
-        : null
     const g = gesture.value
-    if (g === null) return live
+    if (g === null) return heldDisplay()
 
     const target = { page: g.page, w: g.w, h: g.h }
     const sameHeld = isHeldFor(target)
     const heldBounds = sameHeld ? bounds.value : null
     const effective = normalizeOp(g.op, heldBounds)
-    if (effective === null || scratch === null) return live
-
     const shape = currentShape()
-    if (shape === null) return live
-    const region = clampToPage(regionFor(effective, heldBounds, shape.bounds), g.w, g.h)
-    // Everything the last frame dirtied is recomputed, so no stale preview is
-    // left behind when the shape shrinks. Every pixel is a function of the held
-    // mask and the shape at that pixel, so a wider region is only more work.
-    const write = unionRect(previewDirty, region)
-    composeInto(scratch, sameHeld ? mask : null, g.w, g.h, shape, effective, write)
-    previewDirty = region
-    return {
-      mask: scratch,
-      page: g.page,
-      w: g.w,
-      h: g.h,
-      bounds: boundsOfMask(scratch, g.w, g.h, unionRect(heldBounds ?? EMPTY_RECT, write)),
-    }
+    if (effective === null || shape === null) return heldDisplay()
+
+    const region = clampToPage(unionRect(heldBounds ?? EMPTY_RECT, shape.bounds), g.w, g.h)
+    if (isEmptyRect(region)) return heldDisplay()
+    const base = sameHeld ? readWindow(region).bytes : null
+    const window_: MaskWindow = { region, bytes: composeWindow(base, shape, effective, region) }
+    return { ...window_, page: g.page, bounds: boundsOfWindow(window_) }
   }
 
   /** What belongs on screen for this page: the held mask, or a drag over it. */
@@ -704,7 +681,13 @@ export const useSelectionStore = defineStore('selection', () => {
     if (shown === null || shown.bounds === null) return []
     if (outlinesAt !== revision.value) {
       outlinesAt = revision.value
-      outlineCache = traceMaskOutlines(shown.mask, shown.w, shown.h, shown.bounds)
+      const at = shown.region
+      outlineCache = traceMaskOutlines(shown.bytes, at.w, at.h, {
+        x: shown.bounds.x - at.x,
+        y: shown.bounds.y - at.y,
+        w: shown.bounds.w,
+        h: shown.bounds.h,
+      }).map((loop) => loop.map((p) => ({ x: p.x + at.x, y: p.y + at.y })))
     }
     return outlineCache
   }
@@ -760,11 +743,9 @@ export const useSelectionStore = defineStore('selection', () => {
    * two projects can hold a page of the same name.
    */
   function reset(): void {
-    mask = null
+    window.engine.maskReset()
     held = null
-    scratch = null
     stroke = null
-    previewDirty = EMPTY_RECT
     gesture.value = null
     bounds.value = null
     quickMask.value = false
@@ -780,9 +761,9 @@ export const useSelectionStore = defineStore('selection', () => {
     brushRadiusFor,
     hasSelection,
     isDrawing,
-    maskFor,
     maskPatchOf,
     heldPage,
+    readWindow,
     displayFor,
     dirtySince,
     outlinesFor,

@@ -33,17 +33,17 @@ impl Rect {
         self.w <= 0 || self.h <= 0
     }
 
-    fn right(&self) -> i32 {
+    pub(crate) fn right(&self) -> i32 {
         self.x + self.w
     }
 
-    fn bottom(&self) -> i32 {
+    pub(crate) fn bottom(&self) -> i32 {
         self.y + self.h
     }
 
     /// An empty rectangle is the identity — a write that covered nothing must
     /// not drag a frame's corner to the origin.
-    fn union(self, other: Rect) -> Rect {
+    pub(crate) fn union(self, other: Rect) -> Rect {
         if self.is_empty() {
             return other;
         }
@@ -60,7 +60,7 @@ impl Rect {
         }
     }
 
-    fn intersect(self, other: Rect) -> Rect {
+    pub(crate) fn intersect(self, other: Rect) -> Rect {
         let x = self.x.max(other.x);
         let y = self.y.max(other.y);
         Rect {
@@ -71,7 +71,7 @@ impl Rect {
         }
     }
 
-    fn offset(self, dx: i32, dy: i32) -> Rect {
+    pub(crate) fn offset(self, dx: i32, dy: i32) -> Rect {
         Rect {
             x: self.x + dx,
             y: self.y + dy,

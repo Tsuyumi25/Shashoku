@@ -150,6 +150,18 @@ const engineApi: ShashokuEngineApi = {
   rasterDropJournal: (journal) => engine.rasterDropJournal(journal),
   rasterHistoryBytes: () => engine.rasterHistoryBytes(),
   rasterTrimHistory: (floor, ceiling) => engine.rasterTrimHistory(floor, ceiling),
+  maskState: () => engine.maskState(),
+  maskRead: (region) => engine.maskRead(region),
+  maskHold: (page, width, height) => engine.maskHold(page, width, height),
+  maskDeselect: () => engine.maskDeselect(),
+  maskWrite: (region, bytes) => engine.maskWrite(region, bytes),
+  maskSelectAll: () => engine.maskSelectAll(),
+  maskInvert: () => engine.maskInvert(),
+  maskApplyJournal: (journal) => engine.maskApplyJournal(journal),
+  maskDropJournal: (journal) => engine.maskDropJournal(journal),
+  maskAbsorbJournal: (into, later) => engine.maskAbsorbJournal(into, later),
+  maskBytesHeld: () => engine.maskBytesHeld(),
+  maskReset: () => engine.maskReset(),
 };
 
 // ────────────────────────────────────────────────────────────────────────────

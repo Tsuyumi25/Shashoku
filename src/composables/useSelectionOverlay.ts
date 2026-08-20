@@ -8,6 +8,7 @@ import {
   strokeAnts,
   strokeBuildingPath,
 } from '@/lib/selection/overlay'
+import { intersectRect, sameRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
@@ -68,14 +69,14 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
    * The wash lives at page size and is kept between frames, so a brush stamp
    * repaints the few thousand pixels it dirtied instead of the whole selection.
    *
-   * `washMask` is held to compare by identity rather than to read: a gesture in
-   * progress is shown from a scratch buffer, and patching one from the other's
-   * regions would paint the wrong pixels. Anything but the same array on the
-   * same page falls back to a full repaint.
+   * `washRegion` says which part of the page the last frame's bytes were of. A
+   * patch is only safe when this frame is a window on the same rectangle: the
+   * dirty log is in page coordinates and the bytes are not, so a window that
+   * moved would have the patch read from the wrong offset.
    */
   let washImage: OffscreenCanvas | null = null
   let washCtx: OffscreenCanvasRenderingContext2D | null = null
-  let washMask: Uint8ClampedArray | null = null
+  let washRegion: Rect | null = null
   let washAt = -1
 
   function stopCrawl(): void {
@@ -97,20 +98,24 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
       if (selection.quickMask) {
         // The mask only changes when the revision does, so a still selection is
         // drawn from an image built once however much the view moves over it.
-        if (washImage === null || washImage.width !== shown.w || washImage.height !== shown.h) {
-          washImage = new OffscreenCanvas(shown.w, shown.h)
+        const size = editor.viewContentSize
+        if (washImage === null || washImage.width !== size.w || washImage.height !== size.h) {
+          washImage = new OffscreenCanvas(Math.max(1, size.w), Math.max(1, size.h))
           washCtx = washImage.getContext('2d')
-          washMask = null
+          washRegion = null
         }
         if (washCtx !== null && washAt !== selection.revision) {
-          const patch = washMask === shown.mask ? selection.dirtySince(washAt) : null
+          const patch =
+            washRegion !== null && sameRect(washRegion, shown.region)
+              ? selection.dirtySince(washAt)
+              : null
           if (patch === null) {
-            washCtx.clearRect(0, 0, shown.w, shown.h)
-            paintMaskRegion(washCtx, shown.mask, shown.w, shown.bounds)
+            washCtx.clearRect(0, 0, washImage.width, washImage.height)
+            paintMaskRegion(washCtx, shown, shown.region)
           } else {
-            paintMaskRegion(washCtx, shown.mask, shown.w, patch)
+            paintMaskRegion(washCtx, shown, intersectRect(patch, shown.region))
           }
-          washMask = shown.mask
+          washRegion = shown.region
           washAt = selection.revision
         }
         if (washCtx !== null) wash = washImage

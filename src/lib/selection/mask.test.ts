@@ -2,15 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   boundsOfMask,
   composeInto,
-  fullMask,
-  invertInto,
   normalizeOp,
-  readPatch,
   regionFor,
-  writePatch,
 } from '@/lib/selection/mask'
 import { rasterizeRect } from '@/lib/selection/raster'
-import { isEmptyRect, type Rect } from '@/lib/selection/rect'
+import type { Rect } from '@/lib/selection/rect'
 
 const W = 8
 const H = 8
@@ -152,48 +148,3 @@ describe('composeInto', () => {
   })
 })
 
-describe('invertInto', () => {
-  it('inverts every value, not just the selected ones', () => {
-    const src = maskOfRect({ x: 0, y: 0, w: 1, h: 1 }, 100)
-    const out = new Uint8ClampedArray(W * H)
-    invertInto(out, src)
-    expect(out[0]).toBe(155)
-    expect(out[1]).toBe(255)
-  })
-
-  it('inverting nothing selects everything', () => {
-    const out = new Uint8ClampedArray(W * H)
-    invertInto(out, null)
-    expect([...out]).toEqual([...fullMask(W, H)])
-  })
-})
-
-describe('patches', () => {
-  it('round-trips the bytes inside a region', () => {
-    const mask = maskOfRect({ x: 1, y: 1, w: 3, h: 3 }, 77)
-    const region = { x: 1, y: 1, w: 3, h: 3 }
-    const bytes = readPatch(mask, W, region)
-    expect([...bytes]).toEqual(new Array(9).fill(77))
-
-    const empty = new Uint8ClampedArray(W * H)
-    writePatch(empty, W, region, bytes)
-    expect([...empty]).toEqual([...mask])
-  })
-
-  it('leaves everything outside the region alone', () => {
-    const mask = fullMask(W, H)
-    writePatch(mask, W, { x: 2, y: 2, w: 2, h: 2 }, new Uint8ClampedArray(4))
-    expect(mask[2 * W + 2]).toBe(0)
-    expect(mask[2 * W + 4]).toBe(255)
-    expect(mask[0]).toBe(255)
-  })
-
-  it('reads and writes nothing for an empty region', () => {
-    const region = { x: 3, y: 3, w: 0, h: 4 }
-    expect(isEmptyRect(region)).toBe(true)
-    expect(readPatch(fullMask(W, H), W, region).length).toBe(0)
-    const mask = fullMask(W, H)
-    writePatch(mask, W, region, new Uint8ClampedArray(0))
-    expect(mask[3 * W + 3]).toBe(255)
-  })
-})

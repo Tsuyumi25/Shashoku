@@ -10,6 +10,7 @@ use skrifa::{FontRef, MetadataProvider, string::StringId};
 mod encode;
 mod enumerate;
 mod import;
+mod mask;
 mod raster;
 mod render;
 mod stroke;
@@ -640,6 +641,121 @@ pub fn raster_history_bytes() -> f64 {
 #[napi]
 pub fn raster_trim_history(floor: u32, ceiling: f64) -> Vec<String> {
     raster::trim_history(floor as usize, ceiling.max(0.0) as usize)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// The selection
+//
+// One selection at a time, on the same grid the pixels use — one byte a pixel
+// instead of four. Every mutation hands back the name of a record that puts it
+// back, page and size and edges included, so undoing across a page change is the
+// same step as undoing a marquee.
+
+/// Which page the selection is on, how big that page is, and where its edges
+/// are.
+///
+/// One call rather than three, because a caller that has any of them wants all
+/// of them: they change together, and asking separately is three chances to act
+/// on a half-updated answer.
+#[napi(object)]
+pub struct MaskState {
+    /// Null when nothing is selected anywhere.
+    pub page: Option<String>,
+    pub width: i32,
+    pub height: i32,
+    /// The tight box of everything selected, or null when nothing is.
+    pub bounds: Option<LayerFrame>,
+}
+
+#[napi]
+pub fn mask_state() -> MaskState {
+    let (width, height) = mask::size();
+    MaskState {
+        page: mask::page(),
+        width,
+        height,
+        bounds: mask::bounds().map(to_frame),
+    }
+}
+
+/// The selection's own bytes over a rectangle, row by row, one per pixel.
+///
+/// Zero where nothing is selected, which is what the absence of a tile already
+/// means. Anything outside the page reads as zero too.
+#[napi]
+pub fn mask_read(region: LayerFrame) -> Buffer {
+    mask::read(to_rect(&region)).into()
+}
+
+/// Starts an empty selection for a page, putting away whatever was held.
+#[napi]
+pub fn mask_hold(page: String, width: i32, height: i32) -> String {
+    mask::hold(&page, width, height)
+}
+
+/// Nothing selected anywhere.
+#[napi]
+pub fn mask_deselect() -> String {
+    mask::deselect()
+}
+
+/// Writes coverage over a region and works out where the edges are now.
+///
+/// `bytes` is one per pixel of `region`, row by row. The part of the region
+/// outside the page is dropped — a selection is measured in page pixels, and
+/// there is nothing outside them to select.
+#[napi]
+pub fn mask_write(region: LayerFrame, bytes: Buffer) -> napi::Result<String> {
+    mask::write(to_rect(&region), bytes.as_ref()).map_err(napi::Error::from_reason)
+}
+
+/// Every pixel of the page selected, as one block hung at every coordinate it
+/// covers. This is where the bill collapses: a full-page mask is 139 MB at the
+/// largest page, and this is four kilobytes and a list of pointers.
+#[napi]
+pub fn mask_select_all() -> String {
+    mask::select_all()
+}
+
+/// Every value turned over, feathered edges included.
+#[napi]
+pub fn mask_invert() -> String {
+    mask::invert()
+}
+
+/// Swaps a record against the selection. Undo and redo are this same call.
+#[napi]
+pub fn mask_apply_journal(journal: String) {
+    mask::apply_journal(&journal);
+}
+
+#[napi]
+pub fn mask_drop_journal(journal: String) {
+    mask::drop_journal(&journal);
+}
+
+/// Folds a later record into an earlier one and forgets the later.
+///
+/// A brush stroke is one step however many segments it is made of, so its
+/// segments write one after another and their records collapse into the first.
+/// Without this a stroke of two hundred segments would hold two hundred copies
+/// of every tile it crossed.
+#[napi]
+pub fn mask_absorb_journal(into: String, later: String) {
+    mask::absorb_journal(&into, &later);
+}
+
+/// What the selection and its records are holding, counting a shared block once.
+#[napi]
+pub fn mask_bytes_held() -> f64 {
+    mask::bytes_held() as f64
+}
+
+/// Everything forgotten. A selection belongs to the project that made it, and
+/// two projects can hold a page of the same name.
+#[napi]
+pub fn mask_reset() {
+    mask::reset();
 }
 
 // ────────────────────────────────────────────────────────────────────────────

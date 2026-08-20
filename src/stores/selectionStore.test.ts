@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRequire } from 'node:module'
 import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from '@/stores/editorStore'
 import { useSelectionStore, type MaskTarget } from '@/stores/selectionStore'
@@ -8,6 +9,17 @@ import type { Rect } from '@/lib/selection/rect'
 
 const PAGE_A: MaskTarget = { page: 'p001.png', w: 32, h: 32 }
 const PAGE_B: MaskTarget = { page: 'p002.png', w: 32, h: 32 }
+
+/**
+ * The real engine, not a stand-in.
+ *
+ * The selection's coverage lives in its tiles now, and a fake here would be a
+ * second implementation of the invariants the tiles exist to keep — the one
+ * thing a test of this store must not quietly assume. It is the same addon
+ * preload hands the renderer, reached the same way, so `pnpm test` needs
+ * `pnpm engine:build` to have run.
+ */
+const engine = createRequire(import.meta.url)('@shashoku/engine') as Window['engine']
 
 type Selection = ReturnType<typeof useSelectionStore>
 
@@ -21,11 +33,16 @@ function select(
 }
 
 function maskAt(sel: Selection, target: MaskTarget, x: number, y: number): number {
-  const mask = sel.maskFor(target.page)
-  return mask === null ? 0 : mask[y * target.w + x]
+  return sel.maskPatchOf(target.page, { x, y, w: 1, h: 1 })?.[0] ?? 0
 }
 
+beforeAll(() => {
+  vi.stubGlobal('window', { engine })
+})
+
 beforeEach(() => {
+  // One selection, one global. Every test starts from nothing held.
+  engine.maskReset()
   setActivePinia(createPinia())
 })
 
@@ -34,16 +51,16 @@ describe('holding one selection', () => {
     const sel = useSelectionStore()
     expect(sel.hasSelection).toBe(false)
     expect(sel.bounds).toBeNull()
-    expect(sel.maskFor(PAGE_A.page)).toBeNull()
+    expect(sel.heldPage()).not.toBe(PAGE_A.page)
   })
 
   it('remembers which page it is for', () => {
     const sel = useSelectionStore()
     select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
     expect(sel.bounds).toEqual({ x: 4, y: 4, w: 8, h: 8 })
-    expect(sel.maskFor(PAGE_A.page)).not.toBeNull()
+    expect(sel.heldPage()).toBe(PAGE_A.page)
     // Hidden on another page, not destroyed by looking away from it.
-    expect(sel.maskFor(PAGE_B.page)).toBeNull()
+    expect(sel.maskPatchOf(PAGE_B.page, { x: 0, y: 0, w: 1, h: 1 })).toBeNull()
     expect(sel.displayFor(PAGE_B.page)).toBeNull()
     expect(sel.heldPage()).toBe(PAGE_A.page)
   })
@@ -53,7 +70,7 @@ describe('holding one selection', () => {
     select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
     select(sel, PAGE_B, { x: 0, y: 0, w: 4, h: 4 })
     expect(sel.heldPage()).toBe(PAGE_B.page)
-    expect(sel.maskFor(PAGE_A.page)).toBeNull()
+    expect(sel.heldPage()).not.toBe(PAGE_A.page)
   })
 })
 
@@ -249,7 +266,7 @@ describe('gestures', () => {
     const editor = useEditorStore()
     sel.beginGesture('marquee-rect', 'new', PAGE_A, { x: 4, y: 4 })
     sel.trackPointer({ x: 12, y: 12 }, { constrain: false, fromCenter: false, freehand: false })
-    expect(sel.maskFor(PAGE_A.page)).toBeNull()
+    expect(sel.heldPage()).not.toBe(PAGE_A.page)
     expect(editor.canUndo).toBe(false)
 
     sel.commitGesture()
@@ -284,11 +301,12 @@ describe('gestures', () => {
 
     const shown = sel.displayFor(PAGE_A.page)
     expect(shown).not.toBeNull()
-    const previewed = [...(shown as { mask: Uint8ClampedArray }).mask]
+    const region = shown!.region
+    const previewed = [...shown!.bytes]
     const previewBounds = shown?.bounds
 
     sel.commitGesture()
-    expect([...(sel.maskFor(PAGE_A.page) as Uint8ClampedArray)]).toEqual(previewed)
+    expect([...(sel.maskPatchOf(PAGE_A.page, region) as Uint8ClampedArray)]).toEqual(previewed)
     expect(sel.bounds).toEqual(previewBounds)
   })
 
@@ -671,5 +689,60 @@ describe('dirtySince', () => {
   it('refuses a revision it has not reached', () => {
     const sel = useSelectionStore()
     expect(sel.dirtySince(sel.revision + 1)).toBeNull()
+  })
+})
+
+/**
+ * What the tiles are for. A selection is a full-page 8-bit mask, so a page-sized
+ * array was what one cost however little of the page it covered — 139 MB at the
+ * largest page, and selecting all or inverting has the whole page as its changed
+ * region, so two of those in history was 278 MB for one command.
+ */
+describe('what a selection costs', () => {
+  const SMALL: MaskTarget = { page: 'p001.png', w: 64, h: 64 }
+  const LARGE: MaskTarget = { page: 'p001.png', w: 2048, h: 2048 }
+
+  it('costs the same on a large page as on a small one', () => {
+    const sel = useSelectionStore()
+    select(sel, SMALL, { x: 0, y: 0, w: 8, h: 8 })
+    const onSmall = engine.maskBytesHeld()
+
+    engine.maskReset()
+    setActivePinia(createPinia())
+    select(useSelectionStore(), LARGE, { x: 0, y: 0, w: 8, h: 8 })
+
+    expect(engine.maskBytesHeld()).toBe(onSmall)
+  })
+
+  /**
+   * The 500× line. A thousand tiles of page selected whole is one block and a
+   * thousand pointers at it, and the record that takes it back holds the same
+   * one block rather than a second copy of the page.
+   */
+  it('holds one block for a whole page selected and taken back', () => {
+    const sel = useSelectionStore()
+    const editor = useEditorStore()
+    sel.selectAll(LARGE)
+    expect(sel.bounds).toEqual({ x: 0, y: 0, w: 2048, h: 2048 })
+
+    const held = engine.maskBytesHeld()
+    editor.undo()
+
+    // One 64×64 block of a single byte a pixel, whichever side of the undo we
+    // are on — against the eight megabytes this page's mask would be as an array.
+    expect(held).toBe(4096)
+    expect(engine.maskBytesHeld()).toBe(4096)
+    expect(sel.hasSelection).toBe(false)
+  })
+
+  it('brings the whole page back on redo', () => {
+    const sel = useSelectionStore()
+    const editor = useEditorStore()
+    sel.selectAll(LARGE)
+    editor.undo()
+    editor.redo()
+
+    expect(sel.bounds).toEqual({ x: 0, y: 0, w: 2048, h: 2048 })
+    expect(maskAt(sel, LARGE, 2047, 2047)).toBe(255)
   })
 })

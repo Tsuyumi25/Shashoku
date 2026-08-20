@@ -50,6 +50,14 @@ everyone who installs. Working on the repository therefore needs a Rust
 toolchain (the flake's devShell provides one); people running a packaged
 build do not, since the `.node` ships inside it.
 
+`pnpm test` needs it to have run at least once. The selection's coverage and
+every layer's pixels live in the engine's tiles, so the tests that drive them
+require the real addon — a stand-in there would be a second implementation of
+the invariants the tiles exist to keep, and one that agreed with the store and
+disagreed with the engine would pass while the application was broken.
+`vue-tsc` still needs nothing built: the addon's surface is declared by hand
+rather than imported from the generated typings.
+
 `pnpm sidecar:sync` builds the OCR environment with `uv`, and is separate for
 the same reason: it is a gigabyte of PyTorch that a session may never reach
 for. Weights are not part of it — each model downloads itself the first time
