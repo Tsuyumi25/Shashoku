@@ -4,10 +4,10 @@ import {
   contentToScreenPx,
   framePoint,
   positionHolding,
-  screenDeltaToContentPx,
   screenToContentPx,
   screenToPagePx,
   smoothingQualityFor,
+  travelSinceGrab,
   turnedAround,
   type ViewTransform,
 } from './coords'
@@ -38,17 +38,55 @@ describe('coords with view rotation', () => {
   })
 })
 
-describe('screenDeltaToContentPx', () => {
-  it('divides by the scale and ignores the translation', () => {
-    const view: ViewTransform = { scale: 2, tx: 999, ty: -999, rotate: 0 }
-    expect(screenDeltaToContentPx(10, 20, view)).toEqual({ x: 5, y: 10 })
+describe('travelSinceGrab', () => {
+  it('reads a pointer that has not moved as no travel at all', () => {
+    const view: ViewTransform = { scale: 1.7, tx: 120, ty: -40, rotate: Math.PI / 7 }
+    const grab = screenToContentPx(300, 200, ORIGIN, view)
+    expect(travelSinceGrab(grab, 300, 200, ORIGIN, view)).toEqual({ dx: 0, dy: 0 })
   })
 
-  it('turns a downward drag into content +x at 90 degrees', () => {
+  it('measures in page pixels rather than screen ones', () => {
+    const view: ViewTransform = { scale: 2, tx: 999, ty: -999, rotate: 0 }
+    const grab = screenToContentPx(300, 200, ORIGIN, view)
+    expect(travelSinceGrab(grab, 310, 220, ORIGIN, view)).toEqual({ dx: 5, dy: 10 })
+  })
+
+  it('turns a downward drag into page +x at 90 degrees', () => {
     const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: Math.PI / 2 }
-    const d = screenDeltaToContentPx(0, 10, view)
-    expect(d.x).toBeCloseTo(10, 6)
-    expect(d.y).toBeCloseTo(0, 6)
+    const grab = screenToContentPx(300, 200, ORIGIN, view)
+    const d = travelSinceGrab(grab, 300, 210, ORIGIN, view)
+    expect(d.dx).toBeCloseTo(10, 6)
+    expect(d.dy).toBeCloseTo(0, 6)
+  })
+
+  /**
+   * The whole reason a grab is a page point: the view the press was taken under
+   * is not the view the drag is read under. A screen distance divided by the
+   * scale as it now stands is off by `travelled × (1/now − 1/then)`, which is
+   * why the old way looked fine on a short drag and threw the object across the
+   * page on a long one.
+   */
+  it('holds the grabbed point still when the view zooms mid-drag', () => {
+    const pressed: ViewTransform = { scale: 0.4, tx: 0, ty: 0, rotate: 0 }
+    const grab = screenToContentPx(100, 100, ORIGIN, pressed)
+    const at = { x: 300, y: 100 }
+    expect(travelSinceGrab(grab, at.x, at.y, ORIGIN, pressed)).toEqual({ dx: 500, dy: 0 })
+
+    // Doubled, anchored on the pointer — what the wheel does, which is what
+    // leaves the point under the cursor where it is and the press point adrift.
+    const zoomed: ViewTransform = { scale: 0.8, tx: -300, ty: -100, rotate: 0 }
+    expect(screenToContentPx(at.x, at.y, ORIGIN, zoomed)).toEqual(
+      screenToContentPx(at.x, at.y, ORIGIN, pressed),
+    )
+    expect(travelSinceGrab(grab, at.x, at.y, ORIGIN, zoomed)).toEqual({ dx: 500, dy: 0 })
+  })
+
+  it('follows the pointer when the view pans mid-drag', () => {
+    const pressed: ViewTransform = { scale: 2, tx: 0, ty: 0, rotate: 0 }
+    const grab = screenToContentPx(100, 100, ORIGIN, pressed)
+    const panned: ViewTransform = { ...pressed, tx: 30, ty: -12 }
+    const d = travelSinceGrab(grab, 100, 100, ORIGIN, panned)
+    expect(d).toEqual({ dx: -15, dy: 6 })
   })
 
   it('agrees with the difference of two mapped points', () => {
@@ -57,9 +95,17 @@ describe('screenDeltaToContentPx', () => {
     const drag = { x: 37, y: -22 }
     const before = screenToContentPx(at.x, at.y, ORIGIN, view)
     const after = screenToContentPx(at.x + drag.x, at.y + drag.y, ORIGIN, view)
-    const d = screenDeltaToContentPx(drag.x, drag.y, view)
-    expect(d.x).toBeCloseTo(after.x - before.x, 6)
-    expect(d.y).toBeCloseTo(after.y - before.y, 6)
+    const d = travelSinceGrab(before, at.x + drag.x, at.y + drag.y, ORIGIN, view)
+    expect(d.dx).toBeCloseTo(after.x - before.x, 6)
+    expect(d.dy).toBeCloseTo(after.y - before.y, 6)
+  })
+
+  it('subtracts the container offset like screenToContentPx does', () => {
+    const view: ViewTransform = { scale: 1, tx: 0, ty: 0, rotate: 0 }
+    const rect = { left: 60, top: 20 }
+    const grab = screenToContentPx(260, 120, rect, view)
+    expect(grab).toEqual({ x: 200, y: 100 })
+    expect(travelSinceGrab(grab, 270, 140, rect, view)).toEqual({ dx: 10, dy: 20 })
   })
 })
 

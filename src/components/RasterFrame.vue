@@ -1,7 +1,7 @@
 <template>
   <ObjectFrame
     :box="box"
-    :view-rotate="view.rotate"
+    :view="view"
     :rotation="place.rotation"
     :selected="selected"
     :in-selection="inSelection"

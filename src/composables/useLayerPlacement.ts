@@ -7,9 +7,7 @@ import {
   framePoint,
   positionHolding,
   turnedAround,
-  screenDeltaToContentPx,
   type Displacement,
-  type ViewTransform,
 } from '@/lib/coords'
 import {
   NO_PLACEMENT,
@@ -60,9 +58,8 @@ export function useLayerPlacement() {
     held.value = { id, place: { ...placementOf(id), ...part } }
   }
 
-  function moveBy(id: string, d: Displacement, view: ViewTransform): void {
-    const delta = screenDeltaToContentPx(d.dx, d.dy, view)
-    set(id, { dx: delta.x, dy: delta.y })
+  function moveBy(id: string, d: Displacement): void {
+    set(id, { dx: d.dx, dy: d.dy })
   }
 
   /**

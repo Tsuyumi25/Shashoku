@@ -222,6 +222,7 @@ import {
   contentToScreenPx,
   screenToContentPx,
   screenToPagePx,
+  travelSinceGrab,
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -1112,7 +1113,8 @@ function onPointerDown(e: PointerEvent) {
   // Unclamped, unlike placing text: a press out in the gutter is a press on
   // nothing, and clamping it to the page edge would take whatever lies there.
   const rect = containerRef.value.getBoundingClientRect()
-  const hit = layerHitAt(screenToContentPx(e.clientX, e.clientY, rect, view))
+  const at = screenToContentPx(e.clientX, e.clientY, rect, view)
+  const hit = layerHitAt(at)
   if (hit === null) {
     // Bare page. The one deliberate way to be holding nothing.
     editor.selectOnly(null)
@@ -1120,7 +1122,13 @@ function onPointerDown(e: PointerEvent) {
   }
   onSelectObject(hit, e.shiftKey)
   el.setPointerCapture(e.pointerId)
-  layerDrag.value = { id: hit, from: { x: e.clientX, y: e.clientY }, engaged: false }
+  layerDrag.value = {
+    id: hit,
+    from: { x: e.clientX, y: e.clientY },
+    client: { x: e.clientX, y: e.clientY },
+    grab: at,
+    engaged: false,
+  }
 }
 
 /**
@@ -1129,7 +1137,15 @@ function onPointerDown(e: PointerEvent) {
  * only the press, the travel and the release, in the place where the press
  * already lands.
  */
-const layerDrag = ref<{ id: string; from: Anchor; engaged: boolean } | null>(null)
+const layerDrag = ref<{
+  id: string
+  /** The press and the pointer's latest, both in client coordinates. */
+  from: Anchor
+  client: Anchor
+  /** The page point the press landed on, which no view change can move. */
+  grab: Anchor
+  engaged: boolean
+} | null>(null)
 
 /**
  * Under this the press was a click. Without a threshold a layer would creep by
@@ -1138,17 +1154,32 @@ const layerDrag = ref<{ id: string; from: Anchor; engaged: boolean } | null>(nul
  */
 const LAYER_DRAG_THRESHOLD_PX = 3
 
+function reportLayerDrag(): void {
+  const drag = layerDrag.value
+  if (drag === null || !drag.engaged || containerRef.value === null) return
+  const rect = containerRef.value.getBoundingClientRect()
+  placement.moveBy(drag.id, travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, view))
+}
+
 function trackLayerDrag(e: PointerEvent): void {
   const drag = layerDrag.value
   if (drag === null) return
-  const dx = e.clientX - drag.from.x
-  const dy = e.clientY - drag.from.y
   if (!drag.engaged) {
+    const dx = e.clientX - drag.from.x
+    const dy = e.clientY - drag.from.y
     if (Math.hypot(dx, dy) < LAYER_DRAG_THRESHOLD_PX) return
     drag.engaged = true
   }
-  placement.moveBy(drag.id, { dx, dy }, view)
+  drag.client = { x: e.clientX, y: e.clientY }
+  reportLayerDrag()
 }
+
+// The frames answer a view change themselves; a layer is dragged by its body,
+// which has no frame taking the pointer, so this is where it is answered for.
+watch(
+  () => [view.scale, view.tx, view.ty, view.rotate],
+  () => reportLayerDrag(),
+)
 
 /**
  * A cancelled pointer arrives here too, and banks the move rather than snapping

@@ -59,7 +59,14 @@
 
 <script setup lang="ts">
 import { computed, ref, useTemplateRef, watch } from 'vue'
-import { turnedAround, type Displacement } from '@/lib/coords'
+import {
+  screenToContentPx,
+  travelSinceGrab,
+  turnedAround,
+  type Anchor,
+  type Displacement,
+  type ViewTransform,
+} from '@/lib/coords'
 import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/labelBox'
 
 /**
@@ -73,15 +80,24 @@ import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/la
  * not a coordinate system but the question: where is this box, and what happens
  * when its handles are pushed.
  *
- * Every gesture reports and never writes. A drag gives cumulative screen
- * displacement, a corner gives a ratio, the antenna gives an angle; each caller
- * turns those into its own units.
+ * Every gesture reports and never writes. A drag gives how far the page point
+ * it grabbed has travelled, a corner gives a ratio, the antenna gives an angle;
+ * each caller turns those into its own units.
+ *
+ * All of them are measured on the page rather than on the screen, so a view
+ * that zooms, pans or turns mid-gesture leaves what is held exactly where it
+ * was. Measured on the screen, a gesture in progress is arithmetic over a ruler
+ * that is still changing length.
  */
 const props = defineProps<{
   /** Screen placement, already resolved by whoever knows this node's geometry. */
   box: { centerX: number; centerY: number; width: number; height: number }
-  /** The view's own turn, in radians. */
-  viewRotate: number
+  /**
+   * The view the box was placed through, which is also what puts a pointer on
+   * the page — the one thing a gesture has to speak in if it is to survive the
+   * view moving under it.
+   */
+  view: ViewTransform
   /** The object's turn on the page, in radians. */
   rotation: number
   /**
@@ -151,7 +167,11 @@ const emit = defineEmits<{
   select: [additive: boolean]
   /** On press, so a caller can take down where the object was before any write. */
   dragStart: []
-  /** Cumulative screen displacement, on every frame past the threshold. */
+  /**
+   * How far the page point pressed on has travelled, in page pixels, on every
+   * frame past the threshold — and on every view change, since moving the view
+   * under a held pointer moves that point too.
+   */
   drag: [d: Displacement]
   /** Once on release, and only if the pointer actually travelled. */
   dragEnd: [d: Displacement]
@@ -204,7 +224,7 @@ const outlineWidth = computed(() => {
   return 0
 })
 
-const turn = computed(() => props.viewRotate + props.rotation)
+const turn = computed(() => props.view.rotate + props.rotation)
 
 /**
  * The outline is written out here rather than composed from utility classes.
@@ -299,6 +319,31 @@ function centerOnScreen(): Point {
 }
 
 /**
+ * The stage's own corner in client coordinates — the one thing standing between
+ * a pointer's client coordinates and the stage-local ones the view speaks.
+ *
+ * Asked of the offset parent, which is by definition the element this frame's
+ * own placement is measured from, and which the view moving does not move: only
+ * the frames inside it travel. ⚠️ Deriving it from this frame instead — its
+ * rectangle less the stage-local centre it was given — reads true and is a
+ * trap. The two come from different clocks: `box` is a prop, already carrying
+ * the new view by the time a view change is answered, while the rectangle is
+ * the last layout, still carrying the old one. Their difference then holds a
+ * whole zoom's worth of travel that never happened.
+ */
+function stageOrigin(): { left: number; top: number } {
+  const stage = boxEl.value?.offsetParent
+  if (!stage) return { left: 0, top: 0 }
+  const rect = stage.getBoundingClientRect()
+  return { left: rect.left, top: rect.top }
+}
+
+/** Where a client point sits on the page. What every gesture here measures in. */
+function pageAt(clientX: number, clientY: number): Anchor {
+  return screenToContentPx(clientX, clientY, stageOrigin(), props.view)
+}
+
+/**
  * A fractional point of the frame in client coordinates, walked out from the
  * centre in the frame's own axes — the bounding rectangle cannot say where a
  * corner is once the frame is lying at an angle, but the centre plus a turned
@@ -314,11 +359,18 @@ function pointOnScreen(ratio: Point): Point {
   return { x: c.x + out.x, y: c.y + out.y }
 }
 
-/** A screen movement as a fraction of the frame, in the frame's own axes. */
-function screenDeltaToFrame(dx: number, dy: number): Point {
-  if (props.box.width <= 0 || props.box.height <= 0) return ORIGIN
-  const d = turnedAround(ORIGIN, { x: dx, y: dy }, -turn.value)
-  return { x: d.x / props.box.width, y: d.y / props.box.height }
+/**
+ * A movement across the page as a fraction of the frame, in the frame's own
+ * axes. The frame's page size is its screen size divided by the scale, and only
+ * the object's own turn is undone — the view's is already gone by the time a
+ * point is on the page.
+ */
+function pageDeltaToFrame(d: Displacement): Point {
+  const w = props.box.width / props.view.scale
+  const h = props.box.height / props.view.scale
+  if (w <= 0 || h <= 0) return ORIGIN
+  const turned = turnedAround(ORIGIN, { x: d.dx, y: d.dy }, -props.rotation)
+  return { x: turned.x / w, y: turned.y / h }
 }
 
 /** The handle across the frame from this one, which a drag on it pins. */
@@ -386,20 +438,22 @@ const referenceStyle = computed(() => ({
   pointerEvents: handlePointer.value,
 }))
 
-const moveReference = { from: { x: 0, y: 0 }, at: MIDDLE }
+const moveReference = { grab: ORIGIN as Anchor, at: MIDDLE }
 let movingReference = false
 
 function onReferenceDown(e: PointerEvent) {
   if (e.button !== 0) return
   capture(e)
   movingReference = true
-  moveReference.from = { x: e.clientX, y: e.clientY }
+  moveReference.grab = pageAt(e.clientX, e.clientY)
   moveReference.at = reference.value
 }
 
 function onReferenceMove(e: PointerEvent) {
   if (!movingReference) return
-  const d = screenDeltaToFrame(e.clientX - moveReference.from.x, e.clientY - moveReference.from.y)
+  const d = pageDeltaToFrame(
+    travelSinceGrab(moveReference.grab, e.clientX, e.clientY, stageOrigin(), props.view),
+  )
   reference.value = snapReference({
     x: moveReference.at.x + d.x,
     y: moveReference.at.y + d.y,
@@ -430,7 +484,15 @@ function travelled(e: PointerEvent, from: Point): boolean {
  * that outruns the frame keeps moving it.
  */
 const dragging = ref(false)
-const drag = { from: { x: 0, y: 0 }, latest: { dx: 0, dy: 0 } }
+const drag = {
+  /** The press, in client coordinates, which is where the threshold is measured. */
+  from: ORIGIN as Point,
+  /** The page point the press landed on. The view cannot move it. */
+  grab: ORIGIN as Anchor,
+  /** Where the pointer was last seen, so a view change can be answered without one. */
+  client: ORIGIN as Point,
+  latest: { dx: 0, dy: 0 } as Displacement,
+}
 let dragEngaged = false
 
 function onDown(e: PointerEvent) {
@@ -439,9 +501,16 @@ function onDown(e: PointerEvent) {
   dragging.value = true
   dragEngaged = false
   drag.from = { x: e.clientX, y: e.clientY }
+  drag.client = drag.from
+  drag.grab = pageAt(e.clientX, e.clientY)
   drag.latest = { dx: 0, dy: 0 }
   emit('select', e.shiftKey)
   emit('dragStart')
+}
+
+function reportDrag() {
+  drag.latest = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, stageOrigin(), props.view)
+  emit('drag', drag.latest)
 }
 
 /**
@@ -456,8 +525,8 @@ function onMove(e: PointerEvent) {
     if (!travelled(e, drag.from)) return
     dragEngaged = true
   }
-  drag.latest = { dx: e.clientX - drag.from.x, dy: e.clientY - drag.from.y }
-  emit('drag', drag.latest)
+  drag.client = { x: e.clientX, y: e.clientY }
+  reportDrag()
 }
 
 function onUp(e: PointerEvent) {
@@ -477,9 +546,14 @@ function onUp(e: PointerEvent) {
  */
 const scale = {
   corner: CORNERS[0],
-  pin: { x: 0, y: 0 },
-  pivot: { x: 0, y: 0 },
-  from: { x: 0, y: 0 },
+  pin: ORIGIN as Point,
+  /** The pinned handle's page point, which the ratio is measured out from. */
+  pivot: ORIGIN as Anchor,
+  /** The press, in client coordinates, for the threshold. */
+  from: ORIGIN as Point,
+  /** The press on the page, which is the ratio's denominator. */
+  grab: ORIGIN as Anchor,
+  client: ORIGIN as Point,
 }
 let scaling = false
 let scaleEngaged = false
@@ -491,7 +565,13 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
   scaleEngaged = false
   scale.corner = corner
   scale.from = { x: e.clientX, y: e.clientY }
+  scale.client = scale.from
+  scale.grab = pageAt(e.clientX, e.clientY)
   emit('select', false)
+}
+
+function reportScale() {
+  emit('scale', uniformScaleRatio(scale.pivot, scale.grab, pageAt(scale.client.x, scale.client.y)))
 }
 
 /**
@@ -501,15 +581,16 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
  */
 function onScaleMove(e: PointerEvent) {
   if (!scaling) return
-  const to = { x: e.clientX, y: e.clientY }
   if (!scaleEngaged) {
     if (!travelled(e, scale.from)) return
     scaleEngaged = true
     scale.pin = e.altKey ? reference.value : opposite(scale.corner)
-    scale.pivot = pointOnScreen(scale.pin)
+    const held = pointOnScreen(scale.pin)
+    scale.pivot = pageAt(held.x, held.y)
     emit('scaleStart', scale.pin)
   }
-  emit('scale', uniformScaleRatio(scale.pivot, scale.from, to))
+  scale.client = { x: e.clientX, y: e.clientY }
+  reportScale()
 }
 
 function onScaleUp(e: PointerEvent) {
@@ -524,9 +605,12 @@ function onScaleUp(e: PointerEvent) {
 const ROTATE_SNAP = Math.PI / 12
 
 const spin = {
-  /** The reference point on screen, which is what the turn goes round. */
-  center: { x: 0, y: 0 },
-  from: { x: 0, y: 0 },
+  /** The reference point on the page, which is what the turn goes round. */
+  center: ORIGIN as Anchor,
+  from: ORIGIN as Point,
+  client: ORIGIN as Point,
+  /** Shift as it was last seen, so a view change turns by the same rule. */
+  snapping: false,
   lastAngle: 0,
   /** Where the object was lying when the handle was taken hold of. */
   start: 0,
@@ -542,13 +626,30 @@ function onRotateDown(e: PointerEvent) {
   capture(e)
   spinning = true
   spinEngaged = false
-  spin.center = pointOnScreen(reference.value)
+  const around = pointOnScreen(reference.value)
+  spin.center = pageAt(around.x, around.y)
   spin.from = { x: e.clientX, y: e.clientY }
-  spin.lastAngle = angleAround(spin.center, spin.from)
+  spin.client = spin.from
+  spin.lastAngle = angleAround(spin.center, pageAt(e.clientX, e.clientY))
   spin.start = props.rotation
   spin.free = props.rotation
   spin.applied = props.rotation
   emit('select', false)
+}
+
+/**
+ * Read on the page, where an angle means what the object's own rotation means.
+ * A view turned since the handle was taken hold of would otherwise keep adding
+ * its own turn to the object's.
+ */
+function reportSpin() {
+  const now = angleAround(spin.center, pageAt(spin.client.x, spin.client.y))
+  // Accumulated rather than measured against the start, so a turn can pass half
+  // a revolution and keep going.
+  spin.free += angleDelta(spin.lastAngle, now)
+  spin.lastAngle = now
+  spin.applied = spin.snapping ? Math.round(spin.free / ROTATE_SNAP) * ROTATE_SNAP : spin.free
+  emit('rotate', spin.applied)
 }
 
 function onRotateMove(e: PointerEvent) {
@@ -558,13 +659,9 @@ function onRotateMove(e: PointerEvent) {
     spinEngaged = true
     emit('rotateStart', reference.value)
   }
-  const now = angleAround(spin.center, { x: e.clientX, y: e.clientY })
-  // Accumulated rather than measured against the start, so a turn can pass half
-  // a revolution and keep going.
-  spin.free += angleDelta(spin.lastAngle, now)
-  spin.lastAngle = now
-  spin.applied = e.shiftKey ? Math.round(spin.free / ROTATE_SNAP) * ROTATE_SNAP : spin.free
-  emit('rotate', spin.applied)
+  spin.client = { x: e.clientX, y: e.clientY }
+  spin.snapping = e.shiftKey
+  reportSpin()
 }
 
 function onRotateUp(e: PointerEvent) {
@@ -574,4 +671,20 @@ function onRotateUp(e: PointerEvent) {
   if (spinEngaged) emit('rotateEnd', spin.start, spin.applied)
   spinEngaged = false
 }
+
+/**
+ * A gesture in progress is a standing answer to "where is the held point now",
+ * and the view moving is as much a change to that answer as the pointer moving
+ * — but nothing sends an event to say so. Without this the object would sit
+ * still through a pan and then cross the gap in one step at the next twitch of
+ * the mouse.
+ */
+watch(
+  () => [props.view.scale, props.view.tx, props.view.ty, props.view.rotate],
+  () => {
+    if (dragEngaged) reportDrag()
+    if (scaleEngaged) reportScale()
+    if (spinEngaged) reportSpin()
+  },
+)
 </script>

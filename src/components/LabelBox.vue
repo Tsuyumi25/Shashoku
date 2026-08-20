@@ -1,7 +1,7 @@
 <template>
   <ObjectFrame
     :box="box"
-    :view-rotate="view.rotate"
+    :view="view"
     :rotation="rotation"
     :selected="selected"
     :in-selection="inSelection"
@@ -46,7 +46,6 @@ import {
   clamp,
   framePoint,
   positionHolding,
-  screenDeltaToContentPx,
   turnedAround,
   type Anchor,
   type Displacement,
@@ -164,9 +163,10 @@ const substitution = computed(() => {
 const box = computed(() => centeredBoxOnScreen(drawn.value.center, drawn.value.box, props.view))
 
 /**
- * Where the object was before the drag wrote anything. A drag reports total
- * travel rather than a position, so the start has to be kept: reading the
- * anchor again on each frame would compound what has already been applied.
+ * Where the object was before the drag wrote anything. A drag reports how far
+ * the point it grabbed has travelled rather than a position, so the start has
+ * to be kept: reading the anchor again on each frame would compound what has
+ * already been applied.
  */
 let dragFrom: Anchor = { x: 0, y: 0 }
 let dragTo: Anchor = { x: 0, y: 0 }
@@ -182,12 +182,11 @@ function onDragStart() {
  */
 function onDrag(d: Displacement) {
   if (!props.natural.w || !props.natural.h) return
-  const delta = screenDeltaToContentPx(d.dx, d.dy, props.view)
   // Clamped to the page: an anchor parked outside it can no longer be reached
   // to be dragged back.
   dragTo = {
-    x: clamp(dragFrom.x + delta.x, 0, props.natural.w),
-    y: clamp(dragFrom.y + delta.y, 0, props.natural.h),
+    x: clamp(dragFrom.x + d.dx, 0, props.natural.w),
+    y: clamp(dragFrom.y + d.dy, 0, props.natural.h),
   }
   emit('move', dragTo)
 }

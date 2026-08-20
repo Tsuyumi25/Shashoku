@@ -18,7 +18,7 @@ export interface Anchor {
   y: number
 }
 
-/** A movement on screen, in screen pixels, carrying no origin. */
+/** A movement across the page, in page pixels, carrying no origin. */
 export interface Displacement {
   dx: number
   dy: number
@@ -102,22 +102,29 @@ export function contentToScreenPx(
 }
 
 /**
- * A screen-space movement in content px. A displacement carries no origin, so
- * the translation drops out and only the scale and the rotation are undone —
- * which is what a drag needs, and why it cannot reuse the container rect that
- * screenToContentPx demands.
+ * How far the page point taken hold of at `grab` has travelled, given where the
+ * pointer is now and the view as it now stands.
+ *
+ * A gesture holds a point on the page, not a distance on the screen. The
+ * distinction is invisible while the view sits still and is the whole story
+ * once it moves: a screen distance is a thing that already happened, measured
+ * with the ruler of the moment it happened in, and dividing it by a scale that
+ * has since changed misses by `travelled × (1/now − 1/then)` — proportional to
+ * how far the drag has come, which is why it used to look like nothing on a
+ * short drag and like the object being flung on a long one.
+ *
+ * A page point has no such problem. Zooming, panning and turning the view all
+ * leave it exactly where it is, so what is grabbed stays grabbed.
  */
-export function screenDeltaToContentPx(
-  dx: number,
-  dy: number,
+export function travelSinceGrab(
+  grab: Anchor,
+  clientX: number,
+  clientY: number,
+  containerRect: { left: number; top: number },
   view: ViewTransform,
-): { x: number; y: number } {
-  const ix = dx / view.scale
-  const iy = dy / view.scale
-  if (view.rotate === 0) return { x: ix, y: iy }
-  const cos = Math.cos(view.rotate)
-  const sin = Math.sin(view.rotate)
-  return { x: ix * cos + iy * sin, y: -ix * sin + iy * cos }
+): Displacement {
+  const now = screenToContentPx(clientX, clientY, containerRect, view)
+  return { dx: now.x - grab.x, dy: now.y - grab.y }
 }
 
 /**
