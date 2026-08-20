@@ -5,11 +5,11 @@
     :rotation="place.rotation"
     :selected="selected"
     :in-selection="inSelection"
-    :locked="locked"
+    :locked="false"
     :handles="selected"
+    :pointed="pointed"
+    :pointer="pointer"
     @select="emit('select', $event)"
-    @drag="emit('drag', $event)"
-    @drag-end="emit('commit')"
     @scale-start="onScaleStart"
     @scale="onScale"
     @scale-end="emit('commit')"
@@ -23,7 +23,7 @@
 import { computed } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
-import { centeredBoxOnScreen, type Displacement, type ViewTransform } from '@/lib/coords'
+import { centeredBoxOnScreen, type ViewTransform } from '@/lib/coords'
 import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
 
 /**
@@ -34,23 +34,34 @@ import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
  * is. `place` is the gesture in progress and it is a preview: the layer's own
  * numbers stay whole until the release resamples the pixels into them.
  *
- * Unlike a text object this frame appears only while the layer is selected. A
- * text frame is the translation's own outline and marks the work; this one is
- * only a handle, and an erase patch's handle is a large, mostly transparent
- * rectangle — a page of them would be a page of invisible walls over the art.
+ * Every drawn layer wears one rather than only the selected layer, so a patch
+ * can be reached by pointing at it instead of by reading down the tree. It is
+ * drawn while the pointer is on it, as a text frame is: a page of outlines all
+ * showing at once would be a page of rectangles over the art.
+ *
+ * Which is also why the box gives up the pointer. These rectangles hold their
+ * own transparency, and letting the browser decide a press by whose rectangle
+ * is on top would make them invisible walls. The canvas reads the pixels and
+ * says which layer it found — including whether the pointer is on this one —
+ * and the frame is left drawing.
+ *
+ * A locked layer is given no frame at all, so nothing here is ever on one — the
+ * frame is what says a thing can be taken hold of.
  */
 const props = defineProps<{
   entry: RasterLayerEntry
   view: ViewTransform
   selected: boolean
   inSelection: boolean
-  locked: boolean
+  /** The canvas's hit test says the pointer is on this layer. */
+  pointed: boolean
+  /** Never the whole box: only the handles of the selected layer answer. */
+  pointer: 'handles' | 'none'
   place: LayerPlacement
 }>()
 
 const emit = defineEmits<{
   select: [additive: boolean]
-  drag: [d: Displacement]
   /** The ratio, and which fractional point of the frame the drag is pinning. */
   scale: [ratio: number, pin: { x: number; y: number }]
   /** The angle, and which fractional point of the frame the turn goes round. */

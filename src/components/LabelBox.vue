@@ -9,6 +9,7 @@
     :handles="handles ?? true"
     :accent="accent"
     :standing="framed || untyped"
+    :pointer="pointer"
     :title="substitution"
     @select="emit('select', $event)"
     @drag-start="onDragStart"
@@ -98,6 +99,12 @@ const props = defineProps<{
    * out is an interface that lies.
    */
   handles?: boolean
+  /**
+   * Whether the frame answers the pointer at all. A text object's shape is its
+   * rectangle — the glyphs have holes in them and an empty label has nothing
+   * drawn at all — so it is the whole box or nothing, never the handles alone.
+   */
+  pointer: 'box' | 'none'
   /**
    * What the object is, one tag to a line, shown while the pointer is here or
    * while this is in the selection.

@@ -101,24 +101,23 @@
       <div v-if="pageReady" class="pointer-events-none absolute inset-0">
         <RasterFrame
           v-for="layer in rasterFrames"
-          :key="layer.entry.id"
-          :class="[!gestureArmed && !selecting && !connecting && 'pointer-events-auto']"
-          :entry="layer.entry"
+          :key="layer.id"
+          :entry="layer"
           :view="view"
-          :selected="layer.entry.id === editor.cursorId"
-          :in-selection="true"
-          :locked="layer.locked"
-          :place="placement.placementOf(layer.entry.id)"
-          @select="onSelectObject(layer.entry.id, $event)"
-          @drag="placement.moveBy(layer.entry.id, $event, view)"
-          @scale="(ratio, pin) => placement.scaleTo(layer.entry.id, ratio, pin)"
-          @rotate="(radians, pivot) => placement.rotateTo(layer.entry.id, radians, pivot)"
-          @commit="onLayerCommit(layer.entry)"
+          :selected="layer.id === editor.cursorId"
+          :in-selection="editor.isSelected(layer.id)"
+          :pointed="layer.id === pointedLayerId"
+          :pointer="framesTakePointer ? 'handles' : 'none'"
+          :place="placement.placementOf(layer.id)"
+          @select="onSelectObject(layer.id, $event)"
+          @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
+          @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
+          @commit="onLayerCommit(layer)"
         />
         <LabelBox
           v-for="object in objects"
           :key="object.id"
-          :class="[!gestureArmed && !selecting && !connecting && 'pointer-events-auto']"
+          :pointer="framesTakePointer ? 'box' : 'none'"
           :framed="connecting"
           :handles="!connecting"
           :text="object.text"
@@ -195,11 +194,12 @@ import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
+import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { isLocked, textObjects } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
+import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
@@ -208,10 +208,12 @@ import { ownsKeyboard } from '@/lib/editContext'
 import {
   centeredBoxOnScreen,
   contentToScreenPx,
+  screenToContentPx,
   screenToPagePx,
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork } from '@/lib/pageComposite'
 import {
   distanceToSegment,
@@ -335,25 +337,19 @@ const objects = computed(() => {
 })
 
 /**
- * The raster layers wearing a frame, which is only the ones selected.
+ * The raster layers wearing a frame: every one that is drawn and can be taken
+ * hold of, selected or not. Each draws its outline only while the pointer is
+ * on it, so having one is what makes a layer reachable rather than what puts a
+ * rectangle on the artwork.
  *
- * Nothing here hit-tests the page: the layers are drawn into containers that
- * take no pointer, and a frame is what the pointer is meant to find. A frame
- * for every layer would be nearly free, but an erase patch's frame is a large,
- * mostly transparent rectangle — twenty of them would be twenty invisible walls
- * over the artwork. So the tree says which layer is being worked on, and the
- * canvas offers a handle for that one. This is Photoshop's default, where the
- * Move tool moves the selected layer and auto-select is off.
+ * The same list the press is answered from, which is what makes the frame under
+ * the pointer and the layer a press takes the same layer by construction rather
+ * than by two rules kept in step.
  */
 const rasterFrames = computed(() => {
   const file = currentFile.value
   if (!file) return []
-  return stackedRasterNodes(stack.value)
-    .filter((node) => editor.isSelected(node.entry.id))
-    // A layer with no frame yet — a blank one, before anything has been painted
-    // on it — has no box to draw and nothing to move.
-    .filter((node) => node.entry.w > 0 && node.entry.h > 0)
-    .map((node) => ({ entry: node.entry, locked: isLocked(file.page.layers, node.entry.id) }))
+  return framedLayers(stack.value, (id) => isLocked(file.page.layers, id))
 })
 
 /**
@@ -364,9 +360,39 @@ const rasterFrames = computed(() => {
  * is cut the moment it is selected and not while a pointer is already moving.
  */
 const heldLayer = computed(() => {
-  const id = rasterFrames.value.find((l) => l.entry.id === editor.cursorId)?.entry.id
+  const id = rasterFrames.value.find((entry) => entry.id === editor.cursorId)?.id
   return id === undefined ? null : { id, place: placement.placementOf(id) }
 })
+
+/**
+ * The pixels of every layer a press could reach, kept ready.
+ *
+ * Only the framed ones, which is what keeps a locked full-page base map — the
+ * one layer that would cost real memory — from ever being read back.
+ */
+const layerAlpha = useLayerAlpha(
+  () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
+  () => rasterFrames.value,
+)
+
+/**
+ * Which layer is under a page point, decided by the pixels rather than by whose
+ * rectangle is on top — the frames are drawn over the page but take no pointer,
+ * so this is what answers instead.
+ */
+function layerHitAt(p: Anchor): string | null {
+  const file = currentFile.value
+  if (!file) return null
+  return layerAt(
+    stack.value,
+    p,
+    (id) => isLocked(file.page.layers, id),
+    layerAlpha.alphaAt,
+  )
+}
+
+/** Which layer the pointer is on, so its frame can say so before the press. */
+const pointedLayerId = ref<string | null>(null)
 
 function onLayerCommit(entry: RasterLayerEntry) {
   void placement.commit(entry).catch((err: unknown) => console.error('place layer failed', err))
@@ -940,6 +966,22 @@ const rotateDirection = reactive(beginRotationDirection(1, 0))
 // starts on one still pans or rotates the page under it.
 const gestureArmed = computed(() => spaceDown.value || rDown.value)
 
+/**
+ * Whether the objects on the page answer the pointer at all. Off for everything
+ * whose drag means something else — panning, turning, drawing a selection,
+ * running a line from one object to another.
+ */
+const framesTakePointer = computed(
+  () => !gestureArmed.value && !selecting.value && !connecting.value,
+)
+
+/**
+ * Whether a press on bare page picks a raster layer. The move tool alone: the
+ * others each want the press for themselves, and a tool that places text has no
+ * business selecting the patch under where the text is going.
+ */
+const picking = computed(() => framesTakePointer.value && editor.tool === 'select')
+
 const canvasCursor = computed(() => {
   // Kept visible through the display's drag: the brush lands where the pointer
   // is when it is let go, so that has to stay in sight the whole way.
@@ -959,6 +1001,9 @@ const canvasCursor = computed(() => {
     selecting.value
   )
     return 'cursor-crosshair'
+  // The frames gave up the pointer, so what a layer can be done with has to be
+  // said from here — otherwise finding one would say nothing about grabbing it.
+  if (pointedLayerId.value !== null) return layerDrag.value ? 'cursor-grabbing' : 'cursor-grab'
   return 'cursor-default'
 })
 
@@ -1030,7 +1075,58 @@ function onPointerDown(e: PointerEvent) {
     onConnectDown(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
     return
   }
-  editor.selectOnly(null)
+  // Unclamped, unlike placing text: a press out in the gutter is a press on
+  // nothing, and clamping it to the page edge would take whatever lies there.
+  const rect = containerRef.value.getBoundingClientRect()
+  const hit = layerHitAt(screenToContentPx(e.clientX, e.clientY, rect, view))
+  if (hit === null) {
+    // Bare page. The one deliberate way to be holding nothing.
+    editor.selectOnly(null)
+    return
+  }
+  onSelectObject(hit, e.shiftKey)
+  el.setPointerCapture(e.pointerId)
+  layerDrag.value = { id: hit, from: { x: e.clientX, y: e.clientY }, engaged: false }
+}
+
+/**
+ * Moving a layer by its own body, which its frame no longer takes the pointer
+ * for. Everything the gesture means still belongs to the placement — this is
+ * only the press, the travel and the release, in the place where the press
+ * already lands.
+ */
+const layerDrag = ref<{ id: string; from: Anchor; engaged: boolean } | null>(null)
+
+/**
+ * Under this the press was a click. Without a threshold a layer would creep by
+ * a pixel every time it was selected, and the move would be resampled into the
+ * pixels and land in the undo stack as if it had been asked for.
+ */
+const LAYER_DRAG_THRESHOLD_PX = 3
+
+function trackLayerDrag(e: PointerEvent): void {
+  const drag = layerDrag.value
+  if (drag === null) return
+  const dx = e.clientX - drag.from.x
+  const dy = e.clientY - drag.from.y
+  if (!drag.engaged) {
+    if (Math.hypot(dx, dy) < LAYER_DRAG_THRESHOLD_PX) return
+    drag.engaged = true
+  }
+  placement.moveBy(drag.id, { dx, dy }, view)
+}
+
+/**
+ * A cancelled pointer arrives here too, and banks the move rather than snapping
+ * the layer back — which is this canvas's standing convention for work the
+ * system interrupts.
+ */
+function endLayerDrag(): void {
+  const drag = layerDrag.value
+  layerDrag.value = null
+  if (drag === null || !drag.engaged) return
+  const entry = project.entryById(drag.id)
+  if (entry?.kind === 'raster') onLayerCommit(entry)
 }
 
 const ROTATE_SNAP = Math.PI / 12
@@ -1062,6 +1158,10 @@ function onPointerMove(e: PointerEvent) {
     panLast = { x: e.clientX, y: e.clientY }
     return
   }
+  if (layerDrag.value !== null) {
+    trackLayerDrag(e)
+    return
+  }
   if (objectMarquee.value !== null && containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect()
     objectMarquee.value.current = screenToPagePx(
@@ -1078,11 +1178,23 @@ function onPointerMove(e: PointerEvent) {
     onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
     return
   }
-  if (selecting.value) selectionTool.onPointerMove(e)
+  if (selecting.value) {
+    selectionTool.onPointerMove(e)
+    return
+  }
+  // What a press would take, worked out before there is one — the same answer
+  // the press itself will get, since it is the same question.
+  if (!picking.value || !containerRef.value) {
+    pointedLayerId.value = null
+    return
+  }
+  const rect = containerRef.value.getBoundingClientRect()
+  pointedLayerId.value = layerHitAt(screenToContentPx(e.clientX, e.clientY, rect, view))
 }
 
 function onPointerLeave() {
   cursorPos.value = null
+  pointedLayerId.value = null
   // The chain's loose end stays where the pointer left it rather than snapping
   // back to its source, so stepping off the canvas for the tool rail or a panel
   // does not look like the gesture broke.
@@ -1094,6 +1206,10 @@ function onPointerUp(e: PointerEvent) {
   if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
   if (hudGesture.value !== null) {
     commitBrushHud()
+    return
+  }
+  if (layerDrag.value !== null) {
+    endLayerDrag()
     return
   }
   // Rotating and panning take the pointer for themselves, so a selection tool

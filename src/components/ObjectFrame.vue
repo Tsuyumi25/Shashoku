@@ -5,8 +5,8 @@
     :class="[locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab']"
     :style="boxStyle"
     :title="title || undefined"
-    @pointerenter="hovered = true"
-    @pointerleave="hovered = false"
+    @pointerenter="entered = true"
+    @pointerleave="entered = false"
     @pointerdown.stop="onDown"
     @pointermove="onMove"
     @pointerup="onUp"
@@ -63,8 +63,8 @@ import { turnedAround, type Displacement } from '@/lib/coords'
 import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/labelBox'
 
 /**
- * The frame around one object: what says there is something here, and the only
- * thing on the canvas that takes a pointer.
+ * The frame around one object: what says there is something here, and — for the
+ * objects whose shape is their rectangle — what takes the pointer for it.
  *
  * It knows a box on screen and nothing else. Where that box came from — a point
  * on the page and a size the typesetter derived, or the extent of a PNG — is the
@@ -120,6 +120,29 @@ const props = defineProps<{
    * that would otherwise be findable only by hunting for it.
    */
   standing?: boolean
+  /**
+   * What this frame takes the pointer for.
+   *
+   * `box` is the whole of it: a press anywhere inside is a press on the object,
+   * which is what a text object wants, since its shape is full of holes and an
+   * empty one has no pixels at all.
+   *
+   * `handles` leaves the box itself transparent, so the canvas can work out
+   * what was pressed from the pixels rather than from whose rectangle is on
+   * top. The handles still answer: only the one selected object wears them, so
+   * no two sets can cover each other.
+   *
+   * `none` while a canvas gesture owns the pointer — panning, or a tool whose
+   * drag draws rather than grabs.
+   */
+  pointer: 'box' | 'handles' | 'none'
+  /**
+   * The pointer is on this object, worked out by whoever is hit-testing the
+   * page. A frame that has given up the pointer cannot notice on its own, and
+   * a highlight that disagreed with what a press would take is the one thing
+   * hit testing must not produce.
+   */
+  pointed?: boolean
   title?: string
 }>()
 
@@ -153,8 +176,15 @@ const emit = defineEmits<{
  */
 const DRAG_THRESHOLD_PX = 3
 
-const hovered = ref(false)
+/** The pointer is inside this frame, which only a frame taking it can tell. */
+const entered = ref(false)
 const boxEl = useTemplateRef<HTMLElement>('boxEl')
+
+const hovered = computed(() => entered.value || props.pointed === true)
+
+const handlePointer = computed<'none' | 'auto'>(() =>
+  props.pointer === 'none' ? 'none' : 'auto',
+)
 
 /**
  * Held through a drag, because the pointer can outrun the frame and leave it.
@@ -196,6 +226,7 @@ const boxStyle = computed(() => ({
   // An object no registered tag speaks for draws in the ordinary colour, which
   // is what "nobody has said what this is" looks like.
   outlineColor: props.accent ?? 'var(--primary)',
+  pointerEvents: props.pointer === 'box' ? ('auto' as const) : ('none' as const),
 }))
 
 interface Corner {
@@ -229,6 +260,7 @@ function cornerStyle(corner: Corner) {
     left: `${corner.kx * 100}%`,
     top: `${corner.ky * 100}%`,
     transform: 'translate(-50%, -50%)',
+    pointerEvents: handlePointer.value,
   }
 }
 
@@ -251,6 +283,7 @@ const antennaHandleStyle = computed(() => ({
   width: `${ANTENNA_HANDLE_HIT_PX}px`,
   height: `${ANTENNA_HANDLE_HIT_PX}px`,
   transform: `translate(-50%, calc(-50% - ${ANTENNA_LENGTH_PX}px))`,
+  pointerEvents: handlePointer.value,
 }))
 
 /**
@@ -350,6 +383,7 @@ const referenceStyle = computed(() => ({
   width: `${REFERENCE_HIT_PX}px`,
   height: `${REFERENCE_HIT_PX}px`,
   transform: `translate(-50%, -50%) rotate(${-turn.value}rad)`,
+  pointerEvents: handlePointer.value,
 }))
 
 const moveReference = { from: { x: 0, y: 0 }, at: MIDDLE }
