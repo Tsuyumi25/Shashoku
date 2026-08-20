@@ -351,6 +351,20 @@ export interface ShashokuEngineApi {
     color: string,
   ): EngineLayerPatch | null;
   /**
+   * Takes the covered part of `mask` out of a held layer, in one transaction
+   * against its tiles.
+   *
+   * The same machinery as a fill with one operator swapped, and always all the
+   * way through: an eraser that stopped at the layer below would be a second
+   * kind of transparency, and there is only one. Null when the coverage is
+   * empty.
+   */
+  rasterErase(
+    id: string,
+    mask: Uint8Array,
+    maskFrame: EngineLayerFrame,
+  ): EngineLayerPatch | null;
+  /**
    * Swaps a record against its layer. Undo and redo are this same call, because
    * swapping is its own inverse. Null when the record or its layer has been let
    * go.

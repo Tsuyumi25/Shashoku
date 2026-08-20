@@ -136,8 +136,8 @@
             <button
               type="button"
               class="panel-action"
-              title="複製圖層（Ctrl+J）"
-              :disabled="!canDuplicate"
+              title="複製圖層；有選區時拷貝選區內容成新圖層（Ctrl+J）"
+              :disabled="!canDuplicate && !pixels.liftsSelection.value"
               @click="onDuplicate"
             >
               <Copy :size="14" />
@@ -159,6 +159,21 @@
               @click="onAddFolder"
             >
               <FolderPlus :size="14" />
+            </button>
+            <!--
+              Delete used to be the only way to take a layer away, and it now
+              answers to the selection's pixels first — as it does in Photoshop,
+              which has this button for the same reason. Without it, deleting a
+              layer would mean deselecting first.
+            -->
+            <button
+              type="button"
+              class="panel-action ml-auto"
+              title="刪除圖層（Delete，沒有選區時）"
+              :disabled="editor.selectedIds.size === 0"
+              @click="editor.deleteSelection()"
+            >
+              <Trash2 :size="14" />
             </button>
           </div>
           <div
@@ -199,6 +214,7 @@ import {
   FolderPlus,
   PaintBucket,
   Plus,
+  Trash2,
 } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
@@ -213,6 +229,7 @@ import ResizeHandle from '@/components/ResizeHandle.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
+import { useSelectionPixels } from '@/composables/useSelectionPixels'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -233,6 +250,7 @@ const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 const { canFill, fillSelection } = useFillSelection()
 const { canMerge, canDuplicate, mergeBySelection, duplicateLayer } = useMergeLayers()
+const pixels = useSelectionPixels()
 
 function onFill() {
   void fillSelection().catch((err: unknown) => console.error('fill failed', err))
@@ -242,8 +260,11 @@ function onMerge() {
   void mergeBySelection().catch((err: unknown) => console.error('merge failed', err))
 }
 
+// The same fork the key takes, so the button and Ctrl+J cannot come to mean
+// two different things.
 function onDuplicate() {
-  void duplicateLayer().catch((err: unknown) => console.error('duplicate failed', err))
+  const copy = pixels.liftsSelection.value ? pixels.liftSelection() : duplicateLayer()
+  void copy.catch((err: unknown) => console.error('duplicate failed', err))
 }
 
 // The chapter's, not the open page's — the list below spans the chapter.

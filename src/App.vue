@@ -85,6 +85,7 @@ import ToolRail from '@/components/ToolRail.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
+import { useSelectionPixels } from '@/composables/useSelectionPixels'
 import { isTypingSurface, ownsKeyboard } from '@/lib/editContext'
 import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
@@ -106,6 +107,7 @@ const exportSelection = useExportStore()
 const ui = useUiStore()
 const fill = useFillSelection()
 const merge = useMergeLayers()
+const pixels = useSelectionPixels()
 
 // The window holds itself open until this answers, so every path out of it has
 // to reach the release — a failed write loses that one write, not the reply.
@@ -193,9 +195,16 @@ useEventListener(window, 'keydown', (e) => {
     if (e.repeat) return
     void merge.mergeBySelection().catch((err: unknown) => console.error('merge failed', err))
   } else if (key === 'j') {
+    // One key for both, as Photoshop's is: a selection means lift what is
+    // inside it onto a layer of its own, and no selection means copy the whole
+    // layer. Both come out as a new layer above the one they were taken from,
+    // which is why they are the same key rather than two.
     e.preventDefault()
     if (e.repeat) return
-    void merge.duplicateLayer().catch((err: unknown) => console.error('duplicate failed', err))
+    const lift = pixels.liftsSelection.value
+      ? pixels.liftSelection()
+      : merge.duplicateLayer()
+    void lift.catch((err: unknown) => console.error('duplicate failed', err))
   }
 })
 
@@ -251,11 +260,23 @@ useEventListener(window, 'keydown', (e) => {
   else if (e.key === 'ArrowLeft') editor.pageBy(-1)
   else if (e.key === 'ArrowRight') editor.pageBy(1)
   else if (e.key === 'Delete') {
-    // No confirmation, as in every editor with an undo stack behind it. A line
-    // being looked at goes first: it is the smaller and more transient of the
-    // two, and it is the one the connecting tool just put under attention.
+    /*
+     * One key, three things it could mean, ordered by how small and how recent
+     * each one is. No confirmation on any of them, as in every editor with an
+     * undo stack behind it.
+     *
+     * A line being looked at goes first: it is the most transient of the three
+     * and the one the connecting tool just put under attention. Then the
+     * selection's pixels, whenever there is a selection over a raster layer —
+     * which is Photoshop's answer to the same collision, and the reason the
+     * layer panel has a button of its own for taking a layer away.
+     */
     e.preventDefault()
     if (connect.eraseSelected()) return
+    if (pixels.erasesPixels.value) {
+      void pixels.eraseSelection().catch((err: unknown) => console.error('erase failed', err))
+      return
+    }
     editor.deleteSelection()
   } else if (e.key === 'Backspace' && connect.isDrawing) {
     // The same act as Ctrl+Z inside a chain.

@@ -102,6 +102,18 @@ fn tile_rect(coord: TileCoord) -> Rect {
 // ────────────────────────────────────────────────────────────────────────────
 // Compositing
 
+/// How a scratch layer lands on the layer under it.
+///
+/// The whole of the difference between painting and erasing. Neither has
+/// anything of its own in the data model — both put coverage on the paper and
+/// differ only here, which is what lets one transaction, one record and one
+/// undo path serve both.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Blend {
+    Over,
+    Erase,
+}
+
 /// `src` over `dst`, both straight RGBA.
 ///
 /// Kept in 255-scaled integers throughout rather than dividing as it goes: the
@@ -129,6 +141,27 @@ fn over(src: &[u8], dst: &mut [u8]) {
         dst[channel] = ((front + back + alpha / 2) / alpha) as u8;
     }
     dst[3] = ((alpha + 127) / 255) as u8;
+}
+
+/// `src`'s coverage taken out of `dst`.
+///
+/// Always all the way through, never down to whatever is underneath: an eraser
+/// that stopped at the layer below would be a second kind of transparency, and
+/// there is only one.
+///
+/// The colour is left where the alpha survives. Under straight alpha the two are
+/// independent, and a pixel taken to zero has its colour stripped when the tile
+/// is released — which is the same rule every other write obeys.
+fn punch(src: &[u8], dst: &mut [u8]) {
+    let coverage = src[3] as u32;
+    if coverage == 0 {
+        return;
+    }
+    if coverage == 255 {
+        dst.fill(0);
+        return;
+    }
+    dst[3] = ((dst[3] as u32 * (255 - coverage) + 127) / 255) as u8;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -222,6 +255,35 @@ impl RasterLayer {
         mask_frame: Rect,
         color: [u8; 4],
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
+        if color[3] == 0 {
+            return Ok(None);
+        }
+        self.write(mask, mask_frame, color, Blend::Over)
+    }
+
+    /// Takes the covered part of `mask` out of the layer, in a single
+    /// transaction, and hands back what changed.
+    ///
+    /// The same machinery as a fill with one operator swapped. Erasing has
+    /// nothing of its own in the data model: it puts coverage on the scratch
+    /// like everything else and punches through when that scratch is committed.
+    /// A tile emptied outright goes back to being no tile at all, which is the
+    /// only spelling of transparent there is.
+    pub fn erase(
+        &mut self,
+        mask: &[u8],
+        mask_frame: Rect,
+    ) -> Result<Option<(LayerJournal, Patch)>, String> {
+        self.write(mask, mask_frame, [0, 0, 0, 255], Blend::Erase)
+    }
+
+    fn write(
+        &mut self,
+        mask: &[u8],
+        mask_frame: Rect,
+        color: [u8; 4],
+        blend: Blend,
+    ) -> Result<Option<(LayerJournal, Patch)>, String> {
         let wanted = (mask_frame.w.max(0) as usize)
             .checked_mul(mask_frame.h.max(0) as usize)
             .ok_or_else(|| "mask is too large to describe".to_string())?;
@@ -234,7 +296,7 @@ impl RasterLayer {
             ));
         }
         let at = mask_frame.offset(-self.anchor_x, -self.anchor_y);
-        if at.is_empty() || color[3] == 0 {
+        if at.is_empty() {
             return Ok(None);
         }
 
@@ -258,13 +320,22 @@ impl RasterLayer {
             let mut target = tx.edit(coord);
             let out = target.bytes_mut();
             for (src, dst) in source.bytes().chunks_exact(4).zip(out.chunks_exact_mut(4)) {
-                over(src, dst);
+                match blend {
+                    Blend::Over => over(src, dst),
+                    Blend::Erase => punch(src, dst),
+                }
             }
         }
         let tiles = tx.commit();
 
         let before = self.bounds;
-        self.bounds = self.bounds.union(written);
+        // Only paint moves a frame. Taking pixels out could shrink one, but a
+        // frame that shrank would have to be recomputed from the whole layer,
+        // and a frame larger than its content costs a little disk while a frame
+        // smaller than its content loses pixels.
+        if blend == Blend::Over {
+            self.bounds = self.bounds.union(written);
+        }
         let journal = LayerJournal {
             layer: String::new(),
             tiles,
@@ -577,12 +648,28 @@ pub fn fill(
     mask_frame: Rect,
     color: [u8; 4],
 ) -> Result<Option<(String, Patch)>, String> {
+    record(id, |layer| layer.fill(mask, mask_frame, color))
+}
+
+/// Takes the masked region out of a held layer. The returned name is how the
+/// caller asks for this write to be taken back.
+pub fn erase(id: &str, mask: &[u8], mask_frame: Rect) -> Result<Option<(String, Patch)>, String> {
+    record(id, |layer| layer.erase(mask, mask_frame))
+}
+
+/// Runs one write against a held layer and files the record it produced.
+type Written = Result<Option<(LayerJournal, Patch)>, String>;
+
+fn record(
+    id: &str,
+    write: impl FnOnce(&mut RasterLayer) -> Written,
+) -> Result<Option<(String, Patch)>, String> {
     let mut held = registry();
     let layer = held
         .layers
         .get_mut(id)
         .ok_or_else(|| format!("layer {id} is not held by the engine"))?;
-    let Some((mut journal, patch)) = layer.fill(mask, mask_frame, color)? else {
+    let Some((mut journal, patch)) = write(layer)? else {
         return Ok(None);
     };
     held.next_journal += 1;
@@ -813,6 +900,90 @@ mod tests {
         layer.apply(&mut journal);
         assert_eq!(layer.frame(), frame(90, 100, 20, 10));
         assert_eq!(pixel(&layer, 90, 100), RED.to_vec());
+    }
+
+    #[test]
+    fn an_erase_takes_the_covered_pixels_out() {
+        let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 255, 255]);
+        layer
+            .erase(&full_mask(2, 2), frame(0, 0, 2, 2))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+
+        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 0, 0]);
+        assert_eq!(pixel(&layer, 1, 1), vec![0, 0, 0, 0]);
+        assert_eq!(pixel(&layer, 2, 2), vec![0, 0, 255, 255]);
+    }
+
+    // An eraser always goes all the way through: there is only one transparency.
+    #[test]
+    fn erasing_a_whole_tile_leaves_no_tile_behind() {
+        let mut layer = solid(frame(0, 0, TILE_SIZE, TILE_SIZE), [0, 0, 255, 255]);
+        assert_eq!(layer.grid.tile_count(), 1);
+
+        layer
+            .erase(
+                &full_mask(TILE_SIZE, TILE_SIZE),
+                frame(0, 0, TILE_SIZE, TILE_SIZE),
+            )
+            .expect("a well-formed erase")
+            .expect("something to erase");
+
+        assert_eq!(layer.grid.tile_count(), 0);
+    }
+
+    #[test]
+    fn a_partly_covered_erase_thins_the_alpha_and_keeps_the_colour() {
+        let mut layer = solid(frame(0, 0, 2, 1), [0, 0, 255, 255]);
+        let mask = vec![128u8, 0];
+        layer
+            .erase(&mask, frame(0, 0, 2, 1))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+
+        let thinned = pixel(&layer, 0, 0);
+        assert_eq!(&thinned[..3], &[0, 0, 255]);
+        assert!((thinned[3] as i32 - 127).abs() <= 1, "{thinned:?}");
+        assert_eq!(pixel(&layer, 1, 0), vec![0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn an_erase_over_nothing_is_not_a_step() {
+        let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 0, 0]);
+        assert!(
+            layer
+                .erase(&[0u8; 4], frame(0, 0, 2, 2))
+                .expect("a well-formed erase")
+                .is_none()
+        );
+    }
+
+    // Only paint moves a frame. A frame that shrank would have to be recomputed
+    // from the whole layer, and one larger than its content costs only disk.
+    #[test]
+    fn an_erase_leaves_the_frame_where_it_was() {
+        let mut layer = solid(frame(5, 5, 4, 4), [0, 0, 255, 255]);
+        layer
+            .erase(&full_mask(4, 4), frame(5, 5, 4, 4))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(layer.frame(), frame(5, 5, 4, 4));
+    }
+
+    #[test]
+    fn an_erase_is_taken_back_by_the_same_swap() {
+        let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 255, 255]);
+        let (mut journal, _) = layer
+            .erase(&full_mask(2, 2), frame(0, 0, 2, 2))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 0, 0]);
+
+        layer.apply(&mut journal);
+        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 255, 255]);
+
+        layer.apply(&mut journal);
+        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 0, 0]);
     }
 
     #[test]

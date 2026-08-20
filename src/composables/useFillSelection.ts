@@ -1,7 +1,6 @@
 import { computed } from 'vue'
-import type { RasterLayerEntry } from '@shared/page/types'
-import { isHidden, isLocked } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
+import { useRasterTarget } from '@/composables/useRasterTarget'
 import { isEmptyRect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
@@ -31,14 +30,7 @@ export function useFillSelection() {
   const notices = useNoticeStore()
   const preferences = usePreferencesStore()
   const raster = useRasterStore()
-
-  /** Where a fill would land: the raster layer the cursor is standing on. */
-  const target = computed<RasterLayerEntry | null>(() => {
-    const id = editor.cursorId
-    if (id === null) return null
-    const entry = project.entryById(id)
-    return entry?.kind === 'raster' ? entry : null
-  })
+  const { target, refuse } = useRasterTarget()
 
   const canFill = computed(
     () =>
@@ -47,26 +39,6 @@ export function useFillSelection() {
       selection.bounds !== null &&
       !isEmptyRect(selection.bounds),
   )
-
-  /**
-   * Whether this layer may be written to at all, saying why when it may not.
-   *
-   * Both refusals are about a write whose result could not be seen: a locked
-   * layer is one somebody protected, and a hidden one would take the paint and
-   * show nothing, which is indistinguishable from the tool being broken.
-   */
-  function refuse(pageId: string, entry: RasterLayerEntry): boolean {
-    const layers = project.pageById(pageId)?.page.layers ?? []
-    if (isLocked(layers, entry.id)) {
-      notices.say(`「${entry.name}」鎖定中，改不了`)
-      return true
-    }
-    if (isHidden(layers, entry.id)) {
-      notices.say(`「${entry.name}」是隱藏的，改不了`)
-      return true
-    }
-    return false
-  }
 
   async function fillSelection(): Promise<void> {
     const page = editor.currentPageId

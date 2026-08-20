@@ -145,6 +145,7 @@ const engineApi: ShashokuEngineApi = {
   rasterRelease: (id) => engine.rasterRelease(id),
   rasterReleaseAll: () => engine.rasterReleaseAll(),
   rasterFill: (id, mask, maskFrame, color) => engine.rasterFill(id, mask, maskFrame, color),
+  rasterErase: (id, mask, maskFrame) => engine.rasterErase(id, mask, maskFrame),
   rasterApplyJournal: (journal) => engine.rasterApplyJournal(journal),
   rasterDropJournal: (journal) => engine.rasterDropJournal(journal),
   rasterHistoryBytes: () => engine.rasterHistoryBytes(),

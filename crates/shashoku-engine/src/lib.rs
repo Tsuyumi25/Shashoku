@@ -581,6 +581,23 @@ pub fn raster_fill(
     Ok(filled.map(|(journal, patch)| to_patch(journal, patch)))
 }
 
+/// Takes the covered part of `mask` out of a held layer, in one transaction
+/// against its tiles.
+///
+/// The same machinery as a fill with one operator swapped, and always all the
+/// way through: an eraser that stopped at the layer below would be a second kind
+/// of transparency, and there is only one. Null when the coverage is empty.
+#[napi]
+pub fn raster_erase(
+    id: String,
+    mask: Buffer,
+    mask_frame: LayerFrame,
+) -> napi::Result<Option<LayerPatch>> {
+    let erased = raster::erase(&id, mask.as_ref(), to_rect(&mask_frame))
+        .map_err(napi::Error::from_reason)?;
+    Ok(erased.map(|(journal, patch)| to_patch(journal, patch)))
+}
+
 /// Swaps a record against its layer. Undo and redo are this same call, because
 /// swapping is its own inverse. Nothing comes back when the record or its layer
 /// has been let go.

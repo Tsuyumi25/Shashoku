@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { fillPixels } from '@/lib/selection/fill'
+import { maskPixels } from '@/lib/selection/fill'
 
-describe('fillPixels', () => {
-  const red = { r: 255, g: 0, b: 0 }
+/** One opaque pixel per mask byte, in a colour worth watching for. */
+function opaque(count: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(count * 4)
+  for (let i = 0; i < count; i += 1) out.set([255, 0, 0, 255], i * 4)
+  return out
+}
 
-  it('carries the mask through as the alpha channel', () => {
-    const alpha = new Uint8ClampedArray([0, 128, 255, 64])
-    const out = fillPixels(alpha, red)
-    expect([...out.slice(0, 4)]).toEqual([255, 0, 0, 0])
-    expect([...out.slice(4, 8)]).toEqual([255, 0, 0, 128])
-    expect([...out.slice(8, 12)]).toEqual([255, 0, 0, 255])
-    expect([...out.slice(12, 16)]).toEqual([255, 0, 0, 64])
+describe('maskPixels', () => {
+  it('scales the alpha by the coverage', () => {
+    const rgba = opaque(4)
+    maskPixels(rgba, new Uint8ClampedArray([0, 128, 255, 64]))
+    expect([...rgba.slice(4, 8)]).toEqual([255, 0, 0, 128])
+    expect([...rgba.slice(8, 12)]).toEqual([255, 0, 0, 255])
+    expect([...rgba.slice(12, 16)]).toEqual([255, 0, 0, 64])
   })
 
   /**
@@ -18,15 +22,29 @@ describe('fillPixels', () => {
    * pixels, and clipping it here would put a jagged patch on the page.
    */
   it('keeps a feathered edge rather than clipping it to on or off', () => {
-    const out = fillPixels(new Uint8ClampedArray([200]), red)
-    expect(out[3]).toBe(200)
+    const rgba = opaque(1)
+    maskPixels(rgba, new Uint8ClampedArray([200]))
+    expect(rgba[3]).toBe(200)
   })
 
-  it('gives four bytes per mask pixel', () => {
-    expect(fillPixels(new Uint8ClampedArray(6), red)).toHaveLength(24)
+  /**
+   * A transparent red drags the white beside it pink the moment anything
+   * resamples, and baking a transform takes exactly that path.
+   */
+  it('takes the colour with the alpha it took to nothing', () => {
+    const rgba = opaque(1)
+    maskPixels(rgba, new Uint8ClampedArray([0]))
+    expect([...rgba]).toEqual([0, 0, 0, 0])
+  })
+
+  it('takes what was already transparent no further', () => {
+    const rgba = new Uint8ClampedArray([0, 0, 0, 0])
+    maskPixels(rgba, new Uint8ClampedArray([255]))
+    expect([...rgba]).toEqual([0, 0, 0, 0])
   })
 
   it('has nothing to say about an empty patch', () => {
-    expect(fillPixels(new Uint8ClampedArray(0), red)).toHaveLength(0)
+    const rgba = new Uint8ClampedArray(0)
+    expect(() => maskPixels(rgba, new Uint8ClampedArray(0))).not.toThrow()
   })
 })
