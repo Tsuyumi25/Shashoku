@@ -1,6 +1,5 @@
 import { computed } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
-import { generateId } from '@shared/page/schema'
 import { isHidden, isLocked } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
 import { isEmptyRect } from '@/lib/selection/rect'
@@ -10,15 +9,6 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
-
-/** Everything about where a layer's pixels are, which a fill can move. */
-interface LayerPlace {
-  file: string
-  x: number
-  y: number
-  w: number
-  h: number
-}
 
 /**
  * Filling a selection with the foreground colour, onto the layer already
@@ -104,7 +94,7 @@ export function useFillSelection() {
     if (mask === null) return
 
     // The first edit of this layer, and the only time its whole pixels cross.
-    await raster.take(entry, layersDirOf(file.pageDir))
+    await raster.take(entry, page, layersDirOf(file.pageDir), file.pageDir)
 
     /*
      * Trimmed before the write allocates, never after. Building the record
@@ -121,7 +111,6 @@ export function useFillSelection() {
       ),
     )
 
-    const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
     const patch = window.engine.rasterFill(
       entry.id,
       new Uint8Array(mask),
@@ -132,45 +121,28 @@ export function useFillSelection() {
     // is a failure and neither is a step.
     if (patch === null) return
     raster.paste(entry.id, patch)
+    await raster.owe(entry.id)
 
     /*
-     * A name nothing else has ever held, on every write. The manifest is
-     * written after the pixels it names, so a crash between the two leaves the
-     * previous manifest pointing at data that is all still there — which
-     * reusing a file name is exactly what would destroy. Whatever no manifest
-     * names any more is swept when the project is next opened.
+     * Literally one function for both directions. The engine's record is a
+     * swap, so applying it takes the write back and applying it again puts it
+     * there; the frame rides along inside the same swap. Nothing here touches
+     * the manifest or a file — the layer as it now stands is what goes to disk
+     * next, so no version anybody has moved past is ever pointed at again.
      */
-    const to: LayerPlace = {
-      file: `${entry.id}.${generateId().slice(0, 8)}.png`,
-      ...patch.frame,
-    }
-    const bytes = await raster.encode(entry.id)
-    if (bytes === null) return
-    await window.api.writePage(file.pageDir, { layerParts: { [to.file]: bytes } })
-    project.placeLayer(page, entry.id, to)
-
-    /*
-     * One call for both directions. The engine's record is a swap, so applying
-     * it takes the write back and applying it again puts it there — undo and
-     * redo differ only in which frame and file the manifest is left pointing at.
-     *
-     * Both files stay on disk until the project is next opened, which is what
-     * lets the manifest side of this be a plain swap rather than an encode.
-     */
-    const swapTo = (place: LayerPlace) => {
+    const swap = () => {
       const back = window.engine.rasterApplyJournal(patch.journal)
       if (back !== null) raster.paste(entry.id, back)
-      project.placeLayer(page, entry.id, place)
+      void raster.owe(entry.id)
     }
     editor.pushCommand(
       {
         label: `fill-layer ${entry.id}`,
         journal: patch.journal,
-        do: () => swapTo(to),
-        undo: () => swapTo(from),
-        // Only when this step leaves the stack for good. The layer files it
-        // named stay on disk either way — the ceiling bounds memory, and what
-        // no manifest names is swept when the project is next opened.
+        do: swap,
+        undo: swap,
+        // Only when this step leaves the stack for good. The ceiling bounds
+        // memory; what is on disk is swept when the project is next opened.
         forget: () => window.engine.rasterDropJournal(patch.journal),
       },
       { alreadyApplied: true },

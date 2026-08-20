@@ -165,6 +165,39 @@ export const useProjectStore = defineStore('project', () => {
   })
 
   /**
+   * Everything that owes bytes to `layers/` before a reader of that folder can
+   * be trusted.
+   *
+   * Pixels are written on a scheduler of their own and much more slowly than the
+   * manifest, so at any moment the newest paint may only be in memory. Anything
+   * that reads the folder — exporting, making a thumbnail, closing the project —
+   * has to make it true first, and that is not a flaw in deferred writing, it is
+   * what deferred writing means.
+   *
+   * A register rather than a call from each of them, so that a consumer added
+   * later inherits the obligation instead of having to be told about it.
+   */
+  const layerObligations = new Set<() => Promise<void>>()
+
+  function oweBeforeLayerRead(settle: () => Promise<void>): void {
+    layerObligations.add(settle)
+  }
+
+  /** The manifest alone. What a pixel flush calls once it has named its file. */
+  function flushManifest(): Promise<void> {
+    return autosave.flush()
+  }
+
+  /**
+   * Everything down: the pixels first, because settling them is what gives the
+   * manifest its final names, and the manifest after.
+   */
+  async function flush(): Promise<void> {
+    for (const settle of layerObligations) await settle()
+    await autosave.flush()
+  }
+
+  /**
    * Every mutation below ends here or in markMetaDirty, which is what lets the
    * autosave be scheduled in two places rather than at each of the twenty-odd
    * call sites — and what keeps a new mutation from silently opting out of it.
@@ -197,7 +230,7 @@ export const useProjectStore = defineStore('project', () => {
     // The only place the open project is replaced, so the only place the
     // outgoing one has to be banked. Still addressed by the old rootPath here,
     // which is what makes it land where it came from.
-    await autosave.flush()
+    await flush()
     const meta = parseProjectJson(projectMetaRaw)
     const loaded: ProjectFile[] = []
     // A page whose reading order had drifted is put right here and queued to be
@@ -239,14 +272,13 @@ export const useProjectStore = defineStore('project', () => {
    * Reading a project back off disk, with the queued writes banked first.
    *
    * The order is the whole point and must not be taken apart: `openProject`
-   * sweeps every layer file the manifest on disk does not name, and a layer
-   * written by a tool is on disk long before the manifest that names it is —
-   * the manifest goes through autosave, the pixels do not. Sweeping ahead of
-   * the flush therefore deletes work that was never saved, and then writes a
+   * sweeps every layer file the manifest on disk does not name, and both halves
+   * of a page are written on schedulers of their own. Sweeping ahead of the
+   * flush therefore deletes work that was never saved, and then writes a
    * manifest pointing at the file it just removed.
    */
   async function reopen(rootPathToOpen: string): Promise<void> {
-    await autosave.flush()
+    await flush()
     const result = await window.api.openProject(rootPathToOpen)
     await ingestProject(rootPathToOpen, result.projectMetaRaw, result.pages)
   }
@@ -1101,7 +1133,10 @@ export const useProjectStore = defineStore('project', () => {
     movePageBefore,
     tagPagesDeleted,
     untagPagesDeleted,
-    flush: autosave.flush,
+    flush,
+    flushManifest,
+    oweBeforeLayerRead,
+    markPageDirty,
     addLabel,
     deleteLabel,
     renamePage,

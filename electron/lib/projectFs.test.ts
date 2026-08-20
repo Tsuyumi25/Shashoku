@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deflateSync } from "node:zlib";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertPathSegment, createPage, createProject, openProject } from "./projectFs";
+import {
+  assertPathSegment,
+  createPage,
+  createProject,
+  deleteLayerParts,
+  openProject,
+  writePage,
+} from "./projectFs";
 import { parseManifest } from "@shared/page/schema";
 import { parseProjectJson, serializeProjectJson } from "@shared/project/schema";
 import {
@@ -294,5 +301,58 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
     await mkdir(join(root, "somewhere-else"), { recursive: true });
     const opened = await createProject(root);
     expect(opened.pages).toEqual([]);
+  });
+});
+
+describe("dropping a layer file a flush has superseded", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "shashoku-layers-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function pageWithLayers(...names: string[]): Promise<string> {
+    const pageDir = join(root, "page");
+    await writePage(pageDir, {
+      layerParts: Object.fromEntries(names.map((name) => [name, sourcePng(2, 2)])),
+    });
+    return pageDir;
+  }
+
+  async function layerNames(pageDir: string): Promise<string[]> {
+    return (await readdir(join(pageDir, DIR_LAYERS))).sort();
+  }
+
+  it("takes only the ones it names", async () => {
+    const pageDir = await pageWithLayers("a.png", "b.png");
+
+    await deleteLayerParts(pageDir, ["a.png"]);
+
+    expect(await layerNames(pageDir)).toEqual(["b.png"]);
+  });
+
+  /**
+   * Two flushes racing on one layer would otherwise have the loser throw over
+   * work the winner has already done.
+   */
+  it("says nothing about a file that is already gone", async () => {
+    const pageDir = await pageWithLayers("a.png");
+
+    await deleteLayerParts(pageDir, ["a.png"]);
+    await expect(deleteLayerParts(pageDir, ["a.png"])).resolves.toBeUndefined();
+  });
+
+  // The one deletion that happens while a project is open, so it must not be
+  // able to reach anything but this page's layers.
+  it("refuses a name that walks out of the folder", async () => {
+    const pageDir = await pageWithLayers("a.png");
+
+    await expect(deleteLayerParts(pageDir, ["../../etc/passwd"])).rejects.toThrow();
+    await expect(deleteLayerParts(pageDir, [".."])).rejects.toThrow();
+    expect(await layerNames(pageDir)).toEqual(["a.png"]);
   });
 });

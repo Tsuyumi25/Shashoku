@@ -25,6 +25,8 @@ const api: ShashokuApi = {
   readPage: (pageDir) => ipcRenderer.invoke(CHANNELS.readPage, pageDir),
   writePage: (pageDir, input: WritePageInput) =>
     ipcRenderer.invoke(CHANNELS.writePage, pageDir, input),
+  deleteLayerParts: (pageDir, filenames) =>
+    ipcRenderer.invoke(CHANNELS.deleteLayerParts, pageDir, filenames),
   writeProjectMeta: (shashokuDir, projectMetaRaw) =>
     ipcRenderer.invoke(CHANNELS.writeProjectMeta, shashokuDir, projectMetaRaw),
   writeExport: (rootPath, profileFolder, filename, bytes) =>

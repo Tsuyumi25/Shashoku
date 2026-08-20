@@ -104,6 +104,17 @@ function revoke() {
 }
 
 async function bytesFor(): Promise<Uint8Array> {
+  /*
+   * Before the key, not just before the drawing. Making this reads `layers/`,
+   * and the newest paint may be in memory alone — a thumbnail of the page as it
+   * was half a minute ago is exactly the wrong answer to "did page 47 get
+   * typeset". The key is taken from the manifest, so settling first is also what
+   * keeps a stale picture from being filed under a name that looks current.
+   *
+   * Costs nothing when nothing is owed, which is every thumbnail but the few
+   * after an edit.
+   */
+  await project.flush()
   const key = await thumbnailKey(props.file)
   const cached = await window.api.readThumbnail(key)
   if (cached) return cached

@@ -6,6 +6,7 @@ import { CHANNELS, type WritePageInput } from "@shared/ipc/channels";
 import {
   createProject,
   createPage,
+  deleteLayerParts,
   listSources,
   openProject,
   readPage,
@@ -55,6 +56,9 @@ export function registerShashokuProjectHandlers(): void {
   );
   ipcMain.handle(CHANNELS.openProject, (_e, rootPath: string) => openProject(rootPath));
   ipcMain.handle(CHANNELS.readPage, (_e, pageDir: string) => readPage(pageDir));
+  ipcMain.handle(CHANNELS.deleteLayerParts, (_e, pageDir: string, filenames: string[]) =>
+    deleteLayerParts(pageDir, filenames),
+  );
   ipcMain.handle(CHANNELS.writePage, (_e, pageDir: string, input: WritePageInput) =>
     writePage(pageDir, input),
   );

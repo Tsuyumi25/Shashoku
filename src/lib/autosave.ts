@@ -8,6 +8,21 @@ export const DEBOUNCE_MS = 800
  */
 export const MAX_WAIT_MS = 5000
 
+/**
+ * The same two numbers for pixels, and much larger ones.
+ *
+ * Encoding a whole layer is a tenth of a second or two. Paid once per stroke
+ * that is two orders of magnitude too much; paid once every few tens of seconds
+ * in the background it is nothing at all — which is the whole argument against
+ * writing pixels when they are committed.
+ *
+ * So the two schedulers are separate rather than one with a compromise between
+ * them: a manifest is small and cheap and should follow the hand closely, and
+ * pixels are neither.
+ */
+export const PIXEL_DEBOUNCE_MS = 2000
+export const PIXEL_MAX_WAIT_MS = 30000
+
 export interface Autosave {
   /** Something changed. The write follows once the burst settles. */
   mark(): void

@@ -145,6 +145,15 @@ export const useExportStore = defineStore('export', () => {
     const pages = pagesToRun.value
     if (root === null || running.value || profiles.length === 0 || pages.length === 0) return
 
+    /*
+     * Everything owed to `layers/` goes down first, and this waits for it.
+     * Export reads the folder for full-resolution pixels, and the newest paint
+     * may only be in memory — delivering a chapter short of the last thirty
+     * seconds of retouching, silently, is what deferred writing costs if nobody
+     * settles it.
+     */
+    await project.flush()
+
     abandoned = false
     outcome.value = null
     progress.value = { done: 0, total: pages.length * profiles.length }

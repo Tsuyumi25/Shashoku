@@ -109,6 +109,11 @@ export function useMergeLayers() {
     const target = editor.maskTarget
     if (open === null || target === null || parts.length < 2) return
 
+    // Both of these read `layers/` for the pixels they consume, and pixels
+    // reach disk on a scheduler of their own — merging a layer that was painted
+    // on a moment ago would flatten the version before the paint.
+    await project.flush()
+
     // Hiding is inherited and `pageStack` honours it, so a hidden participant
     // contributes nothing and is still consumed — as merging does anywhere.
     const nodes = pageStack(parts)
@@ -229,6 +234,7 @@ export function useMergeLayers() {
     const copy = cloneEntry(source, clone)
 
     if (clone.files.length > 0) {
+      await project.flush()
       const dir = layersDirOf(open.pageDir)
       const parts: Record<string, Uint8Array> = {}
       for (const { from, to } of clone.files) parts[to] = await window.api.readImage(dir, from)

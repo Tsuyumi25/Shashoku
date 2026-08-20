@@ -331,6 +331,29 @@ async function gcOrphanLayers(pageDir: string): Promise<void> {
   }
 }
 
+/**
+ * Removes named layer files. The one deletion that happens while a project is
+ * open, and the only one narrow enough to be safe there.
+ *
+ * A flush uses it to drop the version it just superseded, and only after the
+ * manifest naming the new one is on disk — so at no moment does a manifest name
+ * a file that is gone. The wide sweep still belongs at open, where there is no
+ * undo stack to reach past the manifest.
+ *
+ * Missing is not an error: two flushes racing on the same layer would otherwise
+ * make the loser throw over work that is already done.
+ */
+export async function deleteLayerParts(
+  pageDir: string,
+  filenames: readonly string[],
+): Promise<void> {
+  const layersDir = join(pageDir, DIR_LAYERS);
+  for (const filename of filenames) {
+    assertPathSegment(filename, "layer 檔名");
+    await unlink(join(layersDir, filename)).catch(() => {});
+  }
+}
+
 export async function readPage(pageDir: string): Promise<PageRawData> {
   const manifestRaw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
   const ocrPath = join(pageDir, PAGE_OCR_FILENAME);

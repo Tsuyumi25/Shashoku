@@ -218,8 +218,13 @@ export function useLayerPlacement() {
        * frame. Letting it go here is what makes the next edit hand over the
        * layer as it now stands, rather than paint into a grid that is one
        * gesture behind.
+       *
+       * Settled first, and not only so nothing is lost: baking reads the layer's
+       * file, so an unwritten edit would be resampled out of existence.
        */
-      useRasterStore().release(entry.id)
+      const raster = useRasterStore()
+      await raster.flush()
+      raster.release(entry.id)
       // A pure translation moves the frame and leaves the pixels alone, which
       // is the one gesture that costs nothing — a copy rather than an average.
       if (place.scale === 1 && place.rotation === 0) {

@@ -25,11 +25,30 @@ export interface CompositeInput {
    * live, and this decides which of them the page actually needs.
    */
   loadLayer(file: string): Promise<Uint8Array>
+  /**
+   * A layer's pixels as they stand in memory, for layers being edited.
+   *
+   * Only on-screen consumers pass this. Pixels reach disk on a scheduler of
+   * their own, so a layer under the hand is ahead of its file for tens of
+   * seconds at a time — and the wand reading the page as it was tens of seconds
+   * ago would be reading a different page.
+   *
+   * Deliberately not passed by anything that delivers. Export and thumbnails
+   * settle the pixels first and then read the folder, which keeps what is
+   * delivered and what is on disk the same thing by construction.
+   */
+  liveLayer?(id: string): { canvas: OffscreenCanvas; frame: Frame } | null
 }
 
 interface Size {
   w: number
   h: number
+}
+
+/** A rectangle on the page, which is what a raster layer occupies. */
+interface Frame extends Size {
+  x: number
+  y: number
 }
 
 /**
@@ -128,6 +147,8 @@ export interface StackPaint {
    */
   page: Size
   rasters: ReadonlyMap<string, ImageBitmap>
+  /** A layer's live pixels, when the caller has any. See `CompositeInput`. */
+  liveLayer?(id: string): { canvas: OffscreenCanvas; frame: Frame } | null
   /** How a text object is drawn. Merge never has one and refuses instead. */
   drawText(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void
 }
@@ -146,10 +167,14 @@ export function drawStack(
     ctx.globalAlpha = node.opacity
     ctx.globalCompositeOperation = canvasBlend(node.blendMode)
     if (node.kind === 'raster') {
-      const bitmap = paint.rasters.get(node.entry.file)
-      if (bitmap) {
-        const { x, y, w, h } = node.entry
-        ctx.drawImage(bitmap, x, y, w, h)
+      // The live pixels win where there are any, and they carry their own frame:
+      // a write that grew the layer moved it, and the manifest is not told until
+      // the file naming the new frame is on disk.
+      const live = paint.liveLayer?.(node.entry.id) ?? null
+      const source = live?.canvas ?? paint.rasters.get(node.entry.file)
+      if (source) {
+        const { x, y, w, h } = live?.frame ?? node.entry
+        ctx.drawImage(source, x, y, w, h)
       }
     } else if (node.kind === 'text') {
       paint.drawText(ctx, node)
@@ -223,15 +248,25 @@ export async function compositeArtwork(input: CompositeInput): Promise<Offscreen
  * Text is left out because the composite leaves it out: typing a translation
  * must not throw away a sample that is still good.
  */
-export function artworkSignature(nodes: readonly StackNode[]): string {
+export function artworkSignature(
+  nodes: readonly StackNode[],
+  /**
+   * A token for a layer whose live pixels the composite would read instead of
+   * its file, or null for one it would not. Without this the signature would
+   * describe only the manifest, and a layer being painted on changes the
+   * picture without the manifest hearing about it for tens of seconds.
+   */
+  liveAt?: (id: string) => string | null,
+): string {
   const parts: string[] = []
   for (const node of nodes) {
     const paint = `${node.opacity}|${node.blendMode}`
     if (node.kind === 'raster') {
       const { file, x, y, w, h } = node.entry
-      parts.push(`r ${file}|${x},${y},${w},${h}|${paint}`)
+      const live = liveAt?.(node.entry.id) ?? null
+      parts.push(`r ${live === null ? `${file}|${x},${y},${w},${h}` : `live ${live}`}|${paint}`)
     } else if (node.kind === 'buffer') {
-      parts.push(`g ${node.entry.id}|${paint}(${artworkSignature(node.children)})`)
+      parts.push(`g ${node.entry.id}|${paint}(${artworkSignature(node.children, liveAt)})`)
     }
   }
   return parts.join('\n')
@@ -246,7 +281,12 @@ async function compositeWith(
   const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)
-    drawStack(context2d(canvas), stack, { page: size, rasters, drawText })
+    drawStack(context2d(canvas), stack, {
+      page: size,
+      rasters,
+      liveLayer: input.liveLayer,
+      drawText,
+    })
     return canvas
   } finally {
     for (const bitmap of rasters.values()) bitmap.close()

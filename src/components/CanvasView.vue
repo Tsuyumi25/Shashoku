@@ -253,6 +253,7 @@ import { useConnectStore } from '@/stores/connectStore'
 import { OCR_ROUTES, useOcrStore } from '@/stores/ocrStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -262,6 +263,7 @@ const selection = useSelectionStore()
 const connect = useConnectStore()
 const ocr = useOcrStore()
 const ui = useUiStore()
+const raster = useRasterStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
 const placement = useLayerPlacement()
@@ -385,6 +387,12 @@ const heldLayer = computed(() => {
 const layerAlpha = useLayerAlpha(
   () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
   () => rasterFrames.value,
+  (entry) => {
+    const live = raster.liveLayer(entry.id)
+    return live === null
+      ? null
+      : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.revision}` }
+  },
 )
 
 /**
@@ -801,10 +809,23 @@ const artwork = ref<OffscreenCanvas | null>(null)
 /** Which composite the result being awaited belongs to. */
 let artworkRequest = 0
 
+/**
+ * What a layer being edited is drawn from, so the wand reads the page as it is
+ * rather than as it was when its pixels last reached disk — which under the
+ * pixel scheduler can be half a minute ago.
+ */
+function liveLayer(id: string) {
+  const live = raster.liveLayer(id)
+  return live === null ? null : { canvas: live.canvas, frame: live.frame }
+}
+
 /** What the wand's picture is of, so a change that redraws the page drops it. */
 const artworkKey = computed(() => {
   const file = currentFile.value
-  return file ? artworkSignature(pageStack(file.page.layers)) : null
+  if (!file) return null
+  return artworkSignature(pageStack(file.page.layers), (id) =>
+    raster.holds(id) ? `${id}@${raster.revision}` : null,
+  )
 })
 
 watch(
@@ -823,6 +844,7 @@ watch(
       const composited = await compositeArtwork({
         page: file.page,
         loadLayer: (name) => window.api.readImage(layersDirOf(pageDir), name),
+        liveLayer,
       })
       // Two edits close together each start one of these, and they can finish
       // in either order. Only the newest may land, or an older picture would

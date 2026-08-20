@@ -370,3 +370,68 @@ describe('saving', () => {
     expect(written).toEqual([PAGE_DIR])
   })
 })
+
+/**
+ * Pixels are written on a scheduler of their own and much more slowly than the
+ * manifest, so anything that reads `layers/` has to make it true first. A
+ * register rather than a call from each of them, so a consumer added later
+ * inherits the obligation instead of having to be told about it.
+ */
+describe('what is owed to the layers folder before anyone reads it', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function traceFlush() {
+    const project = useProjectStore()
+    openOnePage(project)
+    const order: string[] = []
+    vi.stubGlobal('window', {
+      api: {
+        writePage: async () => {
+          order.push('manifest')
+        },
+        writeProjectMeta: async () => {},
+        writePreferences: async () => {},
+      },
+    })
+    project.oweBeforeLayerRead(async () => {
+      order.push('pixels')
+    })
+    return { project, order }
+  }
+
+  // Settling the pixels is what gives the manifest its final layer names, so it
+  // has to happen before the manifest goes down rather than beside it.
+  it('settles the pixels before the manifest', async () => {
+    const { project, order } = traceFlush()
+    project.addLabel(PAGE_ID, label('t5'))
+
+    await project.flush()
+
+    expect(order).toEqual(['pixels', 'manifest'])
+  })
+
+  // The pixel flush calls this once it has named its file, so it must not turn
+  // round and ask the pixels to settle again.
+  it('leaves the obligations alone when only the manifest is asked for', async () => {
+    const { project, order } = traceFlush()
+    project.addLabel(PAGE_ID, label('t6'))
+
+    await project.flushManifest()
+
+    expect(order).toEqual(['manifest'])
+  })
+
+  it('still settles them when the manifest has nothing to write', async () => {
+    const { project, order } = traceFlush()
+
+    await project.flush()
+
+    expect(order).toEqual(['pixels'])
+  })
+})

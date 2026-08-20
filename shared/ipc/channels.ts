@@ -12,6 +12,7 @@ export const CHANNELS = {
   openProject: "shashoku:open-project",
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
+  deleteLayerParts: "shashoku:delete-layer-parts",
   writeProjectMeta: "shashoku:write-project-meta",
   writeExport: "shashoku:write-export",
   openExportFolder: "shashoku:open-export-folder",
@@ -114,6 +115,15 @@ export interface ShashokuApi {
   openProject(rootPath: string): Promise<OpenProjectResult>;
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;
+  /**
+   * Removes named layer files from one page.
+   *
+   * A flush uses it to drop the version it just superseded, and only after the
+   * manifest naming the new one is on disk — so at no moment does a manifest
+   * name a file that is gone. The wide sweep of everything no manifest names
+   * still happens at open, where there is no undo stack to reach past it.
+   */
+  deleteLayerParts(pageDir: string, filenames: string[]): Promise<void>;
   writeProjectMeta(shashokuDir: string, projectMetaRaw: string): Promise<void>;
   /** One delivered page, into `<rootPath>/export/<profileFolder>/`. */
   writeExport(
