@@ -50,6 +50,32 @@ describe('the page list', () => {
   })
 })
 
+describe('the pages marked deleted', () => {
+  it('are none in a project that has never deleted one', () => {
+    expect(parseProjectJson(raw({ pages: ['a', 'b'] })).deletedPages).toBeUndefined()
+  })
+
+  it('round trips', () => {
+    const project = { ...defaultProjectJson(), pages: ['a', 'b', 'c'], deletedPages: ['b'] }
+    expect(parseProjectJson(serializeProjectJson(project))).toEqual(project)
+  })
+
+  /**
+   * Nothing holds the marks and the page list in step, so a directory tidied
+   * away by hand would otherwise leave a mark nobody can reach or clear.
+   */
+  it('drops a mark on a page the project does not have', () => {
+    const parsed = parseProjectJson(raw({ pages: ['a'], deletedPages: ['a', 'gone'] }))
+    expect(parsed.deletedPages).toEqual(['a'])
+  })
+
+  it('refuses a list that is not one', () => {
+    expect(() => parseProjectJson(raw({ pages: ['a'], deletedPages: 'a' }))).toThrow(
+      ProjectParseError,
+    )
+  })
+})
+
 /**
  * Pages stopped being derived from a folder of images and became objects with
  * their own directories, and nothing carries the old shape across. Refusing is

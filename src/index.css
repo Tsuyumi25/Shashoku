@@ -381,53 +381,17 @@ html, body, #app {
   filter: brightness(1.08);
 }
 
-/* Asking before something that cannot be taken back.
+/* What darkens the window behind a modal.
 
    Global and not scoped, and that is not a preference: the content is rendered
    through a portal, so the scoping attribute never reaches the element and a
-   scoped rule here selects nothing at all — a dialog with no background over a
+   scoped rule here selects nothing at all — a modal with no background over a
    page full of pictures. */
 .dialog-overlay {
   position: fixed;
   z-index: 50;
   inset: 0;
   background: rgb(0 0 0 / 0.5);
-}
-.dialog {
-  position: fixed;
-  z-index: 50;
-  top: 50%;
-  left: 50%;
-  display: flex;
-  width: min(26rem, calc(100vw - 2rem));
-  transform: translate(-50%, -50%);
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 0.28);
-}
-.dialog-title {
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-.dialog-body {
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--muted-foreground);
-}
-.dialog-problem {
-  font-size: 0.75rem;
-  color: var(--destructive);
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
 }
 
 /*

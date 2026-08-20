@@ -38,7 +38,7 @@ function openWith(project: ReturnType<typeof useProjectStore>, entry: TextLayerE
   const page = defaultManifest('p', 1200, 1700)
   page.layers.push(entry)
   page.readingOrder.push(entry.id)
-  project.files = [{ pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge: 'ok' }]
+  project.allFiles = [{ pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge: 'ok' }]
 }
 
 /** What answers.ts does for one propose item, without the IPC around it. */

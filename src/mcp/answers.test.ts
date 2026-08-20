@@ -49,7 +49,7 @@ function openWith(
     page.layers.push(entry)
     page.readingOrder.push(entry.id)
   }
-  project.files = [
+  project.allFiles = [
     { pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge },
   ]
 }

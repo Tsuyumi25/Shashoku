@@ -25,7 +25,7 @@ describe('what an export would cover', () => {
     const project = useProjectStore()
     const exportSelection = useExportStore()
 
-    project.files = [page('a'), page('b'), page('c')]
+    project.allFiles = [page('a'), page('b'), page('c')]
     await nextTick()
 
     expect(exportSelection.allSelected).toBe(true)
@@ -38,12 +38,12 @@ describe('what an export would cover', () => {
     const project = useProjectStore()
     const exportSelection = useExportStore()
 
-    project.files = [page('a'), page('b'), page('c')]
+    project.allFiles = [page('a'), page('b'), page('c')]
     await nextTick()
     exportSelection.toggle('b')
     expect(exportSelection.isSelected('b')).toBe(false)
 
-    project.files = [page('a'), page('b'), page('c'), page('d')]
+    project.allFiles = [page('a'), page('b'), page('c'), page('d')]
     await nextTick()
 
     expect(exportSelection.isSelected('b')).toBe(false)
@@ -55,11 +55,11 @@ describe('what an export would cover', () => {
     const project = useProjectStore()
     const exportSelection = useExportStore()
 
-    project.files = [page('a'), page('b')]
+    project.allFiles = [page('a'), page('b')]
     await nextTick()
     exportSelection.toggle('a')
 
-    project.files = [page('x'), page('y')]
+    project.allFiles = [page('x'), page('y')]
     await nextTick()
 
     expect(exportSelection.allSelected).toBe(true)

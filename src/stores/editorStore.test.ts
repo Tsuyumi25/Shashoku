@@ -35,7 +35,7 @@ function label(id: string, text = ''): TextLayerEntry {
 
 function openOnePage(labels: TextLayerEntry[] = []) {
   const project = useProjectStore()
-  project.files = [
+  project.allFiles = [
     {
       pageId: PAGE,
       pageDir: `/x/${PAGE}`,
@@ -157,7 +157,7 @@ describe('selection', () => {
    */
   it('leaves the selection alone through a page turn', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
+    project.allFiles = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
     const editor = useEditorStore()
     editor.startOnPage('001.png')
     expect(setOf(editor)).toEqual(['a'])
@@ -171,7 +171,7 @@ describe('selection', () => {
 
   it('picks a page from the bar without disturbing the selection either', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
+    project.allFiles = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('c')])]
     const editor = useEditorStore()
     editor.startOnPage('001.png')
 
@@ -441,7 +441,7 @@ describe('pending text edit', () => {
 describe('revealLabel', () => {
   it('turns to the page an object lives on and selects that object', () => {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       pageOf('001.png', [label('a'), label('b')]),
       pageOf('002.png', [label('c'), label('d')]),
     ]
@@ -459,7 +459,7 @@ describe('revealLabel', () => {
 
   it('selects without turning the page when the object is already here', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a'), label('b')])]
+    project.allFiles = [pageOf('001.png', [label('a'), label('b')])]
     const editor = useEditorStore()
     editor.currentPageId = '001.png'
     editor.selectOnly('a')
@@ -472,7 +472,7 @@ describe('revealLabel', () => {
 
   it('banks an open editing session when it moves to another page', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a', 'a0')]), pageOf('002.png', [label('c')])]
+    project.allFiles = [pageOf('001.png', [label('a', 'a0')]), pageOf('002.png', [label('c')])]
     const editor = useEditorStore()
     editor.currentPageId = '001.png'
     editor.beginTextEdit('001.png', 'a', 'a0')
@@ -606,7 +606,7 @@ describe('layer tree edits', () => {
 
   function openTree(layers: LayerEntry[], readingOrder: string[]) {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
@@ -945,7 +945,7 @@ describe('layer tree edits', () => {
      */
     it('acts only on what is selected on the open page', () => {
       const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
-      project.files.push({
+      project.allFiles.push({
         pageId: 'p002.png',
         pageDir: '/x/p002.png',
         page: {
@@ -986,7 +986,7 @@ describe('deleteSelection', () => {
 
   function open(pages: Array<{ name: string; layers: LayerEntry[]; order: string[] }>) {
     const project = useProjectStore()
-    project.files = pages.map((p) => ({
+    project.allFiles = pages.map((p) => ({
       pageId: p.name,
       pageDir: `/x/${p.name}`,
       ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -1231,7 +1231,7 @@ describe('selectLayerBy', () => {
 
   function openTree(layers: LayerEntry[], order: string[]) {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
@@ -1313,7 +1313,7 @@ describe('editBy', () => {
 
   it('carries on to the next page at the end of this one', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('b', 'b0')])]
+    project.allFiles = [pageOf('001.png', [label('a')]), pageOf('002.png', [label('b', 'b0')])]
     const editor = useEditorStore()
     editor.currentPageId = '001.png'
     editor.selectOnly('a')
@@ -1336,7 +1336,7 @@ describe('moveObjectsTo', () => {
     }>,
   ) {
     const project = useProjectStore()
-    project.files = pages.map((p) => ({
+    project.allFiles = pages.map((p) => ({
       pageId: p.name,
       pageDir: `/x/${p.name}`,
       ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -1527,7 +1527,7 @@ describe('moveObjectsTo', () => {
 describe('a selection that reaches across pages', () => {
   function open() {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       pageOf('001.png', [label('a'), label('b')]),
       pageOf('002.png', [label('c'), label('d')]),
     ]
@@ -1663,7 +1663,7 @@ describe('reaching a range out', () => {
 describe('moving through a narrowed list', () => {
   function open() {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       pageOf('001.png', [label('a', 'そうか'), label('b', 'やめろ'), label('c', 'そうだね')]),
       pageOf('002.png', [label('d', 'まって')]),
     ]
@@ -1714,7 +1714,7 @@ describe('moving through a narrowed list', () => {
   /** An empty page is somewhere the cursor can be, and its heading is the stop. */
   it('comes to rest on a page with nothing on it', () => {
     const project = useProjectStore()
-    project.files = [pageOf('001.png', [label('a')]), pageOf('002.png', []), pageOf('003.png', [label('c')])]
+    project.allFiles = [pageOf('001.png', [label('a')]), pageOf('002.png', []), pageOf('003.png', [label('c')])]
     const editor = useEditorStore()
     editor.currentPageId = '001.png'
     editor.selectOnly('a')
@@ -1837,7 +1837,7 @@ describe('tagging a selection', () => {
 
   it('counts the whole chapter, not the page on screen', () => {
     const project = useProjectStore()
-    project.files = [
+    project.allFiles = [
       pageOf('001.png', [{ ...label('new'), tags: [] }]),
       pageOf('002.png', many(5, 1, ['outside'], { fontFamily: 'Mincho' })),
     ]
@@ -1865,7 +1865,7 @@ describe('tagging a partly tagged selection', () => {
   it('restyles only the objects whose meaning changed', () => {
     const project = useProjectStore()
     const editor = useEditorStore()
-    project.files = [
+    project.allFiles = [
       pageOf(PAGE, [
         styled('had', ['outside'], { fontFamily: 'Gothic' }),
         styled('lacked', [], { fontFamily: 'Gothic' }),
@@ -2026,7 +2026,7 @@ describe('drawing lines between text objects', () => {
 describe('reordering the chapter', () => {
   function openPages(ids: string[]) {
     const project = useProjectStore()
-    project.files = ids.map((id) => pageOf(id, []))
+    project.allFiles = ids.map((id) => pageOf(id, []))
     project.metaDirty = false
     return { project, editor: useEditorStore() }
   }
@@ -2053,9 +2053,8 @@ describe('reordering the chapter', () => {
   })
 
   /**
-   * The one page-level act that is undoable. It is also the easiest to do by
-   * accident: a page dragged three cells sideways in a chapter of two hundred
-   * is not something anyone notices.
+   * The easiest page-level act to do by accident: a page dragged three cells
+   * sideways in a chapter of two hundred is not something anyone notices.
    */
   it('takes a drop back, and puts it forward again', () => {
     const { project, editor } = openPages(['a', 'b', 'c', 'd'])
@@ -2074,15 +2073,15 @@ describe('reordering the chapter', () => {
   })
 
   /**
-   * Deleting a page cannot be undone and so cannot be waited for. A command
-   * that had recorded an index would put the page back a place short; anchored
-   * to the page that used to follow it, it lands where it belongs.
+   * A command that had recorded an index would put the page back a place short
+   * once something ahead of it had left the list; anchored to the page that
+   * used to follow it, it lands where it belongs.
    */
   it('still puts a page back after another one has been deleted', () => {
     const { project, editor } = openPages(['a', 'b', 'c', 'd'])
     editor.cmdMovePage('d', 0)
     expect(order(project)).toEqual(['d', 'a', 'b', 'c'])
-    project.files.splice(project.files.findIndex((f) => f.pageId === 'b'), 1)
+    project.tagPagesDeleted(['b'])
     editor.undo()
     expect(order(project)).toEqual(['a', 'c', 'd'])
   })

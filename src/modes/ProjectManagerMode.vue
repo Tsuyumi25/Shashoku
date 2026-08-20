@@ -40,7 +40,7 @@
     <!--
       Deleting sits at the far end, as far from picking as the bar is wide. They
       are the two halves of the same mistake — picking everything and then
-      pressing the thing beside it — and nothing here can be taken back.
+      pressing the thing beside it.
 
       The count appears only where nothing else says it. Beside a delete button
       that already carries the number it would be the same figure twice.
@@ -68,67 +68,18 @@
         v-if="tab === 'source'"
         class="bar-button bar-button-danger ml-auto"
         :disabled="exportSelection.selectedPages.length === 0"
-        @click="ask"
+        @click="remove"
       >
         <Trash2 :size="13" />
         <span>刪除 {{ exportSelection.selectedPages.length }} 頁</span>
       </button>
     </div>
-
-    <!--
-      A dialog rather than an undo, because there is no undo to offer: the
-      directory goes first and nothing here can put one back. Everything else
-      destructive in this program answers Delete without asking, and can,
-      because the stack is behind it.
-    -->
-    <AlertDialogRoot :open="asking !== null" @update:open="onDialogOpen">
-      <AlertDialogPortal>
-        <AlertDialogOverlay class="dialog-overlay" />
-        <AlertDialogContent class="dialog">
-          <AlertDialogTitle class="dialog-title">刪除 {{ asking?.length ?? 0 }} 頁?</AlertDialogTitle>
-          <AlertDialogDescription class="dialog-body">
-            {{ namesAsked }}的資料夾會從磁碟移除,連同圖層和已經嵌上的文字。這一步無法復原——資料夾裡的原圖不受影響,但這些頁面做過的工作會消失。
-          </AlertDialogDescription>
-          <p v-if="problem" class="dialog-problem">{{ problem }}</p>
-          <div class="dialog-actions">
-            <AlertDialogCancel class="bar-button">取消</AlertDialogCancel>
-            <!--
-              A plain button and not AlertDialogAction, which closes the dialog
-              itself. Its handler is bound before this one and runs first, so by
-              the time this ran there was nothing left to confirm — and the
-              preventDefault that was supposed to hold it open never had a say,
-              since nothing here checks whether the event was defaulted.
-
-              Closing is this component's to do, and only once the directories
-              are really gone.
-            -->
-            <button
-              type="button"
-              class="bar-button bar-button-danger"
-              :disabled="deleting"
-              @click="confirm"
-            >
-              {{ deleting ? '刪除中…' : '刪除' }}
-            </button>
-          </div>
-        </AlertDialogContent>
-      </AlertDialogPortal>
-    </AlertDialogRoot>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import Draggable from 'vuedraggable'
-import {
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogOverlay,
-  AlertDialogPortal,
-  AlertDialogRoot,
-  AlertDialogTitle,
-} from 'reka-ui'
 import { Check, Trash2 } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import PageThumb from '@/components/PageThumb.vue'
@@ -175,51 +126,19 @@ function onDropped(e: { moved?: { element: ProjectFile; newIndex: number } }) {
   editor.cmdMovePage(e.moved.element.pageId, e.moved.newIndex)
 }
 
-/** The pages the open dialog is asking about, held apart from the selection so
- *  that what is confirmed is what was asked about. */
-const asking = ref<ProjectFile[] | null>(null)
-const problem = ref<string | null>(null)
-/** A run is out; the dialog stays and the button cannot start a second one. */
-const deleting = ref(false)
-
-/** Named while there are few enough to read, counted once there are not. */
-const namesAsked = computed(() => {
-  const pages = asking.value ?? []
-  if (pages.length === 0) return ''
-  if (pages.length > 3) return `這 ${pages.length} 頁`
-  return pages.map((f) => `「${f.page.name}」`).join('、')
-})
-
-function ask() {
-  if (exportSelection.selectedPages.length === 0) return
-  problem.value = null
-  asking.value = [...exportSelection.selectedPages]
-}
-
-function onDialogOpen(open: boolean) {
-  if (!open) asking.value = null
-}
-
 /**
- * Held open until the directories are really gone, so a deletion that failed
- * says so where it was asked for rather than closing as though it worked.
+ * Deletes what is picked, at once and without asking. Ctrl+Z is the answer to
+ * a misclick, the same as it is everywhere else in the program — a dialog in
+ * front of an undoable act only teaches people to click through dialogs.
  */
-async function confirm() {
-  const pages = asking.value
-  if (!pages || deleting.value) return
-  deleting.value = true
+function remove() {
   const wasOn = editor.currentPageId
-  const { deleted, problem: stopped } = await project.deletePages(pages.map((f) => f.pageId))
-  deleting.value = false
-  if (stopped !== null) {
-    problem.value = `刪不掉 — ${stopped}`
-    asking.value = pages.filter((f) => !deleted.includes(f.pageId))
-    return
-  }
-  // The workbench may have been standing on one of them.
+  const deleted = editor.cmdDeletePages(exportSelection.selectedPages.map((f) => f.pageId))
+  // The workbench may have been standing on one of them. Undo does not send it
+  // back here afterwards: what a command restores is the document, not where
+  // you were standing when you ran it.
   if (wasOn !== null && deleted.includes(wasOn)) {
     editor.startOnPage(project.files[0]?.pageId ?? null)
   }
-  asking.value = null
 }
 </script>

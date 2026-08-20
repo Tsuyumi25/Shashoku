@@ -1390,13 +1390,13 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A drop in the page grid. The one page-level act that goes on the stack —
-   * reordering is the easiest to do by accident and the hardest to notice, and
-   * putting an array back is free. Making and deleting pages both touch the
-   * disk, which this interface has no way to reverse and no business trying to.
+   * A drop in the page grid. Reordering is the easiest thing to do by accident
+   * and the hardest to notice, and putting an array back is free. Making pages
+   * stays off the stack — it reads source images and writes directories, which
+   * this interface has no way to reverse.
    *
-   * Held by neighbour rather than by index: a page deleted afterwards cannot be
-   * waited for, so an index recorded now may not mean the same place later.
+   * Held by neighbour rather than by index: a page deleted afterwards drops out
+   * of the list, so an index recorded now may not mean the same place later.
    */
   function cmdMovePage(pageId: string, to: number) {
     const project = useProjectStore()
@@ -1410,6 +1410,33 @@ export const useEditorStore = defineStore('editor', () => {
       do: () => project.movePageBefore(pageId, forward),
       undo: () => project.movePageBefore(pageId, back),
     })
+  }
+
+  /**
+   * Deletes pages, which means marking them — the directories stay, so this is
+   * a memory operation and belongs on the stack like any other.
+   *
+   * One command for the whole batch, however many pages were picked: one act by
+   * the hand should cost one Ctrl+Z, and the stack is bounded, so a page each
+   * would let deleting a chapter push the whole session's work off the bottom.
+   *
+   * The command carries what was really marked rather than what was asked for.
+   * An undo has to take back what happened, and a page already gone from the
+   * chapter never happened.
+   */
+  function cmdDeletePages(pageIds: readonly string[]): string[] {
+    const project = useProjectStore()
+    const deleted = project.tagPagesDeleted(pageIds)
+    if (deleted.length === 0) return []
+    pushCommand(
+      {
+        label: `delete-pages ${deleted.length}`,
+        do: () => project.tagPagesDeleted(deleted),
+        undo: () => project.untagPagesDeleted(deleted),
+      },
+      { alreadyApplied: true },
+    )
+    return deleted
   }
 
   function cmdMoveTag(from: number, to: number) {
@@ -1499,5 +1526,6 @@ export const useEditorStore = defineStore('editor', () => {
     cmdRenameTag,
     cmdMoveTag,
     cmdMovePage,
+    cmdDeletePages,
   }
 })

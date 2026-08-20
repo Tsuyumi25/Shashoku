@@ -78,6 +78,20 @@ function parsePageList(v: unknown): string[] {
   })
 }
 
+/**
+ * The deleted marks, kept down to the pages this project actually has.
+ *
+ * Nothing holds the two lists in step — a page directory tidied away by hand
+ * leaves a mark pointing at nobody — so the repair happens on the way in rather
+ * than being asked of every writer. Drift cannot accumulate that way.
+ */
+function parseDeletedPages(v: unknown, pages: readonly string[]): string[] | undefined {
+  if (v === undefined) return undefined
+  if (!Array.isArray(v)) fail('deletedPages 必須是陣列')
+  const known = new Set(pages)
+  return v.filter((name): name is string => typeof name === 'string' && known.has(name))
+}
+
 export function defaultProjectJson(): ProjectJson {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -114,9 +128,12 @@ export function parseProjectJson(raw: string): ProjectJson {
   const comment = data.comment === undefined ? '' : data.comment
   if (typeof comment !== 'string') fail('comment 必須是字串')
 
+  const pages = parsePageList(data.pages)
+
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
-    pages: parsePageList(data.pages),
+    pages,
+    deletedPages: parseDeletedPages(data.deletedPages, pages),
     tags,
     seedStyle,
     comment,
@@ -130,10 +147,11 @@ export function serializeProjectJson(project: ProjectJson): string {
   const out: Record<string, unknown> = {
     schemaVersion: project.schemaVersion,
     pages: project.pages,
-    tags: project.tags.map((t) => ({ name: t.name, color: t.color })),
-    seedStyle: serializeTextStyle(project.seedStyle),
-    comment: project.comment,
   }
+  if (project.deletedPages !== undefined) out.deletedPages = project.deletedPages
+  out.tags = project.tags.map((t) => ({ name: t.name, color: t.color }))
+  out.seedStyle = serializeTextStyle(project.seedStyle)
+  out.comment = project.comment
   if (project.glossary !== undefined) out.glossary = project.glossary
   out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`

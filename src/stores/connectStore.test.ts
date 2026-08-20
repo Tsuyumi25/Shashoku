@@ -34,7 +34,7 @@ function label(id: string): TextLayerEntry {
 
 function openPage(ids: string[]) {
   const project = useProjectStore()
-  project.files = [
+  project.allFiles = [
     {
       pageId: PAGE,
       pageDir: `/x/${PAGE}`,

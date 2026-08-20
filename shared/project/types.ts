@@ -32,6 +32,19 @@ export interface ProjectJson {
   pages: string[]
 
   /**
+   * The pages that have been deleted, by directory name. Absent means none.
+   *
+   * A label stuck on, not a page taken away: the name stays in `pages`, the
+   * directory stays on disk, and peeling the label off puts the page back in
+   * the place it never left. Nothing here is ever collected — what to do with
+   * a page once it carries this is a later interface's to decide.
+   *
+   * Every name here should also be in `pages`; nothing enforces that, so the
+   * parser repairs it instead.
+   */
+  deletedPages?: string[]
+
+  /**
    * Every tag this project has been told about, in the order the user put them.
    * Position is priority: an object carrying several of these draws in the
    * colour of whichever sits highest.

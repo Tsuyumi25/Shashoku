@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import { defaultManifest, defaultOcr, serializeManifest } from '@shared/page/schema'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
@@ -70,7 +71,7 @@ function stubApi(project: ReturnType<typeof useProjectStore>): Trace {
 
 function openOnePage(project: ReturnType<typeof useProjectStore>) {
   project.rootPath = ROOT
-  project.files = [
+  project.allFiles = [
     {
       pageId: PAGE_ID,
       pageDir: PAGE_DIR,
@@ -228,6 +229,98 @@ describe('the translation pool on an object', () => {
   })
 })
 
+/**
+ * Deleting is a label stuck on, not a page taken away, so what is checked here
+ * is what a chapter looks like afterwards — which pages it still has, in what
+ * order — rather than which field was written.
+ */
+describe('deleting pages', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.stubGlobal('window', {
+      api: {
+        writeProjectMeta: async () => {},
+        writePreferences: async () => {},
+      },
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function openPages(count: number) {
+    const project = useProjectStore()
+    project.rootPath = ROOT
+    project.allFiles = Array.from({ length: count }, (_, i) => {
+      const pageId = `p${i}`
+      return {
+        pageId,
+        pageDir: `${ROOT}/shashoku/pages/${pageId}`,
+        page: defaultManifest(pageId, 1200, 1700),
+        ocr: defaultOcr(1200, 1700),
+        badge: 'ok' as const,
+      }
+    })
+    return { project, editor: useEditorStore() }
+  }
+
+  const order = (project: ReturnType<typeof useProjectStore>) =>
+    project.files.map((f) => f.pageId)
+
+  it('takes the pages out of the chapter', () => {
+    const { project, editor } = openPages(8)
+    editor.cmdDeletePages(['p1', 'p2', 'p3', 'p4', 'p5'])
+    expect(order(project)).toEqual(['p0', 'p6', 'p7'])
+    expect(project.projectMeta.deletedPages).toEqual(['p1', 'p2', 'p3', 'p4', 'p5'])
+  })
+
+  /**
+   * Back where they were, not on the end. The pages never left the order in the
+   * first place, which is the whole of why this works.
+   */
+  it('gives them all back in their own places', () => {
+    const { project, editor } = openPages(8)
+    const before = order(project)
+    editor.cmdDeletePages(['p1', 'p2', 'p3', 'p4', 'p5'])
+    editor.undo()
+    expect(order(project)).toEqual(before)
+  })
+
+  it('deletes them again on redo', () => {
+    const { project, editor } = openPages(8)
+    editor.cmdDeletePages(['p1', 'p2', 'p3', 'p4', 'p5'])
+    editor.undo()
+    editor.redo()
+    expect(order(project)).toEqual(['p0', 'p6', 'p7'])
+  })
+
+  /**
+   * One act by the hand, one Ctrl+Z. The stack is bounded, so a page each would
+   * let deleting a chapter push the session's work off the bottom of it.
+   */
+  it('costs one step of history however many pages went', () => {
+    const { editor } = openPages(8)
+    editor.cmdDeletePages(['p1', 'p2', 'p3', 'p4', 'p5'])
+    editor.undo()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  /**
+   * What an undo takes back is what happened, so a page the batch could not
+   * touch must not come back out of one.
+   */
+  it('carries only the pages it really marked', () => {
+    const { project, editor } = openPages(4)
+    project.tagPagesDeleted(['p0'])
+    editor.cmdDeletePages(['p0', 'p1', 'nobody'])
+
+    expect(order(project)).toEqual(['p2', 'p3'])
+    editor.undo()
+    expect(order(project)).toEqual(['p1', 'p2', 'p3'])
+  })
+})
+
 describe('saving', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -244,7 +337,7 @@ describe('saving', () => {
     const project = useProjectStore()
     const damagedId = 'source-260809-1300'
     project.rootPath = ROOT
-    project.files = [
+    project.allFiles = [
       {
         pageId: PAGE_ID,
         pageDir: PAGE_DIR,

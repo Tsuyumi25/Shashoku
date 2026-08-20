@@ -112,7 +112,13 @@ function joinPath(...parts: string[]): string {
 export const useProjectStore = defineStore('project', () => {
   const rootPath = ref<string | null>(null)
   const projectMeta = ref<ProjectJson>(defaultProjectJson())
-  const files = ref<ProjectFile[]>([])
+  /**
+   * Every page the chapter has, in reading order, including the ones marked
+   * deleted. What goes to disk as `pages`, and the only thing that knows where
+   * a deleted page belongs — which is why it keeps them: undo puts a page back
+   * in its own place rather than at the end.
+   */
+  const allFiles = ref<ProjectFile[]>([])
   const metaDirty = ref(false)
   
   const dirtyPageIds = ref<string[]>([])
@@ -125,13 +131,28 @@ export const useProjectStore = defineStore('project', () => {
     comment: projectMeta.value.comment,
   }))
   const dirty = computed(() => metaDirty.value || dirtyPageIds.value.length > 0)
-  
+
+  const deletedPageIds = computed(() => new Set(projectMeta.value.deletedPages ?? []))
+
+  /**
+   * The pages of the chapter, meaning the ones still in it. Everything that
+   * shows, turns, exports or counts pages reads this, so a page that has been
+   * deleted leaves all of them at once.
+   */
+  const files = computed(() => allFiles.value.filter((f) => !deletedPageIds.value.has(f.pageId)))
 
   const shashokuDir = computed(() =>
     rootPath.value === null ? null : joinPath(rootPath.value, SHASHOKU_DIR),
   )
+
+  /**
+   * Deliberately reaches the deleted ones too. What holds a page id holds it
+   * across a delete — the save queue, an undo waiting further down the stack —
+   * and a page that answers nothing while its work is still owed to disk would
+   * lose that work.
+   */
   function pageById(pageId: string): ProjectFile | undefined {
-    return files.value.find((f) => f.pageId === pageId)
+    return allFiles.value.find((f) => f.pageId === pageId)
   }
 
   /**
@@ -162,7 +183,7 @@ export const useProjectStore = defineStore('project', () => {
     autosave.cancel()
     rootPath.value = null
     projectMeta.value = defaultProjectJson()
-    files.value = []
+    allFiles.value = []
     metaDirty.value = false
     dirtyPageIds.value = []
   }
@@ -201,7 +222,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     rootPath.value = newRootPath
     projectMeta.value = meta
-    files.value = loaded
+    allFiles.value = loaded
     metaDirty.value = false
     dirtyPageIds.value = []
     for (const pageId of mended) markPageDirty(pageId)
@@ -314,62 +335,48 @@ export const useProjectStore = defineStore('project', () => {
    * Moves a page to sit in front of another, or to the end when given nothing.
    *
    * Anchored to a neighbour rather than to an index because an index is only
-   * true of the list it was read from, and the one thing that can change this
-   * list without being undoable is deletion. A neighbour that has since gone
-   * lands the page at the end, which is wrong in a way anybody can see.
+   * true of the list it was read from — the same drop replayed against a list
+   * that has since gained or lost pages lands somewhere else. A neighbour that
+   * has since gone lands the page at the end, which is wrong in a way anybody
+   * can see.
    */
   function movePageBefore(pageId: string, beforeId: string | null): void {
-    const from = files.value.findIndex((f) => f.pageId === pageId)
+    const from = allFiles.value.findIndex((f) => f.pageId === pageId)
     if (from === -1) return
-    const [moved] = files.value.splice(from, 1)
-    const at = beforeId === null ? -1 : files.value.findIndex((f) => f.pageId === beforeId)
-    files.value.splice(at === -1 ? files.value.length : at, 0, moved)
+    const [moved] = allFiles.value.splice(from, 1)
+    const at = beforeId === null ? -1 : allFiles.value.findIndex((f) => f.pageId === beforeId)
+    allFiles.value.splice(at === -1 ? allFiles.value.length : at, 0, moved)
     markMetaDirty()
   }
 
   /**
-   * Takes a page away for good. Not undoable, by construction: the directory
-   * has to go first, and undo cannot bring a directory back.
+   * Marks pages deleted, and answers with the ones it really marked.
    *
-   * The list is only touched once the directory is really gone. Reversed, a
-   * deletion that failed would look like it worked until the next open found
-   * the directory, listed by nobody, and took it back in.
+   * Answering matters because the caller is putting this on the undo stack: a
+   * page already marked, or one no longer in the chapter at all, is not
+   * something an undo may un-mark. What comes back is what happened.
+   *
+   * Nothing here touches the disk, so nothing here can fail or take time — a
+   * chapter's worth of pages goes in one synchronous step.
    */
-  async function deletePage(pageId: string): Promise<void> {
-    const root = rootPath.value
-    if (root === null) return
-    const at = files.value.findIndex((f) => f.pageId === pageId)
-    if (at === -1) return
-    await window.api.deletePage(root, pageId)
-    files.value.splice(at, 1)
-    dirtyPageIds.value = dirtyPageIds.value.filter((id) => id !== pageId)
+  function tagPagesDeleted(pageIds: readonly string[]): string[] {
+    const marked = deletedPageIds.value
+    const present = new Set(allFiles.value.map((f) => f.pageId))
+    const tagged = [...new Set(pageIds)].filter((id) => present.has(id) && !marked.has(id))
+    if (tagged.length === 0) return []
+    projectMeta.value.deletedPages = [...(projectMeta.value.deletedPages ?? []), ...tagged]
     markMetaDirty()
+    return tagged
   }
 
-  /**
-   * Answers rather than throws, for the same reason making pages does: a run
-   * that stopped part way has really taken those pages away, and both halves
-   * are worth saying.
-   */
-  async function deletePages(
-    pageIds: readonly string[],
-  ): Promise<{ deleted: string[]; problem: string | null }> {
-    const deleted: string[] = []
-    for (const pageId of pageIds) {
-      const name = pageById(pageId)?.page.name ?? pageId
-      try {
-        await deletePage(pageId)
-      } catch (err) {
-        // Stops rather than carrying on: a run that kept going past a page it
-        // could not remove would leave nobody able to say which ones went.
-        return {
-          deleted,
-          problem: `${name}:${err instanceof Error ? err.message : String(err)}`,
-        }
-      }
-      deleted.push(pageId)
-    }
-    return { deleted, problem: null }
+  /** Peels the mark off, which puts each page back where it never stopped being. */
+  function untagPagesDeleted(pageIds: readonly string[]): void {
+    const marked = projectMeta.value.deletedPages ?? []
+    const taking = new Set(pageIds)
+    const kept = marked.filter((id) => !taking.has(id))
+    if (kept.length === marked.length) return
+    projectMeta.value.deletedPages = kept
+    markMetaDirty()
   }
 
   
@@ -417,7 +424,7 @@ export const useProjectStore = defineStore('project', () => {
           shashokuDirOf(root),
           serializeProjectJson({
             ...projectMeta.value,
-            pages: files.value.map((f) => f.pageId),
+            pages: allFiles.value.map((f) => f.pageId),
           }),
         )
       }
@@ -1070,6 +1077,7 @@ export const useProjectStore = defineStore('project', () => {
     rootPath,
     projectMeta,
     files,
+    allFiles,
     dirtyPageIds,
     
     folderPath,
@@ -1091,8 +1099,8 @@ export const useProjectStore = defineStore('project', () => {
     createPages,
     abandonCreating,
     movePageBefore,
-    deletePage,
-    deletePages,
+    tagPagesDeleted,
+    untagPagesDeleted,
     flush: autosave.flush,
     addLabel,
     deleteLabel,
