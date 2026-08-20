@@ -366,12 +366,16 @@ export interface ShashokuEngineApi {
    * "#RRGGBB" or "#RRGGBBAA". Null when the coverage is empty or the colour
    * fully transparent — a write that changes nothing is not a step worth being
    * able to take back.
+   *
+   * `alphaLocked` is the layer's own switch: paint lands only where there is
+   * already coverage, and the alpha it lands on is left where it was.
    */
   rasterFill(
     id: string,
     mask: Uint8Array,
     maskFrame: EngineLayerFrame,
     color: string,
+    alphaLocked: boolean,
   ): EngineLayerPatch | null;
   /**
    * Takes the covered part of `mask` out of a held layer, in one transaction

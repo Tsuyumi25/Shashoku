@@ -111,6 +111,8 @@ fn tile_rect(coord: TileCoord) -> Rect {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Blend {
     Over,
+    /// `Over`, but the layer's own alpha is left exactly where it was.
+    OverLocked,
     Erase,
 }
 
@@ -141,6 +143,17 @@ fn over(src: &[u8], dst: &mut [u8]) {
         dst[channel] = ((front + back + alpha / 2) / alpha) as u8;
     }
     dst[3] = ((alpha + 127) / 255) as u8;
+}
+
+/// `src` over `dst` with the layer's alpha lock on: the paint lands where there
+/// is already coverage and nowhere else, and the alpha it landed on is put back.
+///
+/// Where the backdrop was transparent the result is too, and the tile's release
+/// strips the colour that would otherwise be left hiding behind a zero alpha.
+fn over_locked(src: &[u8], dst: &mut [u8]) {
+    let kept = dst[3];
+    over(src, dst);
+    dst[3] = kept;
 }
 
 /// `src`'s coverage taken out of `dst`.
@@ -249,16 +262,24 @@ impl RasterLayer {
     /// `mask` is A8 coverage over `mask_frame`, in page pixels. Nothing is
     /// returned when the coverage is empty — a fill that would write nothing is
     /// not a step worth being able to undo.
+    /// `alpha_locked` is the layer's own switch: paint lands only where there is
+    /// already coverage, and the alpha it lands on is left where it was.
     pub fn fill(
         &mut self,
         mask: &[u8],
         mask_frame: Rect,
         color: [u8; 4],
+        alpha_locked: bool,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
         if color[3] == 0 {
             return Ok(None);
         }
-        self.write(mask, mask_frame, color, Blend::Over)
+        let blend = if alpha_locked {
+            Blend::OverLocked
+        } else {
+            Blend::Over
+        };
+        self.write(mask, mask_frame, color, blend)
     }
 
     /// Takes the covered part of `mask` out of the layer, in a single
@@ -305,10 +326,40 @@ impl RasterLayer {
         // here rather than at commit — what lands on the paper is already the
         // shape, so the commit has one job.
         let mut scratch = TileGrid::<Rgba8>::new();
-        let written = paint_mask(&mut scratch, mask, at, color);
+        let painted = paint_mask(&mut scratch, mask, at, color);
+        let written = painted.written;
         if written.is_empty() {
             return Ok(None);
         }
+
+        /*
+         * A tile the paint covers whole, in one opaque colour, comes out the
+         * same in every one of its four thousand pixels — so every such tile of
+         * one fill is one block, pointed at as many times as it is needed.
+         *
+         * Worked out on the way in and only on this path. A brush is the most
+         * frequent writer there will ever be and can never produce a uniform
+         * tile, so a detector that ran at every commit would be pure cost with
+         * nothing to find. The rule is allowed to miss and never to be wrong: a
+         * tile that is uniform for some other reason simply costs its own block.
+         *
+         * Three things make "uniform" untrue and each is refused outright.
+         * Coverage short of full anywhere in the tile — a feathered or
+         * antialiased edge — leaves the result depending on what was underneath,
+         * and `paint_mask` only names a tile whose every pixel took the colour
+         * whole. A colour short of opaque does the same, and so does the layer's
+         * own alpha lock, which makes every pixel's result depend on the alpha
+         * it landed on.
+         */
+        let solid = if blend == Blend::Over && color[3] == 255 && !painted.whole.is_empty() {
+            let mut tile = Tile::<Rgba8>::blank();
+            for pixel in tile.bytes_mut().chunks_exact_mut(4) {
+                pixel.copy_from_slice(&color);
+            }
+            Some(Arc::new(tile))
+        } else {
+            None
+        };
 
         // The scratch declares which tiles the record is about. Every tile it
         // holds carries coverage, because a tile the mask left blank never
@@ -316,12 +367,20 @@ impl RasterLayer {
         // target's pointer where it was.
         let mut tx = self.grid.transaction();
         for coord in scratch.occupied().collect::<Vec<_>>() {
+            match &solid {
+                Some(block) if painted.whole.contains(&coord) => {
+                    tx.hang(coord, Arc::clone(block));
+                    continue;
+                }
+                _ => {}
+            }
             let source = scratch.tile(coord).expect("occupied names a tile");
             let mut target = tx.edit(coord);
             let out = target.bytes_mut();
             for (src, dst) in source.bytes().chunks_exact(4).zip(out.chunks_exact_mut(4)) {
                 match blend {
                     Blend::Over => over(src, dst),
+                    Blend::OverLocked => over_locked(src, dst),
                     Blend::Erase => punch(src, dst),
                 }
             }
@@ -333,7 +392,7 @@ impl RasterLayer {
         // frame that shrank would have to be recomputed from the whole layer,
         // and a frame larger than its content costs a little disk while a frame
         // smaller than its content loses pixels.
-        if blend == Blend::Over {
+        if blend != Blend::Erase {
             self.bounds = self.bounds.union(written);
         }
         let journal = LayerJournal {
@@ -465,6 +524,21 @@ fn blit(tx: &mut TileTransaction<'_, Rgba8>, src: &[u8], at: Rect) {
     }
 }
 
+/// What laying the paint down came to.
+struct Painted {
+    /// The tight rectangle the paint actually reached.
+    written: Rect,
+    /// Tiles the mask covered whole, every pixel of them at full coverage.
+    ///
+    /// Named here because here is where it is free: the pass is already looking
+    /// at every byte of the mask, and the answer would otherwise have to be
+    /// found again by scanning the result. Whether being covered whole makes the
+    /// finished tile uniform is the caller's to decide — the colour and the
+    /// layer's own switches decide that, and this only says the mask left
+    /// nothing of the tile showing.
+    whole: HashSet<TileCoord>,
+}
+
 /// Lays one colour onto the scratch wherever the mask covers, and reports the
 /// tight rectangle it actually wrote.
 ///
@@ -472,8 +546,9 @@ fn blit(tx: &mut TileTransaction<'_, Rgba8>, src: &[u8], at: Rect) {
 /// alpha rather than as colour — under straight alpha, multiplying coverage into
 /// the channels is what makes a pasted feathered selection darken every time it
 /// is copied.
-fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 4]) -> Rect {
+fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 4]) -> Painted {
     let mut written = Rect::EMPTY;
+    let mut whole = HashSet::new();
     let (tx0, ty0, tx1, ty1) = tile_span(at);
     let mut tx = scratch.transaction();
     for ty in ty0..=ty1 {
@@ -484,10 +559,17 @@ fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 
                 continue;
             }
             let mut covered = Rect::EMPTY;
+            // Only a tile the mask reaches every corner of can come out uniform,
+            // and only then if every one of those pixels took the colour whole.
+            let mut all = part.w == TILE_SIZE && part.h == TILE_SIZE;
             for row in 0..part.h {
                 let line = (part.y + row - at.y) as usize * at.w as usize;
                 for col in 0..part.w {
-                    if mask[line + (part.x + col - at.x) as usize] == 0 {
+                    let coverage = mask[line + (part.x + col - at.x) as usize];
+                    if coverage != 255 {
+                        all = false;
+                    }
+                    if coverage == 0 {
                         continue;
                     }
                     covered = covered.union(Rect {
@@ -500,6 +582,9 @@ fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 
             }
             if covered.is_empty() {
                 continue;
+            }
+            if all {
+                whole.insert(coord);
             }
             written = written.union(covered);
 
@@ -525,7 +610,7 @@ fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 
         }
     }
     drop(tx.commit());
-    written
+    Painted { written, whole }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -647,8 +732,11 @@ pub fn fill(
     mask: &[u8],
     mask_frame: Rect,
     color: [u8; 4],
+    alpha_locked: bool,
 ) -> Result<Option<(String, Patch)>, String> {
-    record(id, |layer| layer.fill(mask, mask_frame, color))
+    record(id, |layer| {
+        layer.fill(mask, mask_frame, color, alpha_locked)
+    })
 }
 
 /// Takes the masked region out of a held layer. The returned name is how the
@@ -731,6 +819,34 @@ mod tests {
         vec![255u8; (w * h) as usize]
     }
 
+    /// How many distinct blocks a layer's tiles come to, by pointer.
+    fn blocks(layer: &RasterLayer) -> usize {
+        let mut seen: HashSet<*const Tile<Rgba8>> = HashSet::new();
+        for coord in layer.grid.occupied() {
+            if let Some(tile) = layer.grid.tile(coord) {
+                seen.insert(Arc::as_ptr(&tile));
+            }
+        }
+        seen.len()
+    }
+
+    /// A transparent page of `tiles` by `tiles`, and a fill that covers all of
+    /// it — the shape a page being painted out white really has.
+    fn painted_out(tiles: i32, color: [u8; 4], alpha_locked: bool) -> RasterLayer {
+        let side = TILE_SIZE * tiles;
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 0, 0]);
+        layer
+            .fill(
+                &full_mask(side, side),
+                frame(0, 0, side, side),
+                color,
+                alpha_locked,
+            )
+            .expect("a well-formed fill")
+            .expect("something to fill");
+        layer
+    }
+
     fn pixel(layer: &RasterLayer, page_x: i32, page_y: i32) -> Vec<u8> {
         layer.read(frame(
             page_x - layer.anchor_x,
@@ -762,7 +878,7 @@ mod tests {
     fn a_fill_lands_on_the_layer_itself() {
         let mut layer = solid(frame(0, 0, 8, 8), [0, 0, 0, 0]);
         let (_, patch) = layer
-            .fill(&full_mask(4, 4), frame(2, 2, 4, 4), RED)
+            .fill(&full_mask(4, 4), frame(2, 2, 4, 4), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
 
@@ -778,7 +894,7 @@ mod tests {
         let empty = vec![0u8; 16];
         assert!(
             layer
-                .fill(&empty, frame(0, 0, 4, 4), RED)
+                .fill(&empty, frame(0, 0, 4, 4), RED, false)
                 .expect("a well-formed fill")
                 .is_none()
         );
@@ -789,7 +905,7 @@ mod tests {
         let mut layer = solid(frame(0, 0, 8, 8), [0, 0, 0, 0]);
         assert!(
             layer
-                .fill(&full_mask(4, 4), frame(0, 0, 4, 4), [255, 0, 0, 0])
+                .fill(&full_mask(4, 4), frame(0, 0, 4, 4), [255, 0, 0, 0], false)
                 .expect("a well-formed fill")
                 .is_none()
         );
@@ -800,7 +916,7 @@ mod tests {
         let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 0, 0]);
         let mask = vec![128u8, 0, 0, 0];
         layer
-            .fill(&mask, frame(0, 0, 4, 1), RED)
+            .fill(&mask, frame(0, 0, 4, 1), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
 
@@ -812,7 +928,7 @@ mod tests {
     fn a_fill_over_an_opaque_layer_replaces_it() {
         let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 255, 255]);
         layer
-            .fill(&full_mask(2, 2), frame(0, 0, 2, 2), RED)
+            .fill(&full_mask(2, 2), frame(0, 0, 2, 2), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
         assert_eq!(pixel(&layer, 0, 0), RED.to_vec());
@@ -824,7 +940,7 @@ mod tests {
         let mut layer = solid(frame(0, 0, 2, 1), [0, 0, 0, 255]);
         let mask = vec![255u8, 0];
         layer
-            .fill(&mask, frame(0, 0, 2, 1), [255, 255, 255, 128])
+            .fill(&mask, frame(0, 0, 2, 1), [255, 255, 255, 128], false)
             .expect("a well-formed fill")
             .expect("something to fill");
 
@@ -839,7 +955,7 @@ mod tests {
     fn the_patch_carries_only_the_tiles_that_moved() {
         let mut layer = solid(frame(0, 0, 300, 300), [0, 0, 0, 0]);
         let (_, patch) = layer
-            .fill(&full_mask(4, 4), frame(70, 70, 4, 4), RED)
+            .fill(&full_mask(4, 4), frame(70, 70, 4, 4), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
 
@@ -853,7 +969,7 @@ mod tests {
     fn a_fill_past_the_left_edge_grows_the_frame() {
         let mut layer = solid(frame(100, 100, 10, 10), [0, 0, 255, 255]);
         let (_, patch) = layer
-            .fill(&full_mask(20, 4), frame(90, 100, 20, 4), RED)
+            .fill(&full_mask(20, 4), frame(90, 100, 20, 4), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
 
@@ -871,7 +987,7 @@ mod tests {
     fn undo_and_redo_are_the_same_call() {
         let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 255, 255]);
         let (mut journal, _) = layer
-            .fill(&full_mask(2, 2), frame(0, 0, 2, 2), RED)
+            .fill(&full_mask(2, 2), frame(0, 0, 2, 2), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
         assert_eq!(pixel(&layer, 0, 0), RED.to_vec());
@@ -887,7 +1003,7 @@ mod tests {
     fn undoing_a_fill_that_grew_the_frame_puts_the_frame_back() {
         let mut layer = solid(frame(100, 100, 10, 10), [0, 0, 255, 255]);
         let (mut journal, _) = layer
-            .fill(&full_mask(20, 4), frame(90, 100, 20, 4), RED)
+            .fill(&full_mask(20, 4), frame(90, 100, 20, 4), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
         assert_eq!(layer.frame(), frame(90, 100, 20, 10));
@@ -900,6 +1016,133 @@ mod tests {
         layer.apply(&mut journal);
         assert_eq!(layer.frame(), frame(90, 100, 20, 10));
         assert_eq!(pixel(&layer, 90, 100), RED.to_vec());
+    }
+
+    /// The bill this exists for. Every tile of a page painted out comes to the
+    /// same four thousand pixels of one colour, so every tile of it is one
+    /// block — sixteen tiles here, and sixteen thousand on a page.
+    #[test]
+    fn a_fill_that_covers_whole_tiles_shares_one_block() {
+        let layer = painted_out(4, [255, 255, 255, 255], false);
+        assert_eq!(layer.grid.tile_count(), 16);
+        assert_eq!(blocks(&layer), 1);
+        assert_eq!(pixel(&layer, 0, 0), vec![255, 255, 255, 255]);
+        assert_eq!(
+            pixel(&layer, TILE_SIZE * 4 - 1, TILE_SIZE * 4 - 1),
+            vec![255, 255, 255, 255]
+        );
+    }
+
+    /// Allowed to miss, never allowed to be wrong. A tile the mask only reaches
+    /// part of pays for its own block, whatever the rest of it happens to hold.
+    #[test]
+    fn only_the_tiles_covered_whole_are_shared() {
+        let side = TILE_SIZE * 2;
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 0, 0]);
+        // One whole tile and a strip of the one beside it.
+        let covered = frame(0, 0, TILE_SIZE + 4, TILE_SIZE);
+        layer
+            .fill(&full_mask(covered.w, covered.h), covered, RED, false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(layer.grid.tile_count(), 2);
+        assert_eq!(blocks(&layer), 2);
+        assert_eq!(pixel(&layer, TILE_SIZE + 3, 0), RED.to_vec());
+        assert_eq!(pixel(&layer, TILE_SIZE + 4, 0), vec![0, 0, 0, 0]);
+    }
+
+    /// A colour short of opaque leaves the result depending on what was under
+    /// it, so no two tiles are alike however completely they are covered.
+    #[test]
+    fn a_colour_short_of_opaque_shares_nothing() {
+        let layer = painted_out(4, [255, 0, 0, 128], false);
+        assert_eq!(layer.grid.tile_count(), 16);
+        assert_eq!(blocks(&layer), 16);
+    }
+
+    /// Coverage short of full anywhere in a tile — a feathered or antialiased
+    /// edge — is the same story, so the tile carrying it keeps its own block.
+    #[test]
+    fn a_feathered_edge_shares_nothing() {
+        let side = TILE_SIZE * 2;
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 0, 0]);
+        let mut mask = full_mask(side, side);
+        // One pixel of the second tile softened, which is all it takes.
+        mask[(TILE_SIZE + 1) as usize] = 200;
+        layer
+            .fill(&mask, frame(0, 0, side, side), RED, false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(layer.grid.tile_count(), 4);
+        assert_eq!(blocks(&layer), 2);
+        assert_eq!(pixel(&layer, TILE_SIZE + 1, 0), vec![255, 0, 0, 200]);
+    }
+
+    /// The layer's own switch makes every pixel's result depend on the alpha it
+    /// landed on, so nothing about the tile is uniform.
+    #[test]
+    fn an_alpha_locked_layer_shares_nothing() {
+        let side = TILE_SIZE * 2;
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
+        layer
+            .fill(&full_mask(side, side), frame(0, 0, side, side), RED, true)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(blocks(&layer), 4);
+    }
+
+    #[test]
+    fn an_alpha_locked_fill_lands_only_where_there_is_coverage() {
+        let mut layer = solid(frame(0, 0, 2, 1), [0, 0, 0, 0]);
+        // One pixel given something to hold on to, the other left empty.
+        layer
+            .fill(&[255, 0], frame(0, 0, 2, 1), [0, 0, 255, 255], false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        layer
+            .fill(&[255, 255], frame(0, 0, 2, 1), RED, true)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(pixel(&layer, 0, 0), RED.to_vec());
+        assert_eq!(pixel(&layer, 1, 0), vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn an_alpha_locked_fill_keeps_a_soft_edge_as_soft_as_it_was() {
+        let mut layer = solid(frame(0, 0, 1, 1), [0, 0, 0, 0]);
+        layer
+            .fill(&[128], frame(0, 0, 1, 1), [0, 0, 255, 255], false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+        layer
+            .fill(&[255], frame(0, 0, 1, 1), RED, true)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(pixel(&layer, 0, 0), vec![255, 0, 0, 128]);
+    }
+
+    /// Copy-on-write is what makes sharing safe: the block every tile points at
+    /// is split by the first of them to be written to, and nobody else moves.
+    #[test]
+    fn writing_to_a_shared_tile_splits_it_off_first() {
+        let mut layer = painted_out(4, [255, 255, 255, 255], false);
+        assert_eq!(blocks(&layer), 1);
+
+        layer
+            .fill(&[255], frame(0, 0, 1, 1), RED, false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(blocks(&layer), 2);
+        assert_eq!(pixel(&layer, 0, 0), RED.to_vec());
+        assert_eq!(pixel(&layer, 1, 0), vec![255, 255, 255, 255]);
+        assert_eq!(pixel(&layer, TILE_SIZE, 0), vec![255, 255, 255, 255]);
     }
 
     #[test]
@@ -989,7 +1232,11 @@ mod tests {
     #[test]
     fn a_mask_of_the_wrong_length_is_refused() {
         let mut layer = solid(frame(0, 0, 4, 4), [0, 0, 0, 0]);
-        assert!(layer.fill(&[255, 255], frame(0, 0, 4, 4), RED).is_err());
+        assert!(
+            layer
+                .fill(&[255, 255], frame(0, 0, 4, 4), RED, false)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1005,7 +1252,7 @@ mod tests {
     fn letting_a_layer_go_forgets_the_records_that_speak_for_it() {
         let _alone = alone();
         take("b", &[0, 0, 0, 0], frame(0, 0, 1, 1)).expect("a well-formed layer");
-        let (name, _) = fill("b", &[255], frame(0, 0, 1, 1), RED)
+        let (name, _) = fill("b", &[255], frame(0, 0, 1, 1), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
         assert!(apply_journal(&name).is_some());
@@ -1017,7 +1264,7 @@ mod tests {
     #[test]
     fn filling_a_layer_nobody_handed_over_is_an_error() {
         let _alone = alone();
-        assert!(fill("nobody", &[255], frame(0, 0, 1, 1), RED).is_err());
+        assert!(fill("nobody", &[255], frame(0, 0, 1, 1), RED, false).is_err());
     }
 
     /// A layer three tiles wide, and one fill per tile — three records holding
@@ -1035,7 +1282,7 @@ mod tests {
 
         let names = (0..3)
             .map(|at| {
-                let (name, _) = fill("wide", &[255], frame(at * TILE_SIZE, 0, 1, 1), RED)
+                let (name, _) = fill("wide", &[255], frame(at * TILE_SIZE, 0, 1, 1), RED, false)
                     .expect("a well-formed fill")
                     .expect("something to fill");
                 name
@@ -1061,7 +1308,7 @@ mod tests {
         take("big", &rgba, frame(0, 0, side, side)).expect("a well-formed layer");
         assert_eq!(history_bytes(), 0);
 
-        fill("big", &[255], frame(0, 0, 1, 1), RED)
+        fill("big", &[255], frame(0, 0, 1, 1), RED, false)
             .expect("a well-formed fill")
             .expect("something to fill");
         assert_eq!(history_bytes(), 16 * 1024);

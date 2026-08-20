@@ -564,12 +564,16 @@ pub fn raster_release_all() {
 /// `mask` is A8 coverage over `maskFrame` in page pixels. Nothing comes back
 /// when the coverage is empty or the colour fully transparent — a write that
 /// changes nothing is not a step worth being able to take back.
+///
+/// `alphaLocked` is the layer's own switch: paint lands only where there is
+/// already coverage, and the alpha it lands on is left where it was.
 #[napi]
 pub fn raster_fill(
     id: String,
     mask: Buffer,
     mask_frame: LayerFrame,
     color: String,
+    alpha_locked: bool,
 ) -> napi::Result<Option<LayerPatch>> {
     let rgba = parse_hex_rgba(&color).map_err(napi::Error::from_reason)?;
     let filled = raster::fill(
@@ -577,6 +581,7 @@ pub fn raster_fill(
         mask.as_ref(),
         to_rect(&mask_frame),
         [rgba.0, rgba.1, rgba.2, rgba.3],
+        alpha_locked,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(filled.map(|(journal, patch)| to_patch(journal, patch)))

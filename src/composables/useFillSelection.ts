@@ -88,6 +88,7 @@ export function useFillSelection() {
       new Uint8Array(mask),
       { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h },
       editor.foreground,
+      entry.alphaLocked,
     )
     // A selection that covered nothing, or a fully transparent colour. Neither
     // is a failure and neither is a step.
