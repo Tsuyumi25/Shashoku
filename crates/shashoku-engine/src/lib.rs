@@ -12,6 +12,7 @@ mod enumerate;
 mod import;
 mod render;
 mod stroke;
+pub mod tile;
 
 use render::{Align, BLACK, Phase, StrokePosition, StrokeSpec, parse_hex_rgba};
 
