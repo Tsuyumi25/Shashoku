@@ -2,6 +2,8 @@ import {
   MAX_FONT_SAMPLE_PX,
   MIN_SECTION_HEIGHT,
   MIN_FONT_SAMPLE_PX,
+  MIN_UNDO_PIXEL_BYTES,
+  MIN_UNDO_PIXEL_STEPS,
   defaultOcrPreference,
   defaultPreferences,
   type OcrModelPreference,
@@ -43,6 +45,8 @@ export function parsePreferences(raw: string): Preferences {
     sidePanel,
     sectionOpen,
     sectionHeight,
+    undoPixelSteps,
+    undoPixelBytes,
     ocr,
   } = parsed;
 
@@ -102,6 +106,15 @@ export function parsePreferences(raw: string): Preferences {
       }
     }
   }
+  // Floored rather than range-checked at the top: a ceiling somebody wants to
+  // be enormous is their business, and one small enough to hold nothing is the
+  // only setting that would break undo outright.
+  if (typeof undoPixelSteps === "number" && Number.isFinite(undoPixelSteps)) {
+    prefs.undoPixelSteps = Math.max(MIN_UNDO_PIXEL_STEPS, Math.round(undoPixelSteps));
+  }
+  if (typeof undoPixelBytes === "number" && Number.isFinite(undoPixelBytes)) {
+    prefs.undoPixelBytes = Math.max(MIN_UNDO_PIXEL_BYTES, Math.round(undoPixelBytes));
+  }
   if (isRecord(ocr)) {
     // Both halves are read on their own. A file naming a device that no longer
     // exists still says something about the checkbox beside it, and dropping
@@ -134,6 +147,8 @@ export function serializePreferences(prefs: Preferences): string {
       sidePanel: prefs.sidePanel,
       sectionOpen: prefs.sectionOpen,
       sectionHeight: prefs.sectionHeight,
+      undoPixelSteps: prefs.undoPixelSteps,
+      undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,
     },
     null,

@@ -5,10 +5,10 @@
 //! a transaction against the tile grid, and what comes back is only the part
 //! that changed.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use crate::tile::{Rgba8, TILE_SIZE, TileCoord, TileGrid, TileJournal, TileTransaction};
+use crate::tile::{Rgba8, TILE_SIZE, Tile, TileCoord, TileGrid, TileJournal, TileTransaction};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rectangles
@@ -464,7 +464,37 @@ fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 
 struct Registry {
     layers: HashMap<String, RasterLayer>,
     journals: HashMap<String, LayerJournal>,
+    /// The records in the order they were made, oldest first. Trimming takes
+    /// from this end, so what falls away is the work furthest from where the
+    /// person is.
+    order: Vec<String>,
     next_journal: u64,
+}
+
+impl Registry {
+    fn forget(&mut self, name: &str) {
+        self.journals.remove(name);
+        self.order.retain(|held| held != name);
+    }
+
+    /// What every record together is holding, counting a shared block once
+    /// however many records point at it.
+    ///
+    /// Taken across the whole of history rather than summed per record, because
+    /// per-record sums cannot see that two of them point at the same block —
+    /// which is the number that decides whether anything is trimmed at all.
+    fn bytes_held(&self) -> usize {
+        let mut seen: HashSet<*const Tile<Rgba8>> = HashSet::new();
+        let mut total = 0;
+        for journal in self.journals.values() {
+            for tile in journal.tiles.tiles() {
+                if seen.insert(Arc::as_ptr(tile)) {
+                    total += tile.byte_len();
+                }
+            }
+        }
+        total
+    }
 }
 
 static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
@@ -495,6 +525,8 @@ pub fn release(id: &str) {
     let mut held = registry();
     held.layers.remove(id);
     held.journals.retain(|_, journal| journal.layer != id);
+    let kept: Vec<String> = held.journals.keys().cloned().collect();
+    held.order.retain(|name| kept.contains(name));
 }
 
 /// Lets go of everything. Turning the page.
@@ -502,6 +534,39 @@ pub fn release_all() {
     let mut held = registry();
     held.layers.clear();
     held.journals.clear();
+    held.order.clear();
+}
+
+/// What pixel history is holding in memory right now.
+///
+/// Asked here rather than worked out by whatever holds the undo stack: a block
+/// shared between records looks like two from outside and is one from inside,
+/// and only inside can count it right.
+pub fn history_bytes() -> usize {
+    registry().bytes_held()
+}
+
+/// Drops the oldest records until history is under `ceiling` bytes, keeping at
+/// least `floor` of them whatever they weigh, and names what it dropped.
+///
+/// The floor wins, which is what makes both of the pure schemes' complaints
+/// impossible: a step count alone leaves somebody asking why this is eating
+/// three hundred megabytes, a byte budget alone leaves them asking why they can
+/// only go back three steps.
+///
+/// Called before a write allocates, never after. Building the new record first
+/// and pruning afterwards is how a stack peaks at its ceiling plus a whole
+/// canvas — a mistake worth avoiding here, where one layer of the largest page
+/// is over half a gigabyte.
+pub fn trim_history(floor: usize, ceiling: usize) -> Vec<String> {
+    let held = &mut *registry();
+    let mut dropped = Vec::new();
+    while held.order.len() > floor && held.bytes_held() > ceiling {
+        let name = held.order.remove(0);
+        held.journals.remove(&name);
+        dropped.push(name);
+    }
+    dropped
 }
 
 /// Fills the masked region of a held layer. The returned name is how the caller
@@ -524,6 +589,7 @@ pub fn fill(
     let name = format!("j{}", held.next_journal);
     journal.layer = id.to_string();
     held.journals.insert(name.clone(), journal);
+    held.order.push(name.clone());
     Ok(Some((name, patch)))
 }
 
@@ -538,7 +604,7 @@ pub fn apply_journal(name: &str) -> Option<Patch> {
 
 /// Forgets a journal, which is what history falling off the bottom means.
 pub fn drop_journal(name: &str) {
-    registry().journals.remove(name);
+    registry().forget(name);
 }
 
 #[cfg(test)]
@@ -546,6 +612,19 @@ mod tests {
     use super::*;
 
     const RED: [u8; 4] = [255, 0, 0, 255];
+
+    /// The registry is one global table and the test runner is threaded, so
+    /// anything that touches it has to take this first. Without it two tests
+    /// clear each other's layers and both report someone else's arithmetic.
+    static EXCLUSIVE: Mutex<()> = Mutex::new(());
+
+    fn alone() -> MutexGuard<'static, ()> {
+        let guard = EXCLUSIVE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        release_all();
+        guard
+    }
 
     fn frame(x: i32, y: i32, w: i32, h: i32) -> Rect {
         Rect { x, y, w, h }
@@ -744,7 +823,7 @@ mod tests {
 
     #[test]
     fn the_registry_holds_a_layer_until_it_is_let_go() {
-        release_all();
+        let _alone = alone();
         take("a", &[0, 0, 0, 0], frame(0, 0, 1, 1)).expect("a well-formed layer");
         assert!(holds("a"));
         release("a");
@@ -753,7 +832,7 @@ mod tests {
 
     #[test]
     fn letting_a_layer_go_forgets_the_records_that_speak_for_it() {
-        release_all();
+        let _alone = alone();
         take("b", &[0, 0, 0, 0], frame(0, 0, 1, 1)).expect("a well-formed layer");
         let (name, _) = fill("b", &[255], frame(0, 0, 1, 1), RED)
             .expect("a well-formed fill")
@@ -766,7 +845,95 @@ mod tests {
 
     #[test]
     fn filling_a_layer_nobody_handed_over_is_an_error() {
-        release_all();
+        let _alone = alone();
         assert!(fill("nobody", &[255], frame(0, 0, 1, 1), RED).is_err());
+    }
+
+    /// A layer three tiles wide, and one fill per tile — three records holding
+    /// one tile each. The layer is opaque so every record really is 16 KiB
+    /// rather than nothing.
+    fn three_records() -> (MutexGuard<'static, ()>, Vec<String>) {
+        let alone = alone();
+        let side = TILE_SIZE * 3;
+        let px = (side * TILE_SIZE) as usize;
+        let mut rgba = Vec::with_capacity(px * 4);
+        for _ in 0..px {
+            rgba.extend_from_slice(&[0, 0, 255, 255]);
+        }
+        take("wide", &rgba, frame(0, 0, side, TILE_SIZE)).expect("a well-formed layer");
+
+        let names = (0..3)
+            .map(|at| {
+                let (name, _) = fill("wide", &[255], frame(at * TILE_SIZE, 0, 1, 1), RED)
+                    .expect("a well-formed fill")
+                    .expect("something to fill");
+                name
+            })
+            .collect();
+        (alone, names)
+    }
+
+    #[test]
+    fn the_meter_counts_what_history_really_holds() {
+        let (_alone, names) = three_records();
+        assert_eq!(names.len(), 3);
+        assert_eq!(history_bytes(), 3 * 16 * 1024);
+    }
+
+    #[test]
+    fn the_meter_does_not_count_a_page_nobody_kept() {
+        let _alone = alone();
+        // A layer far larger than what any record of it holds: a record is the
+        // tiles a write covered, not the page it happened on.
+        let side = TILE_SIZE * 4;
+        let rgba = vec![255u8; (side * side) as usize * 4];
+        take("big", &rgba, frame(0, 0, side, side)).expect("a well-formed layer");
+        assert_eq!(history_bytes(), 0);
+
+        fill("big", &[255], frame(0, 0, 1, 1), RED)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+        assert_eq!(history_bytes(), 16 * 1024);
+    }
+
+    #[test]
+    fn nothing_is_trimmed_while_history_is_under_the_ceiling() {
+        let (_alone, _names) = three_records();
+        assert!(trim_history(1, 1024 * 1024).is_empty());
+        assert_eq!(history_bytes(), 3 * 16 * 1024);
+    }
+
+    #[test]
+    fn the_oldest_records_go_first() {
+        let (_alone, names) = three_records();
+        let dropped = trim_history(1, 16 * 1024);
+        assert_eq!(dropped, vec![names[0].clone(), names[1].clone()]);
+        assert_eq!(history_bytes(), 16 * 1024);
+        assert!(apply_journal(&names[0]).is_none());
+        assert!(apply_journal(&names[2]).is_some());
+    }
+
+    // The floor wins: a ceiling of nothing still leaves the last steps standing.
+    #[test]
+    fn the_step_floor_beats_the_byte_ceiling() {
+        let (_alone, _names) = three_records();
+        let dropped = trim_history(2, 0);
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(history_bytes(), 2 * 16 * 1024);
+    }
+
+    #[test]
+    fn a_floor_above_what_history_holds_trims_nothing() {
+        let (_alone, _names) = three_records();
+        assert!(trim_history(10, 0).is_empty());
+    }
+
+    #[test]
+    fn forgetting_a_record_takes_it_out_of_the_order_too() {
+        let (_alone, names) = three_records();
+        drop_journal(&names[0]);
+        assert_eq!(history_bytes(), 2 * 16 * 1024);
+        // The one just forgotten must not come back as the oldest.
+        assert_eq!(trim_history(1, 0), vec![names[1].clone()]);
     }
 }

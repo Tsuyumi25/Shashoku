@@ -325,6 +325,102 @@ describe('the undo stack is bounded', () => {
   })
 })
 
+describe('steps whose pixels the engine let go', () => {
+  /** A step with an engine record behind it, noting when it is let go. */
+  function pixelStep(editor: ReturnType<typeof useEditorStore>, journal: string, forgotten: string[]) {
+    editor.pushCommand({
+      label: `fill ${journal}`,
+      journal,
+      do: () => {},
+      undo: () => {},
+      forget: () => forgotten.push(journal),
+    })
+  }
+
+  /**
+   * History is linear: a step that cannot be replayed is one nothing under it
+   * can be reached past, so the cut takes everything below the newest casualty
+   * rather than plucking the named ones out of the middle.
+   */
+  it('cuts the stack at the newest step it lost', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    for (const name of ['j1', 'j2', 'j3', 'j4']) pixelStep(editor, name, forgotten)
+
+    editor.forgetJournals(['j1', 'j2'])
+
+    expect(forgotten).toEqual(['j1', 'j2'])
+    const undone: string[] = []
+    editor.pushCommand({ label: 'mark', do: () => {}, undo: () => undone.push('mark') })
+    while (editor.canUndo) editor.undo()
+    expect(forgotten).toEqual(['j1', 'j2'])
+    expect(undone).toEqual(['mark'])
+  })
+
+  // Document steps under a lost pixel step go too — one Ctrl+Z means one thing,
+  // and a stack that skipped a hole would replay the page out of order.
+  it('takes the plain steps under it as well', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    const undone: string[] = []
+    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => undone.push('rename') })
+    pixelStep(editor, 'j1', forgotten)
+    editor.pushCommand({ label: 'move', do: () => {}, undo: () => undone.push('move') })
+
+    editor.forgetJournals(['j1'])
+    while (editor.canUndo) editor.undo()
+
+    expect(undone).toEqual(['move'])
+  })
+
+  it('says nothing and does nothing when it lost none of them', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    pixelStep(editor, 'j1', forgotten)
+
+    editor.forgetJournals(['j9'])
+
+    expect(forgotten).toEqual([])
+    expect(editor.canUndo).toBe(true)
+  })
+
+  // A branch that outlived its own pixels cannot be replayed either.
+  it('drops a redo branch that lost a step', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    pixelStep(editor, 'j1', forgotten)
+    editor.undo()
+    expect(editor.canRedo).toBe(true)
+
+    editor.forgetJournals(['j1'])
+
+    expect(editor.canRedo).toBe(false)
+    expect(forgotten).toEqual(['j1'])
+  })
+
+  it('lets a step go when it falls off the bottom of the bounded stack', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    pixelStep(editor, 'j1', forgotten)
+    for (let i = 0; i < UNDO_LIMIT; i += 1) {
+      editor.pushCommand({ label: `step ${i}`, do: () => {}, undo: () => {} })
+    }
+
+    expect(forgotten).toEqual(['j1'])
+  })
+
+  it('lets everything go when the history is cleared', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    pixelStep(editor, 'j1', forgotten)
+    pixelStep(editor, 'j2', forgotten)
+
+    editor.clearHistory()
+
+    expect(forgotten).toEqual(['j1', 'j2'])
+  })
+})
+
 describe('pending text edit', () => {
   it('turns one editing session into one undo entry', () => {
     const { project, editor } = openOnePage([label('a', 'before')])

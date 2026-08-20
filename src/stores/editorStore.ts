@@ -32,6 +32,19 @@ export interface Command {
   label: string
   do(): void
   undo(): void
+  /**
+   * The engine record this command is the manifest half of, when it has one.
+   *
+   * A pixel step is two things kept in step: a record of tiles the engine holds
+   * and a frame the manifest holds. This names the first so the stack can be
+   * cut where the engine says its pixels are gone.
+   */
+  journal?: string
+  /**
+   * Called once, when this command leaves the stack for good — not when it is
+   * merely undone. Whatever it holds outside the store is let go here.
+   */
+  forget?(): void
 }
 
 /** Everything a corner drag leaves changed about one label. */
@@ -517,8 +530,43 @@ export const useEditorStore = defineStore('editor', () => {
     // The oldest goes, as in any editor: what falls off the bottom is the work
     // furthest from where you are. Redo needs no bound of its own, since it can
     // only ever hold what this stack handed it.
-    undoStack.value = next.length > UNDO_LIMIT ? next.slice(next.length - UNDO_LIMIT) : next
+    const over = next.length - UNDO_LIMIT
+    if (over > 0) {
+      for (const gone of next.slice(0, over)) gone.forget?.()
+      undoStack.value = next.slice(over)
+    } else {
+      undoStack.value = next
+    }
+    for (const gone of redoStack.value) gone.forget?.()
     redoStack.value = []
+  }
+
+  /**
+   * Cuts the stack where the engine says a step's pixels are gone.
+   *
+   * Everything at or below the newest of these goes, not just the named steps:
+   * history is linear, and a step you cannot replay is one nothing under it can
+   * be reached past. Redo goes entirely, since a branch that outlived its own
+   * pixels can no longer be replayed either.
+   *
+   * The bound itself lives in the engine, which is the only place that can see
+   * a block shared between two records as one. This is the stack following it.
+   */
+  function forgetJournals(names: readonly string[]) {
+    if (names.length === 0) return
+    const gone = new Set(names)
+    let cut = -1
+    undoStack.value.forEach((cmd, at) => {
+      if (cmd.journal !== undefined && gone.has(cmd.journal)) cut = at
+    })
+    if (cut >= 0) {
+      for (const dropped of undoStack.value.slice(0, cut + 1)) dropped.forget?.()
+      undoStack.value = undoStack.value.slice(cut + 1)
+    }
+    if (redoStack.value.some((cmd) => cmd.journal !== undefined && gone.has(cmd.journal))) {
+      for (const dropped of redoStack.value) dropped.forget?.()
+      redoStack.value = []
+    }
   }
 
   /**
@@ -548,6 +596,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   
   function clearHistory() {
+    for (const gone of [...undoStack.value, ...redoStack.value]) gone.forget?.()
     undoStack.value = []
     redoStack.value = []
     pendingTextEdit.value = null
@@ -1489,6 +1538,7 @@ export const useEditorStore = defineStore('editor', () => {
     flushTextEdit,
     editBy,
     pushCommand,
+    forgetJournals,
     undo,
     redo,
     clearHistory,

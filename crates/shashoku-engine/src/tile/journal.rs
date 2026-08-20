@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::TileCoord;
@@ -39,24 +40,26 @@ impl<P: PixelFormat> TileJournal<P> {
         self.entries.iter().map(|(coord, _)| *coord)
     }
 
-    /// The distinct tiles this journal is holding onto, by pointer.
+    /// Every block this journal is holding onto, one entry per coordinate and
+    /// so with repeats. Deduplicating is the caller's, because the count is only
+    /// right when it is taken across the whole of history at once.
+    pub fn tiles(&self) -> impl Iterator<Item = &Arc<Tile<P>>> {
+        self.entries.iter().filter_map(|(_, held)| held.as_ref())
+    }
+
+    /// What this journal alone occupies, counting a shared block once.
     ///
-    /// One block shared by ten thousand coordinates is one tile here, which is
-    /// the only way the count can be right: a select-all mask is tens of
-    /// thousands of coordinates pointing at a single block, and counting each
-    /// coordinate's bytes would report hundreds of megabytes for four kilobytes
-    /// of memory.
-    pub fn distinct_tiles(&self) -> impl Iterator<Item = &Arc<Tile<P>>> {
-        let mut seen: Vec<*const Tile<P>> = Vec::new();
-        self.entries.iter().filter_map(move |(_, held)| {
-            let tile = held.as_ref()?;
-            let at = Arc::as_ptr(tile);
-            if seen.contains(&at) {
-                return None;
-            }
-            seen.push(at);
-            Some(tile)
-        })
+    /// By pointer, which is the only way the number can be right: a select-all
+    /// mask is tens of thousands of coordinates pointing at one block, and
+    /// adding up each coordinate's bytes would report hundreds of megabytes for
+    /// four kilobytes of memory — and would then empty the stack on the first
+    /// select-all, destroying exactly what the bound exists to protect.
+    pub fn bytes_held(&self) -> usize {
+        let mut seen: HashSet<*const Tile<P>> = HashSet::new();
+        self.tiles()
+            .filter(|tile| seen.insert(Arc::as_ptr(tile)))
+            .map(|tile| tile.byte_len())
+            .sum()
     }
 
     pub(super) fn push(&mut self, coord: TileCoord, held: Option<Arc<Tile<P>>>) {
@@ -213,8 +216,7 @@ mod tests {
         };
 
         assert_eq!(journal.len(), 100);
-        let held: usize = journal.distinct_tiles().map(|tile| tile.byte_len()).sum();
-        assert_eq!(held, 16 * 1024);
+        assert_eq!(journal.bytes_held(), 16 * 1024);
     }
 
     #[test]

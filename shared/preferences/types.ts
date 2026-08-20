@@ -57,6 +57,24 @@ export type SectionHeight = Record<ResizableSection, number>;
 export const MIN_SECTION_HEIGHT = 96;
 
 /**
+ * How far pixel history reaches, as a floor in steps and a ceiling in bytes.
+ *
+ * Two knobs because either alone fails in a way nobody can make sense of. A
+ * pure step count answers "why is this eating three hundred megabytes"; a pure
+ * byte budget answers "why can I only go back three steps". A floor that wins
+ * over the ceiling means neither complaint can happen: the last few steps are
+ * always there, and everything above them is bounded.
+ *
+ * ⚠️ Both numbers are provisional. Nothing that writes pixels in bulk exists
+ * yet, so there is nothing to measure them against — the shape is what is being
+ * settled here, and the values are meant to be taken again once a brush is
+ * running. `UNDO_LIMIT` is deliberately not inherited as the floor: it bounds a
+ * stack of closures, which is a different quantity.
+ */
+export const MIN_UNDO_PIXEL_STEPS = 1;
+export const MIN_UNDO_PIXEL_BYTES = 16 * 1024 * 1024;
+
+/**
  * The choice offered is the device, not the runtime: PP-OCR is an ONNX graph
  * on the processor and a torch model on the card, because no runtime won on
  * both.
@@ -127,6 +145,19 @@ export interface Preferences {
   sectionOpen: SectionOpen;
   sectionHeight: SectionHeight;
   /**
+   * How many pixel steps are kept whatever they weigh. The floor wins over the
+   * ceiling, so this is what "you can always go back at least this far" means.
+   */
+  undoPixelSteps: number;
+  /**
+   * What pixel history may hold in memory, in bytes, above the floor.
+   *
+   * Memory only. Nothing on disk is swept for being over this — the old layer
+   * files an edit leaves behind are collected when the project is closed or
+   * next opened, which is a different question with a different answer.
+   */
+  undoPixelBytes: number;
+  /**
    * Only what a reader has changed. A model absent from here has never been
    * touched and takes the default its own route declares, so this file does
    * not have to be edited every time one is added.
@@ -158,6 +189,12 @@ export function defaultPreferences(): Preferences {
     // Room for four or five candidates each, which is what one region read by
     // every recognizer comes to.
     sectionHeight: { source: 280, translation: 220 },
+    // Provisional on both counts — see MIN_UNDO_PIXEL_STEPS above. Ten steps is
+    // enough to back out of a mistaken sequence; half a gigabyte is under what
+    // one full-page layer at the largest page would cost twice over, so the
+    // ceiling bites before the machine does.
+    undoPixelSteps: 10,
+    undoPixelBytes: 512 * 1024 * 1024,
     ocr: {},
   };
 }

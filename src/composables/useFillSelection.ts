@@ -6,6 +6,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { isEmptyRect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -38,6 +39,7 @@ export function useFillSelection() {
   const editor = useEditorStore()
   const selection = useSelectionStore()
   const notices = useNoticeStore()
+  const preferences = usePreferencesStore()
   const raster = useRasterStore()
 
   /** Where a fill would land: the raster layer the cursor is standing on. */
@@ -104,6 +106,21 @@ export function useFillSelection() {
     // The first edit of this layer, and the only time its whole pixels cross.
     await raster.take(entry, layersDirOf(file.pageDir))
 
+    /*
+     * Trimmed before the write allocates, never after. Building the record
+     * first and pruning afterwards is how a stack peaks at its ceiling plus a
+     * whole canvas — which here is over half a gigabyte at the largest page.
+     *
+     * The engine decides what goes, because it is the only place that can see a
+     * block shared between two records as one block. The stack follows.
+     */
+    editor.forgetJournals(
+      window.engine.rasterTrimHistory(
+        preferences.prefs.undoPixelSteps,
+        preferences.prefs.undoPixelBytes,
+      ),
+    )
+
     const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
     const patch = window.engine.rasterFill(
       entry.id,
@@ -148,8 +165,13 @@ export function useFillSelection() {
     editor.pushCommand(
       {
         label: `fill-layer ${entry.id}`,
+        journal: patch.journal,
         do: () => swapTo(to),
         undo: () => swapTo(from),
+        // Only when this step leaves the stack for good. The layer files it
+        // named stay on disk either way — the ceiling bounds memory, and what
+        // no manifest names is swept when the project is next opened.
+        forget: () => window.engine.rasterDropJournal(patch.journal),
       },
       { alreadyApplied: true },
     )

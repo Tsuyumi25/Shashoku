@@ -595,6 +595,36 @@ pub fn raster_drop_journal(journal: String) {
     raster::drop_journal(&journal);
 }
 
+/// What pixel history is holding in memory right now.
+///
+/// Asked here rather than worked out by whatever holds the undo stack: a block
+/// shared between records looks like two from outside and is one from inside,
+/// and only inside can count it right. A select-all mask is tens of thousands
+/// of coordinates pointing at one block, and a caller adding up its own
+/// commands would report hundreds of megabytes for four kilobytes.
+/// A double rather than a u32: history is bounded in the hundreds of megabytes
+/// but nothing stops a ceiling being set past four gigabytes, and a count that
+/// silently wrapped there would report almost nothing at the exact moment it
+/// mattered most.
+#[napi]
+pub fn raster_history_bytes() -> f64 {
+    raster::history_bytes() as f64
+}
+
+/// Drops the oldest records until history is under `ceiling` bytes, keeping at
+/// least `floor` of them whatever they weigh, and names what it dropped.
+///
+/// Call before a write, never after. Building the new record first and pruning
+/// afterwards is how a stack peaks at its ceiling plus a whole canvas.
+///
+/// Everything named here is gone; a caller holding an undo stack has to drop
+/// those steps and everything under them, since history is linear and a step
+/// whose pixels are gone cannot be reached past.
+#[napi]
+pub fn raster_trim_history(floor: u32, ceiling: f64) -> Vec<String> {
+    raster::trim_history(floor as usize, ceiling.max(0.0) as usize)
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Source import
 

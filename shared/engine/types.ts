@@ -358,4 +358,25 @@ export interface ShashokuEngineApi {
   rasterApplyJournal(journal: string): EngineLayerPatch | null;
   /** Forgets a record — what history falling off the bottom means. */
   rasterDropJournal(journal: string): void;
+  /**
+   * What pixel history is holding in memory right now.
+   *
+   * Asked here rather than worked out from the undo stack: a block shared
+   * between records looks like two from outside and is one from inside, and only
+   * inside can count it right. A select-all mask is tens of thousands of
+   * coordinates pointing at one block, and a caller adding up its own commands
+   * would report hundreds of megabytes for four kilobytes.
+   */
+  rasterHistoryBytes(): number;
+  /**
+   * Drops the oldest records until history is under `ceiling` bytes, keeping at
+   * least `floor` of them whatever they weigh, and names what it dropped.
+   *
+   * Call before a write, never after — building the new record first and
+   * pruning afterwards is how a stack peaks at its ceiling plus a whole canvas.
+   * Everything named is gone, so an undo stack has to drop those steps and
+   * everything under them: history is linear, and a step whose pixels are gone
+   * cannot be reached past.
+   */
+  rasterTrimHistory(floor: number, ceiling: number): string[];
 }
