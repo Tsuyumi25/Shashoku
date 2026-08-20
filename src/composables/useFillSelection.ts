@@ -8,6 +8,7 @@ import { fillPixels } from '@/lib/selection/fill'
 import { context2d, encodePng } from '@/lib/pageComposite'
 import { isEmptyRect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
+import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
@@ -43,6 +44,7 @@ export function useFillSelection() {
   const project = useProjectStore()
   const editor = useEditorStore()
   const selection = useSelectionStore()
+  const notices = useNoticeStore()
 
   const canFill = computed(
     () =>
@@ -63,7 +65,16 @@ export function useFillSelection() {
   async function fillSelection(): Promise<void> {
     const page = editor.currentPageId
     const bounds = selection.bounds
-    if (page === null || bounds === null || isEmptyRect(bounds)) return
+    if (page === null) return
+    /*
+     * The keyboard reaches this with nothing selected — the button is disabled
+     * then, the shortcut is not. Silence there reads as a broken key rather
+     * than as a fill that had nowhere to go.
+     */
+    if (bounds === null || isEmptyRect(bounds)) {
+      notices.say('沒有選區可以填充')
+      return
+    }
     const file = project.pageById(page)
     if (!file) return
     const color = hexToRgb(editor.foreground)

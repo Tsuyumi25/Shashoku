@@ -184,12 +184,19 @@
       </span>
       <span v-else class="text-sm text-muted-foreground">開啟一個資料夾開始工作</span>
     </div>
+
+    <!--
+      Outside the page's branch: a refusal is worth saying whether or not there
+      is a page ready to draw, and last in the box so nothing drawn covers it.
+    -->
+    <CanvasNotice />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
+import CanvasNotice from '@/components/CanvasNotice.vue'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
