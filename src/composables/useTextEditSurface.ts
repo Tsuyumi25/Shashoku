@@ -1,4 +1,5 @@
-import { readonly, ref, shallowRef } from 'vue'
+import { computed, readonly, ref, shallowRef } from 'vue'
+import { pinnedInputBox, type CaretOnScreen, type PinnedBox } from '@/lib/pinnedInput'
 
 /**
  * The one native control a translation is being typed into, and where its caret
@@ -97,13 +98,52 @@ function setRange(start: number, end = start): void {
   publish(start, end)
 }
 
+/**
+ * Whether the box should ride the caret on the canvas instead of sitting in its
+ * row, decided by whoever opened the session — which is the one thing that says
+ * where the user is looking. Typing down the list leaves it exactly where it
+ * has always been.
+ */
+const pinned = ref(false)
+
+/** Where the caret stands on screen, published by whatever is projecting it. */
+const caret = ref<CaretOnScreen | null>(null)
+
+/**
+ * The window as it was when the caret was last published. Taken there rather
+ * than read where the box is worked out: a caret is republished whenever
+ * anything moves it, resizing the window included, so this cannot go stale
+ * without the caret going stale first.
+ */
+const viewport = ref({ w: 0, h: 0 })
+
+function pin(to: boolean): void {
+  pinned.value = to
+}
+
+function showCaretAt(at: CaretOnScreen | null): void {
+  caret.value = at
+  if (at !== null) viewport.value = { w: window.innerWidth, h: window.innerHeight }
+}
+
+/** The box the input should take, or null to leave it in the flow of its row. */
+const pinnedBox = computed<PinnedBox | null>(() => {
+  const at = caret.value
+  if (!pinned.value || at === null) return null
+  return pinnedInputBox(at, viewport.value)
+})
+
 export function useTextEditSurface() {
   return {
     field,
     range: readonly(range),
     moved: readonly(moved),
+    pinned: readonly(pinned),
+    pinnedBox,
     register,
     setRange,
+    pin,
+    showCaretAt,
     read,
     readSoon,
   }

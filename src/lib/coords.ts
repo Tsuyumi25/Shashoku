@@ -195,6 +195,23 @@ export function screenToFramePx(
   return { x: out.x / scale + box.w / 2, y: out.y / scale + box.h / 2 }
 }
 
+/** The inverse of `screenToFramePx`: a point of the frame, put back on screen. */
+export function framePxToScreen(
+  x: number,
+  y: number,
+  center: { x: number; y: number },
+  box: { w: number; h: number },
+  scale: number,
+  turn: number,
+): { x: number; y: number } {
+  const out = turnedAround(
+    NOWHERE,
+    { x: (x - box.w / 2) * scale, y: (y - box.h / 2) * scale },
+    turn,
+  )
+  return { x: center.x + out.x, y: center.y + out.y }
+}
+
 /**
  * A point turned about another, clockwise as the page's own axes run — which is
  * the direction an object's stored angle means, since Y grows downward.

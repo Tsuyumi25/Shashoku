@@ -3,6 +3,7 @@ import {
   centeredBoxOnScreen,
   contentToScreenPx,
   framePoint,
+  framePxToScreen,
   positionHolding,
   screenToContentPx,
   screenToFramePx,
@@ -281,5 +282,26 @@ describe('screenToFramePx', () => {
     )
     expect(back.x).toBeCloseTo(local.x, 9)
     expect(back.y).toBeCloseTo(local.y, 9)
+  })
+})
+
+describe('framePxToScreen', () => {
+  const BOX = { w: 100, h: 40 }
+  const CENTER = { x: 500, y: 300 }
+
+  it('inverts screenToFramePx for any turn and scale', () => {
+    for (const turn of [0, Math.PI / 2, -0.9, 2.4]) {
+      for (const scale of [0.25, 1, 3.5]) {
+        const local = { x: 61, y: 7 }
+        const s = framePxToScreen(local.x, local.y, CENTER, BOX, scale, turn)
+        const back = screenToFramePx(s.x, s.y, CENTER, BOX, scale, turn)
+        expect(back.x).toBeCloseTo(local.x, 9)
+        expect(back.y).toBeCloseTo(local.y, 9)
+      }
+    }
+  })
+
+  it('puts the top left corner where the box begins', () => {
+    expect(framePxToScreen(0, 0, CENTER, BOX, 1, 0)).toEqual({ x: 450, y: 280 })
   })
 })

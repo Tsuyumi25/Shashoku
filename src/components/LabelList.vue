@@ -192,6 +192,11 @@
                   class="text-[10px] leading-snug whitespace-pre-wrap text-muted-foreground"
                   :class="!sourceOf(element as LabelRow) && 'opacity-50'"
                 >{{ sourceOf(element as LabelRow) ?? '—' }}</span>
+                <!--
+                  One box per session wherever it is standing. Pinned to the
+                  canvas it is the same element with the same text and the same
+                  caret, which is what makes the two ways of editing one edit.
+                -->
                 <textarea
                   v-if="isEditing(element as LabelRow)"
                   :ref="takeFocus"
@@ -199,13 +204,20 @@
                   spellcheck="false"
                   placeholder="(未翻譯)"
                   class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
+                  :class="pinned && 'pinned'"
+                  :style="pinnedStyle"
                   :value="textOf((element as LabelRow).label)"
                   @input="onInput(element as LabelRow, $event)"
                   @keydown="onInputKey($event)"
                   @blur="onInputBlur(element as LabelRow)"
                 />
+                <!--
+                  The row goes on reading as a row while the box is away on the
+                  canvas — a translation being typed elsewhere is still the
+                  translation this row is about.
+                -->
                 <span
-                  v-else
+                  v-if="!isEditing(element as LabelRow) || pinned"
                   class="text-sm leading-snug whitespace-pre-wrap"
                   :class="isBlank(element as LabelRow) && 'text-muted-foreground/50'"
                 >{{ preview(element as LabelRow) }}</span>
@@ -410,14 +422,47 @@ function takeFocus(el: unknown) {
 
 /**
  * The box exists exactly as long as the session does, so the session is what
- * withdraws it — one fact rather than two that can disagree.
+ * withdraws it — one fact rather than two that can disagree. The pin goes with
+ * it: where the box belongs is decided per session by whoever opened it.
  */
 watch(
   () => editor.pendingTextEdit,
   (pending) => {
-    if (pending === null) surface.register(null)
+    if (pending !== null) return
+    surface.register(null)
+    surface.pin(false)
+    surface.showCaretAt(null)
   },
 )
+
+const pinned = surface.pinned
+
+/**
+ * What it takes to put a native control on the insertion point and leave it
+ * reachable by the IME.
+ *
+ * Turned about its own corner, because the position names where the run starts
+ * rather than where the box's middle would go. Faintly opaque rather than
+ * transparent: `visibility` and `opacity: 0` cost the IME its target in some
+ * environments, and the box is one or two pixels of a colour nothing is drawn
+ * in — invisible in practice without ever claiming to be hidden.
+ */
+const pinnedStyle = computed(() => {
+  const box = surface.pinnedBox.value
+  if (box === null) return undefined
+  return {
+    position: 'fixed' as const,
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    transformOrigin: '0 0',
+    transform: `rotate(${box.angle}rad)`,
+    // The IME reads the control's direction, so a column of text gets a column
+    // of a box and its candidates open along the same axis the reader is on.
+    writingMode: box.vertical ? ('vertical-rl' as const) : ('horizontal-tb' as const),
+  }
+})
 
 onBeforeUnmount(() => surface.register(null))
 
@@ -432,9 +477,15 @@ function onPick(row: LabelRow, e: MouseEvent) {
   else editor.revealLabel(row.pageId, row.label.id)
 }
 
+/**
+ * Opened from the list, so the box stays in the list. Where it belongs follows
+ * from where the work was started, which is the one thing that says where the
+ * user is looking.
+ */
 function onEdit(row: LabelRow) {
   editor.revealLabel(row.pageId, row.label.id)
   editor.beginTextEdit(row.pageId, row.label.id, textOf(row.label))
+  surface.pin(false)
 }
 
 /**
@@ -605,6 +656,28 @@ function orderedTags(tags: readonly string[]): string[] {
  */
 .label-input {
   field-sizing: content;
+}
+
+/*
+ * Pinned to the insertion point on the canvas: a real control, holding the real
+ * text and the real caret, sized down to a sliver. What the reader sees is the
+ * engine's own drawing on the page; this is only what the platform's input
+ * needs to exist and to be somewhere.
+ *
+ * Not hidden, faint. A control that is `visibility: hidden`, `display: none` or
+ * fully transparent stops being an IME target in some environments, and being
+ * one is its entire job.
+ */
+.label-input.pinned {
+  field-sizing: fixed;
+  z-index: 50;
+  padding: 0;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  opacity: 0.01;
+  pointer-events: none;
 }
 
 /*

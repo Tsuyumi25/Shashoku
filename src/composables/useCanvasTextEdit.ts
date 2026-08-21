@@ -86,6 +86,9 @@ export function useCanvasTextEdit() {
     preferences.setSidePanel('labels')
     editor.revealLabel(pageId, label.id)
     editor.beginTextEdit(pageId, label.id, textOf(label))
+    // The work is happening on the page, so the box goes to the page — pinned
+    // to the insertion point, where the IME will open its candidates.
+    surface.pin(true)
     const field = await fieldAppears()
     if (field === null) return
     field.focus({ preventScroll: true })

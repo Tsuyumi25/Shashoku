@@ -58,13 +58,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import type { TextStyle } from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
   centeredBoxOnScreen,
   clamp,
   framePoint,
+  framePxToScreen,
   positionHolding,
   screenToFramePx,
   turnedAround,
@@ -78,6 +80,7 @@ import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 import { engineStrokeFor } from '@/lib/textStyle'
 import { textProjection } from '@/lib/textProjection'
+import { useTextEditSurface } from '@/composables/useTextEditSurface'
 
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
@@ -327,6 +330,7 @@ function onRotateEnd() {
 const CARET_PX = 2
 
 const surfaceEl = ref<HTMLElement | null>(null)
+const surface = useTextEditSurface()
 
 /**
  * Whether the text answers the pointer. It defers to the frame's own answer as
@@ -397,15 +401,78 @@ const selectionBoxes = computed(() => {
 /** The frame's turn on screen: the view's and the object's, as drawn. */
 const turn = computed(() => props.view.rotate + props.rotation)
 
+/** The frame's middle in client pixels, which a turn cannot move. */
+function centerOnScreen(): { x: number; y: number } | null {
+  const rect = surfaceEl.value?.getBoundingClientRect()
+  if (!rect) return null
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
+
+/**
+ * Say where the caret stands on screen, so the native input can be put there
+ * and the IME's candidate window opens beside the text.
+ *
+ * ⚠️ Post-flush, and reading the frame's rectangle rather than deriving it from
+ * the view: `view` is already the new one by the time a change is answered,
+ * while the element is still where the last layout left it. Asking the element
+ * after the patch is what makes the two agree — and the read forces the layout
+ * it needs.
+ */
+function publishCaret(): void {
+  const at = props.selection
+  const center = centerOnScreen()
+  if (!props.editing || !at || !center) return
+  const r = projection.value.caret(at.end)
+  const p = framePxToScreen(r.x, r.y, center, drawn.value.box, props.view.scale, turn.value)
+  surface.showCaretAt({
+    x: p.x,
+    y: p.y,
+    width: vertical.value ? scaled(r.width) : CARET_PX,
+    height: vertical.value ? CARET_PX : scaled(r.height),
+    angle: turn.value,
+    vertical: vertical.value,
+  })
+}
+
+// Named one by one rather than watching the drawn label: that carries the
+// bitmap, and a deep watch over it would walk a megabyte of pixels per frame.
+watch(
+  () => [
+    props.editing,
+    props.selection?.start,
+    props.selection?.end,
+    props.text,
+    props.textStyle,
+    props.x,
+    props.y,
+    props.rotation,
+    props.view.scale,
+    props.view.tx,
+    props.view.ty,
+    props.view.rotate,
+  ],
+  publishCaret,
+  { flush: 'post' },
+)
+useEventListener(window, 'resize', publishCaret)
+// A watch has nothing to answer when the frame arrives already open — turning
+// back to the page a session was left on, or the panel being rebuilt.
+onMounted(publishCaret)
+
+// The page turning takes the frame away without the session ending, and a
+// caret left standing would pin the input over a page it is not on.
+onBeforeUnmount(() => {
+  if (props.editing) surface.showCaretAt(null)
+})
+
 /** Which character a client point is nearest to the near side of. */
 function indexAtPointer(e: { clientX: number; clientY: number }): number | null {
-  const el = surfaceEl.value
-  if (!el) return null
-  const rect = el.getBoundingClientRect()
+  const center = centerOnScreen()
+  if (center === null) return null
   const at = screenToFramePx(
     e.clientX,
     e.clientY,
-    { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+    center,
     drawn.value.box,
     props.view.scale,
     turn.value,
