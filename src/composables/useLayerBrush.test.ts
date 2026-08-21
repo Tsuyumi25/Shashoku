@@ -648,6 +648,63 @@ describe('the stroke as it is being drawn', () => {
     expect(raster.committed).toBeGreaterThan(written)
   })
 
+  /**
+   * A handover reads a file and decodes it, so "is it held" answers no for the
+   * whole of that. Two quick presses would both cross over, and the one that
+   * landed second would put the file's pixels back over whatever the first had
+   * already committed.
+   */
+  it('hands a layer over once however many strokes reach for it at the same time', async () => {
+    const { brush } = open(framed)
+    const handed = vi.spyOn(engine, 'rasterTake')
+
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerUp()
+    brush.onPointerDown(press(120, 50))
+    brush.onPointerMove(press(140, 50))
+    brush.onPointerUp()
+    await settle()
+
+    expect(handed).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A release waits on that handover, so it outlives the hand that drew it —
+   * long enough for the next press to have taken the overlay. Only the stroke
+   * still holding it may put it down.
+   */
+  it('does not let a stroke that has finished take down the one after it', async () => {
+    const { brush } = open(framed)
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerUp()
+
+    // The release is queued behind the handover; this press lands first.
+    brush.onPointerDown(press(120, 50))
+    brush.onPointerMove(press(140, 50))
+    await settle()
+
+    expect(overlay()).not.toBeNull()
+    expect(shownAlpha(130, 50)).toBe(255)
+  })
+
+  /**
+   * A layer whose pixels cannot be read is not a layer that can be painted, and
+   * the picture has to say so. Leaving the overlay up would leave the stroke
+   * plainly on screen with nothing behind it in the layer or the stack.
+   */
+  it('takes the overlay down when the handover never lands', async () => {
+    const { brush } = open(framed)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(window.api, 'readImage').mockRejectedValue(new Error('no such layer file'))
+
+    await stroke(brush, { x: 50, y: 50 }, { x: 70, y: 50 })
+
+    expect(overlay()).toBeNull()
+    expect(useStrokeOverlayStore().layerId).toBeNull()
+  })
+
   /** And the overlay goes when the write it stood in for arrives. */
   it('takes the overlay down at the release', async () => {
     const { brush } = open()

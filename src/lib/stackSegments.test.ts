@@ -123,27 +123,27 @@ describe('stackSegments', () => {
     expect(segments.map((s) => s.key)).toEqual(['a', 't'])
   })
 
-  describe('with one layer held aside', () => {
+  describe('with layers held aside', () => {
     /**
      * A dragged layer is offset by a transform on its element, so it has to be
      * the only thing that element draws — otherwise its neighbours travel with
      * it.
      */
     it('gives the held layer an element of its own', () => {
-      const segments = stackSegments([raster('a'), raster('b'), raster('c')], 'b')
+      const segments = stackSegments([raster('a'), raster('b'), raster('c')], new Set(['b']))
       expect(segments.map((s) => s.kind)).toEqual(['run', 'run', 'run'])
       expect(segments.map((s) => s.key)).toEqual(['a', 'b', 'c'])
       expect(segments[1].kind === 'run' && segments[1].nodes).toHaveLength(1)
     })
 
     it("closes the run behind it, so what follows does not join the held layer", () => {
-      const segments = stackSegments([raster('a'), raster('b')], 'a')
+      const segments = stackSegments([raster('a'), raster('b')], new Set(['a']))
       expect(segments).toHaveLength(2)
       expect(segments[0].kind === 'run' && segments[0].nodes).toHaveLength(1)
     })
 
     it('leaves the rest of the page gathered as it was', () => {
-      const segments = stackSegments([raster('a'), raster('b'), raster('c'), raster('d')], 'a')
+      const segments = stackSegments([raster('a'), raster('b'), raster('c'), raster('d')], new Set(['a']))
       expect(segments).toHaveLength(2)
       expect(segments[1].kind === 'run' && segments[1].nodes.map((n) => n.entry.id)).toEqual([
         'b',
@@ -153,11 +153,25 @@ describe('stackSegments', () => {
     })
 
     it('holds nothing aside for an id that is not on this page', () => {
-      expect(stackSegments([raster('a'), raster('b')], 'gone')).toHaveLength(1)
+      expect(stackSegments([raster('a'), raster('b')], new Set(['gone']))).toHaveLength(1)
     })
 
     it('holds nothing aside when nothing is being held', () => {
-      expect(stackSegments([raster('a'), raster('b')], null)).toHaveLength(1)
+      expect(stackSegments([raster('a'), raster('b')], new Set())).toHaveLength(1)
+    })
+
+    /**
+     * A stroke's write waits on a handover, so the layer it was drawn on keeps
+     * its canvas past the release — long enough for a hand to have grabbed
+     * another one. Both are held aside or the paint comes off screen.
+     */
+    it('gives each of two held layers an element of its own', () => {
+      const segments = stackSegments(
+        [raster('a'), raster('b'), raster('c'), raster('d')],
+        new Set(['b', 'd']),
+      )
+      expect(segments.map((s) => s.key)).toEqual(['a', 'b', 'c', 'd'])
+      expect(segments.every((s) => s.kind === 'run' && s.nodes.length === 1)).toBe(true)
     })
   })
 })

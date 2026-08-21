@@ -57,6 +57,10 @@ const props = defineProps<{
    * over when that layer is alone here. Alone is what makes it drawable: an
    * eraser takes alpha out of this canvas, and a neighbour sharing it would
    * have a hole punched through it too.
+   *
+   * A prop lags: it is settled when the run renders, and a stroke can be taken
+   * down inside the very write that repaints — so what is drawn is checked
+   * against the overlay as it stands now rather than as it stood then.
    */
   overlay?: StrokeOverlay
 }>()
@@ -163,7 +167,7 @@ function paint() {
      * Straight back to source-over: this canvas is shared with whatever the
      * stack put on it either side of a stroke.
      */
-    if (props.overlay) {
+    if (props.overlay && stroke.layerId === node.entry.id) {
       const { canvas, region, op } = props.overlay
       ctx.globalCompositeOperation = op
       ctx.drawImage(canvas, region.x, region.y, region.w, region.h)

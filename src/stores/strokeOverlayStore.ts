@@ -71,11 +71,22 @@ export const useStrokeOverlayStore = defineStore('strokeOverlay', () => {
   const current = shallowRef<StrokeOverlay | null>(null)
   let op: StrokeOverlayOp = 'source-over'
 
-  function begin(id: string, operator: StrokeOverlayOp): void {
+  /**
+   * Which stroke this overlay belongs to. There is one overlay because there is
+   * one hand, but a stroke's tail outlives the hand that drew it — the write
+   * waits on a handover — so the stroke that takes the overlay down has to be
+   * asked whether it is still the one holding it.
+   */
+  let ticket = 0
+
+  /** Hands the overlay to a new stroke, and hands back its claim on it. */
+  function begin(id: string, operator: StrokeOverlayOp): number {
     current.value = null
     op = operator
     layerId.value = id
     revision.value++
+    ticket += 1
+    return ticket
   }
 
   /**
@@ -105,10 +116,15 @@ export const useStrokeOverlayStore = defineStore('strokeOverlay', () => {
   }
 
   /**
-   * Ends the stroke. The caller commits in the same task, so the picture never
-   * shows a layer that has neither the stroke nor the write.
+   * Ends the stroke that `held` was given for, and nothing else. The caller
+   * commits in the same task, so the picture never shows a layer that has
+   * neither the stroke nor the write.
+   *
+   * Safe to call twice, which is what lets a caller take it down where the
+   * write goes up and still have somewhere to put a backstop.
    */
-  function end(): void {
+  function end(held: number): void {
+    if (held !== ticket) return
     if (current.value === null && layerId.value === null) return
     current.value = null
     layerId.value = null

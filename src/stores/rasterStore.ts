@@ -104,21 +104,46 @@ export const useRasterStore = defineStore('raster', () => {
     return held.value.get(entry.id)?.frame ?? entry
   }
 
+  /** The handovers that have been started and have not landed. */
+  const arriving = new Map<string, Promise<void>>()
+
   /**
    * Hands a layer's whole pixels to the engine, once.
    *
-   * The decode is the same one the stack does to draw the layer, done again
-   * rather than borrowed from it: the stack owns its bitmaps and closes them
-   * when a run unmounts, and a takeover that depended on one being alive would
-   * be a takeover that fails depending on what is on screen.
+   * Once even against a second caller that arrives while the first is still in
+   * the air. A handover reads a file and decodes it, so "is it held" is false
+   * for the whole of that, and two quick strokes on the same untouched layer
+   * would both cross over — the later arrival overwriting the engine's tiles,
+   * and with them whatever the earlier stroke had already committed.
    */
-  async function take(
+  function take(
     entry: RasterLayerEntry,
     pageId: string,
     layersDir: string,
     pageDir: string,
   ): Promise<void> {
-    if (held.value.has(entry.id)) return
+    if (held.value.has(entry.id)) return Promise.resolve()
+    const already = arriving.get(entry.id)
+    if (already !== undefined) return already
+    const arrival = handOver(entry, pageId, layersDir, pageDir).finally(() => {
+      arriving.delete(entry.id)
+    })
+    arriving.set(entry.id, arrival)
+    return arrival
+  }
+
+  /**
+   * The decode is the same one the stack does to draw the layer, done again
+   * rather than borrowed from it: the stack owns its bitmaps and closes them
+   * when a run unmounts, and a takeover that depended on one being alive would
+   * be a takeover that fails depending on what is on screen.
+   */
+  async function handOver(
+    entry: RasterLayerEntry,
+    pageId: string,
+    layersDir: string,
+    pageDir: string,
+  ): Promise<void> {
     const frame: EngineLayerFrame = { x: entry.x, y: entry.y, w: entry.w, h: entry.h }
     const canvas = new OffscreenCanvas(Math.max(1, frame.w), Math.max(1, frame.h))
     let rgba = new Uint8Array(0)

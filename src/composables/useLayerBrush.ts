@@ -49,7 +49,21 @@ interface Stroke {
   dirty: Rect
   /** The layer's handover, begun with the press and awaited at the release. */
   taken: Promise<void>
+  /** This stroke's claim on the overlay, which only it may take down. */
+  shown: number
 }
+
+/**
+ * One stroke's release at a time, in the order the hand drew them.
+ *
+ * A release waits on the layer's handover, and how long that takes depends on
+ * whether the layer had been touched before — so a quick second stroke on a
+ * layer already over there can otherwise overtake a first one that is still
+ * reading a file, and reach the undo stack ahead of it. The stack would then
+ * take them back in the order they finished rather than the order they were
+ * drawn, which is not an order anybody watched happen.
+ */
+let releases: Promise<void> = Promise.resolve()
 
 /**
  * The brush and the eraser, painting the selected raster layer.
@@ -243,9 +257,9 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       surface: EMPTY_SURFACE,
       dirty: EMPTY_RECT,
       taken,
+      shown: overlay.begin(entry.id, operatorFor(mode, entry.alphaLocked)),
     }
     stroke = opened
-    overlay.begin(entry.id, operatorFor(mode, entry.alphaLocked))
     strokeTo(at)
     return true
   }
@@ -277,23 +291,39 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    * interrupts.
    */
   function onPointerUp(): boolean {
-    if (stroke === null) return false
-    void endStroke()
+    const s = stroke
+    if (s === null) return false
+    /*
+     * Taken here rather than inside the release, because the release is queued
+     * behind whatever is still finishing and by the time it runs another press
+     * may have opened a stroke of its own — which it would then end instead of
+     * this one.
+     */
+    stroke = null
+    releases = releases.then(() => endStroke(s)).catch((err: unknown) => {
+      console.error('stroke failed', err)
+    })
     return true
   }
 
-  async function endStroke(): Promise<void> {
-    const s = stroke
-    stroke = null
+  async function endStroke(s: Stroke): Promise<void> {
+    try {
+      await bank(s)
+    } finally {
+      // A backstop. The happy path takes it down where the write goes up, so
+      // that no frame is drawn holding both; this is for the paths that never
+      // reach there — a handover that failed, an engine that refused.
+      overlay.end(s.shown)
+    }
+  }
+
+  async function bank(s: Stroke): Promise<void> {
     /*
      * A press that drew nothing — a brush sized to nothing, a click out past
      * the page — is not a step. Nothing has been handed to the engine yet, so
      * there is nothing to take back either.
      */
-    if (s === null || isEmptyRect(s.dirty)) {
-      overlay.end()
-      return
-    }
+    if (isEmptyRect(s.dirty)) return
 
     const at = s.dirty
     // Outside a selection the stroke is cut to nothing, so neither the pixels
@@ -331,7 +361,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
      * write repaints as it lands and would otherwise draw the stroke twice —
      * once from the layer and once from an overlay saying the same thing.
      */
-    overlay.end()
+    overlay.end(s.shown)
     // Coverage that came to nothing once the selection had cut it, or a fully
     // transparent colour. Neither is a failure and neither is a step.
     if (patch === null) return

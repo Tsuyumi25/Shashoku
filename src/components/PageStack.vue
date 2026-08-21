@@ -59,12 +59,17 @@ const props = defineProps<{
 const stroke = useStrokeOverlayStore()
 
 /**
- * A gesture and a stroke both want their layer on a canvas of its own, and one
- * hand cannot be doing both — so they share the cut.
+ * A gesture and a stroke both want their layer on a canvas of its own. One hand
+ * cannot be doing both at once, but a stroke's tail outlives the hand that drew
+ * it — so both are named, and the one that has just finished keeps its canvas
+ * until its write has landed.
  */
-const segments = computed(() =>
-  stackSegments(props.nodes, props.held?.id ?? stroke.layerId ?? null),
-)
+const segments = computed(() => {
+  const alone = new Set<string>()
+  if (props.held) alone.add(props.held.id)
+  if (stroke.layerId !== null) alone.add(stroke.layerId)
+  return stackSegments(props.nodes, alone)
+})
 
 function placeFor(segment: StackSegment): LayerPlacement | undefined {
   if (!props.held || segment.kind !== 'run') return undefined

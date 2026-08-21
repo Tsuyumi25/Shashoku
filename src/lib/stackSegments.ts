@@ -34,13 +34,20 @@ export type StackSegment =
  *
  * `alone` is the second reason to break a run: a layer under a gesture is drawn
  * at an offset of its own, and a canvas it shares would carry its neighbours
- * along with it. Only for as long as the gesture lasts — the decoded layers are
- * held above this, so a re-cut is a rearrangement of pixels that are already
- * there and selecting a layer has no reason to move anything.
+ * along with it; a layer under a stroke has that stroke composited onto it, and
+ * an eraser sharing a canvas would punch through its neighbours. Only for as
+ * long as those last — the decoded layers are held above this, so a re-cut is a
+ * rearrangement of pixels that are already there and selecting a layer has no
+ * reason to move anything.
+ *
+ * A set rather than one id, because the two outlive each other: a stroke's
+ * write waits on a handover, and a hand that lets go and grabs a different
+ * layer in that window would otherwise put the layer it had just painted back
+ * into a shared run and take the paint off screen until the write landed.
  */
 export function stackSegments(
   nodes: readonly StackNode[],
-  alone: string | null = null,
+  alone: ReadonlySet<string> = new Set(),
 ): StackSegment[] {
   const out: StackSegment[] = []
   for (const node of nodes) {
@@ -49,16 +56,16 @@ export function stackSegments(
       continue
     }
     const last = out[out.length - 1]
-    const held = node.entry.id === alone
+    const held = alone.has(node.entry.id)
     if (
       !held &&
       node.blendMode === 'normal' &&
       last !== undefined &&
       last.kind === 'run' &&
       last.blendMode === 'normal' &&
-      // A run that ended on the held layer stays closed; joining it would put
-      // the neighbour back under the transform the split exists to keep off it.
-      last.nodes[0].entry.id !== alone
+      // A run that ended on a held layer stays closed; joining it would put the
+      // neighbour back under whatever the split exists to keep off it.
+      !alone.has(last.nodes[0].entry.id)
     ) {
       last.nodes.push(node)
       continue
