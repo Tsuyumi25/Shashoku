@@ -7,6 +7,7 @@
       :container="container"
       :view="view"
       :place="placeFor(segment)"
+      :overlay="overlayFor(segment)"
     />
     <PageStack
       v-else
@@ -28,6 +29,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { stackSegments, type StackSegment } from '@/lib/stackSegments'
 import type { ViewTransform } from '@/lib/coords'
 import type { LayerPlacement } from '@/lib/layerTransform'
+import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
 /**
  * A page's stack as elements, in the order the browser paints siblings — which
@@ -54,11 +56,31 @@ const props = defineProps<{
   held?: { id: string; place: LayerPlacement } | null
 }>()
 
-const segments = computed(() => stackSegments(props.nodes, props.held?.id ?? null))
+const stroke = useStrokeOverlayStore()
+
+/**
+ * A gesture and a stroke both want their layer on a canvas of its own, and one
+ * hand cannot be doing both — so they share the cut.
+ */
+const segments = computed(() =>
+  stackSegments(props.nodes, props.held?.id ?? stroke.layerId ?? null),
+)
 
 function placeFor(segment: StackSegment): LayerPlacement | undefined {
   if (!props.held || segment.kind !== 'run') return undefined
   return segment.nodes[0].entry.id === props.held.id ? props.held.place : undefined
+}
+
+/**
+ * The stroke in progress, for the run that is the layer it is being drawn on.
+ *
+ * Given out here rather than read where it is drawn, so that the one place
+ * deciding a run is alone is also the place that moves its opacity off the
+ * canvas — see `styleFor`.
+ */
+function overlayFor(segment: StackSegment): StrokeOverlay | undefined {
+  if (segment.kind !== 'run' || segment.nodes.length !== 1) return undefined
+  return stroke.overlayFor(segment.nodes[0].entry.id) ?? undefined
 }
 
 /**
@@ -74,7 +96,17 @@ function styleFor(segment: StackSegment): CSSProperties {
     // Every object's opacity is already drawn in, so only a blend mode is left
     // for CSS to apply — and it applies against the page, which is what a
     // shared canvas could not have given it.
-    return segment.blendMode === 'normal' ? {} : { mixBlendMode: asBlendMode(segment.blendMode) }
+    const style: CSSProperties =
+      segment.blendMode === 'normal' ? {} : { mixBlendMode: asBlendMode(segment.blendMode) }
+    /*
+     * With one exception: a layer under a stroke has its opacity here instead.
+     * The stroke is drawn onto the layer inside that canvas, and the two are
+     * one picture that the opacity applies to once — drawn in separately they
+     * would each be faded, and the rim where they overlap would come out
+     * lighter than the release then makes it.
+     */
+    if (overlayFor(segment)) style.opacity = segment.nodes[0].opacity
+    return style
   }
   const { opacity, blendMode } = segment.node
   const style: CSSProperties = { opacity }

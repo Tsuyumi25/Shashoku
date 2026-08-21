@@ -15,6 +15,7 @@ import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
 import { useRasterStore } from '@/stores/rasterStore'
+import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
 /**
  * A run of the page's objects on one canvas, drawn in page coordinates under
@@ -52,17 +53,49 @@ const props = defineProps<{
    * into view along with the layer.
    */
   place?: LayerPlacement
+  /**
+   * The stroke being drawn on this run's layer, which `PageStack` only hands
+   * over when that layer is alone here. Alone is what makes it drawable: an
+   * eraser takes alpha out of this canvas, and a neighbour sharing it would
+   * have a hole punched through it too.
+   */
+  overlay?: StrokeOverlay
 }>()
 
 const dpr = window.devicePixelRatio || 1
 
 const raster = useRasterStore()
+const stroke = useStrokeOverlayStore()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
-/** A layer with no frame yet has nothing to draw. */
-function drawable(node: RasterStackNode): boolean {
-  return node.entry.w > 0 && node.entry.h > 0
+/**
+ * One raster layer, or nothing when it has no pixels to put anywhere yet.
+ *
+ * A layer the engine holds draws from the canvas its patches are pasted into,
+ * not from the file — the file is one write behind for as long as an edit is
+ * being made, and that canvas is what an edit changes. Its frame comes from
+ * there too, because the manifest is not told a layer grew until the file
+ * naming the new frame is safely on disk. Which is also why the frame decides
+ * whether there is anything to draw: the manifest's is still the frame from
+ * before the edit, and on a layer first painted this session that is nothing.
+ */
+function drawRaster(ctx: CanvasRenderingContext2D, node: RasterStackNode): void {
+  const live = raster.liveLayer(node.entry.id)
+  const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
+  if (!source) return
+  const { x, y, w: fw, h: fh } = live?.frame ?? node.entry
+  if (fw <= 0 || fh <= 0) return
+  if (props.place) {
+    // Around the layer's own middle, and undone afterwards so a preview can
+    // never leak onto whatever else this canvas holds.
+    ctx.save()
+    applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
+    ctx.drawImage(source, 0, 0, fw, fh)
+    ctx.restore()
+    return
+  }
+  ctx.drawImage(source, x, y, fw, fh)
 }
 
 /**
@@ -115,32 +148,29 @@ function paint() {
   for (const node of props.nodes) {
     // Only a run of normally-blending objects shares a canvas, so drawing each
     // at its own alpha over the last is the same picture CSS would make of
-    // them one at a time.
-    ctx.globalAlpha = node.opacity
+    // them one at a time. A run carrying a stroke is the exception: its opacity
+    // is on the element, because it belongs to the layer and the stroke as one.
+    ctx.globalAlpha = props.overlay ? 1 : node.opacity
     if (node.kind === 'text') {
       drawText(ctx, node.entry)
       continue
     }
-    if (!drawable(node)) continue
-    // A layer the engine holds draws from the canvas its patches are pasted
-    // into, not from the file — the file is one write behind for as long as an
-    // edit is being made, and that canvas is what an edit changes. Its frame
-    // comes from there too, because the manifest is not told a layer grew until
-    // the file naming the new frame is safely on disk.
-    const live = raster.liveLayer(node.entry.id)
-    const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
-    if (!source) continue
-    const { x, y, w: fw, h: fh } = live?.frame ?? node.entry
-    if (props.place) {
-      // Around the layer's own middle, and undone afterwards so a preview can
-      // never leak onto whatever else this canvas holds.
-      ctx.save()
-      applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
-      ctx.drawImage(source, 0, 0, fw, fh)
-      ctx.restore()
-      continue
+    drawRaster(ctx, node)
+    /*
+     * After the layer and before anything else, so the operator meets the
+     * layer's own pixels — and whether the layer drew anything or not. A first
+     * stroke on a layer with no frame yet is exactly the case where the layer
+     * contributes nothing and the stroke is the whole of the picture.
+     *
+     * Straight back to source-over: this canvas is shared with whatever the
+     * stack put on it either side of a stroke.
+     */
+    if (props.overlay) {
+      const { canvas, region, op } = props.overlay
+      ctx.globalCompositeOperation = op
+      ctx.drawImage(canvas, region.x, region.y, region.w, region.h)
+      ctx.globalCompositeOperation = 'source-over'
     }
-    ctx.drawImage(source, x, y, fw, fh)
   }
   ctx.globalAlpha = 1
   probePaint(performance.now() - started)
@@ -213,6 +243,9 @@ watch(() => raster.committed, paint, { flush: 'sync' })
  * every object on it. The frame that a write cancels is this one.
  */
 watch(() => raster.revision, () => (probeSync() ? paint() : schedulePaint()), { flush: 'sync' })
+
+/** The stroke on this run's layer, which moves for the same reason and as often. */
+watch(() => stroke.revision, schedulePaint)
 
 watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 

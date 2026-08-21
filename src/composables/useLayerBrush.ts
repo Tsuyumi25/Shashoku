@@ -1,8 +1,8 @@
 import type { Ref } from 'vue'
-import type { EngineLayerPixels } from '@shared/engine/types'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
+import { hexToRgb } from '@/lib/color'
 import { screenToContentPx } from '@/lib/coords'
 import { strokeMask } from '@/lib/selection/brushMask'
 import {
@@ -27,6 +27,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { useStrokeOverlayStore, type StrokeOverlayOp } from '@/stores/strokeOverlayStore'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 
 /**
@@ -60,6 +61,12 @@ interface Stroke {
  * transaction, one swappable record. That is what makes a stroke one step in
  * the stack however many segments it was drawn from.
  *
+ * What is on screen while the hand is down is that coverage painted onto a
+ * canvas of the stroke's own, drawn over the layer by the stack. The engine is
+ * not asked, which is the point: it was asked once per pointer event, and the
+ * answer is a region of pixels — megabytes a frame under a wide brush moving
+ * quickly, and the boundary crossing was the cost of the whole feature.
+ *
  * Coverage accumulates the same way in both directions: which of them this is
  * decides nothing until the commit picks the operator. Erasing has nothing of
  * its own in the data model, which is also why it cannot be stopped by the
@@ -72,6 +79,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   const notices = useNoticeStore()
   const preferences = usePreferencesStore()
   const raster = useRasterStore()
+  const overlay = useStrokeOverlayStore()
   const { target, refuse } = useRasterTarget()
 
   let stroke: Stroke | null = null
@@ -124,6 +132,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       s.from = at
       return
     }
+    overlay.holding(region)
     // Always the painting direction: this is coverage, and the eraser's coverage
     // is laid down exactly like the brush's. The operator is the commit's.
     const local = strokeMask(
@@ -165,51 +174,38 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   /**
    * Shows the stroke as it stands, over the segment just drawn.
    *
-   * The layer's own canvas is what this lands on, so the stack composites the
-   * preview with the layer's opacity and blend mode without either being said
-   * twice. Nothing is committed: the tiles and the frame the engine holds are
-   * untouched all the way to the release, and no record is filed.
+   * Only the segment: the overlay keeps what earlier segments put on it, and
+   * coverage is a ceiling rather than a sum, so putting the same pixels down
+   * again where the stroke crossed itself lands on the value already there.
    *
-   * No rectangle is worked out here beyond the segment that was just drawn. The
-   * frame a preview stands on and how much of the layer has to come back with
-   * it are the engine's answers, arrived at by the arithmetic the release will
-   * use — which is what stops the two of them from landing apart.
+   * Nothing is committed and nothing is asked of the engine — which is also why
+   * this works before the layer has been handed over. The first stamp of the
+   * first stroke on a layer is visible while that handover is still in flight.
    */
   function show(s: Stroke, segment: Rect): void {
-    if (!raster.holds(s.entry.id) || isEmptyRect(segment)) return
-    const shown = ask(s, segment)
-    // Nothing covered, once the selection had cut it. Not a failure and not
-    // something to show.
-    if (shown === null) return
-    /*
-     * Nothing painted means the frame moved, and the answer is the frame alone.
-     * The picture it is measured against is about to be rebuilt from nothing,
-     * so what is wanted is the whole of it — and the whole of it holds more
-     * than this segment drew, since everything earlier in the stroke is
-     * uncommitted and lives nowhere but on the picture being replaced. So it is
-     * asked again, over the frame the engine named, with everything the stroke
-     * has laid down so far.
-     */
-    if (!isEmptyRect(shown.changed)) {
-      raster.paste(s.entry.id, shown, true)
-      return
-    }
-    const whole = ask(s, shown.frame)
-    if (whole !== null) raster.paste(s.entry.id, whole, true)
+    if (isEmptyRect(segment)) return
+    overlay.show(inked(coverageFor(s, segment), segment, editor.foreground), segment)
   }
 
-  /** What the layer would look like over `at`, with the stroke laid on it. */
-  function ask(s: Stroke, at: Rect): EngineLayerPixels | null {
-    const coverage = coverageFor(s, at)
-    return s.mode === 'erase'
-      ? window.engine.rasterPreviewErase(s.entry.id, coverage, at)
-      : window.engine.rasterPreviewFill(
-          s.entry.id,
-          coverage,
-          at,
-          editor.foreground,
-          s.entry.alphaLocked,
-        )
+  /**
+   * Coverage as pixels, in straight alpha: the colour is the colour and the
+   * coverage is the alpha, which is what the engine's fill makes of the two.
+   *
+   * The eraser paints here as well and its colour is never seen —
+   * `destination-out` reads the alpha and nothing else.
+   */
+  function inked(coverage: Uint8Array, at: Rect, color: string): ImageData {
+    const { r, g, b } = hexToRgb(color) ?? { r: 0, g: 0, b: 0 }
+    const image = new ImageData(Math.max(1, at.w), Math.max(1, at.h))
+    const out = image.data
+    for (let i = 0; i < coverage.length; i++) {
+      const p = i * 4
+      out[p] = r
+      out[p + 1] = g
+      out[p + 2] = b
+      out[p + 3] = coverage[i]
+    }
+    return image
   }
 
   function onPointerDown(e: PointerEvent): boolean {
@@ -251,16 +247,19 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       taken,
     }
     stroke = opened
-    // Nothing can be shown until the layer is over there. A press held still on
-    // a layer being taken over would otherwise sit blank until it moved, so the
-    // handover landing is itself a reason to draw.
-    void taken.then(() => {
-      if (stroke !== opened) return
-      window.engine.rasterPreviewBegin(opened.entry.id)
-      show(opened, opened.dirty)
-    })
+    overlay.begin(entry.id, operatorFor(mode, entry.alphaLocked))
     strokeTo(at)
     return true
+  }
+
+  /**
+   * How the overlay meets the layer, which is the canvas's name for what the
+   * release will do. The alpha lock has nothing to say to the eraser: there is
+   * no fill for it to hold back, only a hole.
+   */
+  function operatorFor(mode: MaskBrushMode, alphaLocked: boolean): StrokeOverlayOp {
+    if (mode === 'erase') return 'destination-out'
+    return alphaLocked ? 'source-atop' : 'source-over'
   }
 
   function onPointerMove(e: PointerEvent): boolean {
@@ -289,7 +288,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
      * the page — is not a step. Nothing has been handed to the engine yet, so
      * there is nothing to take back either.
      */
-    if (s === null || isEmptyRect(s.dirty)) return
+    if (s === null || isEmptyRect(s.dirty)) {
+      overlay.end()
+      return
+    }
 
     const at = s.dirty
     // Outside a selection the stroke is cut to nothing, so neither the pixels
@@ -321,6 +323,13 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
             editor.foreground,
             s.entry.alphaLocked,
           )
+    /*
+     * Taken down in the same task the write goes up in, so no frame is drawn
+     * between the two. Dropped before the write rather than after, because the
+     * write repaints as it lands and would otherwise draw the stroke twice —
+     * once from the layer and once from an overlay saying the same thing.
+     */
+    overlay.end()
     // Coverage that came to nothing once the selection had cut it, or a fully
     // transparent colour. Neither is a failure and neither is a step.
     if (patch === null) return
