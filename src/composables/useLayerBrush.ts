@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { EngineLayerPixels } from '@shared/engine/types'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
@@ -8,7 +9,6 @@ import {
   clampToPage,
   EMPTY_RECT,
   isEmptyRect,
-  sameRect,
   unionRect,
   type Point,
   type Rect,
@@ -168,39 +168,46 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    * twice. Nothing is committed: the tiles and the frame the engine holds are
    * untouched all the way to the release, and no record is filed.
    *
-   * A segment is all that is repainted while the frame stands still. When it
-   * has to move — a stroke reaching past the layer's edge, or any stroke at all
-   * on a layer that has no frame yet — the canvas is rebuilt underneath, so
-   * everything inside the new frame is asked for instead.
+   * No rectangle is worked out here beyond the segment that was just drawn. The
+   * frame a preview stands on and how much of the layer has to come back with
+   * it are the engine's answers, arrived at by the arithmetic the release will
+   * use — which is what stops the two of them from landing apart.
    */
   function show(s: Stroke, segment: Rect): void {
-    const live = raster.liveLayer(s.entry.id)
-    if (live === null) return
-    const frame = unionRect(live.frame, s.surface.region)
-    const moved = !sameRect(frame, live.frame)
-    const at = moved ? frame : segment
-    if (isEmptyRect(at)) return
-
-    const coverage = coverageFor(s, at)
+    if (!raster.holds(s.entry.id) || isEmptyRect(segment)) return
+    const shown = ask(s, segment)
+    // Nothing covered, once the selection had cut it. Not a failure and not
+    // something to show.
+    if (shown === null) return
     /*
-     * A segment the selection cut away entirely has nothing to show, and
-     * showing it anyway would not be merely wasteful: the frame handed to the
-     * paste is the one this stroke might grow into, so a stroke drawn wholly
-     * outside a selection would enlarge the layer while committing nothing.
+     * Nothing painted means the frame moved, and the answer is the frame alone.
+     * The picture it is measured against is about to be rebuilt from nothing,
+     * so what is wanted is the whole of it — and the whole of it holds more
+     * than this segment drew, since everything earlier in the stroke is
+     * uncommitted and lives nowhere but on the picture being replaced. So it is
+     * asked again, over the frame the engine named, with everything the stroke
+     * has laid down so far.
      */
-    if (!coverage.some((byte) => byte !== 0)) return
-    const rgba =
-      s.mode === 'erase'
-        ? window.engine.rasterPreviewErase(s.entry.id, coverage, at)
-        : window.engine.rasterPreviewFill(
-            s.entry.id,
-            coverage,
-            at,
-            editor.foreground,
-            s.entry.alphaLocked,
-          )
-    if (rgba === null) return
-    raster.paste(s.entry.id, { frame, changed: at, rgba })
+    if (!isEmptyRect(shown.changed)) {
+      raster.paste(s.entry.id, shown, true)
+      return
+    }
+    const whole = ask(s, shown.frame)
+    if (whole !== null) raster.paste(s.entry.id, whole, true)
+  }
+
+  /** What the layer would look like over `at`, with the stroke laid on it. */
+  function ask(s: Stroke, at: Rect): EngineLayerPixels | null {
+    const coverage = coverageFor(s, at)
+    return s.mode === 'erase'
+      ? window.engine.rasterPreviewErase(s.entry.id, coverage, at)
+      : window.engine.rasterPreviewFill(
+          s.entry.id,
+          coverage,
+          at,
+          editor.foreground,
+          s.entry.alphaLocked,
+        )
   }
 
   function onPointerDown(e: PointerEvent): boolean {
@@ -246,7 +253,9 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // a layer being taken over would otherwise sit blank until it moved, so the
     // handover landing is itself a reason to draw.
     void taken.then(() => {
-      if (stroke === opened) show(opened, opened.dirty)
+      if (stroke !== opened) return
+      window.engine.rasterPreviewBegin(opened.entry.id)
+      show(opened, opened.dirty)
     })
     strokeTo(at)
     return true

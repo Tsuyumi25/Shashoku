@@ -423,9 +423,13 @@ const layerAlpha = useLayerAlpha(
   () => rasterFrames.value,
   (entry) => {
     const live = raster.liveLayer(entry.id)
+    // Keyed on what has been written rather than on what has been drawn. A
+    // preview puts the same pixels on the same canvas, so a plane read before
+    // one is as true as a plane read after — and building a plane reads a whole
+    // canvas back, which at one per pointer event is most of a stroke's cost.
     return live === null
       ? null
-      : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.revision}` }
+      : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.committed}` }
   },
 )
 

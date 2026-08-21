@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
+import type { EngineLayerPixels } from '@shared/engine/types'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { useLayerBrush } from '@/composables/useLayerBrush'
 import { rasterizeRect } from '@/lib/selection/raster'
@@ -172,14 +173,9 @@ async function pressAndSettle(
   await settle()
 }
 
-/**
- * The layer's own pixels over a rectangle, read through the preview with
- * nothing laid on it. A fill of no coverage is the layer as it stands, which
- * makes this the one read-back the engine's surface offers.
- */
+/** The layer as the engine holds it — the pixels the previews stand in for. */
 function layerPixels(id: string, at: { x: number; y: number; w: number; h: number }): Uint8Array {
-  const nothing = new Uint8Array(at.w * at.h)
-  return engine.rasterPreviewFill(id, nothing, at, '#000000', false)!
+  return engine.rasterRead(id, at)
 }
 
 beforeEach(() => {
@@ -380,13 +376,16 @@ describe('a selection bounds the stroke', () => {
 })
 
 describe('the stroke as it is being drawn', () => {
-  function open() {
-    const { editor, project } = openWith(raster('r'))
+  function open(frame: Partial<RasterLayerEntry> = {}) {
+    const { editor, project } = openWith(raster('r', frame))
     editor.selectOnly('r')
     editor.setTool('brush')
     useSelectionStore().brushes.paint.size = 8
     return { editor, project, brush: useLayerBrush(container) }
   }
+
+  /** A layer whose frame already covers the page, so no stroke can move it. */
+  const framed = { x: 0, y: 0, w: PAGE.w, h: PAGE.h }
 
   it('shows the stroke before the button comes up', async () => {
     const { brush } = open()
@@ -401,13 +400,55 @@ describe('the stroke as it is being drawn', () => {
 
   /** One crossing per event, which is the whole of the cost being spent. */
   it('asks the engine once per pointer event, and does not save them up', async () => {
-    const { brush } = open()
+    const { brush } = open(framed)
     await pressAndSettle(brush, { x: 50, y: 50 })
     const preview = vi.spyOn(engine, 'rasterPreviewFill')
 
     brush.onPointerMove(press(60, 50))
     brush.onPointerMove(press(70, 50))
     brush.onPointerMove(press(80, 50))
+
+    expect(preview).toHaveBeenCalledTimes(3)
+  })
+
+  /**
+   * The one event that costs two. A frame that moved is answered over the whole
+   * of itself, and that answer has to carry the whole stroke rather than the
+   * segment the first question was about — so the region the engine names is
+   * asked about again. Said out loud because the standing rule is one crossing
+   * an event, and this is where it does not hold.
+   */
+  it('costs a second crossing on the event that moves the frame', async () => {
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    // Far enough to leave the room the first move took with it.
+    brush.onPointerMove(press(1200, 900))
+
+    expect(preview).toHaveBeenCalledTimes(2)
+    const moved = preview.mock.results[0].value as EngineLayerPixels
+    // The first answer is the frame alone — no pixels, because the ones wanted
+    // next are the whole frame's and this segment's mask cannot paint them.
+    expect(moved.rgba.length).toBe(0)
+    // The second asks over exactly that frame.
+    expect(preview.mock.calls[1][2]).toEqual(moved.frame)
+  })
+
+  /**
+   * And the events either side of it cost one. Room to grow into is what makes
+   * the expensive event rare rather than every event — a frame moving on each
+   * one is a rebuild on each one, which is the most expensive thing a stroke
+   * can ask for.
+   */
+  it('takes room with it, so the events after a move are cheap again', async () => {
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    brush.onPointerMove(press(70, 55))
+    brush.onPointerMove(press(90, 60))
+    brush.onPointerMove(press(110, 65))
 
     expect(preview).toHaveBeenCalledTimes(3)
   })
@@ -437,15 +478,14 @@ describe('the stroke as it is being drawn', () => {
     const preview = vi.spyOn(engine, 'rasterPreviewFill')
 
     brush.onPointerMove(press(70, 50))
-    const [, , at] = preview.mock.calls[preview.mock.calls.length - 1]
-    const shown = preview.mock.results[preview.mock.results.length - 1].value as Uint8Array
+    const last = preview.mock.results[preview.mock.results.length - 1].value as EngineLayerPixels
 
     brush.onPointerUp()
     await settle()
 
     // Paint in it, so the two agreeing is not two blanks agreeing.
-    expect(shown.some((byte) => byte !== 0)).toBe(true)
-    expect([...layerPixels('r', at)]).toEqual([...shown])
+    expect(last.rgba.some((byte) => byte !== 0)).toBe(true)
+    expect([...layerPixels('r', last.changed)]).toEqual([...last.rgba])
   })
 
   it('shows the eraser punching through, not painting over', async () => {
@@ -460,10 +500,127 @@ describe('the stroke as it is being drawn', () => {
     eraser.onPointerMove(press(72, 50))
 
     expect(preview).toHaveBeenCalled()
-    const shown = preview.mock.results[0].value as Uint8Array
-    const [, , at] = preview.mock.calls[0]
+    const shown = preview.mock.results[0].value as EngineLayerPixels
+    const at = shown.changed
     const middle = ((70 - at.y) * at.w + (71 - at.x)) * 4
-    expect(shown[middle + 3]).toBe(0)
+    expect(shown.rgba[middle + 3]).toBe(0)
+  })
+
+  /**
+   * The frame a preview stands on has to be the one the release settles for.
+   * The renderer's copy of a layer is rebuilt whenever its frame changes, so a
+   * preview standing on a frame the release then disagrees with has that copy
+   * thrown away and only the tiles the write touched put back — the rest of the
+   * layer vanishing under the hand that drew it.
+   */
+  it('never moves the frame of a layer whose frame already holds the stroke', async () => {
+    const { brush } = open(framed)
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const stood = { ...useRasterStore().liveLayer('r')!.frame }
+
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerMove(press(90, 62))
+    expect(useRasterStore().liveLayer('r')!.frame).toEqual(stood)
+
+    brush.onPointerUp()
+    await settle()
+
+    expect(useRasterStore().liveLayer('r')!.frame).toEqual(stood)
+  })
+
+  /**
+   * Taking pixels out never moves a frame, so neither may showing it about to
+   * happen — even reaching past the edge, where there is nothing to take.
+   */
+  it('never moves the frame for an eraser, edge or not', async () => {
+    const { editor, brush } = open(framed)
+    await stroke(brush, { x: 50, y: 50 }, { x: 90, y: 50 })
+    const stood = { ...useRasterStore().liveLayer('r')!.frame }
+
+    editor.setTool('eraser')
+    const eraser = useLayerBrush(container)
+    await pressAndSettle(eraser, { x: PAGE.w - 2, y: PAGE.h - 2 })
+    eraser.onPointerMove(press(PAGE.w + 40, PAGE.h + 40))
+
+    expect(useRasterStore().liveLayer('r')!.frame).toEqual(stood)
+  })
+
+  /**
+   * On a layer the stroke does grow, the frame the previews stood on is wider
+   * than the one the release settles for — and that is safe only because a
+   * release that moved its own bounds hands the whole frame back, so the
+   * rebuild it causes is fed everything rather than a few tiles.
+   */
+  it('is handed the whole frame by the release that moved it', async () => {
+    const { brush } = open()
+    const fill = vi.spyOn(engine, 'rasterFill')
+
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    brush.onPointerMove(press(90, 62))
+    brush.onPointerUp()
+    await settle()
+
+    const patch = fill.mock.results[0].value as EngineLayerPixels
+    expect(patch.changed).toEqual(patch.frame)
+  })
+
+  /**
+   * A frame that moves takes the whole of itself back, and the whole of it has
+   * to hold the whole stroke. Everything drawn earlier is uncommitted — it
+   * lives nowhere but on the picture the move is about to replace — so an
+   * answer worked out from one segment's coverage would rub it out.
+   */
+  it('keeps what the stroke drew earlier when the frame has to move', async () => {
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    brush.onPointerMove(press(120, 50))
+    brush.onPointerMove(press(190, 50))
+
+    const last = preview.mock.results[preview.mock.results.length - 1].value as EngineLayerPixels
+    const at = last.changed
+    const first = ((50 - at.y) * at.w + (50 - at.x)) * 4
+    expect(last.rgba[first + 3]).toBe(255)
+  })
+
+  /**
+   * Everything that reads a canvas back to build itself hangs off this. A
+   * stroke shown at one preview per pointer event would have those readbacks
+   * run per event too, and reading a whole canvas back is more than a frame's
+   * worth of time on a layer of any size.
+   */
+  it('says nothing was written until the stroke commits', async () => {
+    const raster = useRasterStore()
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const written = raster.committed
+
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerMove(press(90, 50))
+    brush.onPointerMove(press(110, 50))
+
+    // Drawn on three times over, and written to none.
+    expect(raster.revision).toBeGreaterThan(0)
+    expect(raster.committed).toBe(written)
+
+    brush.onPointerUp()
+    await settle()
+
+    expect(raster.committed).toBeGreaterThan(written)
+  })
+
+  it('does not rebuild the layer underneath when the stroke commits', async () => {
+    const { brush } = open(framed)
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    brush.onPointerMove(press(70, 50))
+    const canvas = useRasterStore().liveLayer('r')!.canvas
+
+    brush.onPointerUp()
+    await settle()
+
+    // The same canvas, so nothing shown on it was thrown away to make room.
+    expect(useRasterStore().liveLayer('r')!.canvas).toBe(canvas)
   })
 
   /**
@@ -478,7 +635,11 @@ describe('the stroke as it is being drawn', () => {
     await pressAndSettle(brush, { x: 50, y: 50 })
     brush.onPointerMove(press(70, 50))
 
-    expect(preview).not.toHaveBeenCalled()
+    // Asked, and told there is nothing there. Emptiness is the engine's answer
+    // rather than a guess made before asking, so there is one place that
+    // decides it and the frame cannot be moved by a guess.
+    expect(preview).toHaveBeenCalled()
+    expect(preview.mock.results.every((call) => call.value === null)).toBe(true)
     expect(useRasterStore().liveLayer('r')?.frame.w).toBe(0)
   })
 })

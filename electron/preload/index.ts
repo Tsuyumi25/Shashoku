@@ -147,6 +147,8 @@ const engineApi: ShashokuEngineApi = {
   rasterFill: (id, mask, maskFrame, color, alphaLocked) =>
     engine.rasterFill(id, mask, maskFrame, color, alphaLocked),
   rasterErase: (id, mask, maskFrame) => engine.rasterErase(id, mask, maskFrame),
+  rasterRead: (id, region) => engine.rasterRead(id, region),
+  rasterPreviewBegin: (id) => engine.rasterPreviewBegin(id),
   rasterPreviewFill: (id, mask, maskFrame, color, alphaLocked) =>
     engine.rasterPreviewFill(id, mask, maskFrame, color, alphaLocked),
   rasterPreviewErase: (id, mask, maskFrame) => engine.rasterPreviewErase(id, mask, maskFrame),

@@ -7,6 +7,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, useTemplateRef, watch } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
+import { useRasterStore } from '@/stores/rasterStore'
 
 /**
  * One raster layer's own picture, at the size of a row.
@@ -35,14 +36,18 @@ const EDGE = 20
 const boxStyle = { width: `${EDGE}px`, height: `${EDGE}px` }
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
+const raster = useRasterStore()
 const dpr = window.devicePixelRatio || 1
 
-let held: ImageBitmap | null = null
+/** What the row is drawing, at the size that picture really is. */
+let shown: { image: CanvasImageSource; w: number; h: number } | null = null
+/** The decode this row owns, when it read one, and so has to close. */
+let owned: ImageBitmap | null = null
 let token = 0
 
 function release() {
-  held?.close()
-  held = null
+  owned?.close()
+  owned = null
 }
 
 function paint() {
@@ -57,27 +62,52 @@ function paint() {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, edge, edge)
-  if (held === null) return
+  if (shown === null) return
 
   // Letterboxed, so a wide patch is not stretched into a square and every row
   // reads at the shape it really is.
-  const scale = Math.min(edge / held.width, edge / held.height)
-  const w = Math.max(1, Math.round(held.width * scale))
-  const h = Math.max(1, Math.round(held.height * scale))
+  const scale = Math.min(edge / shown.w, edge / shown.h)
+  const w = Math.max(1, Math.round(shown.w * scale))
+  const h = Math.max(1, Math.round(shown.h * scale))
   ctx.imageSmoothingEnabled = true
   // Most patches are flat white on transparent, so what survives the reduction
   // is the shape — which is the one thing this is here to show.
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(held, Math.round((edge - w) / 2), Math.round((edge - h) / 2), w, h)
+  ctx.drawImage(shown.image, Math.round((edge - w) / 2), Math.round((edge - h) / 2), w, h)
+}
+
+function blank() {
+  release()
+  shown = null
+  paint()
 }
 
 async function load() {
   const mine = ++token
-  release()
-  paint()
+
+  /*
+   * A layer the engine holds is drawn from the canvas its writes are pasted
+   * into, not from its file. The file is one save behind for as long as a write
+   * is owed — tens of seconds under the pixel scheduler — and a row that waited
+   * for it would keep showing the picture from before the stroke.
+   */
+  const live = raster.liveLayer(props.entry.id)
+  if (live !== null) {
+    release()
+    shown =
+      live.frame.w > 0 && live.frame.h > 0
+        ? { image: live.canvas, w: live.frame.w, h: live.frame.h }
+        : null
+    paint()
+    return
+  }
+
   const { file, w, h } = props.entry
   // A layer nothing has been written to yet has no frame, and so no file.
-  if (w === 0 || h === 0) return
+  if (w === 0 || h === 0) {
+    blank()
+    return
+  }
   try {
     const bytes = await window.api.readImage(props.layersDir, file)
     const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
@@ -85,7 +115,12 @@ async function load() {
       bitmap.close()
       return
     }
-    held = bitmap
+    // Swapped once the replacement is in hand rather than before it is asked
+    // for. Clearing first leaves the row empty across a file read and a decode,
+    // which is long enough to read as a flash.
+    release()
+    owned = bitmap
+    shown = { image: bitmap, w: bitmap.width, h: bitmap.height }
     paint()
   } catch (err) {
     // A row without its picture still says which layer it is by name; the
@@ -95,7 +130,17 @@ async function load() {
 }
 
 watch(
-  () => [props.layersDir, props.entry.file, props.entry.w, props.entry.h] as const,
+  () =>
+    [
+      props.layersDir,
+      props.entry.file,
+      props.entry.w,
+      props.entry.h,
+      // What has been written, not what has been drawn: a stroke being shown
+      // puts the same picture here many times a second, and this one costs a
+      // scaled draw each time.
+      raster.committed,
+    ] as const,
   load,
   { immediate: true },
 )

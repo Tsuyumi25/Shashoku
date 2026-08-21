@@ -47,6 +47,17 @@ export const useRasterStore = defineStore('raster', () => {
   const revision = ref(0)
 
   /**
+   * Bumped only when a layer's *committed* pixels changed — never by a stroke
+   * being shown as it is drawn.
+   *
+   * Redrawing has to follow a preview and reading back does not, and telling
+   * them apart is worth a second counter: a cache keyed on `revision` is
+   * rebuilt once per pointer event, and anything that reads a whole canvas to
+   * build itself then costs the stroke a frame every time the hand moves.
+   */
+  const committed = ref(0)
+
+  /**
    * The pixel half of saving, on a clock of its own and a much slower one than
    * the manifest's. Encoding a whole layer is a tenth of a second or two: paid
    * per stroke that is two orders of magnitude too much, paid every few tens of
@@ -129,8 +140,14 @@ export const useRasterStore = defineStore('raster', () => {
    * `putImageData` rather than a draw, because it ignores compositing entirely —
    * the straight alpha the engine works in survives instead of being blended
    * against what is already on the canvas.
+   *
+   * `shown` marks a stroke being drawn rather than a write that happened, which
+   * only the second counter is told about. What is on the canvas is the same
+   * either way — that is the whole point of a preview — so anything that merely
+   * redraws must not care, and anything that reads the canvas back to build
+   * itself must, or it does that once per pointer event.
    */
-  function paste(id: string, patch: EngineLayerPixels): void {
+  function paste(id: string, patch: EngineLayerPixels, shown = false): void {
     const layer = held.value.get(id)
     if (layer === undefined) return
     const { frame, changed } = patch
@@ -149,6 +166,7 @@ export const useRasterStore = defineStore('raster', () => {
       context2d(layer.canvas).putImageData(image, changed.x - frame.x, changed.y - frame.y)
     }
     revision.value++
+    if (!shown) committed.value++
   }
 
   /**
@@ -267,6 +285,7 @@ export const useRasterStore = defineStore('raster', () => {
 
   return {
     revision,
+    committed,
     liveLayer,
     holds,
     take,
