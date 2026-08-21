@@ -1197,6 +1197,29 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * Inside the lock, unlike the eye and unlike the lock itself: this one decides
+   * where paint may land, which is the very thing a lock is put on to hold
+   * still.
+   *
+   * Applied first, as a rename is: the tree refuses this on anything but a
+   * raster, and a refusal must not reach the stack as a step that undoes to
+   * nothing.
+   */
+  function cmdSetLayerAlphaLocked(pageId: string, layerId: string, alphaLocked: boolean) {
+    if (isLayerLocked(layerId)) return
+    const project = useProjectStore()
+    if (!project.setLayerAlphaLocked(pageId, layerId, alphaLocked)) return
+    pushCommand(
+      {
+        label: `set-alpha-locked ${layerId}`,
+        do: () => project.setLayerAlphaLocked(pageId, layerId, alphaLocked),
+        undo: () => project.setLayerAlphaLocked(pageId, layerId, !alphaLocked),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
    * Left out of the lock deliberately: the eye is a control for looking rather
    * than for changing, and a locked layer that could not be turned off for a
    * moment to see what is under it would be frozen rather than protected. The
@@ -1558,6 +1581,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLayer,
     cmdSetLayerVisible,
     cmdSetLayerLocked,
+    cmdSetLayerAlphaLocked,
     isLayerLocked,
     cmdRenameLayer,
     cmdSetLayerOpacity,

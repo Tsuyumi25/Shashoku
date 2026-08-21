@@ -588,6 +588,22 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /**
+   * A raster only, and refused rather than corrected elsewhere. It is a rule
+   * about where paint may land on this layer's own pixels, and an entry that
+   * holds none has nothing for the rule to be about — a folder's contents each
+   * answer for themselves.
+   */
+  function setLayerAlphaLocked(pageId: string, layerId: string, alphaLocked: boolean): boolean {
+    const file = pageById(pageId)
+    if (!file) return false
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry || entry.kind !== 'raster' || entry.alphaLocked === alphaLocked) return false
+    entry.alphaLocked = alphaLocked
+    markPageDirty(pageId)
+    return true
+  }
+
   /** Any entry too — a folder carries blending so a run can be faded as one. */
   function setLayerOpacity(pageId: string, layerId: string, opacity: number) {
     const file = pageById(pageId)
@@ -1160,6 +1176,7 @@ export const useProjectStore = defineStore('project', () => {
     allTextObjects,
     setLayerVisible,
     setLayerLocked,
+    setLayerAlphaLocked,
     placeLayer,
     renameLayer,
     setLayerOpacity,

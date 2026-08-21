@@ -75,6 +75,31 @@
           <LockOpen v-else :size="12" />
         </button>
 
+        <!--
+          A checkerboard, which is what transparency looks like everywhere: the
+          switch says the empty squares are spoken for. Only a raster has any,
+          and the column is held open on the rows without one so the names below
+          it stay in a line.
+        -->
+        <button
+          v-if="row.entry.kind === 'raster'"
+          type="button"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded"
+          :class="[
+            isRowLocked(row)
+              ? 'cursor-not-allowed text-muted-foreground/40'
+              : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            !row.entry.alphaLocked && !isRowLocked(row) && 'opacity-0 group-hover/row:opacity-100',
+          ]"
+          :title="alphaLockTitle(row)"
+          :disabled="isRowLocked(row)"
+          @click.stop="onToggleAlphaLocked(row.entry)"
+        >
+          <Grid2x2Check v-if="row.entry.alphaLocked" :size="12" />
+          <Grid2x2 v-else :size="12" />
+        </button>
+        <span v-else class="w-5 shrink-0" />
+
         <LayerThumb
           v-if="row.entry.kind === 'raster' && layersDir"
           :entry="row.entry"
@@ -143,6 +168,8 @@ import {
   Eye,
   EyeOff,
   Folder,
+  Grid2x2,
+  Grid2x2Check,
   Image,
   Lock,
   LockOpen,
@@ -230,6 +257,18 @@ function lockTitle(row: LayerTreeRow): string {
 function onToggleLocked(entry: LayerEntry) {
   if (!editor.currentPageId) return
   editor.cmdSetLayerLocked(editor.currentPageId, entry.id, !entry.locked)
+}
+
+function alphaLockTitle(row: LayerTreeRow): string {
+  if (isRowLocked(row)) return '圖層已鎖定'
+  return row.entry.kind === 'raster' && row.entry.alphaLocked
+    ? '解除鎖住透明像素'
+    : '鎖住透明像素（只畫在已經有像素的地方）'
+}
+
+function onToggleAlphaLocked(entry: LayerEntry) {
+  if (!editor.currentPageId || entry.kind !== 'raster') return
+  editor.cmdSetLayerAlphaLocked(editor.currentPageId, entry.id, !entry.alphaLocked)
 }
 
 function onDissolve(folderId: string) {

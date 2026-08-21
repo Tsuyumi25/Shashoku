@@ -3,7 +3,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { isSelectionTool, maskBrushModeOf, UNDO_LIMIT, useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import type { ProjectFile } from '@/types/project'
-import type { GroupLayerEntry, LayerEntry, TextLayerEntry } from '@shared/page/types'
+import type {
+  GroupLayerEntry,
+  LayerEntry,
+  RasterLayerEntry,
+  TextLayerEntry,
+} from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf, textOf } from '@shared/page/text'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
@@ -700,6 +705,24 @@ describe('layer tree edits', () => {
     }
   }
 
+  function raster(id: string): RasterLayerEntry {
+    return {
+      kind: 'raster',
+      id,
+      name: id,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      file: `${id}.png`,
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      alphaLocked: false,
+    }
+  }
+
   function openTree(layers: LayerEntry[], readingOrder: string[]) {
     const project = useProjectStore()
     project.allFiles = [
@@ -785,6 +808,29 @@ describe('layer tree edits', () => {
 
     editor.undo()
     expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
+  })
+
+  const alphaLockOf = (project: ReturnType<typeof useProjectStore>, id: string): boolean => {
+    const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
+    return entry?.kind === 'raster' && entry.alphaLocked
+  }
+
+  it("speaks for a raster's transparent pixels, and takes it back", () => {
+    const { project, editor } = openTree([raster('r')], [])
+
+    editor.cmdSetLayerAlphaLocked(PAGE, 'r', true)
+    expect(alphaLockOf(project, 'r')).toBe(true)
+
+    editor.undo()
+    expect(alphaLockOf(project, 'r')).toBe(false)
+  })
+
+  it('has nothing to lock on an entry that holds no pixels of its own', () => {
+    const { editor } = openTree([folder('g', [label('a')])], ['a'])
+
+    editor.cmdSetLayerAlphaLocked(PAGE, 'g', true)
+
+    expect(editor.canUndo).toBe(false)
   })
 
   describe('a lock refuses every change', () => {
@@ -894,6 +940,16 @@ describe('layer tree edits', () => {
       editor.cmdSetLayerVisible(PAGE, 'a', false)
 
       expect(project.labelById(PAGE, 'a')?.visible).toBe(false)
+    })
+
+    // Where paint may land is exactly what the lock was put on to hold still.
+    it('refuses to speak for the transparent pixels of a locked raster', () => {
+      const { project, editor } = openTree([raster('r')], [])
+      lock(project, 'r')
+
+      editor.cmdSetLayerAlphaLocked(PAGE, 'r', true)
+
+      expect(alphaLockOf(project, 'r')).toBe(false)
     })
 
     // Refusing this would leave no way to take the lock off again.
