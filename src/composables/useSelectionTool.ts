@@ -122,6 +122,13 @@ export function useSelectionTool(
     const target = editor.maskTarget
     const at = pageAt(e)
     if (target === null || at === null) return false
+    /*
+     * The two brushes draw the mask only while Quick Mask is on. Outside it the
+     * same two tools are painting the layer, which is another handler's — and
+     * this one has to say so before it takes the pointer, or the press it
+     * declines would still be recorded as one it caught.
+     */
+    if (maskBrushModeOf(editor.tool) !== null && !selection.quickMask) return false
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     pressed = true
     pressAt = { x: e.clientX, y: e.clientY }
@@ -141,10 +148,7 @@ export function useSelectionTool(
     }
     const brushMode = maskBrushModeOf(editor.tool)
     if (brushMode !== null) {
-      // Refused rather than merely invisible. These draw the mask and the mask
-      // is only on screen in Quick Mask, so painting outside that mode would
-      // leave no trace — which is what the greyed button is saying.
-      if (selection.quickMask) selection.beginStroke(target, brushMode, at)
+      selection.beginStroke(target, brushMode, at)
       return true
     }
 

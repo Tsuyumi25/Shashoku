@@ -9,9 +9,9 @@
       <button
         type="button"
         class="rail-btn"
-        :class="[editor.tool === tool.tool && 'rail-btn-active', tool.inert && 'rail-btn-inert']"
+        :class="[editor.tool === tool.tool && 'rail-btn-active']"
         :title="tool.title"
-        @click="chooseTool(tool.tool)"
+        @click="editor.setTool(tool.tool)"
       >
         <component :is="tool.icon" :size="15" />
       </button>
@@ -21,9 +21,9 @@
 
     <!--
       Quick Mask is a mode rather than a tool, so it sits below the run of them
-      with a rule between, where Photoshop puts it. It is still in the rail
-      because the brush is inert without it, and a mode reachable only by a
-      keystroke is a mode nobody finds.
+      with a rule between, where Photoshop puts it. It is what the brush and the
+      eraser point at — the layer with it off, the selection with it on — and a
+      mode reachable only by a keystroke is a mode nobody finds.
     -->
     <div class="rail-divider" />
     <button
@@ -65,15 +65,13 @@ import {
   Wand,
   Waypoints,
 } from '@lucide/vue'
-import { useToolChoice } from '@/composables/useToolChoice'
-import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
+import { useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
 const ui = useUiStore()
-const { chooseTool } = useToolChoice()
 
 /**
  * Every tool visible at once, rather than Photoshop's stacked slots with a
@@ -88,8 +86,6 @@ interface RailTool {
   title: string
   /** Draws a rule above this one, so order and grouping are one list to read. */
   opensGroup?: boolean
-  /** Up, but with nothing to act on until something else is turned on. */
-  inert?: boolean
 }
 
 const tools = computed<RailTool[]>(() => [
@@ -102,18 +98,9 @@ const tools = computed<RailTool[]>(() => [
   { tool: 'lasso', icon: Lasso, title: '套索（L）' },
   { tool: 'lasso-polygon', icon: LassoSelect, title: '多邊形套索（Shift+L）' },
   { tool: 'wand', icon: Wand, title: '魔術棒（W）' },
-  { tool: 'brush', icon: Paintbrush, title: '遮罩筆刷（B）', inert: isInert('brush') },
-  { tool: 'eraser', icon: Eraser, title: '遮罩橡皮擦（E）', inert: isInert('eraser') },
+  { tool: 'brush', icon: Paintbrush, title: '筆刷（B）' },
+  { tool: 'eraser', icon: Eraser, title: '橡皮擦（E）' },
 ])
-
-/**
- * Both mask tools draw only where Quick Mask can show it. Said out loud,
- * because a tool that leaves no mark reads as a broken one — and only the tool
- * that is up says it, since the others are not the ones being refused.
- */
-function isInert(tool: CanvasTool): boolean {
-  return editor.tool === tool && maskBrushModeOf(tool) !== null && !selection.quickMask
-}
 </script>
 
 <style scoped>
@@ -135,10 +122,6 @@ function isInert(tool: CanvasTool): boolean {
 .rail-btn-active:hover {
   background: var(--accent);
   color: var(--accent-foreground);
-}
-/* The tool is up but has nothing to draw on until Quick Mask is. */
-.rail-btn-inert {
-  opacity: 0.4;
 }
 .rail-divider {
   margin: 0.25rem 0;

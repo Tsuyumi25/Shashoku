@@ -104,21 +104,30 @@
       </svg>
 
       <div v-if="pageReady" class="pointer-events-none absolute inset-0">
-        <RasterFrame
-          v-for="layer in rasterFrames"
-          :key="layer.id"
-          :entry="layer"
-          :view="view"
-          :selected="layer.id === editor.cursorId"
-          :in-selection="editor.isSelected(layer.id)"
-          :pointed="layer.id === pointedLayerId"
-          :pointer="framesTakePointer ? 'handles' : 'none'"
-          :place="placement.placementOf(layer.id)"
-          @select="onSelectObject(layer.id, $event)"
-          @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
-          @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
-          @commit="onLayerCommit(layer)"
-        />
+        <!--
+          The move tool alone, which is already the only one that can pick a
+          raster layer. A rectangle drawn around what cannot be grabbed says
+          nothing, and under a brush it says it right where the work is — the
+          layer being painted is the whole page often enough that its frame
+          lands across everything being drawn.
+        -->
+        <template v-if="framesShow">
+          <RasterFrame
+            v-for="layer in rasterFrames"
+            :key="layer.id"
+            :entry="layer"
+            :view="view"
+            :selected="layer.id === editor.cursorId"
+            :in-selection="editor.isSelected(layer.id)"
+            :pointed="layer.id === pointedLayerId"
+            :pointer="framesTakePointer ? 'handles' : 'none'"
+            :place="placement.placementOf(layer.id)"
+            @select="onSelectObject(layer.id, $event)"
+            @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
+            @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
+            @commit="onLayerCommit(layer)"
+          />
+        </template>
         <LabelBox
           v-for="object in objects"
           :key="object.id"
@@ -220,10 +229,10 @@ import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
+import { useLayerBrush } from '@/composables/useLayerBrush'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
-import { useToolChoice } from '@/composables/useToolChoice'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import {
   centeredBoxOnScreen,
@@ -275,7 +284,6 @@ const ui = useUiStore()
 const raster = useRasterStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
-const { chooseTool } = useToolChoice()
 
 const view = editor.view
 
@@ -815,6 +823,7 @@ function onConnectMove(p: Anchor) {
 
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.value)
 const selectionTool = useSelectionTool(containerRef, () => artwork.value, () => pageReady.value)
+const layerBrush = useLayerBrush(containerRef)
 
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
@@ -1057,6 +1066,14 @@ const framesTakePointer = computed(
 )
 
 /**
+ * Whether a raster layer's own rectangle is drawn at all. The move tool alone,
+ * which is the only one that can take hold of one — a frame around something
+ * that cannot be grabbed is decoration, and over a brush it is decoration lying
+ * across the work.
+ */
+const framesShow = computed(() => editor.tool === 'select')
+
+/**
  * Whether a press on bare page picks a raster layer. The move tool alone: the
  * others each want the press for themselves, and a tool that places text has no
  * business selecting the patch under where the text is going.
@@ -1136,6 +1153,10 @@ function onPointerDown(e: PointerEvent) {
       if (picked !== null) editor.foreground = picked
       return
     }
+    // The two brushes are asked twice over: once as the layer's, once as the
+    // mask's. Which of them answers is Quick Mask, and each declines what is
+    // not its own rather than the canvas deciding for them.
+    if (layerBrush.onPointerDown(e)) return
     if (selectionTool.onPointerDown(e)) return
   }
   if (editor.tool === 'text') {
@@ -1289,6 +1310,7 @@ function onPointerMove(e: PointerEvent) {
     onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
     return
   }
+  if (layerBrush.onPointerMove(e)) return
   if (selecting.value) {
     selectionTool.onPointerMove(e)
     return
@@ -1330,7 +1352,9 @@ function onPointerUp(e: PointerEvent) {
     objectMarquee.value = null
     return
   }
-  if (!rotating.value && !panning.value && selecting.value) selectionTool.onPointerUp(e)
+  if (!rotating.value && !panning.value) {
+    if (!layerBrush.onPointerUp() && selecting.value) selectionTool.onPointerUp(e)
+  }
   rotating.value = false
   panning.value = false
 }
@@ -1388,9 +1412,9 @@ useEventListener(window, 'keydown', (e) => {
   } else if (key === 'w') {
     editor.setTool('wand')
   } else if (key === 'b') {
-    chooseTool('brush')
+    editor.setTool('brush')
   } else if (key === 'e') {
-    chooseTool('eraser')
+    editor.setTool('eraser')
   } else if (key === 'q') {
     selection.toggleQuickMask()
   } else if (e.key === '[' || e.key === ']') {
