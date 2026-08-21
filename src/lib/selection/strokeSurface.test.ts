@@ -99,10 +99,25 @@ describe('coverageWithin', () => {
 })
 
 describe('cutToMask', () => {
+  const row = { x: 0, y: 0, w: 4, h: 1 }
+
   it('scales coverage by the selection rather than thresholding it', () => {
     const coverage = new Uint8Array([255, 255, 128, 60])
-    cutToMask(coverage, new Uint8ClampedArray([255, 0, 255, 128]))
+    cutToMask(coverage, row, new Uint8ClampedArray([255, 0, 255, 128]), row)
 
     expect([...coverage]).toEqual([255, 0, 128, 30])
+  })
+
+  /**
+   * A selection stops at the page while the region handed to the engine can
+   * reach past it, on a layer larger than the page. Out there the stroke has
+   * laid nothing down, so leaving it alone and cutting it come to the same
+   * thing — and only one of them can be indexed.
+   */
+  it('leaves the part the selection does not reach where it is', () => {
+    const coverage = new Uint8Array([9, 255, 255, 9])
+    cutToMask(coverage, row, new Uint8ClampedArray([0, 255]), { x: 1, y: 0, w: 2, h: 1 })
+
+    expect([...coverage]).toEqual([9, 0, 255, 9])
   })
 })

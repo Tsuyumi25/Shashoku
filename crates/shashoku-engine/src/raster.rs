@@ -99,6 +99,24 @@ fn tile_rect(coord: TileCoord) -> Rect {
     }
 }
 
+/// A mask has to describe exactly its frame. Checked in one place because the
+/// committed write and the preview are the same call twice over, and a bound
+/// enforced in only one of them is the one an out-of-range read gets through.
+fn check_mask(mask: &[u8], mask_frame: Rect) -> Result<(), String> {
+    let wanted = (mask_frame.w.max(0) as usize)
+        .checked_mul(mask_frame.h.max(0) as usize)
+        .ok_or_else(|| "mask is too large to describe".to_string())?;
+    if mask.len() != wanted {
+        return Err(format!(
+            "mask of {}x{} needs {wanted} bytes, got {}",
+            mask_frame.w,
+            mask_frame.h,
+            mask.len()
+        ));
+    }
+    Ok(())
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Compositing
 
@@ -114,6 +132,15 @@ enum Blend {
     /// `Over`, but the layer's own alpha is left exactly where it was.
     OverLocked,
     Erase,
+}
+
+/// Which way paint lands, which is the layer's own alpha lock and nothing else.
+fn paint_blend(alpha_locked: bool) -> Blend {
+    if alpha_locked {
+        Blend::OverLocked
+    } else {
+        Blend::Over
+    }
 }
 
 /// `src` over `dst`, both straight RGBA.
@@ -274,12 +301,31 @@ impl RasterLayer {
         if color[3] == 0 {
             return Ok(None);
         }
-        let blend = if alpha_locked {
-            Blend::OverLocked
-        } else {
-            Blend::Over
-        };
-        self.write(mask, mask_frame, color, blend)
+        self.write(mask, mask_frame, color, paint_blend(alpha_locked))
+    }
+
+    /// A fill worked out and not committed. Same arguments, same answer, no
+    /// record and no change to the layer.
+    pub fn preview_fill(
+        &self,
+        mask: &[u8],
+        mask_frame: Rect,
+        color: [u8; 4],
+        alpha_locked: bool,
+    ) -> Result<Option<Vec<u8>>, String> {
+        if color[3] == 0 {
+            return Ok(None);
+        }
+        self.preview(mask, mask_frame, color, paint_blend(alpha_locked))
+    }
+
+    /// An erase worked out and not committed.
+    pub fn preview_erase(
+        &self,
+        mask: &[u8],
+        mask_frame: Rect,
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.preview(mask, mask_frame, [0, 0, 0, 255], Blend::Erase)
     }
 
     /// Takes the covered part of `mask` out of the layer, in a single
@@ -298,6 +344,72 @@ impl RasterLayer {
         self.write(mask, mask_frame, [0, 0, 0, 255], Blend::Erase)
     }
 
+    /// What the layer would look like over `mask_frame` with `mask` laid on it,
+    /// worked out and handed back with nothing committed.
+    ///
+    /// Taking `&self` is the whole of that guarantee: neither the tiles nor the
+    /// frame can move because this has no way to move them. What it does move
+    /// through is `paint_mask` and the same three blends a write uses, so the
+    /// picture shown during a stroke and the one the release leaves behind are
+    /// one implementation rather than two that have to agree.
+    ///
+    /// Straight RGBA over `mask_frame`, or nothing when that rectangle is empty.
+    fn preview(
+        &self,
+        mask: &[u8],
+        mask_frame: Rect,
+        color: [u8; 4],
+        blend: Blend,
+    ) -> Result<Option<Vec<u8>>, String> {
+        check_mask(mask, mask_frame)?;
+        let at = mask_frame.offset(-self.anchor_x, -self.anchor_y);
+        if at.is_empty() {
+            return Ok(None);
+        }
+
+        let mut scratch = TileGrid::<Rgba8>::new();
+        paint_mask(&mut scratch, mask, at, color);
+
+        let mut out = self.read(at);
+        let stride = at.w as usize * 4;
+        for coord in scratch.occupied().collect::<Vec<_>>() {
+            let Some(tile) = scratch.tile(coord) else {
+                continue;
+            };
+            let part = at.intersect(tile_rect(coord));
+            if part.is_empty() {
+                continue;
+            }
+            for row in 0..part.h {
+                for col in 0..part.w {
+                    let from = ((part.y + row - coord.ty * TILE_SIZE) as usize * TILE_SIZE as usize
+                        + (part.x + col - coord.tx * TILE_SIZE) as usize)
+                        * 4;
+                    let to =
+                        (part.y + row - at.y) as usize * stride + (part.x + col - at.x) as usize * 4;
+                    let src = &tile.bytes()[from..from + 4];
+                    let dst = &mut out[to..to + 4];
+                    match blend {
+                        Blend::Over => over(src, dst),
+                        Blend::OverLocked => over_locked(src, dst),
+                        Blend::Erase => punch(src, dst),
+                    }
+                    // A committed write gets this when the tile is released and
+                    // a preview has no release to get it in. It is not tidiness:
+                    // under straight alpha a transparent pixel that kept its
+                    // colour drags that colour into its neighbours the moment
+                    // anything resamples it, and leaving the two paths to differ
+                    // here is the one way the last preview of a stroke could
+                    // disagree with what the release leaves.
+                    if dst[3] == 0 {
+                        dst.fill(0);
+                    }
+                }
+            }
+        }
+        Ok(Some(out))
+    }
+
     fn write(
         &mut self,
         mask: &[u8],
@@ -305,17 +417,7 @@ impl RasterLayer {
         color: [u8; 4],
         blend: Blend,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
-        let wanted = (mask_frame.w.max(0) as usize)
-            .checked_mul(mask_frame.h.max(0) as usize)
-            .ok_or_else(|| "mask is too large to describe".to_string())?;
-        if mask.len() != wanted {
-            return Err(format!(
-                "mask of {}x{} needs {wanted} bytes, got {}",
-                mask_frame.w,
-                mask_frame.h,
-                mask.len()
-            ));
-        }
+        check_mask(mask, mask_frame)?;
         let at = mask_frame.offset(-self.anchor_x, -self.anchor_y);
         if at.is_empty() {
             return Ok(None);
@@ -745,6 +847,40 @@ pub fn erase(id: &str, mask: &[u8], mask_frame: Rect) -> Result<Option<(String, 
     record(id, |layer| layer.erase(mask, mask_frame))
 }
 
+/// What a fill would leave over the masked region, without leaving it. No
+/// record is filed, so nothing here is reachable by undo — there is nothing to
+/// take back.
+pub fn preview_fill(
+    id: &str,
+    mask: &[u8],
+    mask_frame: Rect,
+    color: [u8; 4],
+    alpha_locked: bool,
+) -> Result<Option<Vec<u8>>, String> {
+    peek(id, |layer| {
+        layer.preview_fill(mask, mask_frame, color, alpha_locked)
+    })?
+}
+
+/// What an erase would leave over the masked region, without leaving it.
+pub fn preview_erase(
+    id: &str,
+    mask: &[u8],
+    mask_frame: Rect,
+) -> Result<Option<Vec<u8>>, String> {
+    peek(id, |layer| layer.preview_erase(mask, mask_frame))?
+}
+
+/// Reads a held layer without the means to change it.
+fn peek<T>(id: &str, read: impl FnOnce(&RasterLayer) -> T) -> Result<T, String> {
+    let held = registry();
+    let layer = held
+        .layers
+        .get(id)
+        .ok_or_else(|| format!("layer {id} is not held by the engine"))?;
+    Ok(read(layer))
+}
+
 /// Runs one write against a held layer and files the record it produced.
 type Written = Result<Option<(LayerJournal, Patch)>, String>;
 
@@ -1125,6 +1261,111 @@ mod tests {
             .expect("something to fill");
 
         assert_eq!(pixel(&layer, 0, 0), vec![255, 0, 0, 128]);
+    }
+
+    /**
+     * The whole of what a preview promises. It is asked for at every pointer
+     * event of a stroke, so a layer that moved under one would have a hundred
+     * uncommitted writes in it by the time the button came up.
+     */
+    #[test]
+    fn a_preview_leaves_the_layer_where_it_found_it() {
+        let side = TILE_SIZE * 2;
+        let layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
+        let bounds = layer.bounds;
+        let tiles = layer.grid.tile_count();
+        let at = frame(0, 0, 8, 8);
+
+        layer
+            .preview_fill(&full_mask(at.w, at.h), at, RED, false)
+            .expect("a well-formed preview")
+            .expect("something to show");
+
+        assert_eq!(layer.bounds, bounds);
+        assert_eq!(layer.grid.tile_count(), tiles);
+        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 255, 255]);
+    }
+
+    /// One implementation rather than two that have to agree: what the last
+    /// preview of a stroke showed is what the release leaves behind, byte for
+    /// byte.
+    #[test]
+    fn a_preview_is_what_the_commit_leaves() {
+        let side = TILE_SIZE * 2;
+        let at = frame(4, 4, TILE_SIZE, TILE_SIZE);
+        let mut mask = full_mask(at.w, at.h);
+        // A soft corner, so the blend has something to do beyond copying.
+        mask[0] = 90;
+        mask[1] = 30;
+
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
+        let shown = layer
+            .preview_fill(&mask, at, [255, 0, 0, 128], false)
+            .expect("a well-formed preview")
+            .expect("something to show");
+        layer
+            .fill(&mask, at, [255, 0, 0, 128], false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(shown, layer.read(at));
+    }
+
+    /// The eraser too, which is the case a preview built from paint alone would
+    /// get wrong: the hole has to be visible while the stroke is out.
+    #[test]
+    fn an_erase_preview_shows_the_hole_the_commit_will_punch() {
+        let side = TILE_SIZE * 2;
+        let at = frame(0, 0, 8, 8);
+        let mut mask = full_mask(at.w, at.h);
+        mask[4] = 120;
+
+        let mut layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
+        let shown = layer
+            .preview_erase(&mask, at)
+            .expect("a well-formed preview")
+            .expect("something to show");
+        layer
+            .erase(&mask, at)
+            .expect("a well-formed erase")
+            .expect("something to erase");
+
+        assert_eq!(shown, layer.read(at));
+        assert_eq!(&shown[0..4], &[0, 0, 0, 0]);
+    }
+
+    /// The lock is one blend picked one way, so it reaches the preview by the
+    /// same road it reaches the commit.
+    #[test]
+    fn a_locked_preview_is_what_a_locked_commit_leaves() {
+        let side = TILE_SIZE;
+        let mut rgba = vec![0u8; (side * side) as usize * 4];
+        for y in 0..side / 2 {
+            for x in 0..side {
+                let i = ((y * side + x) * 4) as usize;
+                rgba[i + 2] = 255;
+                rgba[i + 3] = 255;
+            }
+        }
+        let mut layer =
+            RasterLayer::take(&rgba, frame(0, 0, side, side)).expect("a well-formed layer");
+        // Straddling the edge of what is there, so the lock has ground to
+        // refuse as well as ground to accept.
+        let at = frame(0, side / 2 - 2, 8, 4);
+        let mask = full_mask(at.w, at.h);
+
+        let shown = layer
+            .preview_fill(&mask, at, RED, true)
+            .expect("a well-formed preview")
+            .expect("something to show");
+        layer
+            .fill(&mask, at, RED, true)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        assert_eq!(shown, layer.read(at));
+        assert_eq!(&shown[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&shown[(2 * at.w as usize) * 4..(2 * at.w as usize) * 4 + 4], &[0, 0, 0, 0]);
     }
 
     /// Copy-on-write is what makes sharing safe: the block every tile points at

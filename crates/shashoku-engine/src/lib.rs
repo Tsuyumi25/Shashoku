@@ -604,6 +604,44 @@ pub fn raster_erase(
     Ok(erased.map(|(journal, patch)| to_patch(journal, patch)))
 }
 
+/// What a fill would leave over `maskFrame`, worked out and handed back with
+/// nothing committed: no tile moves, no frame moves and no record is filed.
+///
+/// Straight RGBA of `maskFrame`, row-major. This is what a stroke is shown as
+/// while it is being drawn, and it goes through the very code the release will
+/// go through — so the last preview and the committed layer cannot disagree.
+#[napi]
+pub fn raster_preview_fill(
+    id: String,
+    mask: Buffer,
+    mask_frame: LayerFrame,
+    color: String,
+    alpha_locked: bool,
+) -> napi::Result<Option<Buffer>> {
+    let rgba = parse_hex_rgba(&color).map_err(napi::Error::from_reason)?;
+    let shown = raster::preview_fill(
+        &id,
+        mask.as_ref(),
+        to_rect(&mask_frame),
+        [rgba.0, rgba.1, rgba.2, rgba.3],
+        alpha_locked,
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(shown.map(Buffer::from))
+}
+
+/// What an erase would leave over `maskFrame`, on the same terms.
+#[napi]
+pub fn raster_preview_erase(
+    id: String,
+    mask: Buffer,
+    mask_frame: LayerFrame,
+) -> napi::Result<Option<Buffer>> {
+    let shown = raster::preview_erase(&id, mask.as_ref(), to_rect(&mask_frame))
+        .map_err(napi::Error::from_reason)?;
+    Ok(shown.map(Buffer::from))
+}
+
 /// Swaps a record against its layer. Undo and redo are this same call, because
 /// swapping is its own inverse. Nothing comes back when the record or its layer
 /// has been let go.

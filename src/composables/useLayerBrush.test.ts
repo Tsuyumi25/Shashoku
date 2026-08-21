@@ -159,6 +159,29 @@ function selectRect(at: { x: number; y: number; w: number; h: number }): void {
   useSelectionStore().applyShape(PAGE, rasterizeRect(PAGE, at), 'new', 'test')
 }
 
+/**
+ * A press whose handover has landed, which is what a stroke has by the time a
+ * hand has moved at all — and what a preview needs before it can ask the engine
+ * anything.
+ */
+async function pressAndSettle(
+  brush: ReturnType<typeof useLayerBrush>,
+  at: { x: number; y: number },
+): Promise<void> {
+  brush.onPointerDown(press(at.x, at.y))
+  await settle()
+}
+
+/**
+ * The layer's own pixels over a rectangle, read through the preview with
+ * nothing laid on it. A fill of no coverage is the layer as it stands, which
+ * makes this the one read-back the engine's surface offers.
+ */
+function layerPixels(id: string, at: { x: number; y: number; w: number; h: number }): Uint8Array {
+  const nothing = new Uint8Array(at.w * at.h)
+  return engine.rasterPreviewFill(id, nothing, at, '#000000', false)!
+}
+
 beforeEach(() => {
   engine.maskReset()
   engine.rasterReleaseAll()
@@ -353,6 +376,110 @@ describe('a selection bounds the stroke', () => {
     expect(frame.y).toBeGreaterThanOrEqual(40)
     expect(frame.x + frame.w).toBeLessThanOrEqual(60)
     expect(frame.y + frame.h).toBeLessThanOrEqual(60)
+  })
+})
+
+describe('the stroke as it is being drawn', () => {
+  function open() {
+    const { editor, project } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 8
+    return { editor, project, brush: useLayerBrush(container) }
+  }
+
+  it('shows the stroke before the button comes up', async () => {
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+
+    brush.onPointerMove(press(80, 50))
+
+    const shown = useRasterStore().liveLayer('r')
+    expect(shown).not.toBeNull()
+    expect(shown!.frame.w).toBeGreaterThan(0)
+  })
+
+  /** One crossing per event, which is the whole of the cost being spent. */
+  it('asks the engine once per pointer event, and does not save them up', async () => {
+    const { brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    brush.onPointerMove(press(60, 50))
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerMove(press(80, 50))
+
+    expect(preview).toHaveBeenCalledTimes(3)
+  })
+
+  /**
+   * The preview is worked out and thrown away. Nothing it shows is in the
+   * layer, and nothing it shows can be undone, because there is no step there
+   * to undo.
+   */
+  it('leaves the committed layer and the undo stack alone all the way', async () => {
+    const { editor, brush } = open()
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const before = layerPixels('r', { x: 40, y: 40, w: 40, h: 20 })
+
+    brush.onPointerMove(press(60, 50))
+    brush.onPointerMove(press(70, 50))
+
+    expect([...layerPixels('r', { x: 40, y: 40, w: 40, h: 20 })]).toEqual([...before])
+    expect(editor.canUndo).toBe(false)
+  })
+
+  /** What the hand last saw is what the release leaves, to the byte. */
+  it('agrees with the committed layer once the button comes up', async () => {
+    const { editor, brush } = open()
+    editor.foreground = '#3366ff'
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    brush.onPointerMove(press(70, 50))
+    const [, , at] = preview.mock.calls[preview.mock.calls.length - 1]
+    const shown = preview.mock.results[preview.mock.results.length - 1].value as Uint8Array
+
+    brush.onPointerUp()
+    await settle()
+
+    // Paint in it, so the two agreeing is not two blanks agreeing.
+    expect(shown.some((byte) => byte !== 0)).toBe(true)
+    expect([...layerPixels('r', at)]).toEqual([...shown])
+  })
+
+  it('shows the eraser punching through, not painting over', async () => {
+    const { editor, brush } = open()
+    editor.foreground = '#ffffff'
+    await stroke(brush, { x: 50, y: 50 }, { x: 90, y: 50 })
+
+    editor.setTool('eraser')
+    const eraser = useLayerBrush(container)
+    await pressAndSettle(eraser, { x: 70, y: 50 })
+    const preview = vi.spyOn(engine, 'rasterPreviewErase')
+    eraser.onPointerMove(press(72, 50))
+
+    expect(preview).toHaveBeenCalled()
+    const shown = preview.mock.results[0].value as Uint8Array
+    const [, , at] = preview.mock.calls[0]
+    const middle = ((70 - at.y) * at.w + (71 - at.x)) * 4
+    expect(shown[middle + 3]).toBe(0)
+  })
+
+  /**
+   * A stroke the selection cuts away entirely commits nothing, so it must not
+   * leave the layer's frame grown by what it showed on the way.
+   */
+  it('shows nothing, and grows nothing, outside the selection', async () => {
+    const { brush } = open()
+    selectRect({ x: 200, y: 200, w: 20, h: 20 })
+    const preview = vi.spyOn(engine, 'rasterPreviewFill')
+
+    await pressAndSettle(brush, { x: 50, y: 50 })
+    brush.onPointerMove(press(70, 50))
+
+    expect(preview).not.toHaveBeenCalled()
+    expect(useRasterStore().liveLayer('r')?.frame.w).toBe(0)
   })
 })
 

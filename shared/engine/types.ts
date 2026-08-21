@@ -150,17 +150,17 @@ export interface EngineLayerFrame {
   h: number;
 }
 
-/** What a write to a held layer left behind. */
-export interface EngineLayerPatch {
+/**
+ * A layer's pixels over part of itself, and where its frame stands.
+ *
+ * What a write hands back, minus the way to take it back — which is also
+ * exactly what a preview is, so both reach the renderer's own copy of a layer
+ * by one path instead of two.
+ */
+export interface EngineLayerPixels {
   /**
-   * What to name when asking for this write to be taken back. Empty on a patch
-   * that came from applying a record, since applying it again is what puts it
-   * back and the caller already knows which record it asked for.
-   */
-  journal: string;
-  /**
-   * The layer's frame after the write. A write reaching past an edge moves it,
-   * and the manifest has to be told.
+   * The layer's frame. A write reaching past an edge moves it, and the manifest
+   * has to be told.
    */
   frame: EngineLayerFrame;
   /**
@@ -171,6 +171,16 @@ export interface EngineLayerPatch {
   changed: EngineLayerFrame;
   /** Straight RGBA of `changed`, row-major. */
   rgba: Uint8Array;
+}
+
+/** What a write to a held layer left behind. */
+export interface EngineLayerPatch extends EngineLayerPixels {
+  /**
+   * What to name when asking for this write to be taken back. Empty on a patch
+   * that came from applying a record, since applying it again is what puts it
+   * back and the caller already knows which record it asked for.
+   */
+  journal: string;
 }
 
 /**
@@ -391,6 +401,31 @@ export interface ShashokuEngineApi {
     mask: Uint8Array,
     maskFrame: EngineLayerFrame,
   ): EngineLayerPatch | null;
+  /**
+   * What a fill would leave over `maskFrame`, worked out and handed back with
+   * nothing committed: no tile moves, no frame moves, no record is filed.
+   *
+   * Straight RGBA of `maskFrame`, row-major, or null when the layer is not held
+   * or the rectangle is empty. This is what a stroke is shown as while it is
+   * being drawn, and it goes through the very code the release will go through
+   * — so the last preview and the committed layer cannot disagree.
+   *
+   * Called once per pointer event, which is why it takes a region rather than
+   * answering for the whole layer.
+   */
+  rasterPreviewFill(
+    id: string,
+    mask: Uint8Array,
+    maskFrame: EngineLayerFrame,
+    color: string,
+    alphaLocked: boolean,
+  ): Uint8Array | null;
+  /** What an erase would leave over `maskFrame`, on the same terms. */
+  rasterPreviewErase(
+    id: string,
+    mask: Uint8Array,
+    maskFrame: EngineLayerFrame,
+  ): Uint8Array | null;
   /**
    * Swaps a record against its layer. Undo and redo are this same call, because
    * swapping is its own inverse. Null when the record or its layer has been let

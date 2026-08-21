@@ -1,4 +1,11 @@
-import { clampToPage, EMPTY_RECT, isEmptyRect, unionRect, type Rect } from '@/lib/selection/rect'
+import {
+  clampToPage,
+  EMPTY_RECT,
+  intersectRect,
+  isEmptyRect,
+  unionRect,
+  type Rect,
+} from '@/lib/selection/rect'
 
 /**
  * The coverage one stroke has laid down so far, over the part of the page it
@@ -77,29 +84,52 @@ export function surfaceHolding(
 }
 
 /**
- * The coverage inside `at`, as the engine takes it. `at` must lie inside the
- * surface's own region, which is what every caller has: the box is built from
- * the stamps, and a stamp is clipped to the surface before it lands.
+ * The coverage over `at`, as the engine takes it.
+ *
+ * `at` need not lie inside the surface: a preview is asked for over the layer's
+ * whole frame whenever that frame moves, and the stroke has only reached part
+ * of it. What the stroke has not reached is uncovered, which is what the zeroes
+ * this starts as already say.
  */
 export function coverageWithin(surface: StrokeSurface, at: Rect): Uint8Array {
-  const out = new Uint8Array(at.w * at.h)
+  const out = new Uint8Array(Math.max(0, at.w) * Math.max(0, at.h))
+  const part = intersectRect(surface.region, at)
+  if (isEmptyRect(part)) return out
   const from = surface.region
-  for (let row = 0; row < at.h; row++) {
-    const start = (at.y + row - from.y) * from.w + (at.x - from.x)
-    out.set(surface.coverage.subarray(start, start + at.w), row * at.w)
+  for (let row = 0; row < part.h; row++) {
+    const start = (part.y + row - from.y) * from.w + (part.x - from.x)
+    out.set(
+      surface.coverage.subarray(start, start + part.w),
+      (part.y + row - at.y) * at.w + (part.x - at.x),
+    )
   }
   return out
 }
 
 /**
- * Cuts coverage down to a selection, in place.
+ * Cuts coverage down to a selection, in place. `coverage` is laid over `at` and
+ * `mask` over `within`, which has to lie inside it.
  *
  * Multiplied rather than tested against a threshold, so a feathered selection
  * feathers the stroke instead of hard-clipping it — the same thing the fill
  * does, since there the selection *is* the coverage.
+ *
+ * What lies outside `within` is left alone rather than cleared: a selection is
+ * held for a page and stops at its edges, while `at` can reach past them on a
+ * layer larger than the page. Coverage out there is already nothing, because
+ * the surface a stroke draws on is cut to the page.
  */
-export function cutToMask(coverage: Uint8Array, mask: Uint8ClampedArray): void {
-  for (let i = 0; i < coverage.length; i++) {
-    coverage[i] = Math.round((coverage[i] * mask[i]) / 255)
+export function cutToMask(
+  coverage: Uint8Array,
+  at: Rect,
+  mask: Uint8ClampedArray,
+  within: Rect,
+): void {
+  for (let row = 0; row < within.h; row++) {
+    const to = (within.y + row - at.y) * at.w + (within.x - at.x)
+    const from = row * within.w
+    for (let col = 0; col < within.w; col++) {
+      coverage[to + col] = Math.round((coverage[to + col] * mask[from + col]) / 255)
+    }
   }
 }

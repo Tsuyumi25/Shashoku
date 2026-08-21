@@ -1,6 +1,6 @@
 import { ref, shallowRef, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { EngineLayerFrame, EngineLayerPatch } from '@shared/engine/types'
+import type { EngineLayerFrame, EngineLayerPixels } from '@shared/engine/types'
 import { generateId } from '@shared/page/schema'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { createAutosave, PIXEL_DEBOUNCE_MS, PIXEL_MAX_WAIT_MS } from '@/lib/autosave'
@@ -119,17 +119,18 @@ export const useRasterStore = defineStore('raster', () => {
   }
 
   /**
-   * Puts what a write handed back onto the layer's own canvas.
+   * Puts pixels the engine handed back onto the layer's own canvas.
    *
-   * One path, whether or not the frame moved: the engine hands back the whole
-   * frame when it did, so a rebuilt canvas is always fully covered by the very
-   * patch that told it to rebuild.
+   * One path, whether or not the frame moved: a rebuilt canvas is always fully
+   * covered by the very patch that told it to rebuild. A write hands back the
+   * whole frame when the frame moved; a stroke's preview, which is the other
+   * caller, follows the same rule for the same reason.
    *
    * `putImageData` rather than a draw, because it ignores compositing entirely —
    * the straight alpha the engine works in survives instead of being blended
    * against what is already on the canvas.
    */
-  function paste(id: string, patch: EngineLayerPatch): void {
+  function paste(id: string, patch: EngineLayerPixels): void {
     const layer = held.value.get(id)
     if (layer === undefined) return
     const { frame, changed } = patch

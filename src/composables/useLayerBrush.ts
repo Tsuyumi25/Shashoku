@@ -4,7 +4,15 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { screenToContentPx } from '@/lib/coords'
 import { strokeMask } from '@/lib/selection/brushMask'
-import { EMPTY_RECT, isEmptyRect, unionRect, type Point, type Rect } from '@/lib/selection/rect'
+import {
+  clampToPage,
+  EMPTY_RECT,
+  isEmptyRect,
+  sameRect,
+  unionRect,
+  type Point,
+  type Rect,
+} from '@/lib/selection/rect'
 import {
   coverageWithin,
   cutToMask,
@@ -127,12 +135,72 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     )
     s.from = at
     if (isEmptyRect(local)) return
-    s.dirty = unionRect(s.dirty, {
+    const segment = {
       x: local.x + region.x,
       y: local.y + region.y,
       w: local.w,
       h: local.h,
-    })
+    }
+    s.dirty = unionRect(s.dirty, segment)
+    show(s, segment)
+  }
+
+  /**
+   * The coverage the engine is to be handed over `at`, cut to the selection.
+   *
+   * One function for the previews and for the commit, because a preview that
+   * was cut differently from the write it is standing in for would be showing
+   * something the release then takes away.
+   */
+  function coverageFor(s: Stroke, at: Rect): Uint8Array {
+    const coverage = coverageWithin(s.surface, at)
+    const within = clampToPage(at, s.pageW, s.pageH)
+    const mask = isEmptyRect(within) ? null : selection.maskPatchOf(s.page, within)
+    if (mask !== null) cutToMask(coverage, at, mask, within)
+    return coverage
+  }
+
+  /**
+   * Shows the stroke as it stands, over the segment just drawn.
+   *
+   * The layer's own canvas is what this lands on, so the stack composites the
+   * preview with the layer's opacity and blend mode without either being said
+   * twice. Nothing is committed: the tiles and the frame the engine holds are
+   * untouched all the way to the release, and no record is filed.
+   *
+   * A segment is all that is repainted while the frame stands still. When it
+   * has to move — a stroke reaching past the layer's edge, or any stroke at all
+   * on a layer that has no frame yet — the canvas is rebuilt underneath, so
+   * everything inside the new frame is asked for instead.
+   */
+  function show(s: Stroke, segment: Rect): void {
+    const live = raster.liveLayer(s.entry.id)
+    if (live === null) return
+    const frame = unionRect(live.frame, s.surface.region)
+    const moved = !sameRect(frame, live.frame)
+    const at = moved ? frame : segment
+    if (isEmptyRect(at)) return
+
+    const coverage = coverageFor(s, at)
+    /*
+     * A segment the selection cut away entirely has nothing to show, and
+     * showing it anyway would not be merely wasteful: the frame handed to the
+     * paste is the one this stroke might grow into, so a stroke drawn wholly
+     * outside a selection would enlarge the layer while committing nothing.
+     */
+    if (!coverage.some((byte) => byte !== 0)) return
+    const rgba =
+      s.mode === 'erase'
+        ? window.engine.rasterPreviewErase(s.entry.id, coverage, at)
+        : window.engine.rasterPreviewFill(
+            s.entry.id,
+            coverage,
+            at,
+            editor.foreground,
+            s.entry.alphaLocked,
+          )
+    if (rgba === null) return
+    raster.paste(s.entry.id, { frame, changed: at, rgba })
   }
 
   function onPointerDown(e: PointerEvent): boolean {
@@ -162,7 +230,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // The release awaits this and sees the same rejection; this only keeps a
     // failure from being reported as an unhandled one while the stroke is out.
     void taken.catch(() => {})
-    stroke = {
+    const opened: Stroke = {
       page,
       pageW: file.page.width,
       pageH: file.page.height,
@@ -173,6 +241,13 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       dirty: EMPTY_RECT,
       taken,
     }
+    stroke = opened
+    // Nothing can be shown until the layer is over there. A press held still on
+    // a layer being taken over would otherwise sit blank until it moved, so the
+    // handover landing is itself a reason to draw.
+    void taken.then(() => {
+      if (stroke === opened) show(opened, opened.dirty)
+    })
     strokeTo(at)
     return true
   }
@@ -206,12 +281,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     if (s === null || isEmptyRect(s.dirty)) return
 
     const at = s.dirty
-    const coverage = coverageWithin(s.surface, at)
     // Outside a selection the stroke is cut to nothing, so neither the pixels
     // nor the frame can grow past it: a covered pixel is the only kind the
     // engine writes or measures a frame from.
-    const mask = selection.maskPatchOf(s.page, at)
-    if (mask !== null) cutToMask(coverage, mask)
+    const coverage = coverageFor(s, at)
 
     await s.taken
 
