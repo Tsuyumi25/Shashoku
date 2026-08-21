@@ -408,45 +408,6 @@ export interface ShashokuEngineApi {
    */
   rasterRead(id: string, region: EngineLayerFrame): Uint8Array;
   /**
-   * Starts a run of previews against a layer: the frame they stand on begins
-   * again from the committed one. Called as a stroke begins.
-   *
-   * A run left unfinished — a stroke that drew only where a selection cut it
-   * away, so no write ever settled the frame — is ended by the next run rather
-   * than by anyone remembering to close it.
-   */
-  rasterPreviewBegin(id: string): void;
-  /**
-   * What a fill would leave, worked out and handed back with nothing
-   * committed: no tile moves, no frame moves, no record is filed. Null when the
-   * mask covers nothing or the colour is fully transparent.
-   *
-   * This is what a stroke is shown as while it is being drawn, and it goes
-   * through the very code the release will go through — so the last preview and
-   * the committed layer cannot disagree.
-   *
-   * `frame` is where the frame would stand were the stroke released now. It is
-   * worked out over there rather than here, because a frame is the engine's to
-   * name: a caller that arrived at its own answer would be a second authority
-   * on the same rectangle, and the two disagreeing at the release is silent.
-   *
-   * Called once per pointer event, which is why it takes a region rather than
-   * answering for the whole layer.
-   */
-  rasterPreviewFill(
-    id: string,
-    mask: Uint8Array,
-    maskFrame: EngineLayerFrame,
-    color: string,
-    alphaLocked: boolean,
-  ): EngineLayerPixels | null;
-  /** What an erase would leave, on the same terms. */
-  rasterPreviewErase(
-    id: string,
-    mask: Uint8Array,
-    maskFrame: EngineLayerFrame,
-  ): EngineLayerPixels | null;
-  /**
    * Swaps a record against its layer. Undo and redo are this same call, because
    * swapping is its own inverse. Null when the record or its layer has been let
    * go.

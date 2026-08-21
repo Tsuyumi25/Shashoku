@@ -10,7 +10,6 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
-import { probePaint, probeSync } from '@/lib/paintProbe'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
@@ -134,7 +133,6 @@ function paint() {
     cancelAnimationFrame(frame)
     frame = null
   }
-  const started = performance.now()
   const w = Math.max(1, Math.round(props.container.w * dpr))
   const h = Math.max(1, Math.round(props.container.h * dpr))
   if (cv.width !== w || cv.height !== h) {
@@ -173,7 +171,6 @@ function paint() {
     }
   }
   ctx.globalAlpha = 1
-  probePaint(performance.now() - started)
 }
 
 /**
@@ -242,7 +239,7 @@ watch(() => raster.committed, paint, { flush: 'sync' })
  * every one of those reports would otherwise clear this whole canvas and redraw
  * every object on it. The frame that a write cancels is this one.
  */
-watch(() => raster.revision, () => (probeSync() ? paint() : schedulePaint()), { flush: 'sync' })
+watch(() => raster.revision, schedulePaint, { flush: 'sync' })
 
 /** The stroke on this run's layer, which moves for the same reason and as often. */
 watch(() => stroke.revision, schedulePaint)

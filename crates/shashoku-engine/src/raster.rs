@@ -99,110 +99,9 @@ fn tile_rect(coord: TileCoord) -> Rect {
     }
 }
 
-/// How far past what it has to cover a preview's frame is allowed to reach.
-///
-/// Slack is not waste here, it is the whole saving: moving that frame is what
-/// makes a caller rebuild its picture of the layer, and rebuilding is by far the
-/// most expensive thing a stroke can ask for. Room to grow into turns "moves on
-/// every event" into "moves a handful of times a stroke".
-///
-/// GIMP spends 100 px on the same problem, on the layer itself, and offers it as
-/// a setting. This is spent on a rectangle that dies with the stroke, so it can
-/// afford to be more generous.
-const PREVIEW_SLACK: i32 = 256;
-
-/// Where a preview's frame stands once it has had to move to hold `covered`.
-///
-/// **Only when it has to.** A frame that grew while the coverage justifying it
-/// stayed inside the committed one would be a frame the release then disagrees
-/// with, and the caller rebuilds against the smaller answer and keeps only what
-/// the write touched. Nothing else it draws survives that.
-///
-/// Once it does have to move, the slack goes on and the result is taken out to
-/// the tile grid, where the work lands anyway.
-fn with_slack(stood: Rect, covered: Rect) -> Rect {
-    let wanted = stood.union(covered);
-    if wanted == stood {
-        return stood;
-    }
-    /*
-     * Slack goes on the edges that actually moved, and nowhere else. Spending
-     * it on all four every time compounds: a stroke down one diagonal moves the
-     * right and bottom edges over and over, and paying the left and top each
-     * time puts a frame around the layer that is several times the page.
-     */
-    let empty = stood.w <= 0 || stood.h <= 0;
-    let grew = |moved: bool, edge: i32, by: i32| if empty || moved { edge + by } else { edge };
-    let left = grew(wanted.x < stood.x, wanted.x, -PREVIEW_SLACK);
-    let top = grew(wanted.y < stood.y, wanted.y, -PREVIEW_SLACK);
-    let right = grew(
-        wanted.x + wanted.w > stood.x + stood.w,
-        wanted.x + wanted.w,
-        PREVIEW_SLACK,
-    );
-    let bottom = grew(
-        wanted.y + wanted.h > stood.y + stood.h,
-        wanted.y + wanted.h,
-        PREVIEW_SLACK,
-    );
-    let x0 = left.div_euclid(TILE_SIZE) * TILE_SIZE;
-    let y0 = top.div_euclid(TILE_SIZE) * TILE_SIZE;
-    let x1 = (right - 1).div_euclid(TILE_SIZE) * TILE_SIZE + TILE_SIZE;
-    let y1 = (bottom - 1).div_euclid(TILE_SIZE) * TILE_SIZE + TILE_SIZE;
-    // Never smaller than what stood there: the caller's picture covers it
-    // already, and giving it back a shrunken frame is a rebuild for nothing.
-    stood.union(Rect {
-        x: x0,
-        y: y0,
-        w: x1 - x0,
-        h: y1 - y0,
-    })
-}
-
-/// The tight box of everything a mask covers, in page pixels, or an empty
-/// rectangle when it covers nothing.
-///
-/// The same question `paint_mask` answers on its way through, asked separately
-/// because a preview has to know how far the frame would move before it can
-/// decide how much of the layer to hand back — and that is before there is any
-/// paint to look at.
-fn covered_bounds(mask: &[u8], mask_frame: Rect) -> Rect {
-    let mut x0 = mask_frame.w;
-    let mut y0 = mask_frame.h;
-    let mut x1 = -1;
-    let mut y1 = -1;
-    for row in 0..mask_frame.h {
-        let line = row as usize * mask_frame.w as usize;
-        for col in 0..mask_frame.w {
-            if mask[line + col as usize] == 0 {
-                continue;
-            }
-            if col < x0 {
-                x0 = col;
-            }
-            if col > x1 {
-                x1 = col;
-            }
-            if row < y0 {
-                y0 = row;
-            }
-            y1 = row;
-        }
-    }
-    if x1 < 0 {
-        return Rect::EMPTY;
-    }
-    Rect {
-        x: mask_frame.x + x0,
-        y: mask_frame.y + y0,
-        w: x1 - x0 + 1,
-        h: y1 - y0 + 1,
-    }
-}
-
-/// A mask has to describe exactly its frame. Checked in one place because the
-/// committed write and the preview are the same call twice over, and a bound
-/// enforced in only one of them is the one an out-of-range read gets through.
+/// A mask has to describe exactly its frame, which is what makes an index into
+/// it safe. Checked before anything reads one, because the length is the
+/// caller's word and an out-of-range read is what a wrong one buys.
 fn check_mask(mask: &[u8], mask_frame: Rect) -> Result<(), String> {
     let wanted = (mask_frame.w.max(0) as usize)
         .checked_mul(mask_frame.h.max(0) as usize)
@@ -330,14 +229,6 @@ pub struct Patch {
     pub rgba: Vec<u8>,
 }
 
-/// The same three things for a write that has not happened: where the frame
-/// would stand, which part of the page the pixels describe, and the pixels.
-pub struct Preview {
-    pub frame: Rect,
-    pub changed: Rect,
-    pub rgba: Vec<u8>,
-}
-
 /// One write's worth of undo: the tiles it wrote over, and the frame it found.
 ///
 /// Both halves swap, so applying this puts the layer back and applying it again
@@ -413,32 +304,6 @@ impl RasterLayer {
         self.write(mask, mask_frame, color, paint_blend(alpha_locked))
     }
 
-    /// A fill worked out and not committed, over `at`. Same arguments, same
-    /// answer, no record and no change to the layer.
-    pub fn preview_fill(
-        &self,
-        mask: &[u8],
-        mask_frame: Rect,
-        at: Rect,
-        color: [u8; 4],
-        alpha_locked: bool,
-    ) -> Result<Option<Vec<u8>>, String> {
-        if color[3] == 0 {
-            return Ok(None);
-        }
-        self.preview(mask, mask_frame, at, color, paint_blend(alpha_locked))
-    }
-
-    /// An erase worked out and not committed, over `at`.
-    pub fn preview_erase(
-        &self,
-        mask: &[u8],
-        mask_frame: Rect,
-        at: Rect,
-    ) -> Result<Option<Vec<u8>>, String> {
-        self.preview(mask, mask_frame, at, [0, 0, 0, 255], Blend::Erase)
-    }
-
     /// Takes the covered part of `mask` out of the layer, in a single
     /// transaction, and hands back what changed.
     ///
@@ -453,79 +318,6 @@ impl RasterLayer {
         mask_frame: Rect,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
         self.write(mask, mask_frame, [0, 0, 0, 255], Blend::Erase)
-    }
-
-    /// What the layer would look like over `at` with `mask` laid on it, worked
-    /// out and handed back with nothing committed.
-    ///
-    /// Taking `&self` is the whole of that guarantee: neither the tiles nor the
-    /// frame can move because this has no way to move them. What it does move
-    /// through is `paint_mask` and the same three blends a write uses, so the
-    /// picture shown during a stroke and the one the release leaves behind are
-    /// one implementation rather than two that have to agree.
-    ///
-    /// `at` need not be `mask_frame`. A stroke asks for the segment it just
-    /// drew while the frame stands still, and for the whole of a frame that
-    /// moved — where the ground the mask never reached still has to come back,
-    /// because the caller is about to rebuild its picture from it.
-    ///
-    /// Straight RGBA over `at`, or nothing when that rectangle is empty.
-    fn preview(
-        &self,
-        mask: &[u8],
-        mask_frame: Rect,
-        at: Rect,
-        color: [u8; 4],
-        blend: Blend,
-    ) -> Result<Option<Vec<u8>>, String> {
-        check_mask(mask, mask_frame)?;
-        let painted = mask_frame.offset(-self.anchor_x, -self.anchor_y);
-        let shown = at.offset(-self.anchor_x, -self.anchor_y);
-        if shown.is_empty() {
-            return Ok(None);
-        }
-
-        let mut scratch = TileGrid::<Rgba8>::new();
-        paint_mask(&mut scratch, mask, painted, color);
-
-        let mut out = self.read(shown);
-        let stride = shown.w as usize * 4;
-        for coord in scratch.occupied().collect::<Vec<_>>() {
-            let Some(tile) = scratch.tile(coord) else {
-                continue;
-            };
-            let part = shown.intersect(tile_rect(coord));
-            if part.is_empty() {
-                continue;
-            }
-            for row in 0..part.h {
-                for col in 0..part.w {
-                    let from = ((part.y + row - coord.ty * TILE_SIZE) as usize * TILE_SIZE as usize
-                        + (part.x + col - coord.tx * TILE_SIZE) as usize)
-                        * 4;
-                    let to = (part.y + row - shown.y) as usize * stride
-                        + (part.x + col - shown.x) as usize * 4;
-                    let src = &tile.bytes()[from..from + 4];
-                    let dst = &mut out[to..to + 4];
-                    match blend {
-                        Blend::Over => over(src, dst),
-                        Blend::OverLocked => over_locked(src, dst),
-                        Blend::Erase => punch(src, dst),
-                    }
-                    // A committed write gets this when the tile is released and
-                    // a preview has no release to get it in. It is not tidiness:
-                    // under straight alpha a transparent pixel that kept its
-                    // colour drags that colour into its neighbours the moment
-                    // anything resamples it, and leaving the two paths to differ
-                    // here is the one way the last preview of a stroke could
-                    // disagree with what the release leaves.
-                    if dst[3] == 0 {
-                        dst.fill(0);
-                    }
-                }
-            }
-        }
-        Ok(Some(out))
     }
 
     fn write(
@@ -850,17 +642,6 @@ struct Registry {
     /// person is.
     order: Vec<String>,
     next_journal: u64,
-    /// Where a stroke in progress has provisionally taken each layer's frame.
-    ///
-    /// Kept here rather than being worked out by whoever is drawing, because a
-    /// frame is the engine's to name: it is what tile coordinates are measured
-    /// from and what the manifest is told. A caller that arrived at its own
-    /// answer would be a second authority on the same rectangle, and the two of
-    /// them disagreeing at the release is silent — the picture on screen is
-    /// rebuilt from a frame nothing else believes in.
-    ///
-    /// A write clears it, because a write settles the real one.
-    previews: HashMap<String, Rect>,
 }
 
 impl Registry {
@@ -930,7 +711,6 @@ pub fn read(id: &str, at: Rect) -> Result<Vec<u8>, String> {
 pub fn release(id: &str) {
     let mut held = registry();
     held.layers.remove(id);
-    held.previews.remove(id);
     held.journals.retain(|_, journal| journal.layer != id);
     let kept: Vec<String> = held.journals.keys().cloned().collect();
     held.order.retain(|name| kept.contains(name));
@@ -940,7 +720,6 @@ pub fn release(id: &str) {
 pub fn release_all() {
     let mut held = registry();
     held.layers.clear();
-    held.previews.clear();
     held.journals.clear();
     held.order.clear();
 }
@@ -997,109 +776,6 @@ pub fn erase(id: &str, mask: &[u8], mask_frame: Rect) -> Result<Option<(String, 
     record(id, |layer| layer.erase(mask, mask_frame))
 }
 
-/// Starts a run of previews against a layer: the frame they stand on begins
-/// again from the committed one.
-///
-/// Called as a stroke begins. A run left unfinished — a stroke that drew only
-/// where a selection cut it away, so no write ever settled the frame — is ended
-/// by the next run rather than by anyone remembering to close it.
-pub fn preview_begin(id: &str) {
-    registry().previews.remove(id);
-}
-
-/// What a fill would leave, without leaving it. No record is filed, so nothing
-/// here is reachable by undo — there is nothing to take back.
-pub fn preview_fill(
-    id: &str,
-    mask: &[u8],
-    mask_frame: Rect,
-    color: [u8; 4],
-    alpha_locked: bool,
-) -> Result<Option<Preview>, String> {
-    if color[3] == 0 {
-        return Ok(None);
-    }
-    preview_run(id, mask, mask_frame, true, |layer, at| {
-        layer.preview_fill(mask, mask_frame, at, color, alpha_locked)
-    })
-}
-
-/// What an erase would leave, on the same terms.
-pub fn preview_erase(id: &str, mask: &[u8], mask_frame: Rect) -> Result<Option<Preview>, String> {
-    // Taking pixels out never moves a frame, so neither may showing it about to
-    // happen. A preview standing on a frame the release will not arrive at is
-    // one the caller rebuilds its whole picture against and then loses.
-    preview_run(id, mask, mask_frame, false, |layer, at| {
-        layer.preview_erase(mask, mask_frame, at)
-    })
-}
-
-/// Works out where the frame stands part-way through a stroke, and how much of
-/// the layer the caller has to be handed to draw it.
-///
-/// The frame is grown by the same arithmetic a write grows it by — the tight
-/// box of what the mask actually covered — so the rectangle a preview names and
-/// the rectangle the release settles on are arrived at the same way and cannot
-/// drift apart.
-///
-/// While that frame stands still only the masked region comes back. When it
-/// moves, the whole of it does: the caller's picture is the wrong size and in
-/// the wrong place, and a patch of it would have nowhere correct to land. That
-/// is the rule a committed write already follows.
-fn preview_run(
-    id: &str,
-    mask: &[u8],
-    mask_frame: Rect,
-    // `grows` says whether this direction of write moves a frame at all. Paint
-    // does; taking pixels out does not, and a preview has to move exactly when
-    // its write would, or the caller rebuilds against a frame nothing arrives at.
-    grows: bool,
-    render: impl FnOnce(&RasterLayer, Rect) -> Result<Option<Vec<u8>>, String>,
-) -> Result<Option<Preview>, String> {
-    check_mask(mask, mask_frame)?;
-    let covered = covered_bounds(mask, mask_frame);
-    if covered.is_empty() {
-        return Ok(None);
-    }
-
-    let held = &mut *registry();
-    let layer = held
-        .layers
-        .get(id)
-        .ok_or_else(|| format!("layer {id} is not held by the engine"))?;
-
-    let stood = held.previews.get(id).copied().unwrap_or_else(|| layer.frame());
-    let frame = if grows { with_slack(stood, covered) } else { stood };
-
-    /*
-     * A frame that moved is answered with the frame and nothing else.
-     *
-     * What the caller needs then is the whole of it, and the whole of it holds
-     * more than this mask knows about: everything drawn earlier in the stroke
-     * is uncommitted and lives only on the picture the move is about to
-     * replace. Painting it here from one segment's coverage would be a picture
-     * the caller has to throw away, and a frame-sized one at that — so it is
-     * not painted, and the caller asks again with everything it has.
-     */
-    held.previews.insert(id.to_string(), frame);
-    if frame != stood {
-        return Ok(Some(Preview {
-            frame,
-            changed: Rect::EMPTY,
-            rgba: Vec::new(),
-        }));
-    }
-
-    let Some(rgba) = render(layer, mask_frame)? else {
-        return Ok(None);
-    };
-    Ok(Some(Preview {
-        frame,
-        changed: mask_frame,
-        rgba,
-    }))
-}
-
 /// Runs one write against a held layer and files the record it produced.
 type Written = Result<Option<(LayerJournal, Patch)>, String>;
 
@@ -1115,8 +791,6 @@ fn record(
     let Some((mut journal, patch)) = write(layer)? else {
         return Ok(None);
     };
-    // The frame is settled now, so nothing provisional about it survives.
-    held.previews.remove(id);
     held.next_journal += 1;
     let name = format!("j{}", held.next_journal);
     journal.layer = id.to_string();
@@ -1131,7 +805,6 @@ pub fn apply_journal(name: &str) -> Option<Patch> {
     let held = &mut *registry();
     let journal = held.journals.get_mut(name)?;
     let layer = held.layers.get_mut(&journal.layer)?;
-    held.previews.remove(&journal.layer);
     Some(layer.apply(journal))
 }
 
@@ -1483,292 +1156,6 @@ mod tests {
             .expect("something to fill");
 
         assert_eq!(pixel(&layer, 0, 0), vec![255, 0, 0, 128]);
-    }
-
-    /**
-     * The whole of what a preview promises. It is asked for at every pointer
-     * event of a stroke, so a layer that moved under one would have a hundred
-     * uncommitted writes in it by the time the button came up.
-     */
-    #[test]
-    fn a_preview_leaves_the_layer_where_it_found_it() {
-        let side = TILE_SIZE * 2;
-        let layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
-        let bounds = layer.bounds;
-        let tiles = layer.grid.tile_count();
-        let at = frame(0, 0, 8, 8);
-
-        layer
-            .preview_fill(&full_mask(at.w, at.h), at, at, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-
-        assert_eq!(layer.bounds, bounds);
-        assert_eq!(layer.grid.tile_count(), tiles);
-        assert_eq!(pixel(&layer, 0, 0), vec![0, 0, 255, 255]);
-    }
-
-    /// One implementation rather than two that have to agree: what the last
-    /// preview of a stroke showed is what the release leaves behind, byte for
-    /// byte.
-    #[test]
-    fn a_preview_is_what_the_commit_leaves() {
-        let side = TILE_SIZE * 2;
-        let at = frame(4, 4, TILE_SIZE, TILE_SIZE);
-        let mut mask = full_mask(at.w, at.h);
-        // A soft corner, so the blend has something to do beyond copying.
-        mask[0] = 90;
-        mask[1] = 30;
-
-        let mut layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
-        let shown = layer
-            .preview_fill(&mask, at, at, [255, 0, 0, 128], false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        layer
-            .fill(&mask, at, [255, 0, 0, 128], false)
-            .expect("a well-formed fill")
-            .expect("something to fill");
-
-        assert_eq!(shown, layer.read(at));
-    }
-
-    /// The eraser too, which is the case a preview built from paint alone would
-    /// get wrong: the hole has to be visible while the stroke is out.
-    #[test]
-    fn an_erase_preview_shows_the_hole_the_commit_will_punch() {
-        let side = TILE_SIZE * 2;
-        let at = frame(0, 0, 8, 8);
-        let mut mask = full_mask(at.w, at.h);
-        mask[4] = 120;
-
-        let mut layer = solid(frame(0, 0, side, side), [0, 0, 255, 255]);
-        let shown = layer
-            .preview_erase(&mask, at, at)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        layer
-            .erase(&mask, at)
-            .expect("a well-formed erase")
-            .expect("something to erase");
-
-        assert_eq!(shown, layer.read(at));
-        assert_eq!(&shown[0..4], &[0, 0, 0, 0]);
-    }
-
-    /// The lock is one blend picked one way, so it reaches the preview by the
-    /// same road it reaches the commit.
-    #[test]
-    fn a_locked_preview_is_what_a_locked_commit_leaves() {
-        let side = TILE_SIZE;
-        let mut rgba = vec![0u8; (side * side) as usize * 4];
-        for y in 0..side / 2 {
-            for x in 0..side {
-                let i = ((y * side + x) * 4) as usize;
-                rgba[i + 2] = 255;
-                rgba[i + 3] = 255;
-            }
-        }
-        let mut layer =
-            RasterLayer::take(&rgba, frame(0, 0, side, side)).expect("a well-formed layer");
-        // Straddling the edge of what is there, so the lock has ground to
-        // refuse as well as ground to accept.
-        let at = frame(0, side / 2 - 2, 8, 4);
-        let mask = full_mask(at.w, at.h);
-
-        let shown = layer
-            .preview_fill(&mask, at, at, RED, true)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        layer
-            .fill(&mask, at, RED, true)
-            .expect("a well-formed fill")
-            .expect("something to fill");
-
-        assert_eq!(shown, layer.read(at));
-        assert_eq!(&shown[0..4], &[255, 0, 0, 255]);
-        assert_eq!(&shown[(2 * at.w as usize) * 4..(2 * at.w as usize) * 4 + 4], &[0, 0, 0, 0]);
-    }
-
-    /**
-     * The one rule that keeps a caller's picture alive: a preview may only move
-     * the frame when the release is going to move it too.
-     *
-     * Moving it is what makes the caller rebuild, and a rebuild keeps only what
-     * the answer it was given carries. The release hands back the whole frame
-     * when its own bounds moved and a few tiles when they did not — so a
-     * preview that moved the frame while the write will not is a rebuild fed by
-     * a handful of tiles, and everything else the caller was showing is gone.
-     *
-     * Paint moves bounds. Taking pixels out never does.
-     */
-    #[test]
-    fn a_preview_moves_the_frame_only_where_the_write_would() {
-        let _guard = alone();
-        let side = TILE_SIZE * 2;
-        let rgba = vec![255u8; (side * side) as usize * 4];
-        take("l", &rgba, frame(0, 0, side, side)).expect("a well-formed layer");
-        let stood = frame(0, 0, side, side);
-
-        // Paint that stays inside the frame leaves it exactly where it was.
-        preview_begin("l");
-        let inside = frame(10, 10, 8, 8);
-        let shown = preview_fill("l", &full_mask(inside.w, inside.h), inside, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        assert_eq!(shown.frame, stood);
-        assert_eq!(shown.changed, inside);
-
-        // An eraser reaching past the edge does not move it either, because the
-        // write it stands in for would not.
-        preview_begin("l");
-        let past = frame(side - 4, side - 4, 40, 40);
-        let erased = preview_erase("l", &full_mask(past.w, past.h), past)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        assert_eq!(erased.frame, stood);
-        assert_eq!(erased.changed, past);
-    }
-
-    /// Once it does have to move, it moves further than it had to, so the next
-    /// few events find themselves already inside it. Rebuilding is the most
-    /// expensive thing a stroke asks for; room to grow into is what stops it
-    /// happening on every one.
-    #[test]
-    fn a_frame_that_has_to_move_takes_room_with_it() {
-        let _guard = alone();
-        take("l", &[], frame(0, 0, 0, 0)).expect("a well-formed layer");
-
-        preview_begin("l");
-        let first = frame(400, 400, 8, 8);
-        let one = preview_fill("l", &full_mask(first.w, first.h), first, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        assert!(one.frame.w > first.w + PREVIEW_SLACK);
-        // A move is answered with the frame alone: what the caller needs next
-        // is the whole of it, and this mask cannot paint that.
-        assert!(one.changed.is_empty());
-        assert!(one.rgba.is_empty());
-
-        // A step the slack already covers does not move it again.
-        let next = frame(500, 430, 8, 8);
-        let two = preview_fill("l", &full_mask(next.w, next.h), next, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        assert_eq!(two.frame, one.frame);
-        assert_eq!(two.changed, next);
-    }
-
-    /**
-     * The frame a run of previews arrives at holds everything the release will
-     * settle on. It may hold more — the slack — and that is safe exactly
-     * because moving it at all means the release moves its own bounds too, and
-     * a release that moved its bounds hands the whole frame back.
-     */
-    #[test]
-    fn a_run_of_previews_holds_the_frame_the_release_settles() {
-        let _guard = alone();
-        // No frame at all, which is where the frame has the furthest to move.
-        take("l", &[], frame(0, 0, 0, 0)).expect("a well-formed layer");
-
-        let first = frame(40, 40, 8, 8);
-        let second = frame(90, 60, 8, 8);
-        let both = frame(40, 40, 58, 28);
-        let mut all = vec![0u8; (both.w * both.h) as usize];
-        for part in [first, second] {
-            for row in 0..part.h {
-                for col in 0..part.w {
-                    let at = (part.y + row - both.y) * both.w + (part.x + col - both.x);
-                    all[at as usize] = 255;
-                }
-            }
-        }
-        let of = |part: Rect| -> Vec<u8> {
-            let mut out = vec![0u8; (part.w * part.h) as usize];
-            for row in 0..part.h {
-                for col in 0..part.w {
-                    let from = (part.y + row - both.y) * both.w + (part.x + col - both.x);
-                    out[(row * part.w + col) as usize] = all[from as usize];
-                }
-            }
-            out
-        };
-
-        let holds = |outer: Rect, inner: Rect| {
-            inner.x >= outer.x
-                && inner.y >= outer.y
-                && inner.x + inner.w <= outer.x + outer.w
-                && inner.y + inner.h <= outer.y + outer.h
-        };
-
-        preview_begin("l");
-        let one = preview_fill("l", &of(first), first, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        // A frame that has to move is answered with the frame alone.
-        assert!(holds(one.frame, first));
-        assert!(one.changed.is_empty());
-
-        let two = preview_fill("l", &of(second), second, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-        assert!(holds(two.frame, both));
-
-        let (_, patch) = fill("l", &all, both, RED, false)
-            .expect("a well-formed fill")
-            .expect("something to fill");
-        // The release settles tighter than the preview stood, and says so by
-        // handing the whole frame back — which is what makes the two safe to
-        // differ.
-        assert!(holds(two.frame, patch.frame));
-        assert_eq!(patch.changed, patch.frame);
-    }
-
-    /// A run that stays inside the frame leaves it alone, and only the masked
-    /// region comes back — which is what keeps a stroke on a page-sized layer
-    /// to a few kilobytes an event.
-    #[test]
-    fn a_preview_inside_the_frame_moves_nothing_and_returns_only_its_region() {
-        let _guard = alone();
-        let side = TILE_SIZE * 2;
-        let rgba = vec![0u8; (side * side) as usize * 4];
-        take("l", &rgba, frame(0, 0, side, side)).expect("a well-formed layer");
-
-        preview_begin("l");
-        let at = frame(10, 10, 8, 8);
-        let shown = preview_fill("l", &full_mask(at.w, at.h), at, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-
-        assert_eq!(shown.frame, frame(0, 0, side, side));
-        assert_eq!(shown.changed, at);
-        assert_eq!(shown.rgba.len(), (at.w * at.h) as usize * 4);
-    }
-
-    /// A run left unfinished — a stroke the selection cut away entirely, so no
-    /// write ever settled the frame — must not lend its provisional frame to
-    /// the next one.
-    #[test]
-    fn beginning_a_run_forgets_the_frame_the_last_one_stood_on() {
-        let _guard = alone();
-        take("l", &[], frame(0, 0, 0, 0)).expect("a well-formed layer");
-        // Further off than any amount of slack could reach.
-        let far = frame(4000, 4000, 8, 8);
-
-        preview_begin("l");
-        preview_fill("l", &full_mask(far.w, far.h), far, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-
-        preview_begin("l");
-        let near = frame(10, 10, 8, 8);
-        let shown = preview_fill("l", &full_mask(near.w, near.h), near, RED, false)
-            .expect("a well-formed preview")
-            .expect("something to show");
-
-        // Begun again from the committed frame, so it stands where this run put
-        // it and nowhere near where the last one wandered off to.
-        assert!(shown.frame.x + shown.frame.w < far.x);
     }
 
     /// Copy-on-write is what makes sharing safe: the block every tile points at

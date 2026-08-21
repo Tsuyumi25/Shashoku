@@ -20,7 +20,6 @@ import {
   surfaceHolding,
   type StrokeSurface,
 } from '@/lib/selection/strokeSurface'
-import { probeEvent, probeReport } from '@/lib/paintProbe'
 import { maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -119,7 +118,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   function strokeTo(at: Point): void {
     const s = stroke
     if (s === null) return
-    probeEvent()
     const shape = selection.brushShapeFor(s.mode)
     s.surface = surfaceHolding(
       s.surface,
@@ -334,7 +332,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // transparent colour. Neither is a failure and neither is a step.
     if (patch === null) return
     raster.paste(s.entry.id, patch)
-    probeReport()
     await raster.owe(s.entry.id)
 
     // One function for both directions: the engine's record is a swap, so

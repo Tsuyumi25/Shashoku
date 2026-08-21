@@ -532,31 +532,6 @@ fn to_patch(journal: String, patch: raster::Patch) -> LayerPatch {
     }
 }
 
-/// A layer's pixels over part of itself, and where its frame stands.
-///
-/// What a write hands back minus the way to take it back — which is exactly
-/// what a preview is, so both reach the caller's own picture of a layer by one
-/// path instead of two.
-#[napi(object)]
-pub struct LayerPixels {
-    /// Where the layer's frame would stand were this committed.
-    pub frame: LayerFrame,
-    /// The part of the page `rgba` describes. Equal to `frame` whenever that
-    /// frame moved, because a picture of the old size has nowhere to put a
-    /// patch of the new one.
-    pub changed: LayerFrame,
-    /// Straight RGBA of `changed`, row-major.
-    pub rgba: Buffer,
-}
-
-fn to_pixels(shown: raster::Preview) -> LayerPixels {
-    LayerPixels {
-        frame: to_frame(shown.frame),
-        changed: to_frame(shown.changed),
-        rgba: shown.rgba.into(),
-    }
-}
-
 /// Hands a layer's whole pixels over, to be called once on its first edit.
 ///
 /// Whole rather than lazily, and once rather than per region: the crossing costs
@@ -636,56 +611,6 @@ pub fn raster_erase(
 pub fn raster_read(id: String, region: LayerFrame) -> napi::Result<Buffer> {
     let rgba = raster::read(&id, to_rect(&region)).map_err(napi::Error::from_reason)?;
     Ok(rgba.into())
-}
-
-/// Starts a run of previews against a layer: the frame they stand on begins
-/// again from the committed one. Called as a stroke begins.
-#[napi]
-pub fn raster_preview_begin(id: String) {
-    raster::preview_begin(&id);
-}
-
-/// What a fill would leave, worked out and handed back with nothing committed:
-/// no tile moves, no frame moves and no record is filed.
-///
-/// The same three things a write hands back, so a preview reaches the caller's
-/// own picture of the layer by the path a write already uses. `frame` is where
-/// the frame would stand if the stroke were released now — worked out here,
-/// because a frame is the engine's to name and a caller that arrived at its own
-/// answer would be a second authority on the same rectangle.
-///
-/// `changed` is `maskFrame` while that frame stands still and the whole frame
-/// when it moves, which is the rule a committed write already follows.
-#[napi]
-pub fn raster_preview_fill(
-    id: String,
-    mask: Buffer,
-    mask_frame: LayerFrame,
-    color: String,
-    alpha_locked: bool,
-) -> napi::Result<Option<LayerPixels>> {
-    let rgba = parse_hex_rgba(&color).map_err(napi::Error::from_reason)?;
-    let shown = raster::preview_fill(
-        &id,
-        mask.as_ref(),
-        to_rect(&mask_frame),
-        [rgba.0, rgba.1, rgba.2, rgba.3],
-        alpha_locked,
-    )
-    .map_err(napi::Error::from_reason)?;
-    Ok(shown.map(to_pixels))
-}
-
-/// What an erase would leave, on the same terms.
-#[napi]
-pub fn raster_preview_erase(
-    id: String,
-    mask: Buffer,
-    mask_frame: LayerFrame,
-) -> napi::Result<Option<LayerPixels>> {
-    let shown = raster::preview_erase(&id, mask.as_ref(), to_rect(&mask_frame))
-        .map_err(napi::Error::from_reason)?;
-    Ok(shown.map(to_pixels))
 }
 
 /// Swaps a record against its layer. Undo and redo are this same call, because

@@ -40,20 +40,21 @@ export const useRasterStore = defineStore('raster', () => {
   const held = shallowRef(new Map<string, HeldLayer>())
 
   /**
-   * Bumped whenever a held layer's pixels or frame changed. The canvases are
-   * not reactive — a page-sized one would be walked byte by byte by the devtools
-   * plugin — so this is what the stack watches to know it must redraw.
+   * Bumped whenever what the stack should draw changed — a layer's pixels, its
+   * frame, or which side of the handover it is on. The canvases are not
+   * reactive (a page-sized one would be walked byte by byte by the devtools
+   * plugin), so this is what the stack watches to know it must redraw.
    */
   const revision = ref(0)
 
   /**
-   * Bumped only when a layer's *committed* pixels changed — never by a stroke
-   * being shown as it is drawn.
+   * Bumped only when a layer's pixels were *written*.
    *
-   * Redrawing has to follow a preview and reading back does not, and telling
-   * them apart is worth a second counter: a cache keyed on `revision` is
-   * rebuilt once per pointer event, and anything that reads a whole canvas to
-   * build itself then costs the stroke a frame every time the hand moves.
+   * A handover changes which canvas the stack draws from without changing a
+   * pixel, and telling that apart is worth a second counter: anything that
+   * reads a whole canvas back to build itself — a hit-test plane, a thumbnail,
+   * the wand's composite of the page — hangs off this one, and reading a whole
+   * canvas back is more than a frame's work on a layer of any size.
    */
   const committed = ref(0)
 
@@ -133,21 +134,14 @@ export const useRasterStore = defineStore('raster', () => {
    * Puts pixels the engine handed back onto the layer's own canvas.
    *
    * One path, whether or not the frame moved: a rebuilt canvas is always fully
-   * covered by the very patch that told it to rebuild. A write hands back the
-   * whole frame when the frame moved; a stroke's preview, which is the other
-   * caller, follows the same rule for the same reason.
+   * covered by the very patch that told it to rebuild, because a write that
+   * moved its own frame hands the whole of that frame back.
    *
    * `putImageData` rather than a draw, because it ignores compositing entirely —
    * the straight alpha the engine works in survives instead of being blended
    * against what is already on the canvas.
-   *
-   * `shown` marks a stroke being drawn rather than a write that happened, which
-   * only the second counter is told about. What is on the canvas is the same
-   * either way — that is the whole point of a preview — so anything that merely
-   * redraws must not care, and anything that reads the canvas back to build
-   * itself must, or it does that once per pointer event.
    */
-  function paste(id: string, patch: EngineLayerPixels, shown = false): void {
+  function paste(id: string, patch: EngineLayerPixels): void {
     const layer = held.value.get(id)
     if (layer === undefined) return
     const { frame, changed } = patch
@@ -166,7 +160,7 @@ export const useRasterStore = defineStore('raster', () => {
       context2d(layer.canvas).putImageData(image, changed.x - frame.x, changed.y - frame.y)
     }
     revision.value++
-    if (!shown) committed.value++
+    committed.value++
   }
 
   /**

@@ -245,7 +245,6 @@ import {
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { framedLayers, layerAt } from '@/lib/layerHit'
-import { probeComposite, probeSync } from '@/lib/paintProbe'
 import { artworkSignature, compositeArtwork } from '@/lib/pageComposite'
 import {
   distanceToSegment,
@@ -907,7 +906,7 @@ const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
   return artworkSignature(pageStack(file.page.layers), (id) =>
-    raster.holds(id) ? `${id}@${probeSync() ? raster.revision : raster.committed}` : null,
+    raster.holds(id) ? `${id}@${raster.committed}` : null,
   )
 })
 
@@ -923,7 +922,6 @@ watch(
     const mine = ++artworkRequest
     const file = currentFile.value
     if (!pageDir || !file) return
-    probeComposite()
     try {
       const composited = await compositeArtwork({
         page: file.page,
