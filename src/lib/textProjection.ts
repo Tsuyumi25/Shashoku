@@ -199,12 +199,16 @@ export function textProjection(input: TextProjectionInput): TextProjection {
       const tail = caretMain(Math.min(end, lineTo))
       const cross = lineOffset(line)
       // A selection that swallows a blank line has nothing there to draw, so it
-      // gets a sliver to keep the run continuous. A line the selection merely
-      // touches at its edge gets nothing: the end of one line and the start of
-      // the next are the same point, and drawing it marks a line that holds
-      // none of the selection.
+      // gets a sliver to keep the run continuous. Whether it swallowed one is
+      // that line's own position, never a span: a blank line's two carets are
+      // the same point whether the selection holds the line or merely ends on
+      // it, so measuring between them cannot tell those apart. A line the
+      // selection only touches at its edge gets nothing either way — the end of
+      // one line and the start of the next are the same point, and drawing it
+      // marks a line holding none of the selection.
       const blank = lineFrom === lineTo
-      if (tail <= head && !blank) continue
+      const holds = blank ? start <= lineFrom && lineFrom < end : tail > head
+      if (!holds) continue
       const span = Math.max(tail - head, BLANK_LINE_SLIVER)
       boxes.push(
         vertical

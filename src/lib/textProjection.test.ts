@@ -125,6 +125,26 @@ function vertical() {
   })
 }
 
+/** Three lines with the middle one empty, so it has no glyph to measure. */
+function blankLine() {
+  return textProjection({
+    text: 'a\n\nb',
+    clusters: [
+      { cluster: 0, x: PADDING, y: PADDING, width: CHAR_MAIN, height: CHAR_CROSS },
+      {
+        cluster: 3,
+        x: PADDING,
+        y: PADDING + CHAR_CROSS * 2,
+        width: CHAR_MAIN,
+        height: CHAR_CROSS,
+      },
+    ],
+    vertical: false,
+    padding: PADDING,
+    crossExtent: PADDING * 2 + CHAR_CROSS * 3,
+  })
+}
+
 describe('lines', () => {
   it('splits on newlines', () => {
     const p = horizontal()
@@ -216,25 +236,27 @@ describe('selection', () => {
   })
 
   it('gives a blank line a sliver so the run stays continuous', () => {
-    const p = textProjection({
-      text: 'a\n\nb',
-      clusters: [
-        { cluster: 0, x: PADDING, y: PADDING, width: CHAR_MAIN, height: CHAR_CROSS },
-        { cluster: 3, x: PADDING, y: PADDING + CHAR_CROSS * 2, width: CHAR_MAIN, height: CHAR_CROSS },
-      ],
-      vertical: false,
-      padding: PADDING,
-      crossExtent: PADDING * 2 + CHAR_CROSS * 3,
-    })
-    const boxes = p.selection(0, 4)
+    const boxes = blankLine().selection(0, 4)
     expect(boxes).toHaveLength(3)
     expect(boxes[1]!.width).toBeGreaterThan(0)
     expect(boxes[1]!.y).toBe(PADDING + CHAR_CROSS)
   })
 
+  it('gives a blank line a sliver for its own break alone', () => {
+    const boxes = blankLine().selection(2, 3)
+    expect(boxes).toHaveLength(1)
+    expect(boxes[0]!.y).toBe(PADDING + CHAR_CROSS)
+  })
+
   it('draws nothing on a line the range only touches at its edge', () => {
     // 0..2 ends exactly where line 0 ends; line 1 holds none of it.
     expect(horizontal().selection(0, 2)).toHaveLength(1)
+  })
+
+  it('draws nothing on a blank line the range only touches at its edge', () => {
+    // Shift+Right from the end of line 0 takes that line's break and no more.
+    // The blank line below starts where the range ends, so it holds none of it.
+    expect(blankLine().selection(1, 2)).toEqual([])
   })
 })
 
