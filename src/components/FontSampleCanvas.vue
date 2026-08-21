@@ -7,15 +7,7 @@
       :height="current.image.height"
       :style="boxStyle"
     />
-    <CellTextEditor
-      v-if="editing"
-      :sample="current"
-      :text="text"
-      :vertical="vertical"
-      :start-at="startAt"
-      @update:text="emit('update:text', $event)"
-      @close="emit('close')"
-    />
+    <div v-for="(box, i) in highlightBoxes" :key="i" class="highlight-box" :style="box" />
   </div>
   <span
     v-if="failed"
@@ -31,8 +23,8 @@
 import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
-import CellTextEditor from '@/components/CellTextEditor.vue'
 import { sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
+import { textProjection } from '@/lib/textProjection'
 
 const props = defineProps<{
   entry: FontEntry
@@ -46,13 +38,12 @@ const props = defineProps<{
   weightPx?: number
   /** Outline the characters this family has no glyph for. */
   mark?: boolean
-  /** Puts a caret in this cell. Only one cell may hold it at a time. */
-  editing?: boolean
-  /** Client point of the click that started editing, if there was one. */
-  startAt?: { clientX: number; clientY: number } | null
+  /**
+   * Show the whole sample as selected, because the field that owns it has the
+   * caret and its text selected. Only one cell may hold it at a time.
+   */
+  highlighted?: boolean
 }>()
-
-const emit = defineEmits<{ 'update:text': [string]; close: [] }>()
 
 /**
  * Literal rather than a theme token: canvas fill styles cannot read CSS custom
@@ -61,7 +52,7 @@ const emit = defineEmits<{ 'update:text': [string]; close: [] }>()
 const MARK_COLOR = 'rgba(239, 68, 68, 0.28)'
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
-/** What belongs on the canvas, which is also the editor's geometry. */
+/** What belongs on the canvas, which is also the highlight's geometry. */
 const current = shallowRef<Sample | null>(null)
 const failed = ref(false)
 const failure = ref('')
@@ -90,6 +81,31 @@ const boxStyle = computed(() =>
       }
     : undefined,
 )
+
+/**
+ * The whole sample, boxed line by line rather than as one rectangle over the
+ * bitmap: a line shorter than the longest one would otherwise be highlighted
+ * past its end, and a vertical run would get a horizontal band across columns
+ * it does not fill. Read off the engine's clusters, so the highlight lands on
+ * the glyphs however the run was laid out.
+ */
+const highlightBoxes = computed(() => {
+  const sample = current.value
+  if (!props.highlighted || !sample || props.text.length === 0) return []
+  const projection = textProjection({
+    text: props.text,
+    clusters: sample.clusters,
+    vertical: props.vertical ?? false,
+    padding: sample.padding,
+    crossExtent: props.vertical ? sample.image.width : sample.image.height,
+  })
+  return projection.selection(0, props.text.length).map((box) => ({
+    left: `${box.x / dpr}px`,
+    top: `${box.y / dpr}px`,
+    width: `${box.width / dpr}px`,
+    height: `${box.height / dpr}px`,
+  }))
+})
 
 /**
  * Runs during setup, not on mount. The virtual list measures a row the moment
@@ -141,13 +157,19 @@ watch([current, () => props.mark], paint, { flush: 'post' })
 
 <style scoped>
 /*
- * Sized to the bitmap so the editor overlay, which anchors to this box, lands
+ * Sized to the bitmap so the highlight, which anchors to this box, lands
  * exactly on the glyphs wherever the cell places the sample. Its own stacking
- * context, so the editor's selection highlight sits under the canvas rather
- * than under the cell.
+ * context, so the highlight sits under the canvas rather than under the cell.
  */
 .sample-box {
   position: relative;
   z-index: 0;
+}
+/* Behind the glyphs, the way a selection in a text field is. */
+.highlight-box {
+  position: absolute;
+  z-index: -1;
+  background: var(--primary);
+  opacity: 0.25;
 }
 </style>

@@ -253,7 +253,7 @@ import { RAIL_STROKE, railMarks, railWidth } from '@/lib/readingRail'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEventListener } from '@vueuse/core'
-import { ownsKeyboard } from '@/lib/editContext'
+import { ownsKeyboard } from '@/lib/typingSurface'
 
 const project = useProjectStore()
 const editor = useEditorStore()

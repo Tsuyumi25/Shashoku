@@ -68,12 +68,12 @@ Own the entire pipeline: reading, layout, rasterisation, and text input.
 3. **Imported fonts.** Record the folder paths the user adds and rescan them.
    Font files are never copied into application storage.
 
-4. **Text input.** Bridge the platform IME to the engine-drawn canvas with the
-   `EditContext` API and a hand-written coordinator. One active editor relocates
-   to the focused cell rather than one editor per cell.
+4. **Text input.** Typing always happens in a native input control. What the
+   engine draws is a projection of that control's text, caret and selection —
+   never a place a key is delivered to.
 
 The four are a chain, not a list. (1) makes (2) possible, (2) makes (3)
-meaningful, and (4) is the price of (1).
+meaningful, and (4) is what keeps (1) from having to reimplement text input.
 
 ## Consequences
 
@@ -151,39 +151,32 @@ deletes nothing from disk.
 
 ### Text input
 
-Because samples are engine-drawn bitmaps, there is no DOM text to put a caret
-in. Editing has to be built.
+Because samples and labels are engine-drawn bitmaps, there is no DOM text to put
+a caret in. There does not have to be: a native input holds the string and the
+keyboard, and the bitmap shows what that string currently is.
 
-No headless, renderer-agnostic `EditContext` library exists. Mainstream editors
-all own their own layout, so none of them has reason to expose layout as a
-pluggable interface. VS Code shipped `EditContext` as the stable default in
-1.101 and is itself an Electron application, which is the strongest available
-evidence that the approach works in this environment.
+Caret and selection are projected by index rather than by measuring anything.
+The input reports its selection in string offsets, and the engine already
+returns a rectangle per cluster — so "the caret is before the eighth character"
+is answered by a table lookup, not by adding up advance widths. Nothing about
+the input's own font, size or line breaking can move the projected caret,
+because none of it is consulted.
 
-The coordinator is roughly 900 lines. It stays an order of magnitude smaller
-than VS Code's equivalent because the engine already returns a rectangle per
-glyph, and that one table answers three separate questions: where to mark
-missing characters, which character a click landed on, and where the IME should
-place its candidate window. VS Code's hit testing alone is 1214 lines, because
-it has to derive the same information back out of the DOM.
+The same cluster table answers three separate questions: where to mark missing
+characters, which character a click landed on, and where the caret goes. That
+is why the projection is a few dozen lines rather than the thousand VS Code
+spends on hit testing, which has to derive the same answers back out of the DOM.
 
-`EditContext` does not own clipboard changes. Cut and paste produce no
-`textupdate`, so both the context and our own string have to be updated
-explicitly — unlike the IME path, where the event is the source of truth.
+The pointer stays on the engine-drawn surface. Clicking and dragging there set
+the input's selection directly, so only keys and composition ever reach the
+input, and there are never two copies of the text to reconcile — the input owns
+the string, and the projection owns nothing.
 
-The platform IME is the fragile part. `EditContext` is one Blink API, but
-underneath it are Windows TSF, macOS `NSTextInputClient`, and ibus or fcitx5 on
-Linux. Every reported bug in this area has been platform-specific, and only one
-platform is testable here. This layer will have defects that surface through
-user reports.
-
-`TextFormat`'s `underlineStyle` and `underlineThickness` carry incorrect values
-in shipped Chromium, with a fix intended. Composition underlines drawn from
-those fields may differ visibly between Chromium versions.
-
-The feature degrades rather than breaks. Availability is detected at runtime; if
-`EditContext` is absent, cells simply are not editable. The shared sample input
-above the grid is never removed, so a complete editing path always exists.
+The platform IME therefore needs no work of ours. A native input is what every
+IME on every platform is written against, so Windows TSF, macOS
+`NSTextInputClient` and ibus or fcitx5 on Linux are all somebody else's problem.
+Placing the candidate window is the one thing left to us, and it is a position
+rather than a protocol.
 
 ### Nothing is drawn in a face the object did not name
 
@@ -223,11 +216,18 @@ that cannot draw the sample appear in the list at all.
 
 ### The thing not to "fix"
 
-Making the sample cells DOM text with a `font-family` would replace roughly 900
-lines with 20, and would give caret, selection, clipboard and IME for free.
+Making the sample cells DOM text with a `font-family` would delete the
+projection outright and give caret, selection and clipboard for free.
 
 It would also silently reacquire OTS for every imported font. Older CJK families
 would vanish from the list or draw incorrectly, with no error anywhere.
 
-The hand-written editor is the price of decision (2). Anyone proposing to remove
-it is proposing to require font installation, and should say so explicitly.
+Decision (4) is not that same move made safely, and reading it that way is the
+mistake this section exists to stop. The input is a native control showing the
+user's keystrokes in the *system* font; it never opens one of our font files and
+never asks Chromium to. The sample stays engine-drawn, from bytes Chromium
+never sees. What moved into the DOM is the keyboard, not the typeface.
+
+The projection is the price of decision (2). Anyone proposing to replace it with
+DOM text in the user's own font is proposing to require font installation, and
+should say so explicitly.

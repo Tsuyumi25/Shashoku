@@ -131,11 +131,14 @@
         {{ p.label }}
       </button>
       <input
+        ref="sampleEl"
         v-model="sampleDraft"
         spellcheck="false"
         placeholder="樣本文字"
         title="換行請用 \n"
         class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-0.5 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
+        @input="aimedAt = null"
+        @blur="aimedAt = null"
       />
     </div>
 
@@ -228,14 +231,10 @@
             </span>
 
             <div
-              class="cell-sample"
-              :class="[canEditInCell ? 'cursor-text' : '', vertical ? 'vertical' : '']"
-              :title="
-                canEditInCell
-                  ? '點一下可以直接改樣本文字'
-                  : '這個環境不支援在格子裡編輯，請用上方的樣本文字欄'
-              "
-              @mousedown="startEditing(shownFace(faces), $event)"
+              class="cell-sample cursor-text"
+              :class="vertical ? 'vertical' : ''"
+              title="點一下：樣本文字欄接手，整段選起來，直接打字取代"
+              @mousedown="aimSample(faces[0]!.family, $event)"
             >
               <FontSampleCanvas
                 :entry="shownFace(faces)"
@@ -246,10 +245,7 @@
                 :vertical="vertical"
                 :weight-px="weightPx"
                 :mark="markMissing"
-                :editing="editingFamily === faces[0]!.family"
-                :start-at="editingFamily === faces[0]!.family ? editingAt : undefined"
-                @update:text="onEditorText"
-                @close="stopEditing(faces[0]!.family)"
+                :highlighted="aimedAt === faces[0]!.family"
               />
             </div>
 
@@ -310,7 +306,6 @@ import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/type
 import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
-import { canEditInCell } from '@/lib/editContext'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -338,39 +333,28 @@ const sample = computed(() => sampleDraft.value.replaceAll('\\n', '\n'))
 
 watch(sampleDraft, (text) => preferences.setFontSampleText(text))
 
-/**
- * One editor for the whole grid. HTMLElement.editContext binds one to one, and
- * spreadsheets settle the same way — Handsontable keeps a single editor per
- * table, AG Grid a single editable cell.
- */
-const editingFamily = ref<string | null>(null)
-/** Where the click that opened the editor landed, so the caret starts there. */
-const editingAt = ref<{ clientX: number; clientY: number } | null>(null)
+const sampleEl = ref<HTMLInputElement | null>(null)
 
-function startEditing(entry: FontEntry, e: MouseEvent) {
-  if (!canEditInCell || editingFamily.value === entry.family) return
-  // A cell is not focusable, so letting the press run its course would clear
-  // focus the moment the editor took it — the editor opened and shut again
-  // within the same click.
+/**
+ * Which cell the sample field is currently aimed at, or null. Typing happens in
+ * that field and never in a cell; the cell shows the field's selection back, so
+ * the press reads as having picked up the text it is about to replace.
+ *
+ * One cell at a time, because there is one field and one sample string. The
+ * highlight follows the family rather than the row, so a scroll that recycles
+ * the virtual rows leaves it on the cell it belongs to.
+ */
+const aimedAt = ref<string | null>(null)
+
+function aimSample(family: string, e: MouseEvent) {
+  // A cell cannot hold focus itself, so letting the press run its course would
+  // clear the focus the field is being given within the same click.
   e.preventDefault()
-  editingAt.value = { clientX: e.clientX, clientY: e.clientY }
-  editingScrollTop = scrollEl.value?.scrollTop ?? 0
-  editingFamily.value = entry.family
-}
-
-/**
- * Named rather than unconditional: pressing on another cell moves the caret
- * there before the old editor is told it lost focus, and an anonymous close
- * would then shut the one that just opened.
- */
-function stopEditing(family: string) {
-  if (editingFamily.value === family) editingFamily.value = null
-}
-
-// The editor is a view of the shared sample string, not its owner, so what it
-// types goes back through the same field the input above the grid writes to.
-function onEditorText(next: string) {
-  sampleDraft.value = next.replaceAll('\n', '\\n')
+  aimedAt.value = family
+  const field = sampleEl.value
+  if (!field) return
+  field.focus({ preventScroll: true })
+  field.select()
 }
 
 const appliedSize = computed(() => preferences.prefs.fontSamplePx)
@@ -623,27 +607,6 @@ function measureRow(el: unknown) {
 }
 watch([appliedSize, columns, displayed, vertical], () => virtualizer.value.measure())
 
-/** Where the list stood when editing began, to tell a real scroll from a nudge. */
-let editingScrollTop = 0
-const SCROLL_SLACK_PX = 2
-
-useEventListener(
-  scrollEl,
-  'scroll',
-  () => {
-    // Virtual rows recycle and shift under a scroll, so an editor riding along
-    // would have to stay in step with the list. Spreadsheets commit on scroll
-    // for the same reason. Measured against where editing started rather than
-    // fired on any scroll event, because focusing a partly visible cell scrolls
-    // it into view and would otherwise close the editor that just opened.
-    const top = scrollEl.value?.scrollTop ?? 0
-    if (editingFamily.value && Math.abs(top - editingScrollTop) > SCROLL_SLACK_PX) {
-      editingFamily.value = null
-    }
-  },
-  { passive: true },
-)
-
 // Enumerating on open rather than at startup. The platform's own list does not
 // change while the app runs, so this only repeats when a folder is added.
 let enumerated = false
@@ -683,7 +646,7 @@ watch(
     // box: filtering down to the one font already in use hides exactly what the
     // picker was opened to compare it against.
     search.value = ''
-    editingFamily.value = null
+    aimedAt.value = null
     // Fresh per opening, so every cell starts from the face the object names.
     shownKey.value = new Map()
     vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical

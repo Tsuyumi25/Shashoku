@@ -217,7 +217,7 @@ import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { useToolChoice } from '@/composables/useToolChoice'
-import { ownsKeyboard } from '@/lib/editContext'
+import { ownsKeyboard } from '@/lib/typingSurface'
 import {
   centeredBoxOnScreen,
   contentToScreenPx,
