@@ -10,6 +10,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
+import { probePaint, probeSync } from '@/lib/paintProbe'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
@@ -90,6 +91,17 @@ function paint() {
   if (!cv) return
   const ctx = cv.getContext('2d')
   if (!ctx) return
+  // A painted canvas is current, so a frame waiting to paint it again has
+  // nothing left to do. Cancelling here rather than at each caller is what lets
+  // a write draw itself immediately without the stroke's pending frame then
+  // drawing the same picture a second time. After the guards above, so a call
+  // made before the canvas exists cannot swallow the frame that would have
+  // drawn it.
+  if (frame !== null) {
+    cancelAnimationFrame(frame)
+    frame = null
+  }
+  const started = performance.now()
   const w = Math.max(1, Math.round(props.container.w * dpr))
   const h = Math.max(1, Math.round(props.container.h * dpr))
   if (cv.width !== w || cv.height !== h) {
@@ -131,6 +143,7 @@ function paint() {
     ctx.drawImage(source, x, y, fw, fh)
   }
   ctx.globalAlpha = 1
+  probePaint(performance.now() - started)
 }
 
 /**
@@ -151,12 +164,11 @@ function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
   ctx.restore()
 }
 
-let scheduled = false
+let frame: number | null = null
 function schedulePaint() {
-  if (scheduled) return
-  scheduled = true
-  requestAnimationFrame(() => {
-    scheduled = false
+  if (frame !== null) return
+  frame = requestAnimationFrame(() => {
+    frame = null
     paint()
   })
 }
@@ -185,12 +197,22 @@ watch(
 watch(drawnTexts, schedulePaint)
 
 /**
- * An edit lands on screen in the same call stack that made it, rather than on
+ * A write lands on screen in the same call stack that made it, rather than on
  * the next frame. Drawing is what says the write happened, so anything between
  * the two is a hand the picture is behind — and there is no version number to
  * reconcile because the act of painting is itself the signal.
  */
-watch(() => raster.revision, paint, { flush: 'sync' })
+watch(() => raster.committed, paint, { flush: 'sync' })
+
+/**
+ * A stroke being shown is the other caller, and it is held to the next frame.
+ *
+ * The screen only changes on a frame, so a preview drawn on one is by
+ * definition on time — while a pen reports two to eight times per frame, and
+ * every one of those reports would otherwise clear this whole canvas and redraw
+ * every object on it. The frame that a write cancels is this one.
+ */
+watch(() => raster.revision, () => (probeSync() ? paint() : schedulePaint()), { flush: 'sync' })
 
 watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 

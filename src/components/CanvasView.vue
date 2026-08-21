@@ -244,6 +244,7 @@ import {
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { framedLayers, layerAt } from '@/lib/layerHit'
+import { probeComposite, probeSync } from '@/lib/paintProbe'
 import { artworkSignature, compositeArtwork } from '@/lib/pageComposite'
 import {
   distanceToSegment,
@@ -879,12 +880,19 @@ function liveLayer(id: string) {
   return live === null ? null : { canvas: live.canvas, frame: live.frame }
 }
 
-/** What the wand's picture is of, so a change that redraws the page drops it. */
+/**
+ * What the wand's picture is of, so a change that redraws the page drops it.
+ *
+ * What has been *written*, not what has been drawn. Rebuilding this composites
+ * the whole page out of every layer, and keyed on a stroke being shown it would
+ * do that once per pointer event — for a picture nothing can read until the
+ * hand comes up, since the wand is a different tool.
+ */
 const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
   return artworkSignature(pageStack(file.page.layers), (id) =>
-    raster.holds(id) ? `${id}@${raster.revision}` : null,
+    raster.holds(id) ? `${id}@${probeSync() ? raster.revision : raster.committed}` : null,
   )
 })
 
@@ -900,6 +908,7 @@ watch(
     const mine = ++artworkRequest
     const file = currentFile.value
     if (!pageDir || !file) return
+    probeComposite()
     try {
       const composited = await compositeArtwork({
         page: file.page,
