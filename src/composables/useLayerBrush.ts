@@ -254,6 +254,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    * How the overlay meets the layer, which is the canvas's name for what the
    * release will do. The alpha lock has nothing to say to the eraser: there is
    * no fill for it to hold back, only a hole.
+   *
+   * Two of the three are exact. `source-atop` is the near one — it agrees with
+   * the engine wherever the layer is opaque and parts from it along a soft rim;
+   * see the overlay store for why no operator closes that.
    */
   function operatorFor(mode: MaskBrushMode, alphaLocked: boolean): StrokeOverlayOp {
     if (mode === 'erase') return 'destination-out'

@@ -35,8 +35,20 @@ export interface StrokeOverlay {
  * into the stroke's surface, and what lands here is that coverage painted — one
  * answer to what the brush looks like, rendered twice.
  *
- * What is given up is that the blend is the canvas's rather than the engine's,
- * so an antialiased rim can differ by a step until the release replaces it.
+ * What is given up is that the blend is the canvas's rather than the engine's.
+ * Painting and erasing come out identical — `source-over` in premultiplied
+ * space, converted back, *is* the engine's straight-alpha `over`, and
+ * `destination-out` reads nothing but alpha. The alpha lock is the exception
+ * and cannot be made to agree here: `source-atop` blends the two colours by the
+ * stroke's coverage alone, while the engine weights the ground by its own
+ * coverage as an ordinary composite does and only then holds the alpha still.
+ * The two meet wherever the layer is opaque, which is most of what a lock is
+ * used on, and part along a soft rim — where the release is what settles it.
+ *
+ * There is no operator that would close that gap. Straight-alpha compositing
+ * needs the result alpha to divide by, and fixed-function blending has no
+ * access to it; it is the same wall a GPU compositor meets writing into a
+ * straight-alpha target.
  */
 export const useStrokeOverlayStore = defineStore('strokeOverlay', () => {
   /** The layer being drawn on, which is also what has to be drawn alone. */

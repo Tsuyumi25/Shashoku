@@ -1158,6 +1158,36 @@ mod tests {
         assert_eq!(pixel(&layer, 0, 0), vec![255, 0, 0, 128]);
     }
 
+    /**
+     * The lock holds the alpha still and leaves everything else alone. It does
+     * not change how the colour is mixed — mixing weights the ground by its own
+     * coverage, and a ground that only half covers contributes only half as
+     * much colour, so more of the paint survives than a plain blend between the
+     * two colours would leave.
+     *
+     * Said out loud because every other test here paints at full coverage,
+     * where the two rules agree, and because the renderer's own preview of a
+     * locked stroke can only reach the plain blend — the difference between
+     * them is the one thing a hand sees change at the release.
+     */
+    #[test]
+    fn an_alpha_locked_fill_mixes_by_the_ground_it_finds() {
+        let mut layer = solid(frame(0, 0, 1, 1), [0, 0, 0, 0]);
+        layer
+            .fill(&[128], frame(0, 0, 1, 1), [0, 0, 255, 255], false)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+        layer
+            .fill(&[128], frame(0, 0, 1, 1), RED, true)
+            .expect("a well-formed fill")
+            .expect("something to fill");
+
+        let painted = pixel(&layer, 0, 0);
+        assert_eq!(painted[3], 128);
+        // A plain blend of the two colours by the coverage would land on 128.
+        assert!(painted[0] > 160, "red was {}", painted[0]);
+    }
+
     /// Copy-on-write is what makes sharing safe: the block every tile points at
     /// is split by the first of them to be written to, and nobody else moves.
     #[test]
