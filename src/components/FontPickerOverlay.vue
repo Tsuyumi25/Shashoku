@@ -115,31 +115,27 @@
     <div
       class="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-card px-3 py-1 text-xs"
     >
+      <!--
+        Held down rather than clicked away: taking the press's default is what
+        keeps the caret in whichever cell it is in, so swapping the sample does
+        not also end the editing session.
+      -->
       <button
         v-for="p in SAMPLE_PRESETS"
         :key="p.label"
         type="button"
         class="shrink-0 rounded px-2 py-0.5"
         :class="
-          sampleDraft === p.text
+          sampleText === p.text
             ? 'bg-primary text-primary-foreground'
             : 'bg-accent text-accent-foreground hover:bg-secondary'
         "
         :title="p.text"
-        @click="sampleDraft = p.text"
+        @mousedown.prevent
+        @click="sampleText = p.text"
       >
         {{ p.label }}
       </button>
-      <input
-        ref="sampleEl"
-        v-model="sampleDraft"
-        spellcheck="false"
-        placeholder="樣本文字"
-        title="換行請用 \n"
-        class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-0.5 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
-        @input="aimedAt = null"
-        @blur="aimedAt = null"
-      />
     </div>
 
     <div
@@ -231,21 +227,26 @@
             </span>
 
             <div
-              class="cell-sample cursor-text"
+              class="cell-sample"
               :class="vertical ? 'vertical' : ''"
-              title="點一下：樣本文字欄接手，整段選起來，直接打字取代"
-              @mousedown="aimSample(faces[0]!.family, $event)"
+              title="直接在樣本上打字。所有格子共用同一段文字"
+              @mousedown="aimCell(faces[0]!.family, $event)"
             >
               <FontSampleCanvas
                 :entry="shownFace(faces)"
-                :text="sample"
+                :text="sampleText"
                 :size-px="appliedSize"
                 :fill-color="fillColor"
                 :stroke="stroke"
                 :vertical="vertical"
                 :weight-px="weightPx"
                 :mark="markMissing"
-                :highlighted="aimedAt === faces[0]!.family"
+                :editing="aimedAt === faces[0]!.family"
+                :selection="aimedAt === faces[0]!.family ? sampleRange : null"
+                :caret-key="aimedAt === faces[0]!.family ? sampleCaretKey : 0"
+                @select-text="(a, b) => onCellSelect(faces[0]!.family, a, b)"
+                @select-word="onCellWord(faces[0]!.family, $event)"
+                @caret-at="surface.showCaretAt($event)"
               />
             </div>
 
@@ -293,6 +294,27 @@
         </div>
       </div>
     </div>
+
+    <!--
+      Where the sample is actually typed. A real control, holding the real text
+      and the real caret, pinned to the insertion point and sized down to a
+      sliver — so the IME opens its candidates beside the letters rather than
+      beside the panel. Faint rather than hidden: a control that is transparent
+      or `display: none` stops being an IME target in some environments, and
+      being one is its whole job.
+    -->
+    <textarea
+      ref="sampleEl"
+      class="sample-input"
+      tabindex="-1"
+      spellcheck="false"
+      autocorrect="off"
+      autocapitalize="off"
+      :style="sampleStyle"
+      :value="sampleText"
+      @input="onSampleInput"
+      @blur="onSampleBlur"
+    />
   </div>
 </template>
 
@@ -306,6 +328,7 @@ import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/type
 import type { FontEntry } from '@shared/fonts/types'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { createTextEditSurface } from '@/composables/useTextEditSurface'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -318,44 +341,123 @@ const group = ref<Group>('all')
 
 const showFolders = ref(false)
 
-// Presets and the input share one escaped form: a single-line field silently
-// drops real newlines, so line breaks are spelled \n and decoded before the
-// text reaches the engine.
 const SAMPLE_PRESETS = [
-  { label: '對白', text: '等一下……你是說真的嗎！？\\n等一下……你是说真的吗！？' },
+  { label: '對白', text: '等一下……你是說真的嗎！？\n等一下……你是说真的吗！？' },
   { label: '喊叫', text: '哇啊啊啊——不要過來啊！！' },
   { label: '日文', text: 'わかっているのか？ 撃っていいのは、撃たれる覚悟のある奴だけだ！' },
-  { label: '檢字', text: '永字八法 體鬱龍書\\n哎呀啊喔 体郁龙书\\nあアぐグ Ag123 0O1Il' },
+  { label: '檢字', text: '永字八法 體鬱龍書\n哎呀啊喔 体郁龙书\nあアぐグ Ag123 0O1Il' },
 ] as const
 
-const sampleDraft = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
-const sample = computed(() => sampleDraft.value.replaceAll('\\n', '\n'))
-
-watch(sampleDraft, (text) => preferences.setFontSampleText(text))
-
-const sampleEl = ref<HTMLInputElement | null>(null)
+/**
+ * The sample every cell draws. Line breaks are real, because the box holding
+ * them is a `textarea` sitting on the sample itself — the `\n` they used to be
+ * spelled as was a single-line field's limitation, and it is gone with it.
+ * Anything stored in the old spelling is read back in the new one.
+ */
+const sampleText = ref(
+  (preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text).replaceAll('\\n', '\n'),
+)
+watch(sampleText, (text) => preferences.setFontSampleText(text))
 
 /**
- * Which cell the sample field is currently aimed at, or null. Typing happens in
- * that field and never in a cell; the cell shows the field's selection back, so
- * the press reads as having picked up the text it is about to replace.
+ * The control the sample is typed into. It is never seen: the letters the user
+ * is looking at are the engine's, drawn in the cell, and this only holds the
+ * keyboard and gives the IME somewhere to open its candidates (ADR 0001,
+ * decision 4).
+ */
+const surface = createTextEditSurface()
+const { range: sampleRange, moved: sampleCaretKey } = surface
+const sampleEl = ref<HTMLTextAreaElement | null>(null)
+
+watch(sampleEl, (el) => surface.register(el), { immediate: true })
+
+/**
+ * Which cell is being typed into, or null.
  *
- * One cell at a time, because there is one field and one sample string. The
- * highlight follows the family rather than the row, so a scroll that recycles
- * the virtual rows leaves it on the cell it belongs to.
+ * One at a time, because there is one sample string. Held as the family rather
+ * than the row, so a scroll that recycles the virtual rows leaves the caret on
+ * the cell it belongs to.
  */
 const aimedAt = ref<string | null>(null)
 
-function aimSample(family: string, e: MouseEvent) {
-  // A cell cannot hold focus itself, so letting the press run its course would
-  // clear the focus the field is being given within the same click.
-  e.preventDefault()
-  aimedAt.value = family
-  const field = sampleEl.value
-  if (!field) return
-  field.focus({ preventScroll: true })
-  field.select()
+function aim(family: string): void {
+  if (aimedAt.value !== family) {
+    aimedAt.value = family
+    surface.pin(true)
+  }
+  // Guarded, because a drag asks for this on every frame and taking focus that
+  // is already held is work for nothing.
+  const el = sampleEl.value
+  if (el && document.activeElement !== el) el.focus({ preventScroll: true })
 }
+
+/** A press on the cell but outside the sample: take the cell, leave the caret. */
+function aimCell(family: string, e: MouseEvent) {
+  // A cell cannot hold focus itself, so letting the press run its course would
+  // clear the focus the control is being given within the same click.
+  e.preventDefault()
+  aim(family)
+}
+
+function onCellSelect(family: string, anchor: number, focus: number) {
+  aim(family)
+  surface.setRange(anchor, focus)
+}
+
+const words = new Intl.Segmenter(undefined, { granularity: 'word' })
+
+function onCellWord(family: string, at: number) {
+  aim(family)
+  for (const piece of words.segment(sampleText.value)) {
+    const end = piece.index + piece.segment.length
+    if (at >= piece.index && at < end) {
+      surface.setRange(piece.index, end)
+      return
+    }
+  }
+}
+
+function onSampleInput(e: Event) {
+  sampleText.value = (e.target as HTMLTextAreaElement).value
+}
+
+/**
+ * A preset replaces the text under the caret without an `input` event to say
+ * so, so the control's own selection is what the projection has to be told
+ * about — the browser has already clamped it by the time this runs.
+ */
+watch(sampleText, () => surface.read(), { flush: 'post' })
+
+function onSampleBlur() {
+  aimedAt.value = null
+  surface.pin(false)
+  surface.showCaretAt(null)
+}
+
+/**
+ * Parked when no cell is aimed. It is never focused then, so it cannot pull the
+ * window's scroll — which is the one thing an off-screen focused element does.
+ */
+const PARKED = {
+  position: 'fixed' as const,
+  left: '0px',
+  top: '0px',
+  width: '1px',
+  height: '1px',
+}
+
+const sampleStyle = computed(() => {
+  const box = surface.pinnedBox.value
+  if (box === null) return PARKED
+  return {
+    position: 'fixed' as const,
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    writingMode: box.vertical ? ('vertical-rl' as const) : ('horizontal-tb' as const),
+  }
+})
 
 const appliedSize = computed(() => preferences.prefs.fontSamplePx)
 
@@ -374,7 +476,7 @@ function onDirection(v: unknown) {
   }
 }
 
-const sampleLines = computed(() => sample.value.split('\n'))
+const sampleLines = computed(() => sampleText.value.split('\n'))
 const longestLine = computed(() =>
   sampleLines.value.reduce((most, line) => Math.max(most, line.length), 1),
 )
@@ -557,7 +659,7 @@ function styleLabel(face: FontEntry): string {
 
 function coverageOf(entry: FontEntry): number[] {
   try {
-    return coverageFor(entry, sample.value)
+    return coverageFor(entry, sampleText.value)
   } catch {
     // An unreadable face keeps its place in the list rather than vanishing for
     // a reason the user cannot see.
@@ -646,7 +748,8 @@ watch(
     // box: filtering down to the one font already in use hides exactly what the
     // picker was opened to compare it against.
     search.value = ''
-    aimedAt.value = null
+    // No cell is being typed into yet, so the control goes back to its park.
+    onSampleBlur()
     // Fresh per opening, so every cell starts from the face the object names.
     shownKey.value = new Map()
     vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical
@@ -758,6 +861,22 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 }
 .cell-action.primary:hover {
   background: color-mix(in srgb, var(--primary) 90%, transparent);
+}
+/*
+ * One or two pixels of a colour nothing is drawn in, which is invisible in
+ * practice without ever claiming to be hidden. `pointer-events: none` because
+ * the thing the pointer works on is the sample, not this.
+ */
+.sample-input {
+  z-index: 50;
+  padding: 0;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  opacity: 0.01;
+  pointer-events: none;
+  outline: none;
 }
 /*
  * A vertical run reads right to left, so its first column sits against the

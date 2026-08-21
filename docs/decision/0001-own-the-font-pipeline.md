@@ -223,10 +223,11 @@ It would also silently reacquire OTS for every imported font. Older CJK families
 would vanish from the list or draw incorrectly, with no error anywhere.
 
 Decision (4) is not that same move made safely, and reading it that way is the
-mistake this section exists to stop. The input is a native control showing the
-user's keystrokes in the *system* font; it never opens one of our font files and
-never asks Chromium to. The sample stays engine-drawn, from bytes Chromium
-never sees. What moved into the DOM is the keyboard, not the typeface.
+mistake this section exists to stop. The input is a native control that never
+opens one of our font files and never asks Chromium to — whatever it renders, it
+renders in a font the platform already had. The letters anyone reads are the
+engine's, drawn from bytes Chromium never sees. What moved into the DOM is the
+keyboard, not the typeface.
 
 The projection is the price of decision (2). Anyone proposing to replace it with
 DOM text in the user's own font is proposing to require font installation, and
