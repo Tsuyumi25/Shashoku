@@ -6,6 +6,22 @@ export const MIN_BRUSH_SIZE = 1
 export const MAX_BRUSH_SIZE = 500
 export const DEFAULT_BRUSH_SIZE = 40
 export const DEFAULT_BRUSH_HARDNESS = 0.8
+export const DEFAULT_BRUSH_OPACITY = 1
+
+/**
+ * What a stamp is shaped by, apart from where it lands. Radius in page pixels;
+ * the other two are fractions.
+ *
+ * `opacity` is the brush's, not the colour's: it is the ceiling on coverage
+ * this stroke can reach, which is the thing that makes taking the stronger
+ * value mean anything. A brush that always arrived at 255 would have no
+ * ceiling to stop under.
+ */
+export interface BrushShape {
+  radius: number
+  hardness: number
+  opacity: number
+}
 
 /**
  * One round stamp of the brush into a selection mask. `hardness` at 1 is a hard
@@ -27,10 +43,10 @@ export function stampMaskCircle(
   h: number,
   cx: number,
   cy: number,
-  radius: number,
-  hardness: number,
+  shape: BrushShape,
   mode: MaskBrushMode,
 ): Rect {
+  const { radius, hardness, opacity } = shape
   const bounds = clampToPage(
     {
       x: Math.floor(cx - radius) - 1,
@@ -41,7 +57,7 @@ export function stampMaskCircle(
     w,
     h,
   )
-  if (isEmptyRect(bounds) || radius <= 0) return EMPTY_RECT
+  if (isEmptyRect(bounds) || radius <= 0 || opacity <= 0) return EMPTY_RECT
 
   // Kept under 1 so a fully hard brush still has a one-pixel ramp to sit on,
   // rather than dividing by a zero-width falloff.
@@ -56,7 +72,7 @@ export function stampMaskCircle(
       if (dist > radius) continue
       const strength = dist <= inner ? 1 : 1 - (dist - inner) / (radius - inner)
       if (strength <= 0) continue
-      const value = strength * 255
+      const value = strength * opacity * 255
       const held = mask[row + x]
       if (mode === 'paint') {
         if (value > held) mask[row + x] = value
@@ -79,16 +95,15 @@ export function strokeMask(
   h: number,
   from: { x: number; y: number },
   to: { x: number; y: number },
-  radius: number,
-  hardness: number,
+  shape: BrushShape,
   mode: MaskBrushMode,
 ): Rect {
   const dx = to.x - from.x
   const dy = to.y - from.y
   const dist = Math.hypot(dx, dy)
-  const step = Math.max(1, radius * 0.25)
+  const step = Math.max(1, shape.radius * 0.25)
   const steps = Math.floor(dist / step)
-  if (steps === 0) return stampMaskCircle(mask, w, h, to.x, to.y, radius, hardness, mode)
+  if (steps === 0) return stampMaskCircle(mask, w, h, to.x, to.y, shape, mode)
 
   let dirty = EMPTY_RECT
   for (let i = 1; i <= steps; i++) {
@@ -98,8 +113,7 @@ export function strokeMask(
       h,
       from.x + (dx * i) / steps,
       from.y + (dy * i) / steps,
-      radius,
-      hardness,
+      shape,
       mode,
     )
     dirty = unionRect(dirty, stamp)

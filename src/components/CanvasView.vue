@@ -178,7 +178,8 @@
           class="pointer-events-none absolute rounded border border-border bg-card px-2 py-1 text-xs whitespace-nowrap"
           :style="hudLabelStyle"
         >
-          直徑 {{ hudBrush.size }}px · 硬度 {{ Math.round(hudBrush.hardness * 100) }}%
+          直徑 {{ hudBrush.size }}px · 硬度 {{ Math.round(hudBrush.hardness * 100) }}% ·
+          不透明度 {{ Math.round(hudBrush.opacity * 100) }}%
         </div>
       </template>
     </template>
@@ -1345,14 +1346,27 @@ useEventListener(window, 'keydown', (e) => {
     cancelBrushHud()
     return
   }
+  // Zoom to fit needs a way in that a painting tool cannot take from it: with
+  // one up the bare digit is an opacity, so the modified one is what is always
+  // the view's. It has to be read before the guard below stands every key down.
+  if (e.key === '0' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+    if (pageReady.value) editor.fitToView()
+    e.preventDefault()
+    return
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return
   // Turning the page and moving the cursor act on the document, and are dealt
   // with there. What is left here acts on the view.
   if (e.defaultPrevented) return
 
   const key = e.key.toLowerCase()
+  const brushMode = maskBrushModeOf(editor.tool)
 
-  if (e.key === '0') {
+  if (brushMode !== null && e.key >= '0' && e.key <= '9') {
+    // The row read left to right: 1 through 9 are tenths and 0 closes it at the
+    // whole, which is where every editor with an opacity has put them.
+    selection.setBrushOpacity(brushMode, e.key === '0' ? 1 : Number(e.key) / 10)
+  } else if (e.key === '0') {
     if (pageReady.value) editor.fitToView()
   } else if (e.code === 'Space') {
     spaceDown.value = true
@@ -1382,8 +1396,7 @@ useEventListener(window, 'keydown', (e) => {
   } else if (e.key === '[' || e.key === ']') {
     // Sizes whichever mask tool is up, and nothing otherwise: the two keep
     // their own sizes, so with neither of them up there is no one to size.
-    const mode = maskBrushModeOf(editor.tool)
-    if (mode !== null) selection.nudgeBrushSize(mode, e.key === ']' ? 1 : -1)
+    if (brushMode !== null) selection.nudgeBrushSize(brushMode, e.key === ']' ? 1 : -1)
   } else if (e.key === 'Enter' && selection.isDrawing) {
     e.preventDefault()
     selection.commitGesture()

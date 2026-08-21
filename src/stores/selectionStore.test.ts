@@ -584,6 +584,25 @@ describe('the brush', () => {
     expect(sel.brushes.paint.size).toBe(painting)
   })
 
+  it('keeps an opacity per direction, and clamps it to the range', () => {
+    const sel = useSelectionStore()
+    sel.setBrushOpacity('erase', 0.3)
+    expect(sel.brushes.erase.opacity).toBe(0.3)
+    expect(sel.brushes.paint.opacity).toBe(1)
+    sel.setBrushOpacity('erase', 4)
+    expect(sel.brushes.erase.opacity).toBe(1)
+  })
+
+  it('strokes no deeper than its opacity, however far it doubles back', () => {
+    const sel = useSelectionStore()
+    sel.setBrushOpacity('paint', 0.5)
+    sel.beginStroke(PAGE_A, 'paint', { x: 16, y: 16 })
+    sel.strokeTo({ x: 24, y: 16 })
+    sel.strokeTo({ x: 16, y: 16 })
+    sel.endStroke()
+    expect(maskAt(sel, PAGE_A, 16, 16)).toBe(128)
+  })
+
   it('strokes at the size belonging to the direction it is drawing', () => {
     const sel = useSelectionStore()
     sel.brushes.paint.size = 0

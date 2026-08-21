@@ -3,10 +3,12 @@ import { defineStore } from 'pinia'
 import { useEditorStore } from '@/stores/editorStore'
 import {
   DEFAULT_BRUSH_HARDNESS,
+  DEFAULT_BRUSH_OPACITY,
   DEFAULT_BRUSH_SIZE,
   MAX_BRUSH_SIZE,
   MIN_BRUSH_SIZE,
   strokeMask,
+  type BrushShape,
   type MaskBrushMode,
 } from '@/lib/selection/brushMask'
 import {
@@ -41,6 +43,13 @@ export type { MaskTarget }
 export interface BrushSettings {
   size: number
   hardness: number
+  /**
+   * The ceiling one stroke can reach, as a fraction. It belongs to the brush
+   * rather than to the colour: a colour carrying it would tie "which colour I
+   * picked" to "how hard I am pressing", and the two are chosen at different
+   * moments for different reasons.
+   */
+  opacity: number
 }
 
 export type SelectionGestureKind = 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon'
@@ -120,8 +129,16 @@ export const useSelectionStore = defineStore('selection', () => {
    * often, so that surprise would land constantly rather than once.
    */
   const brushes = ref<Record<MaskBrushMode, BrushSettings>>({
-    paint: { size: DEFAULT_BRUSH_SIZE, hardness: DEFAULT_BRUSH_HARDNESS },
-    erase: { size: DEFAULT_BRUSH_SIZE, hardness: DEFAULT_BRUSH_HARDNESS },
+    paint: {
+      size: DEFAULT_BRUSH_SIZE,
+      hardness: DEFAULT_BRUSH_HARDNESS,
+      opacity: DEFAULT_BRUSH_OPACITY,
+    },
+    erase: {
+      size: DEFAULT_BRUSH_SIZE,
+      hardness: DEFAULT_BRUSH_HARDNESS,
+      opacity: DEFAULT_BRUSH_OPACITY,
+    },
   })
 
   const hasSelection = computed(() => bounds.value !== null)
@@ -481,6 +498,12 @@ export const useSelectionStore = defineStore('selection', () => {
     return brushes.value[mode].size / 2
   }
 
+  /** The settings as a stamp takes them, which is by radius rather than width. */
+  function brushShapeFor(mode: MaskBrushMode): BrushShape {
+    const settings = brushes.value[mode]
+    return { radius: settings.size / 2, hardness: settings.hardness, opacity: settings.opacity }
+  }
+
   /**
    * A stroke is one entry in the stack however long it is, and it writes into
    * the held mask straight away so Quick Mask keeps up with the hand — the same
@@ -552,8 +575,8 @@ export const useSelectionStore = defineStore('selection', () => {
   function strokeTo(at: Point): void {
     const s = stroke
     if (s === null) return
-    const radius = brushRadiusFor(s.mode)
-    const region = strokeWindowFor(s, at, radius)
+    const shape = brushShapeFor(s.mode)
+    const region = strokeWindowFor(s, at, shape.radius)
     if (isEmptyRect(region)) {
       s.from = at
       return
@@ -565,8 +588,7 @@ export const useSelectionStore = defineStore('selection', () => {
       region.h,
       { x: s.from.x - region.x, y: s.from.y - region.y },
       { x: at.x - region.x, y: at.y - region.y },
-      radius,
-      brushes.value[s.mode].hardness,
+      shape,
       s.mode,
     )
     s.from = at
@@ -621,6 +643,14 @@ export const useSelectionStore = defineStore('selection', () => {
       MAX_BRUSH_SIZE,
       Math.max(MIN_BRUSH_SIZE, settings.size + step * direction),
     )
+  }
+
+  /**
+   * Set outright rather than nudged, because the digits are the scale: there is
+   * no step to take when every stop on it has its own key.
+   */
+  function setBrushOpacity(mode: MaskBrushMode, opacity: number): void {
+    brushes.value[mode].opacity = Math.min(1, Math.max(0, opacity))
   }
 
   function toggleQuickMask(): void {
@@ -759,6 +789,7 @@ export const useSelectionStore = defineStore('selection', () => {
     gesture,
     brushes,
     brushRadiusFor,
+    brushShapeFor,
     hasSelection,
     isDrawing,
     maskPatchOf,
@@ -785,6 +816,7 @@ export const useSelectionStore = defineStore('selection', () => {
     strokeTo,
     endStroke,
     nudgeBrushSize,
+    setBrushOpacity,
     toggleQuickMask,
     reset,
   }
