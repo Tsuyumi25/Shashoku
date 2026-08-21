@@ -23,7 +23,7 @@
       <div v-if="pageReady && currentFile" class="pointer-events-none absolute inset-0">
         <PageStack
           :nodes="stack"
-          :layers-dir="layersDirOf(currentFile.pageDir)"
+          :bitmaps="layerBitmaps"
           :container="editor.viewContainerSize"
           :view="view"
           :held="heldLayer"
@@ -206,12 +206,13 @@ import { useBrushHud } from '@/composables/useBrushHud'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { pageStack, stackedTextNodes } from '@shared/page/stack'
+import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked, textObjects } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
+import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useSelectionTool } from '@/composables/useSelectionTool'
@@ -371,13 +372,29 @@ const rasterFrames = computed(() => {
  * Which layer the stack keeps on a canvas of its own, and where a gesture has
  * taken it.
  *
- * The layer wearing the cursor rather than the one being handled, so the page
- * is cut the moment it is selected and not while a pointer is already moving.
+ * The layer actually being handled, so selecting one costs the page nothing:
+ * the cut is what a gesture needs, and a page cut on selection is a page re-cut
+ * every time the cursor moves down the tree.
  */
-const heldLayer = computed(() => {
-  const id = rasterFrames.value.find((entry) => entry.id === editor.cursorId)?.id
-  return id === undefined ? null : { id, place: placement.placementOf(id) }
-})
+const heldLayer = computed(() => placement.held.value)
+
+/**
+ * Every layer the page draws, decoded once and kept until the page turns.
+ *
+ * Above the stack rather than inside it: the elements the stack is cut into
+ * come and go with a gesture, and pixels that came and went with them would be
+ * read back from disk each time.
+ */
+const layerBitmaps = useLayerBitmaps(
+  () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
+  () => [
+    ...new Set(
+      stackedRasterNodes(stack.value)
+        .filter((node) => node.entry.w > 0 && node.entry.h > 0)
+        .map((node) => node.entry.file),
+    ),
+  ],
+)
 
 /**
  * The pixels of every layer a press could reach, kept ready.

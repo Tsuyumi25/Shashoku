@@ -3,7 +3,7 @@
     <StackRun
       v-if="segment.kind === 'run'"
       :nodes="segment.nodes"
-      :layers-dir="layersDir"
+      :bitmaps="bitmaps"
       :container="container"
       :view="view"
       :place="placeFor(segment)"
@@ -11,7 +11,7 @@
     <PageStack
       v-else
       :nodes="segment.node.children"
-      :layers-dir="layersDir"
+      :bitmaps="bitmaps"
       :container="container"
       :view="view"
       :held="held"
@@ -24,6 +24,7 @@ import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { StackNode } from '@shared/page/stack'
 import StackRun from '@/components/StackRun.vue'
+import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { stackSegments, type StackSegment } from '@/lib/stackSegments'
 import type { ViewTransform } from '@/lib/coords'
 import type { LayerPlacement } from '@/lib/layerTransform'
@@ -40,15 +41,15 @@ import type { LayerPlacement } from '@/lib/layerTransform'
  */
 const props = defineProps<{
   nodes: readonly StackNode[]
-  /** Where this page's layer files live. */
-  layersDir: string
+  /** This page's decoded layers, held above the cut so re-cutting costs nothing. */
+  bitmaps: LayerBitmaps
   /** The viewport, which is what a raster canvas is sized to. */
   container: { w: number; h: number }
   view: ViewTransform
   /**
    * The layer a gesture is on and where that gesture has taken it. It is held
-   * out of its run so the transform reaches it alone, and it goes back into
-   * one when nothing is selected there any more.
+   * out of its run so the transform reaches it alone, and it goes back into one
+   * the moment the gesture is let go.
    */
   held?: { id: string; place: LayerPlacement } | null
 }>()

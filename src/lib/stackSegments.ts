@@ -32,12 +32,11 @@ export type StackSegment =
  * normally is the same picture. Text has no reason of its own to be separate,
  * and giving it one cost a viewport-sized canvas for every label on the page.
  *
- * `alone` is the second reason to break a run: a layer that can be dragged is
- * drawn at an offset of its own, and a canvas it shares would carry its
- * neighbours along with it. It is held aside from the moment it is selected
- * rather than from the moment it is grabbed, because re-cutting the page under
- * a pointer that is already moving makes the neighbouring canvases remount and
- * fetch their layers again — a blink at exactly the wrong time.
+ * `alone` is the second reason to break a run: a layer under a gesture is drawn
+ * at an offset of its own, and a canvas it shares would carry its neighbours
+ * along with it. Only for as long as the gesture lasts — the decoded layers are
+ * held above this, so a re-cut is a rearrangement of pixels that are already
+ * there and selecting a layer has no reason to move anything.
  */
 export function stackSegments(
   nodes: readonly StackNode[],

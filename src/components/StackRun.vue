@@ -3,9 +3,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
+import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
@@ -23,15 +24,20 @@ import { useRasterStore } from '@/stores/rasterStore'
  * store at a retina scale is tens of megabytes; `stackSegments` decides which
  * objects may share, and everything that blends normally does.
  *
- * Rasters and text differ here only in where the bitmap comes from and who
- * closes it. Everything after that — placement, alpha, filtering — is the same
- * for both, which is the point: two draw paths would be two answers to what
- * this page looks like.
+ * Rasters and text differ here only in where the bitmap comes from — the page's
+ * layer cache for one, the font sample cache for the other, and neither of them
+ * this run's to own. Everything after that — placement, alpha, filtering — is
+ * the same for both, which is the point: two draw paths would be two answers to
+ * what this page looks like.
  */
 const props = defineProps<{
   nodes: readonly RunStackNode[]
-  /** Where this page's layer files live. */
-  layersDir: string
+  /**
+   * The page's decoded layers, which this run reads and does not own. Runs are
+   * made and unmade every time the stack is re-cut, and a run that owned its
+   * decodes would take them with it.
+   */
+  bitmaps: LayerBitmaps
   container: { w: number; h: number }
   view: ViewTransform
   /**
@@ -53,28 +59,7 @@ const raster = useRasterStore()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
-/**
- * Held for as long as this run is mounted and closed with it. Turning the page
- * unmounts every run on it, which is the whole of the eviction policy: a
- * decoded layer costs its frame in bytes, and holding a chapter's worth would
- * be the full-page-buffer bill the layer frame exists to avoid.
- *
- * Text needs none of this. Its bitmaps come from the sample cache, which is
- * keyed on what was asked for rather than on who asked, and nothing here owns
- * them.
- */
-const bitmaps = shallowRef<Map<string, ImageBitmap>>(new Map())
-
-function releaseAll() {
-  for (const bitmap of bitmaps.value.values()) bitmap.close()
-  bitmaps.value = new Map()
-}
-
-function isRaster(node: RunStackNode): node is RasterStackNode {
-  return node.kind === 'raster'
-}
-
-/** A layer with no frame yet has nothing to draw and no file worth reading. */
+/** A layer with no frame yet has nothing to draw. */
 function drawable(node: RasterStackNode): boolean {
   return node.entry.w > 0 && node.entry.h > 0
 }
@@ -99,48 +84,6 @@ const drawnTexts = computed(() => {
   }
   return out
 })
-
-let loadToken = 0
-
-async function loadBitmaps() {
-  const token = ++loadToken
-  const wanted = [...new Set(props.nodes.filter(isRaster).filter(drawable).map((n) => n.entry.file))]
-  const next = new Map<string, ImageBitmap>()
-  /** Only what this run decoded — what it reused is still owned by `bitmaps`. */
-  const fresh: ImageBitmap[] = []
-
-  const abandon = () => {
-    for (const bitmap of fresh) bitmap.close()
-  }
-
-  for (const file of wanted) {
-    const held = bitmaps.value.get(file)
-    if (held) {
-      next.set(file, held)
-      continue
-    }
-    try {
-      const bytes = await window.api.readImage(props.layersDir, file)
-      const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
-      if (token !== loadToken) {
-        bitmap.close()
-        return abandon()
-      }
-      fresh.push(bitmap)
-      next.set(file, bitmap)
-    } catch (err) {
-      // The page is still worth looking at without one patch, and the manifest
-      // is what says the patch should be there — this is not where that is
-      // reported. Export refuses outright, which is where it matters.
-      console.error('layer image unavailable', file, err)
-    }
-  }
-  if (token !== loadToken) return abandon()
-
-  for (const [file, bitmap] of bitmaps.value) if (next.get(file) !== bitmap) bitmap.close()
-  bitmaps.value = next
-  paint()
-}
 
 function paint() {
   const cv = canvasEl.value
@@ -173,7 +116,7 @@ function paint() {
     // comes from there too, because the manifest is not told a layer grew until
     // the file naming the new frame is safely on disk.
     const live = raster.liveLayer(node.entry.id)
-    const source = live?.canvas ?? bitmaps.value.get(node.entry.file)
+    const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
     if (!source) continue
     const { x, y, w: fw, h: fh } = live?.frame ?? node.entry
     if (props.place) {
@@ -218,11 +161,8 @@ function schedulePaint() {
   })
 }
 
-watch(
-  () => [props.layersDir, props.nodes.filter(isRaster).map((n) => n.entry.file).join(' ')] as const,
-  loadBitmaps,
-  { immediate: true },
-)
+/** A layer whose read has just landed is one this run may be the only drawer of. */
+watch(() => props.bitmaps.revision.value, schedulePaint)
 
 /**
  * Everything a raster draws with, read field by field so each one is tracked.
@@ -254,5 +194,11 @@ watch(() => raster.revision, paint, { flush: 'sync' })
 
 watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
 
-onBeforeUnmount(releaseAll)
+/**
+ * Nothing above draws a run that has just appeared: every watch here fires on a
+ * change, and a fresh run has had none. Re-cutting the stack makes runs whose
+ * objects and view are exactly what they were, so without this the page would
+ * hold its breath until something unrelated moved.
+ */
+onMounted(paint)
 </script>
