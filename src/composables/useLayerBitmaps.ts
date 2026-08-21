@@ -24,6 +24,19 @@ import { onScopeDispose, ref, watch, type Ref } from 'vue'
 export interface LayerBitmaps {
   /** Undefined until the read lands; until then the layer is simply not drawn. */
   get(file: string): ImageBitmap | undefined
+  /**
+   * Pixels that came from somewhere other than a read, filed as though they had.
+   *
+   * A gesture that resamples a layer holds the result and mints a name for it,
+   * and the entry starts pointing at that name in the same breath. Waiting on a
+   * read of the file just written would leave a hole in the page for as long as
+   * the disk takes — so what was written is handed over instead.
+   *
+   * The folder comes too: a page turned while the write was out has already let
+   * everything go, and pixels belonging to a page nobody is looking at are not
+   * kept.
+   */
+  adopt(layersDir: string, file: string, bitmap: ImageBitmap): void
   /** Counts up as each read lands, which is what asks the canvas to draw again. */
   revision: Readonly<Ref<number>>
 }
@@ -77,6 +90,13 @@ export function useLayerBitmaps(
     }
   }
 
+  function adopt(dir: string, file: string, bitmap: ImageBitmap): void {
+    if (dir !== heldDir) return bitmap.close()
+    held.get(file)?.close()
+    held.set(file, bitmap)
+    revision.value += 1
+  }
+
   watch(
     () => [layersDir(), [...wanted()].join(' ')] as const,
     () => {
@@ -87,5 +107,5 @@ export function useLayerBitmaps(
 
   onScopeDispose(releaseAll)
 
-  return { get: (file) => held.get(file), revision }
+  return { get: (file) => held.get(file), adopt, revision }
 }

@@ -184,6 +184,76 @@ describe('useLayerBitmaps', () => {
     dispose()
   })
 
+  /**
+   * A resample mints a file name and the entry points at it at once, so the
+   * pixels have to be there before the read that would otherwise fetch them.
+   */
+  describe('taking in pixels that were not read', () => {
+    function fake(file: string): FakeBitmap {
+      return {
+        file,
+        closed: false,
+        close(): void {
+          this.closed = true
+        },
+      }
+    }
+
+    it('hands back adopted pixels without ever reading their file', async () => {
+      const wanted = ref<readonly string[]>(['a.png'])
+      const { bitmaps, dispose } = mount(
+        () => 'layers',
+        () => wanted.value,
+      )
+      await settle()
+
+      bitmaps.adopt('layers', 'a.rev2.png', fake('baked') as unknown as ImageBitmap)
+      wanted.value = ['a.rev2.png']
+      await settle()
+
+      expect((bitmaps.get('a.rev2.png') as unknown as FakeBitmap).file).toBe('baked')
+      expect(reads).toEqual(['a.png'])
+      dispose()
+    })
+
+    it('drops adopted pixels the page turned away from', async () => {
+      const dir = ref<string | null>('one/layers')
+      const wanted = ref<readonly string[]>(['a.png'])
+      const { bitmaps, dispose } = mount(
+        () => dir.value,
+        () => wanted.value,
+      )
+      await settle()
+      const baked = fake('baked')
+      bitmaps.adopt('one/layers', 'a.rev2.png', baked as unknown as ImageBitmap)
+
+      dir.value = 'two/layers'
+      wanted.value = ['z.png']
+      await settle()
+
+      expect(baked.closed).toBe(true)
+      dispose()
+    })
+
+    it('refuses pixels belonging to a page that is no longer on screen', async () => {
+      const dir = ref<string | null>('one/layers')
+      const { bitmaps, dispose } = mount(
+        () => dir.value,
+        () => ['a.png'],
+      )
+      await settle()
+      dir.value = 'two/layers'
+      await settle()
+
+      const stale = fake('baked')
+      bitmaps.adopt('one/layers', 'a.rev2.png', stale as unknown as ImageBitmap)
+
+      expect(stale.closed).toBe(true)
+      expect(bitmaps.get('a.rev2.png')).toBeUndefined()
+      dispose()
+    })
+  })
+
   it('reads nothing before the page names a folder', async () => {
     const { dispose } = mount(
       () => null,

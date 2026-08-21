@@ -268,7 +268,6 @@ const ui = useUiStore()
 const raster = useRasterStore()
 const preferences = usePreferencesStore()
 const fontPicker = useFontPicker()
-const placement = useLayerPlacement()
 const { chooseTool } = useToolChoice()
 
 const view = editor.view
@@ -279,6 +278,26 @@ const currentFile = computed(() =>
 
 /** What this page draws and in what order — the same answer the export reads. */
 const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers) : []))
+
+/**
+ * Every layer the page draws, decoded once and kept until the page turns.
+ *
+ * Above the stack rather than inside it: the elements the stack is cut into
+ * come and go with a gesture, and pixels that came and went with them would be
+ * read back from disk each time.
+ */
+const layerBitmaps = useLayerBitmaps(
+  () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
+  () => [
+    ...new Set(
+      stackedRasterNodes(stack.value)
+        .filter((node) => node.entry.w > 0 && node.entry.h > 0)
+        .map((node) => node.entry.file),
+    ),
+  ],
+)
+
+const placement = useLayerPlacement(layerBitmaps)
 
 const ocrBoxes = computed(() => {
   if (!editor.currentPageId || ocr.shown.size === 0) return []
@@ -377,24 +396,6 @@ const rasterFrames = computed(() => {
  * every time the cursor moves down the tree.
  */
 const heldLayer = computed(() => placement.held.value)
-
-/**
- * Every layer the page draws, decoded once and kept until the page turns.
- *
- * Above the stack rather than inside it: the elements the stack is cut into
- * come and go with a gesture, and pixels that came and went with them would be
- * read back from disk each time.
- */
-const layerBitmaps = useLayerBitmaps(
-  () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
-  () => [
-    ...new Set(
-      stackedRasterNodes(stack.value)
-        .filter((node) => node.entry.w > 0 && node.entry.h > 0)
-        .map((node) => node.entry.file),
-    ),
-  ],
-)
 
 /**
  * The pixels of every layer a press could reach, kept ready.

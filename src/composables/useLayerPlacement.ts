@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
+import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import {
   clamp,
   framePoint,
@@ -42,7 +43,14 @@ import { useRasterStore } from '@/stores/rasterStore'
  * held whole here and applied once, rather than the entry being rewritten as
  * the pointer moves.
  */
-export function useLayerPlacement() {
+export function useLayerPlacement(
+  /**
+   * What the page draws layers from. A resample writes a file nothing has ever
+   * held, and the page has to be given those pixels rather than sent to fetch
+   * them back.
+   */
+  bitmaps: LayerBitmaps,
+) {
   const project = useProjectStore()
   const editor = useEditorStore()
 
@@ -144,13 +152,16 @@ export function useLayerPlacement() {
    * rectangle without gaining transparent corners, and nothing later gives
    * them up. A frame that only ever grows would erode the very thing per-layer
    * frames exist for.
+   *
+   * The canvas the bytes were encoded from comes back too, so the page can be
+   * shown the resample rather than made to read it back.
    */
   async function bake(
     entry: RasterLayerEntry,
     place: LayerPlacement,
     frame: Rect,
     pageDir: string,
-  ): Promise<{ bytes: Uint8Array; frame: Rect }> {
+  ): Promise<{ bytes: Uint8Array; frame: Rect; pixels: OffscreenCanvas }> {
     const source = await window.api.readImage(layersDirOf(pageDir), entry.file)
     const bitmap = await createImageBitmap(new Blob([source as BlobPart]))
     try {
@@ -165,7 +176,7 @@ export function useLayerPlacement() {
       // Nothing survived, which means nothing went in. Keeping the box that was
       // asked for beats writing a frame of zero, which has no handle to grab
       // and could never be reached again.
-      if (held === null) return { bytes: await encodePng(canvas), frame }
+      if (held === null) return { bytes: await encodePng(canvas), frame, pixels: canvas }
       const trimmed = {
         x: frame.x + held.x,
         y: frame.y + held.y,
@@ -173,9 +184,10 @@ export function useLayerPlacement() {
         h: held.h,
       }
       if (held.x === 0 && held.y === 0 && held.w === frame.w && held.h === frame.h) {
-        return { bytes: await encodePng(canvas), frame: trimmed }
+        return { bytes: await encodePng(canvas), frame: trimmed, pixels: canvas }
       }
-      return { bytes: await encodePng(cropTo(canvas, held)), frame: trimmed }
+      const cropped = cropTo(canvas, held)
+      return { bytes: await encodePng(cropped), frame: trimmed, pixels: cropped }
     } finally {
       bitmap.close()
     }
@@ -233,7 +245,12 @@ export function useLayerPlacement() {
         file: `${entry.id}.${generateId().slice(0, 8)}.png`,
         ...baked.frame,
       }
+      const drawn = await createImageBitmap(baked.pixels)
       await window.api.writePage(file.pageDir, { layerParts: { [to.file]: baked.bytes } })
+      // Handed over in the same breath as the name, and nothing may be awaited
+      // between the two: the entry pointing at a file the page has no pixels for
+      // is a hole in the artwork for as long as a read of it would take.
+      bitmaps.adopt(layersDirOf(file.pageDir), to.file, drawn)
       editor.cmdPlaceLayer(page, entry.id, from, to)
     } finally {
       release(gesture)
