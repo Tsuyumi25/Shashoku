@@ -423,8 +423,12 @@ function centerOnScreen(): { x: number; y: number } | null {
  */
 function publishCaret(): void {
   const at = props.selection
+  // The frame is asked for its rectangle only once it is the one being typed
+  // into. Every other label on the page runs this on the same pan, and a
+  // rectangle read is a layout.
+  if (!props.editing || !at) return
   const center = centerOnScreen()
-  if (!props.editing || !at || !center) return
+  if (!center) return
   const r = projection.value.caret(at.end)
   const p = framePxToScreen(r.x, r.y, center, drawn.value.box, props.view.scale, turn.value)
   surface.showCaretAt({
