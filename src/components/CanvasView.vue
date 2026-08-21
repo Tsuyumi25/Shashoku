@@ -397,17 +397,8 @@ const objects = computed(() => {
  * the pointer and the layer a press takes the same layer by construction rather
  * than by two rules kept in step.
  */
-/**
- * Where a layer's pixels are, for everything that has to agree about it: which
- * layers can be reached, where their frames are drawn, and where a hit is read
- * from. The engine's frame while it holds the layer, because nothing reaches
- * the manifest before the file it names — so an entry keeps the frame from
- * before the edit until the write lands, which is tens of seconds under the
- * pixel scheduler and forever on a layer that has never been written at all.
- */
-function frameOf(entry: RasterLayerEntry) {
-  return raster.liveLayer(entry.id)?.frame ?? entry
-}
+/** Where a layer's pixels are, decided in one place for everything that draws or points at one. */
+const frameOf = raster.frameOf
 
 const rasterFrames = computed(() => {
   const file = currentFile.value

@@ -90,6 +90,21 @@ export const useRasterStore = defineStore('raster', () => {
   }
 
   /**
+   * Where a layer's pixels are, which is the engine's frame while it holds one
+   * and the entry's own otherwise.
+   *
+   * Everything that has to agree about a layer's rectangle asks here: what can
+   * be reached by pointing at it, the frame drawn around it, the point a hit is
+   * read at, and what a gesture measures itself against. Nothing is written to
+   * the manifest before the file it names, so an entry keeps the frame from
+   * before an edit until the write lands — tens of seconds under the pixel
+   * scheduler, and on a layer painted for the first time a frame of nothing.
+   */
+  function frameOf(entry: RasterLayerEntry): Readonly<EngineLayerFrame> {
+    return held.value.get(entry.id)?.frame ?? entry
+  }
+
+  /**
    * Hands a layer's whole pixels to the engine, once.
    *
    * The decode is the same one the stack does to draw the layer, done again
@@ -282,6 +297,7 @@ export const useRasterStore = defineStore('raster', () => {
     committed,
     liveLayer,
     holds,
+    frameOf,
     take,
     paste,
     owe,

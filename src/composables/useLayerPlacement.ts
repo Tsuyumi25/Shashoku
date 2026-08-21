@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
+import { findEntry } from '@shared/page/tree'
 import { generateId } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -61,6 +62,20 @@ export function useLayerPlacement(
     return held.value?.id === id ? held.value.place : NO_PLACEMENT
   }
 
+  /**
+   * The rectangle a gesture is working on, or null where there is none to work
+   * on. Where the pixels are, not what the entry says — that is the box drawn
+   * on screen and the box the pointer was measured against, and a ratio worked
+   * out from a different one would scale by the wrong amount for as long as the
+   * manifest is behind.
+   */
+  function frameHeldBy(id: string): Rect | null {
+    const entry = project.entryById(id)
+    if (entry === undefined || entry.kind !== 'raster') return null
+    const frame = useRasterStore().frameOf(entry)
+    return frame.w > 0 && frame.h > 0 ? { ...frame } : null
+  }
+
   function set(id: string, part: Partial<LayerPlacement>): void {
     if (editor.isLayerLocked(id)) return
     held.value = { id, place: { ...placementOf(id), ...part } }
@@ -85,17 +100,17 @@ export function useLayerPlacement(
    * have travelled — which is what the displacement carries.
    */
   function scaleTo(id: string, ratio: number, pin: { x: number; y: number }): void {
-    const entry = project.entryById(id)
+    const box = frameHeldBy(id)
     const page = editor.maskTarget
-    if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) return
-    const floor = Math.max(1 / entry.w, 1 / entry.h)
+    if (box === null) return
+    const floor = Math.max(1 / box.w, 1 / box.h)
     const ceiling =
-      page === null ? Infinity : Math.max(floor, Math.min(page.w / entry.w, page.h / entry.h))
+      page === null ? Infinity : Math.max(floor, Math.min(page.w / box.w, page.h / box.h))
     const scale = clamp(ratio, floor, ceiling)
 
-    const was = { w: entry.w, h: entry.h }
+    const was = { w: box.w, h: box.h }
     const rotation = placementOf(id).rotation
-    const center = frameCenter(entry)
+    const center = frameCenter(box)
     const held = framePoint(center, was, MIDDLE, pin, rotation)
     const moved = positionHolding(held, { w: was.w * scale, h: was.h * scale }, MIDDLE, pin, rotation)
     set(id, { scale, dx: moved.x - center.x, dy: moved.y - center.y })
@@ -106,10 +121,10 @@ export function useLayerPlacement(
    * else is that turn plus the displacement it leaves the middle at.
    */
   function rotateTo(id: string, rotation: number, pivot: { x: number; y: number }): void {
-    const entry = project.entryById(id)
-    if (entry === undefined || entry.kind !== 'raster') return
-    const center = frameCenter(entry)
-    const around = framePoint(center, { w: entry.w, h: entry.h }, MIDDLE, pivot)
+    const box = frameHeldBy(id)
+    if (box === null) return
+    const center = frameCenter(box)
+    const around = framePoint(center, { w: box.w, h: box.h }, MIDDLE, pivot)
     const moved = turnedAround(around, center, rotation)
     set(id, { rotation, dx: moved.x - center.x, dy: moved.y - center.y })
   }
@@ -199,28 +214,23 @@ export function useLayerPlacement(
    * at the old file, which is still there — and a name nothing has ever held is
    * what keeps that true. Whatever no manifest names is swept at the next open.
    */
-  async function commit(entry: RasterLayerEntry): Promise<void> {
+  async function commit(target: RasterLayerEntry): Promise<void> {
     const gesture = held.value
     const page = editor.currentPageId
     const file = page === null ? undefined : project.pageById(page)
     if (
       gesture === null ||
-      gesture.id !== entry.id ||
+      gesture.id !== target.id ||
       page === null ||
       file === undefined ||
       !isMoved(gesture.place) ||
-      editor.isLayerLocked(entry.id) ||
-      entry.w <= 0 ||
-      entry.h <= 0
+      editor.isLayerLocked(target.id)
     ) {
       release(gesture)
       return
     }
 
     try {
-      const place = gesture.place
-      const frame = placedFrame(entry, place)
-      const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
       /*
        * Whatever the engine is holding for this layer speaks in coordinates
        * measured from the frame it was handed over at, and this moves that
@@ -233,7 +243,26 @@ export function useLayerPlacement(
        */
       const raster = useRasterStore()
       await raster.flush()
-      raster.release(entry.id)
+      raster.release(target.id)
+
+      /*
+       * Read again, because settling is what changed it. The write puts the
+       * layer down under a name nothing has held before and tells the manifest
+       * the frame it grew to, so everything measured before it names a file
+       * that is no longer on disk — and writing that name back would point the
+       * page at nothing and take the frame back to before the edit.
+       *
+       * The emptiness check waits for the same reason. A layer painted for the
+       * first time has no frame in the manifest until this write lands, and it
+       * is reachable on screen well before that: the canvas hit-tests where the
+       * pixels are, not where the entry says.
+       */
+      const entry = findEntry(file.page.layers, target.id)
+      if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) return
+
+      const place = gesture.place
+      const frame = placedFrame(entry, place)
+      const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
       // A pure translation moves the frame and leaves the pixels alone, which
       // is the one gesture that costs nothing — a copy rather than an average.
       if (place.scale === 1 && place.rotation === 0) {
