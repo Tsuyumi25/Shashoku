@@ -52,3 +52,23 @@ describe("how far pixel history reaches", () => {
     expect(back.undoPixelBytes).toBe(defaultPreferences().undoPixelBytes);
   });
 });
+
+describe("breaks in the font sample", () => {
+  it("reads an escaped break written by the single-line field as a real one", () => {
+    const back = parsePreferences(JSON.stringify({ fontSampleText: "上一句\\n下一句" }));
+    expect(back.fontSampleText).toBe("上一句\n下一句");
+  });
+
+  // The old field could not hold a real break, so one is proof the sample has
+  // been saved since — and a sample saved since is never a candidate again.
+  it("leaves a sample holding a real break alone", () => {
+    const kept = "上一句\n下一句\\n";
+    expect(parsePreferences(JSON.stringify({ fontSampleText: kept })).fontSampleText).toBe(kept);
+  });
+
+  it("survives a round trip once converted", () => {
+    const once = parsePreferences(JSON.stringify({ fontSampleText: "上一句\\n下一句" }));
+    const twice = parsePreferences(serializePreferences(once));
+    expect(twice.fontSampleText).toBe(once.fontSampleText);
+  });
+});

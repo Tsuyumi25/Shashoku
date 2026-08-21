@@ -352,11 +352,8 @@ const SAMPLE_PRESETS = [
  * The sample every cell draws. Line breaks are real, because the box holding
  * them is a `textarea` sitting on the sample itself — the `\n` they used to be
  * spelled as was a single-line field's limitation, and it is gone with it.
- * Anything stored in the old spelling is read back in the new one.
  */
-const sampleText = ref(
-  (preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text).replaceAll('\\n', '\n'),
-)
+const sampleText = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
 watch(sampleText, (text) => preferences.setFontSampleText(text))
 
 /**

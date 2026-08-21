@@ -15,6 +15,22 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * A break in the font sample used to be spelled as the two characters `\` and
+ * `n`, because the field holding the sample was single-line and dropped a real
+ * one. That field is gone and a break is a real character now.
+ *
+ * Only a sample with no real break can be in the old spelling, since the writer
+ * that produced it had no way to make one — so a sample saved since is never
+ * touched, and a converted one stops being a candidate the moment it is saved.
+ * A single-line sample meaning to hold a literal `\n` is the one thing this
+ * cannot tell apart, and it is a string typed to look at a typeface.
+ */
+function sampleWithRealBreaks(text: string): string {
+  if (text.includes("\n")) return text;
+  return text.replaceAll("\\n", "\n");
+}
+
+/**
  * Never throws. Project data fails loud when damaged because silently losing
  * a translation is worse than refusing to open it; preferences are the
  * opposite — they must never keep the app from starting, so every field falls
@@ -67,7 +83,7 @@ export function parsePreferences(raw: string): Preferences {
     );
   }
   if (typeof fontSampleText === "string") {
-    prefs.fontSampleText = fontSampleText;
+    prefs.fontSampleText = sampleWithRealBreaks(fontSampleText);
   }
   if (typeof fontSampleVertical === "boolean") {
     prefs.fontSampleVertical = fontSampleVertical;
