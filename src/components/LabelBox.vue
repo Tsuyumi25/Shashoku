@@ -168,6 +168,9 @@ const props = defineProps<{
    * Bumped whenever the caret moves, so the blink can restart from the bright
    * half. A caret that lands mid-blink reads as a keystroke that did not
    * register — the font picker's cells hit the same thing.
+   *
+   * ⚠️ Only the object being typed into may be given the moving value. Handing
+   * it to every object makes a caret moving one pixel a re-render of the page.
    */
   caretKey?: number
 }>()

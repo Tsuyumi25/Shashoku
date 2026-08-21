@@ -139,7 +139,7 @@
           :locked="object.locked"
           :editing="object.id === textEditingId"
           :selection="object.id === textEditingId ? textRange : null"
-          :caret-key="caretKey"
+          :caret-key="object.id === textEditingId ? caretKey : 0"
           @edit-at="beginCanvasTextEdit(object.id, $event)"
           @select-text="(anchor, focus) => setTextRange(anchor, focus)"
           @select="onSelectObject(object.id, $event)"
