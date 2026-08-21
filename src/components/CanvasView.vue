@@ -433,7 +433,7 @@ const layerAlpha = useLayerAlpha(
     // canvas back, which at one per pointer event is most of a stroke's cost.
     return live === null
       ? null
-      : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.committed}` }
+      : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.writesTo(entry.id)}` }
   },
   frameOf,
 )
@@ -897,7 +897,7 @@ const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
   return artworkSignature(pageStack(file.page.layers), (id) =>
-    raster.holds(id) ? `${id}@${raster.committed}` : null,
+    raster.holds(id) ? `${id}@${raster.writesTo(id)}` : null,
   )
 })
 

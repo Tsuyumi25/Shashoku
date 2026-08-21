@@ -136,10 +136,10 @@ watch(
       props.entry.file,
       props.entry.w,
       props.entry.h,
-      // What has been written, not what has been drawn: a stroke being shown
-      // puts the same picture here many times a second, and this one costs a
-      // scaled draw each time.
-      raster.committed,
+      // What has been written to *this* layer. Every row watching the one
+      // counter meant a stroke committed anywhere sent every thumbnail on the
+      // page back to disk for pixels that had not moved.
+      raster.writesTo(props.entry.id),
     ] as const,
   load,
   { immediate: true },

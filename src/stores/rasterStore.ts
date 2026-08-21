@@ -1,4 +1,4 @@
-import { ref, shallowRef, watch } from 'vue'
+import { reactive, ref, shallowRef, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { EngineLayerFrame, EngineLayerPixels } from '@shared/engine/types'
 import { generateId } from '@shared/page/schema'
@@ -57,6 +57,25 @@ export const useRasterStore = defineStore('raster', () => {
    * canvas back is more than a frame's work on a layer of any size.
    */
   const committed = ref(0)
+
+  /**
+   * How many times each held layer has been written to.
+   *
+   * The counter above says *something* was written and is what the stack
+   * redraws on; this says which layer, and is what a cache keyed on a layer's
+   * pixels hangs off. Sharing the one counter meant committing a stroke on any
+   * layer threw away every other held layer's hit-test plane and sent every row
+   * in the tree back to disk for a thumbnail whose pixels had not moved.
+   *
+   * A reactive map rather than a counter and a lookup, because tracking is per
+   * key: a layer nothing wrote to is not a layer anything re-reads.
+   */
+  const writes = reactive(new Map<string, number>())
+
+  /** What a layer's pixels are at, for anything that has to read them back. */
+  function writesTo(id: string): number {
+    return writes.get(id) ?? 0
+  }
 
   /**
    * The pixel half of saving, on a clock of its own and a much slower one than
@@ -201,6 +220,7 @@ export const useRasterStore = defineStore('raster', () => {
     }
     revision.value++
     committed.value++
+    writes.set(id, writesTo(id) + 1)
   }
 
   /**
@@ -277,6 +297,9 @@ export const useRasterStore = defineStore('raster', () => {
   function release(id: string): void {
     if (!held.value.delete(id)) return
     window.engine.rasterRelease(id)
+    // The count goes with it. A layer nobody holds is read from its file again,
+    // and the file's own name is what says which pixels those are.
+    writes.delete(id)
     revision.value++
   }
 
@@ -284,6 +307,7 @@ export const useRasterStore = defineStore('raster', () => {
     if (held.value.size === 0) return
     held.value.clear()
     window.engine.rasterReleaseAll()
+    writes.clear()
     revision.value++
   }
 
@@ -323,6 +347,7 @@ export const useRasterStore = defineStore('raster', () => {
     liveLayer,
     holds,
     frameOf,
+    writesTo,
     take,
     paste,
     owe,

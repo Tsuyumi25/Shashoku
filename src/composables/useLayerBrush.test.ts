@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import { createPinia, setActivePinia } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { EngineLayerPixels } from '@shared/engine/types'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
@@ -802,5 +802,36 @@ describe("the layer's own alpha lock", () => {
 
     expect(erase).toHaveBeenCalledTimes(1)
     expect(fill).not.toHaveBeenCalled()
+  })
+})
+
+describe('what a write wakes', () => {
+  const framed = { x: 0, y: 0, w: PAGE.w, h: PAGE.h }
+
+  /**
+   * Everything that reads a whole canvas back — the hit-test plane, a row's
+   * thumbnail, the wand's composite — hangs off the count of writes to the
+   * layer it is about. Off a count of writes to the document, a stroke anywhere
+   * threw all of them away: every held layer re-read, every row on the page
+   * back to disk, for pixels that had not moved.
+   */
+  it('leaves a layer alone when the stroke was on a different one', async () => {
+    const { editor } = openWith(raster('a', framed), raster('b', framed))
+    editor.setTool('brush')
+    const raster_ = useRasterStore()
+
+    let woke = 0
+    const stop = watch(() => raster_.writesTo('a'), () => (woke += 1), { flush: 'sync' })
+
+    editor.selectOnly('b')
+    await stroke(useLayerBrush(container), { x: 50, y: 50 }, { x: 90, y: 50 })
+    expect(raster_.writesTo('b')).toBeGreaterThan(0)
+    expect(woke).toBe(0)
+
+    editor.selectOnly('a')
+    await stroke(useLayerBrush(container), { x: 50, y: 90 }, { x: 90, y: 90 })
+    expect(woke).toBe(1)
+
+    stop()
   })
 })
