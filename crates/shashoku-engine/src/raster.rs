@@ -99,6 +99,13 @@ fn tile_rect(coord: TileCoord) -> Rect {
     }
 }
 
+/// The most one read may allocate.
+///
+/// Generous by the standards of what is ever asked for — the largest page this
+/// editor opens is a fifth of it — and a floor under nothing at all, which is
+/// what an unbounded read leaves when the allocator gives up.
+const MAX_READ_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
 /// A mask has to describe exactly its frame, which is what makes an index into
 /// it safe. Checked before anything reads one, because the length is the
 /// caller's word and an out-of-range read is what a wrong one buys.
@@ -698,6 +705,24 @@ pub fn holds(id: &str) -> bool {
 /// zeroes it starts as already say — so a rectangle reaching past the frame is
 /// answered rather than refused.
 pub fn read(id: &str, at: Rect) -> Result<Vec<u8>, String> {
+    /*
+     * Sized before anything is asked for. A write is bounded by the mask it
+     * comes with — a caller cannot ask for a rectangle it has not already paid
+     * for the bytes of — and a read has no such ballast: four in-range integers
+     * describe a rectangle no machine can hold. An allocation that large aborts
+     * the process rather than raising anything catchable, so it is refused here
+     * where it can still be said out loud.
+     */
+    let bytes = (at.w.max(0) as usize)
+        .checked_mul(at.h.max(0) as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "region is too large to read".to_string())?;
+    if bytes > MAX_READ_BYTES {
+        return Err(format!(
+            "region of {}x{} is {bytes} bytes, past the {MAX_READ_BYTES} a read may take",
+            at.w, at.h
+        ));
+    }
     let held = registry();
     let layer = held
         .layers
@@ -1326,6 +1351,24 @@ mod tests {
     fn filling_a_layer_nobody_handed_over_is_an_error() {
         let _alone = alone();
         assert!(fill("nobody", &[255], frame(0, 0, 1, 1), RED, false).is_err());
+    }
+
+    /**
+     * A write carries the mask it is bounded by, so a caller cannot ask for
+     * more than it has already paid for the bytes of. A read carries four
+     * integers, and four in-range integers describe a rectangle no machine can
+     * hold — an allocation that size takes the process down rather than raising
+     * anything a caller could catch.
+     */
+    #[test]
+    fn a_read_larger_than_any_machine_is_refused_rather_than_attempted() {
+        let _alone = alone();
+        take("l", &[], frame(0, 0, 0, 0));
+
+        assert!(read("l", frame(0, 0, 1_000_000, 1_000_000)).is_err());
+        // The layer is still there and still answers; the refusal is the read's,
+        // not the engine's.
+        assert!(read("l", frame(0, 0, 4, 4)).is_ok());
     }
 
     /// A layer three tiles wide, and one fill per tile — three records holding

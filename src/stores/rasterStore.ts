@@ -218,6 +218,14 @@ export const useRasterStore = defineStore('raster', () => {
       image.data.set(patch.rgba)
       context2d(layer.canvas).putImageData(image, changed.x - frame.x, changed.y - frame.y)
     }
+    /*
+     * In this order, and the stack leans on it. Both are watched there without
+     * waiting for a flush: the first arms a repaint for the next frame, the
+     * second draws now and cancels the one just armed. Bumped the other way
+     * round, the write would draw and then arm a frame nothing left in the call
+     * cancels — every write repainting twice, with no error and no test to say
+     * so, because the whole of it rests on which line comes first here.
+     */
     revision.value++
     committed.value++
     writes.set(id, writesTo(id) + 1)

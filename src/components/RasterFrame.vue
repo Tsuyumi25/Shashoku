@@ -21,7 +21,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RasterLayerEntry } from '@shared/page/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import { centeredBoxOnScreen, type ViewTransform } from '@/lib/coords'
 import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
@@ -29,10 +28,13 @@ import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
 /**
  * A raster layer's frame: the shared one, over the arithmetic that is paint's own.
  *
- * Its position is whole page pixels and its size is the extent of the PNG, so
- * both are read straight off the entry — no typesetter decides how big a patch
- * is. `place` is the gesture in progress and it is a preview: the layer's own
- * numbers stay whole until the release resamples the pixels into them.
+ * Its position and size are whole page pixels — the extent of the pixels
+ * themselves, since no typesetter decides how big a patch is. They come in
+ * rather than being read off the entry: a layer being edited is ahead of its
+ * entry until the write lands, and the canvas decides where its pixels are once
+ * for the frame, the reachable list and the hit test together. `place` is the
+ * gesture in progress and it is a preview: the layer's own numbers stay whole
+ * until the release resamples the pixels into them.
  *
  * Every drawn layer wears one rather than only the selected layer, so a patch
  * can be reached by pointing at it instead of by reading down the tree. It is
@@ -49,12 +51,7 @@ import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
  * frame is what says a thing can be taken hold of.
  */
 const props = defineProps<{
-  entry: RasterLayerEntry
-  /**
-   * Where the layer's pixels are, which while it is being edited is ahead of
-   * the entry's own rectangle. The canvas decides this once for the frame, the
-   * reachable list and the hit test together.
-   */
+  /** Where the layer's pixels are, in page pixels. */
   frame: { x: number; y: number; w: number; h: number }
   view: ViewTransform
   selected: boolean

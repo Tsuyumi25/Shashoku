@@ -153,9 +153,10 @@ export interface EngineLayerFrame {
 /**
  * A layer's pixels over part of itself, and where its frame stands.
  *
- * What a write hands back, minus the way to take it back — which is also
- * exactly what a preview is, so both reach the renderer's own copy of a layer
- * by one path instead of two.
+ * What a write hands back, minus the way to take it back. Split out because
+ * putting these pixels onto the renderer's copy of a layer is a different job
+ * from filing the record that undoes them, and only one of those needs a
+ * journal to name — the narrower type is what says so.
  */
 export interface EngineLayerPixels {
   /**
@@ -404,7 +405,13 @@ export interface ShashokuEngineApi {
   /**
    * A held layer's own pixels over a rectangle of the page, straight RGBA, row
    * by row. Ground the layer does not cover reads as transparent, so a
-   * rectangle reaching past its frame is answered rather than refused.
+   * rectangle reaching past its frame is answered rather than refused. A
+   * rectangle no machine could hold is refused.
+   *
+   * The renderer keeps its own copy of every held layer and draws from that, so
+   * nothing in the app reaches for this — what it is for is asking the engine
+   * what it actually holds, which is what the tests assert against. A store
+   * that can be written to and not read from is a store nothing can check.
    */
   rasterRead(id: string, region: EngineLayerFrame): Uint8Array;
   /**

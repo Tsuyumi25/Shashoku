@@ -51,13 +51,18 @@ export function useLayerAlpha(
    * screen. The key changes when the pixels do, which is what keeps the cache
    * honest without this having to know what changed.
    */
-  live?: (entry: RasterLayerEntry) => { canvas: OffscreenCanvas; frame: Frame; key: string } | null,
+  live: (entry: RasterLayerEntry) => { canvas: OffscreenCanvas; frame: Frame; key: string } | null,
   /**
    * Where a layer's pixels are. Injected rather than derived from `live`,
    * because the canvas bounds a hit against the same frame this reads it at and
    * the two agreeing must not be a coincidence of two derivations.
+   *
+   * Neither has a default. One that fell back to the entry would answer for a
+   * layer being edited with the frame from before the edit — which is the bug
+   * this argument exists to close, reintroduced silently for whoever writes the
+   * second caller.
    */
-  frameOf: (entry: RasterLayerEntry) => Frame = (entry) => entry,
+  frameOf: (entry: RasterLayerEntry) => Frame,
 ) {
   const planes = new Map<string, AlphaPlane>()
   let token = 0
@@ -88,7 +93,7 @@ export function useLayerAlpha(
 
   /** What a layer's plane is filed under: its live state, or its file name. */
   function keyOf(entry: RasterLayerEntry): string {
-    return live?.(entry)?.key ?? entry.file
+    return live(entry)?.key ?? entry.file
   }
 
   async function load(): Promise<void> {
@@ -100,7 +105,7 @@ export function useLayerAlpha(
     for (const entry of entries) {
       const key = keyOf(entry)
       if (planes.has(key)) continue
-      const held = live?.(entry) ?? null
+      const held = live(entry)
       if (held !== null) {
         const plane = planeOf(held.canvas)
         if (plane) planes.set(key, plane)

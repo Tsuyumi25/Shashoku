@@ -115,7 +115,6 @@
           <RasterFrame
             v-for="layer in rasterFrames"
             :key="layer.id"
-            :entry="layer"
             :frame="frameOf(layer)"
             :view="view"
             :selected="layer.id === editor.cursorId"
