@@ -52,6 +52,12 @@ export function useLayerAlpha(
    * honest without this having to know what changed.
    */
   live?: (entry: RasterLayerEntry) => { canvas: OffscreenCanvas; frame: Frame; key: string } | null,
+  /**
+   * Where a layer's pixels are. Injected rather than derived from `live`,
+   * because the canvas bounds a hit against the same frame this reads it at and
+   * the two agreeing must not be a coincidence of two derivations.
+   */
+  frameOf: (entry: RasterLayerEntry) => Frame = (entry) => entry,
 ) {
   const planes = new Map<string, AlphaPlane>()
   let token = 0
@@ -125,23 +131,22 @@ export function useLayerAlpha(
   )
 
   /**
-   * One point of a layer, in its own whole pixels — zero for anything not read
-   * yet, and zero outside, which is what a layer with nothing there means.
+   * One point of the page, as this layer's coverage there — zero for anything
+   * not read yet, and zero outside, which is what a layer with nothing there
+   * means.
    *
-   * The frame is what the bitmap is drawn into, so a bitmap that is not the
-   * frame's size is being stretched onto the page and the point has to be
-   * stretched with it.
+   * Taken in page pixels and put into the frame the plane was actually read at,
+   * which for a layer being edited is ahead of the entry's. The frame is also
+   * what the bitmap is drawn into, so a bitmap that is not the frame's size is
+   * being stretched onto the page and the point is stretched with it.
    */
-  function alphaAt(entry: RasterLayerEntry, x: number, y: number): number {
+  function alphaAt(entry: RasterLayerEntry, at: { x: number; y: number }): number {
     const plane = planes.get(keyOf(entry))
     if (plane === undefined) return 0
-    // A held layer's frame is ahead of the manifest's, so the point arrives
-    // measured from a corner that has since moved. Translate before scaling, or
-    // a layer that grew would have its whole coverage stretched instead.
-    const frame = live?.(entry)?.frame ?? entry
+    const frame = frameOf(entry)
     if (frame.w <= 0 || frame.h <= 0) return 0
-    const lx = x + entry.x - frame.x
-    const ly = y + entry.y - frame.y
+    const lx = at.x - frame.x
+    const ly = at.y - frame.y
     const px = Math.min(plane.w - 1, Math.floor((lx * plane.w) / frame.w))
     const py = Math.min(plane.h - 1, Math.floor((ly * plane.h) / frame.h))
     if (px < 0 || py < 0) return 0

@@ -21,7 +21,24 @@ import type { Point } from '@/lib/selection/rect'
  * outside is what leaves the rule about who wins somewhere it can be read and
  * tested on its own.
  */
-export type AlphaReader = (entry: RasterLayerEntry, x: number, y: number) => number
+export type AlphaReader = (entry: RasterLayerEntry, at: Point) => number
+
+/**
+ * Where a layer's pixels actually are.
+ *
+ * Not the entry's own rectangle, because nothing is written to the manifest
+ * before the file it names: a layer being edited keeps the frame it was opened
+ * with until its pixels reach disk, which under the pixel scheduler is tens of
+ * seconds. Reachability read off the entry therefore stops at the frame from
+ * before the stroke — and on a layer first painted this session, where the
+ * entry has no frame at all, stops at nothing.
+ */
+export type FrameReader = (entry: RasterLayerEntry) => {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 /**
  * The raster layers wearing a frame, in drawing order.
@@ -39,10 +56,14 @@ export type AlphaReader = (entry: RasterLayerEntry, x: number, y: number) => num
 export function framedLayers(
   nodes: readonly StackNode[],
   isLocked: (id: string) => boolean,
+  frameOf: FrameReader,
 ): RasterLayerEntry[] {
   return stackedRasterNodes(nodes)
     .map((node) => node.entry)
-    .filter((entry) => entry.w > 0 && entry.h > 0 && !isLocked(entry.id))
+    .filter((entry) => {
+      const frame = frameOf(entry)
+      return frame.w > 0 && frame.h > 0 && !isLocked(entry.id)
+    })
 }
 
 /**
@@ -57,22 +78,30 @@ export function framedLayers(
  * a stack is then something added to this later, not a rewrite of it.
  *
  * Any non-zero alpha counts. A committed layer carries no rotation — a turn is
- * baked into the pixels when the gesture is let go — so page to layer is one
- * subtraction.
+ * baked into the pixels when the gesture is let go — so the frame is upright and
+ * the point is inside it or it is not.
+ *
+ * The point stays in page pixels the whole way down, including into the alpha
+ * reader. A layer's own corner is exactly the thing that is out of date here,
+ * and a point measured from it would have to be measured again against the
+ * frame the pixels were really read at — two subtractions that only cancel while
+ * nothing is being edited.
  */
 export function layerAt(
   nodes: readonly StackNode[],
   at: Point,
   isLocked: (id: string) => boolean,
   alphaAt: AlphaReader,
+  frameOf: FrameReader,
 ): string | null {
-  const framed = framedLayers(nodes, isLocked)
+  const framed = framedLayers(nodes, isLocked, frameOf)
   for (let i = framed.length - 1; i >= 0; i -= 1) {
     const entry = framed[i]
-    const x = Math.floor(at.x - entry.x)
-    const y = Math.floor(at.y - entry.y)
-    if (x < 0 || y < 0 || x >= entry.w || y >= entry.h) continue
-    if (alphaAt(entry, x, y) !== 0) return entry.id
+    const frame = frameOf(entry)
+    const x = Math.floor(at.x)
+    const y = Math.floor(at.y)
+    if (x < frame.x || y < frame.y || x >= frame.x + frame.w || y >= frame.y + frame.h) continue
+    if (alphaAt(entry, { x, y }) !== 0) return entry.id
   }
   return null
 }

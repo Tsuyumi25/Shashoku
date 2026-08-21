@@ -50,6 +50,12 @@ import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
  */
 const props = defineProps<{
   entry: RasterLayerEntry
+  /**
+   * Where the layer's pixels are, which while it is being edited is ahead of
+   * the entry's own rectangle. The canvas decides this once for the frame, the
+   * reachable list and the hit test together.
+   */
+  frame: { x: number; y: number; w: number; h: number }
   view: ViewTransform
   selected: boolean
   inSelection: boolean
@@ -96,11 +102,11 @@ function onRotate(radians: number) {
  * to the frame itself, so what is measured here is the upright box.
  */
 const box = computed(() => {
-  const center = frameCenter(props.entry)
+  const center = frameCenter(props.frame)
   const { scale, dx, dy } = props.place
   return centeredBoxOnScreen(
     { x: center.x + dx, y: center.y + dy },
-    { w: props.entry.w * scale, h: props.entry.h * scale },
+    { w: props.frame.w * scale, h: props.frame.h * scale },
     props.view,
   )
 })

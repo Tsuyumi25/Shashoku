@@ -116,6 +116,7 @@
             v-for="layer in rasterFrames"
             :key="layer.id"
             :entry="layer"
+            :frame="frameOf(layer)"
             :view="view"
             :selected="layer.id === editor.cursorId"
             :in-selection="editor.isSelected(layer.id)"
@@ -397,10 +398,22 @@ const objects = computed(() => {
  * the pointer and the layer a press takes the same layer by construction rather
  * than by two rules kept in step.
  */
+/**
+ * Where a layer's pixels are, for everything that has to agree about it: which
+ * layers can be reached, where their frames are drawn, and where a hit is read
+ * from. The engine's frame while it holds the layer, because nothing reaches
+ * the manifest before the file it names — so an entry keeps the frame from
+ * before the edit until the write lands, which is tens of seconds under the
+ * pixel scheduler and forever on a layer that has never been written at all.
+ */
+function frameOf(entry: RasterLayerEntry) {
+  return raster.liveLayer(entry.id)?.frame ?? entry
+}
+
 const rasterFrames = computed(() => {
   const file = currentFile.value
   if (!file) return []
-  return framedLayers(stack.value, (id) => isLocked(file.page.layers, id))
+  return framedLayers(stack.value, (id) => isLocked(file.page.layers, id), frameOf)
 })
 
 /**
@@ -432,6 +445,7 @@ const layerAlpha = useLayerAlpha(
       ? null
       : { canvas: live.canvas, frame: live.frame, key: `${entry.id}@${raster.committed}` }
   },
+  frameOf,
 )
 
 /**
@@ -447,6 +461,7 @@ function layerHitAt(p: Anchor): string | null {
     p,
     (id) => isLocked(file.page.layers, id),
     layerAlpha.alphaAt,
+    frameOf,
   )
 }
 

@@ -5,6 +5,13 @@ import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page
 import { PASS_THROUGH } from '@shared/page/types'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 
+interface Frame {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
   return {
     kind: 'raster',
@@ -52,22 +59,28 @@ const PIXELS: Record<string, string[]> = {
   'top.png': ['....', '..1#', '####', '####'],
 }
 
-function alphaAt(entry: RasterLayerEntry, x: number, y: number): number {
-  const rows = PIXELS[entry.file]
-  if (rows === undefined) throw new Error(`asked for pixels of ${entry.file}`)
-  return ALPHA[rows[y][x]]
-}
-
 /**
  * The lower patch covers the page's top-left corner; the upper one is offset
  * down and right, so their frames overlap over a quarter of each.
+ *
+ * `live` stands for a layer the engine is holding, whose pixels have moved on
+ * from what its entry says — which is every layer being edited, since the
+ * manifest is not written before the file it names.
  */
-function scene(layers: LayerEntry[]) {
+function scene(layers: LayerEntry[], live: Record<string, Frame> = {}) {
   const nodes = pageStack(layers)
+  const frameOf = (entry: RasterLayerEntry): Frame => live[entry.id] ?? entry
+  // Reads at the frame the pixels are really at, as the renderer's plane does.
+  const alphaAt = (entry: RasterLayerEntry, at: { x: number; y: number }): number => {
+    const rows = PIXELS[entry.file]
+    if (rows === undefined) throw new Error(`asked for pixels of ${entry.file}`)
+    const frame = frameOf(entry)
+    return ALPHA[rows[at.y - frame.y][at.x - frame.x]]
+  }
   return {
-    framed: framedLayers(nodes, (id) => isLocked(layers, id)),
+    framed: framedLayers(nodes, (id) => isLocked(layers, id), frameOf),
     at: (x: number, y: number) =>
-      layerAt(nodes, { x, y }, (id) => isLocked(layers, id), alphaAt),
+      layerAt(nodes, { x, y }, (id) => isLocked(layers, id), alphaAt, frameOf),
   }
 }
 
@@ -120,6 +133,28 @@ describe('layerAt', () => {
     const blank = raster('blank', { w: 0, h: 0 })
     expect(scene([BOTTOM, blank]).at(1, 1)).toBe('bottom')
   })
+
+  /**
+   * A layer painted this session has pixels the manifest has not been told
+   * about, and for tens of seconds its entry still says the frame from before —
+   * or, on a layer painted for the first time, no frame at all. Read off the
+   * entry, the paint plainly on screen takes no pointer.
+   */
+  it('reaches a layer painted since the entry was written', () => {
+    const blank = raster('top', { x: 0, y: 0, w: 0, h: 0 })
+    const live = { top: { x: 2, y: 2, w: 4, h: 4 } }
+    expect(scene([BOTTOM, blank], live).at(4, 4)).toBe('top')
+  })
+
+  it('bounds the hit by where the pixels are, not by where the entry says', () => {
+    // The entry still describes the frame before the layer grew down and right.
+    const grown = raster('top', { x: 2, y: 2, w: 1, h: 1 })
+    const live = { top: { x: 2, y: 2, w: 4, h: 4 } }
+    // Past the lower layer as well, so read off the entry the point reaches
+    // nothing at all — which is the pointer falling through visible paint.
+    expect(scene([BOTTOM, grown]).at(4, 4)).toBeNull()
+    expect(scene([BOTTOM, grown], live).at(4, 4)).toBe('top')
+  })
 })
 
 describe('framedLayers', () => {
@@ -137,5 +172,13 @@ describe('framedLayers', () => {
     const open = folder('open', [raster('inside', { x: 2, y: 2 })])
     const shut = folder('shut', [raster('elsewhere')], { visible: false })
     expect(scene([BOTTOM, open, shut]).framed.map((e) => e.id)).toEqual(['bottom', 'inside'])
+  })
+
+  /** Unpainted means no pixels anywhere, not an entry that has yet to hear. */
+  it('counts a layer painted since the entry was written', () => {
+    const blank = raster('fresh', { w: 0, h: 0 })
+    const live = { fresh: { x: 0, y: 0, w: 4, h: 4 } }
+    expect(scene([BOTTOM, blank]).framed.map((e) => e.id)).toEqual(['bottom'])
+    expect(scene([BOTTOM, blank], live).framed.map((e) => e.id)).toEqual(['bottom', 'fresh'])
   })
 })
