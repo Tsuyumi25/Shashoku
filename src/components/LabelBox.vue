@@ -6,11 +6,12 @@
     :selected="selected"
     :in-selection="inSelection"
     :locked="locked"
-    :handles="handles ?? true"
+    :handles="!editing && (handles ?? true)"
     :accent="accent"
     :standing="framed || untyped"
     :pointer="pointer"
     :title="substitution"
+    @dblclick="onDoubleClick"
     @select="emit('select', $event)"
     @drag-start="onDragStart"
     @drag="onDrag"
@@ -23,6 +24,25 @@
     @rotate-end="onRotateEnd"
   >
     <template #default="{ counterTurn, hovered }">
+      <!--
+        Always present so that a double click has a frame to be measured in, and
+        only takes the pointer while editing — a press on it any other time
+        belongs to the drag underneath.
+      -->
+      <div
+        ref="surfaceEl"
+        class="text-surface"
+        :class="takesPointer && 'editing'"
+        @pointerdown="onTextDown"
+        @pointermove="onTextMove"
+        @pointerup="onTextUp"
+        @pointercancel="onTextUp"
+        @mousedown="holdFocus"
+      >
+        <div v-for="(box, i) in selectionBoxes" :key="i" class="text-selection" :style="box" />
+        <div v-if="caretBox" :key="caretKey" class="text-caret" :style="caretBox" />
+      </div>
+
       <div
         v-if="tags.length > 0 && (hovered || inSelection)"
         class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[10px] leading-tight whitespace-nowrap text-white select-none"
@@ -38,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
@@ -46,14 +66,18 @@ import {
   clamp,
   framePoint,
   positionHolding,
+  screenToFramePx,
   turnedAround,
   type Anchor,
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
 import type { TurnedLabel } from '@/stores/editorStore'
+import { samplePadding } from '@/lib/fontSampleCache'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
+import { engineStrokeFor } from '@/lib/textStyle'
+import { textProjection } from '@/lib/textProjection'
 
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
@@ -129,6 +153,20 @@ const props = defineProps<{
   selected: boolean
   inSelection: boolean
   locked: boolean
+  /**
+   * This object is the one being typed into. The keyboard is elsewhere — in the
+   * translation list's box — and what appears here is a projection of where
+   * that box says its caret is.
+   */
+  editing?: boolean
+  /** The field's selection, in UTF-16 offsets, while this is the object. */
+  selection?: { start: number; end: number } | null
+  /**
+   * Bumped whenever the caret moves, so the blink can restart from the bright
+   * half. A caret that lands mid-blink reads as a keystroke that did not
+   * register — the font picker's cells hit the same thing.
+   */
+  caretKey?: number
 }>()
 
 const emit = defineEmits<{
@@ -140,6 +178,10 @@ const emit = defineEmits<{
   scaleEnd: []
   rotate: [radians: number, at: Anchor]
   rotateEnd: [from: TurnedLabel, to: TurnedLabel]
+  /** Start typing, with the caret on the character the double click hit. */
+  editAt: [index: number]
+  /** Where the pointer put the selection, as offsets into the object's text. */
+  selectText: [anchor: number, focus: number]
 }>()
 
 // Turned, because where the frame's middle sits follows the object round once
@@ -279,6 +321,143 @@ function onRotateEnd() {
   emit('rotateEnd', spinFrom, spinTo)
 }
 
+// ── Projecting the field's caret onto the drawn text ───────────────────────
+
+/** How thick a caret is on screen. Constant, so the zoom cannot thin it away. */
+const CARET_PX = 2
+
+const surfaceEl = ref<HTMLElement | null>(null)
+
+/**
+ * Whether the text answers the pointer. It defers to the frame's own answer as
+ * well as to the session, because a canvas gesture that has taken the pointer
+ * from the frames has taken it from what is drawn inside them too.
+ */
+const takesPointer = computed(() => props.editing === true && props.pointer === 'box')
+
+const vertical = computed(() => props.textStyle.direction === 'vertical')
+
+/**
+ * The engine's cluster table read as geometry, in the pixels the run was laid
+ * out in — which are the frame's own, since a bitmap pixel is a document pixel
+ * and the clusters stand upright however the object was turned.
+ *
+ * An empty object has no raster to read, and still has a caret: the padding a
+ * sample would have been drawn with is derived rather than measured, which is
+ * enough to put that caret where the first character will appear.
+ */
+const projection = computed(() => {
+  const { sample, box } = drawn.value
+  const padding =
+    sample?.padding ?? samplePadding(engineStrokeFor(props.textStyle), props.textStyle.weightPx)
+  return textProjection({
+    text: props.text,
+    clusters: sample?.clusters ?? [],
+    vertical: vertical.value,
+    padding,
+    crossExtent: vertical.value ? box.w : box.h,
+  })
+})
+
+/** Layout pixels to screen pixels inside the frame, which is already turned. */
+function scaled(value: number): number {
+  return value * props.view.scale
+}
+
+const caretBox = computed(() => {
+  const at = props.selection
+  if (!props.editing || !at) return null
+  const r = projection.value.caret(at.end)
+  return vertical.value
+    ? {
+        left: `${scaled(r.x)}px`,
+        top: `${scaled(r.y)}px`,
+        width: `${scaled(r.width)}px`,
+        height: `${CARET_PX}px`,
+      }
+    : {
+        left: `${scaled(r.x)}px`,
+        top: `${scaled(r.y)}px`,
+        width: `${CARET_PX}px`,
+        height: `${scaled(r.height)}px`,
+      }
+})
+
+const selectionBoxes = computed(() => {
+  const at = props.selection
+  if (!props.editing || !at) return []
+  return projection.value.selection(at.start, at.end).map((r) => ({
+    left: `${scaled(r.x)}px`,
+    top: `${scaled(r.y)}px`,
+    width: `${scaled(r.width)}px`,
+    height: `${scaled(r.height)}px`,
+  }))
+})
+
+/** The frame's turn on screen: the view's and the object's, as drawn. */
+const turn = computed(() => props.view.rotate + props.rotation)
+
+/** Which character a client point is nearest to the near side of. */
+function indexAtPointer(e: { clientX: number; clientY: number }): number | null {
+  const el = surfaceEl.value
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  const at = screenToFramePx(
+    e.clientX,
+    e.clientY,
+    { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+    drawn.value.box,
+    props.view.scale,
+    turn.value,
+  )
+  return projection.value.indexAt(at.x, at.y)
+}
+
+function onDoubleClick(at: Point) {
+  const box = drawn.value.box
+  emit('editAt', projection.value.indexAt(at.x * box.w, at.y * box.h))
+}
+
+/**
+ * ⭐ Measured: refusing the press's default is what keeps the field focused
+ * through a click on the canvas, so the whole of pointing and dragging happens
+ * without the box ever being blurred — and blurring it is what ends the edit.
+ */
+function holdFocus(e: MouseEvent) {
+  if (!takesPointer.value) return
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+/** Where the selection is being dragged from, or null when no drag is live. */
+let textAnchor: number | null = null
+
+function onTextDown(e: PointerEvent) {
+  if (!takesPointer.value || e.button !== 0) return
+  // The press belongs to the text, not to the object underneath it.
+  e.stopPropagation()
+  const at = indexAtPointer(e)
+  if (at === null) return
+  // Capturing keeps the drag alive once the pointer leaves the frame, which is
+  // exactly when a selection is being extended past the last character.
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  textAnchor = e.shiftKey ? (props.selection?.start ?? at) : at
+  emit('selectText', textAnchor, at)
+}
+
+function onTextMove(e: PointerEvent) {
+  if (textAnchor === null) return
+  const at = indexAtPointer(e)
+  if (at !== null) emit('selectText', textAnchor, at)
+}
+
+function onTextUp(e: PointerEvent) {
+  if (textAnchor === null) return
+  textAnchor = null
+  const el = e.currentTarget as HTMLElement
+  if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+}
+
 /**
  * An object with nothing typed in it yet keeps its frame without being pointed
  * at. Having a frame at all is what makes an empty object reachable, but
@@ -327,3 +506,41 @@ function captionStyle(counterTurn: number) {
   }
 }
 </script>
+
+<style scoped>
+/*
+ * The frame's own extent, so a point inside it can be read in the pixels the
+ * text was laid out in without measuring anything else. It gives up the pointer
+ * unless the object is being typed into: a press on a label that is not is a
+ * press on the object, and the drag underneath has to hear it.
+ */
+.text-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.text-surface.editing {
+  pointer-events: auto;
+  cursor: text;
+}
+/*
+ * Over the glyphs rather than behind them: what the page draws is one composite
+ * bitmap under this whole layer, so there is no back to get to. Translucent for
+ * the same reason — the text has to stay readable through its own selection.
+ */
+.text-selection {
+  position: absolute;
+  background: var(--primary);
+  opacity: 0.3;
+}
+.text-caret {
+  position: absolute;
+  background: var(--primary);
+  animation: label-caret-blink 1.1s steps(1) infinite;
+}
+@keyframes label-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+</style>

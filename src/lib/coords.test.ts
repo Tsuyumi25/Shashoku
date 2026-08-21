@@ -5,6 +5,7 @@ import {
   framePoint,
   positionHolding,
   screenToContentPx,
+  screenToFramePx,
   screenToPagePx,
   smoothingQualityFor,
   travelSinceGrab,
@@ -233,5 +234,52 @@ describe('positionHolding', () => {
   it('leaves the position alone when the held point is the one it names', () => {
     const at = positionHolding({ x: 100, y: 60 }, { w: 40, h: 20 }, TOP_LEFT, TOP_LEFT, 1.1)
     expect(at).toEqual({ x: 100, y: 60 })
+  })
+})
+
+describe('screenToFramePx', () => {
+  const BOX = { w: 100, h: 40 }
+  const CENTER = { x: 500, y: 300 }
+
+  it('puts the top left corner at the origin', () => {
+    const at = screenToFramePx(CENTER.x - 50, CENTER.y - 20, CENTER, BOX, 1, 0)
+    expect(at.x).toBeCloseTo(0, 9)
+    expect(at.y).toBeCloseTo(0, 9)
+  })
+
+  it('answers in the frame\'s own pixels rather than screen ones', () => {
+    const at = screenToFramePx(CENTER.x - 100 + 20, CENTER.y - 40, CENTER, BOX, 2, 0)
+    expect(at.x).toBeCloseTo(10, 9)
+    expect(at.y).toBeCloseTo(0, 9)
+  })
+
+  /** A quarter turn sends the frame's +x along the screen's +y. */
+  it('undoes the turn the frame is drawn with', () => {
+    const at = screenToFramePx(CENTER.x, CENTER.y - 40, CENTER, BOX, 1, Math.PI / 2)
+    expect(at.x).toBeCloseTo(10, 9)
+    expect(at.y).toBeCloseTo(20, 9)
+  })
+
+  /**
+   * The turn a frame carries is the view's and the object's added together, so
+   * one test standing in for both is the whole point of taking one angle.
+   */
+  it('inverts the placement for any turn and scale', () => {
+    const turn = Math.PI / 5
+    const scale = 1.8
+    const local = { x: 17, y: 33 }
+    const dx = local.x - BOX.w / 2
+    const dy = local.y - BOX.h / 2
+    const screen = turnedAround({ x: 0, y: 0 }, { x: dx * scale, y: dy * scale }, turn)
+    const back = screenToFramePx(
+      CENTER.x + screen.x,
+      CENTER.y + screen.y,
+      CENTER,
+      BOX,
+      scale,
+      turn,
+    )
+    expect(back.x).toBeCloseTo(local.x, 9)
+    expect(back.y).toBeCloseTo(local.y, 9)
   })
 })

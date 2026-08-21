@@ -11,6 +11,7 @@
     @pointermove="onMove"
     @pointerup="onUp"
     @pointercancel="onUp"
+    @dblclick.stop="onDoubleClick"
   >
     <slot :counter-turn="-turn" :hovered="hovered" />
 
@@ -183,6 +184,13 @@ const emit = defineEmits<{
   scaleStart: [pin: Point]
   scale: [ratio: number]
   scaleEnd: []
+  /**
+   * A double click, carrying where in the frame it landed as a fraction of it —
+   * the same currency the pin and the pivot are in. Which is the only thing this
+   * frame can say about a point: what the fraction means is the caller's, and
+   * for a text object it means a character.
+   */
+  dblclick: [at: Point]
   /** Likewise, carrying the fractional point the turn is going round. */
   rotateStart: [pivot: Point]
   rotate: [radians: number]
@@ -537,6 +545,22 @@ function onUp(e: PointerEvent) {
   // it back, which loses a deliberate move to an interruption.
   if (dragEngaged) emit('dragEnd', drag.latest)
   dragEngaged = false
+}
+
+/**
+ * Where the click landed, walked back out of the frame's turn — the bounding
+ * rectangle of a frame lying at an angle says nothing about where its own top
+ * left is, but its centre plus an untwisted offset does. No scale is undone
+ * because `box` is already in screen pixels.
+ */
+function onDoubleClick(e: MouseEvent) {
+  if (props.box.width <= 0 || props.box.height <= 0) return
+  const c = centerOnScreen()
+  const out = turnedAround(ORIGIN, { x: e.clientX - c.x, y: e.clientY - c.y }, -turn.value)
+  emit('dblclick', {
+    x: out.x / props.box.width + 0.5,
+    y: out.y / props.box.height + 0.5,
+  })
 }
 
 /**

@@ -237,7 +237,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
 import { textOf } from '@shared/page/text'
@@ -254,9 +254,11 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEventListener } from '@vueuse/core'
 import { ownsKeyboard } from '@/lib/typingSurface'
+import { useTextEditSurface } from '@/composables/useTextEditSurface'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const surface = useTextEditSurface()
 
 /**
  * The whole chapter, not the open page. Translating and proofreading are read
@@ -391,10 +393,33 @@ function sourceOf(row: LabelRow): string | null {
   return text || null
 }
 
-/** Focus follows the input into being, so Enter lands the caret without a click. */
+/**
+ * Focus follows the input into being, so Enter lands the caret without a click.
+ *
+ * The same call publishes the box, because this is the one control a
+ * translation is typed into and the canvas projects what it says. Only
+ * arrivals: a template ref reports its element leaving as a bare `null`, and
+ * carrying the caret to the next row swaps two of them in an order that would
+ * let the departure clear the arrival.
+ */
 function takeFocus(el: unknown) {
-  if (el instanceof HTMLTextAreaElement && document.activeElement !== el) el.focus()
+  if (!(el instanceof HTMLTextAreaElement)) return
+  surface.register(el)
+  if (document.activeElement !== el) el.focus()
 }
+
+/**
+ * The box exists exactly as long as the session does, so the session is what
+ * withdraws it — one fact rather than two that can disagree.
+ */
+watch(
+  () => editor.pendingTextEdit,
+  (pending) => {
+    if (pending === null) surface.register(null)
+  },
+)
+
+onBeforeUnmount(() => surface.register(null))
 
 function focusIn(selector: string) {
   scrollEl.value?.querySelector<HTMLElement>(selector)?.focus()

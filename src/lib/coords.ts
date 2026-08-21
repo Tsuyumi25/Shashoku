@@ -168,6 +168,34 @@ export function centeredBoxOnScreen(
 }
 
 /**
+ * Where a screen point lands inside a frame placed by `centeredBoxOnScreen`, in
+ * the frame's own upright pixels with the origin at its top left corner.
+ *
+ * The frame is drawn as a box of `box × scale` turned by `turn` about its own
+ * centre, so reading a point back out is that chain run backwards: to the
+ * centre, out of the turn, out of the scale, then over to the corner. What
+ * comes back is in the same pixels the engine lays text out in, which is what
+ * makes it the frame a caret is placed in.
+ *
+ * Taking the centre in client coordinates rather than a stage origin is what
+ * keeps this honest under a turn: a rotated element still reports an upright
+ * bounding rectangle, and the centre of that rectangle is the element's centre
+ * whichever way it is lying.
+ */
+export function screenToFramePx(
+  clientX: number,
+  clientY: number,
+  center: { x: number; y: number },
+  box: { w: number; h: number },
+  scale: number,
+  turn: number,
+): { x: number; y: number } {
+  if (scale <= 0) return { x: 0, y: 0 }
+  const out = turnedAround(NOWHERE, { x: clientX - center.x, y: clientY - center.y }, -turn)
+  return { x: out.x / scale + box.w / 2, y: out.y / scale + box.h / 2 }
+}
+
+/**
  * A point turned about another, clockwise as the page's own axes run — which is
  * the direction an object's stored angle means, since Y grows downward.
  *

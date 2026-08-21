@@ -137,6 +137,11 @@
           :selected="object.id === editor.cursorId"
           :in-selection="editor.isSelected(object.id)"
           :locked="object.locked"
+          :editing="object.id === textEditingId"
+          :selection="object.id === textEditingId ? textRange : null"
+          :caret-key="caretKey"
+          @edit-at="beginCanvasTextEdit(object.id, $event)"
+          @select-text="(anchor, focus) => setTextRange(anchor, focus)"
           @select="onSelectObject(object.id, $event)"
           @move="moveLabelTo(object.id, $event)"
           @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -203,6 +208,7 @@ import OcrOverlay from '@/components/OcrOverlay.vue'
 import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
+import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
@@ -474,6 +480,27 @@ function labelById(labelId: string): TextLayerEntry | undefined {
   return editor.currentPageId
     ? project.labelById(editor.currentPageId, labelId)
     : undefined
+}
+
+/**
+ * Typing on the canvas: a double click opens the object, and the pointer goes
+ * on working on the text from there. What is typed goes into the translation
+ * list's box, which never gives up focus while the pointer is on the label — so
+ * the two surfaces are one edit rather than two copies of the text.
+ */
+const {
+  editingId: textEditingId,
+  range: textRange,
+  moved: caretKey,
+  enterAt: enterTextEdit,
+  setRange: setTextRange,
+} = useCanvasTextEdit()
+
+function beginCanvasTextEdit(labelId: string, index: number) {
+  const pageId = editor.currentPageId
+  const label = labelById(labelId)
+  if (pageId === null || label === undefined) return
+  void enterTextEdit(pageId, label, index)
 }
 
 /**
