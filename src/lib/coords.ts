@@ -37,8 +37,9 @@ export function clamp(value: number, min: number, max: number): number {
  * transform that will eventually differ in one of them — which shows up as the
  * overlay sliding off the artwork the first time the view is rotated.
  *
- * Past 3x the point is to see the pixel grid, as in every other raster editor,
- * and both layers have to agree about that too or their grids will not line up.
+ * Past 2x the point is to see the pixel grid rather than a smoothed guess at
+ * it, and both layers have to agree about that too or their grids will not line
+ * up.
  */
 /**
  * Which filter a bitmap wants, given how many destination pixels it gets per
@@ -67,10 +68,25 @@ export function applyViewTransform(
   ctx.translate(view.tx, view.ty)
   ctx.scale(view.scale, view.scale)
   ctx.rotate(view.rotate)
-  // Nearest neighbour past 3x, where the point is to see the pixel grid as in
-  // every other raster editor. That is a property of looking at a page rather
-  // than of the bitmap, so it stays here and not in the shared rule.
-  ctx.imageSmoothingEnabled = view.scale < 3
+  /*
+   * Nearest neighbour past 2x, where a source pixel is large enough that
+   * smoothing it only blurs a grid the eye can already resolve. Two independent
+   * editors put the line at exactly 2: Krita on both of its canvases
+   * (`SCALE_LESS_THAN(…, 2.0)` on the software path, `GL_NEAREST` past
+   * `SCALE_MORE_OR_EQUAL_TO(…, 2.0)` on the GL one), and GEGL's automatic
+   * filter, which GIMP passes through at its default quality — "bilinear for
+   * scales <1.0 box for <2.0 and nearest above".
+   *
+   * Below 2 it stays smooth for the reason those two also stay smooth there:
+   * nearest at a fractional ratio hands some source pixels two destination
+   * pixels and their neighbours one, and a straight line comes out ragged.
+   *
+   * This is a property of looking at a page rather than of the bitmap, so it
+   * stays here and not in the shared rule. It reads `view.scale` and not the
+   * device ratio deliberately — the question is how large a pixel looks, and
+   * 200% looks the same on any display.
+   */
+  ctx.imageSmoothingEnabled = view.scale < 2
   ctx.imageSmoothingQuality = smoothingQualityFor(view.scale)
 }
 

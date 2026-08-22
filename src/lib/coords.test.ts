@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyViewTransform,
   centeredBoxOnScreen,
   contentToScreenPx,
   framePoint,
@@ -164,6 +165,44 @@ describe('smoothingQualityFor', () => {
   it('stops paying going up, where the two filters agree anyway', () => {
     expect(smoothingQualityFor(1.5)).toBe('low')
     expect(smoothingQualityFor(8)).toBe('low')
+  })
+})
+
+describe('applyViewTransform', () => {
+  /** Records the two answers asked about here; the transform calls go nowhere. */
+  function smoothingAt(scale: number): boolean | undefined {
+    const ctx = {
+      imageSmoothingEnabled: undefined as boolean | undefined,
+      imageSmoothingQuality: undefined as ImageSmoothingQuality | undefined,
+      setTransform() {},
+      translate() {},
+      scale() {},
+      rotate() {},
+    }
+    const view: ViewTransform = { scale, tx: 0, ty: 0, rotate: 0 }
+    applyViewTransform(ctx as unknown as CanvasRenderingContext2D, view, 1)
+    return ctx.imageSmoothingEnabled
+  }
+
+  /**
+   * Pinned because this number drifted once already on nothing but an
+   * assertion. Two independent editors put it at exactly 2: Krita on both of
+   * its canvases, and GEGL's automatic filter, which GIMP passes through at its
+   * default quality.
+   */
+  it('shows the pixel grid from twice up', () => {
+    expect(smoothingAt(2)).toBe(false)
+    expect(smoothingAt(8)).toBe(false)
+  })
+
+  /**
+   * Below it a fractional ratio would hand some source pixels two destination
+   * pixels and their neighbours one, which a straight line shows as a kink.
+   */
+  it('smooths under it, where nearest would come out uneven', () => {
+    expect(smoothingAt(1.99)).toBe(true)
+    expect(smoothingAt(1)).toBe(true)
+    expect(smoothingAt(0.3)).toBe(true)
   })
 })
 
