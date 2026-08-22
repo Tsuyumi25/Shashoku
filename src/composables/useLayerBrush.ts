@@ -17,6 +17,7 @@ import {
   coverageWithin,
   cutToMask,
   EMPTY_SURFACE,
+  raiseInto,
   surfaceHolding,
   type StrokeSurface,
 } from '@/lib/selection/strokeSurface'
@@ -51,6 +52,15 @@ interface Stroke {
   color: string
   alphaLocked: boolean
   from: Point
+  /**
+   * What the stroke has covered, already cut to the selection.
+   *
+   * Cut where it is laid down rather than where it is handed over, because the
+   * selection can come and go under the hand: deselecting is a key, and the
+   * hand is busy holding the pointer. Cutting at the release would take a rule
+   * that only ever applied from that moment on and apply it to everything
+   * already drawn — and already seen cut on screen.
+   */
   surface: StrokeSurface
   /** The box every stamp so far has landed in, which is what gets committed. */
   dirty: Rect
@@ -121,6 +131,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    */
   let coverageScratch = new Uint8Array(0)
   let inkScratch = new Uint8ClampedArray(0)
+  let stampScratch = new Uint8ClampedArray(0)
 
   function pageAt(e: MouseEvent): Point | null {
     const el = container.value
@@ -158,54 +169,62 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const s = stroke
     if (s === null) return
     const shape = selection.brushShapeFor(s.mode)
-    s.surface = surfaceHolding(
-      s.surface,
-      segmentWindow(s.from, at, shape.radius),
-      s.pageW,
-      s.pageH,
-    )
-    const region = s.surface.region
-    if (isEmptyRect(region)) {
+    const window = clampToPage(segmentWindow(s.from, at, shape.radius), s.pageW, s.pageH)
+    s.surface = surfaceHolding(s.surface, window, s.pageW, s.pageH)
+    if (isEmptyRect(window) || isEmptyRect(s.surface.region)) {
       s.from = at
       return
     }
-    overlay.holding(region)
+    overlay.holding(s.surface.region)
+
+    const stamped = stampedOver(window)
     // Always the painting direction: this is coverage, and the eraser's coverage
     // is laid down exactly like the brush's. The operator is the commit's.
     const local = strokeMask(
-      s.surface.coverage,
-      region.w,
-      region.h,
-      { x: s.from.x - region.x, y: s.from.y - region.y },
-      { x: at.x - region.x, y: at.y - region.y },
+      stamped,
+      window.w,
+      window.h,
+      { x: s.from.x - window.x, y: s.from.y - window.y },
+      { x: at.x - window.x, y: at.y - window.y },
       shape,
       'paint',
     )
     s.from = at
     if (isEmptyRect(local)) return
     const segment = {
-      x: local.x + region.x,
-      y: local.y + region.y,
+      x: local.x + window.x,
+      y: local.y + window.y,
       w: local.w,
       h: local.h,
     }
+
+    // In this order. The surface holds cut coverage, so a stamp raising it
+    // straight in would put back whatever a feathered selection had thinned.
+    cut(s, stamped, window, segment)
+    raiseInto(s.surface, stamped, window)
     s.dirty = unionRect(s.dirty, segment)
     show(s, segment)
   }
 
   /**
-   * The coverage the engine is to be handed over `at`, cut to the selection.
-   *
-   * One function for the previews and for the commit, because a preview that
-   * was cut differently from the write it is standing in for would be showing
-   * something the release then takes away.
+   * A cleared buffer for one segment's stamps, kept between segments. It is the
+   * segment's own so that the cut has something to act on before the ceiling
+   * takes it.
    */
-  function coverageFor(s: Stroke, at: Rect, into?: Uint8Array): Uint8Array {
-    const coverage = coverageWithin(s.surface, at, into)
+  function stampedOver(window: Rect): Uint8ClampedArray {
+    const size = window.w * window.h
+    if (stampScratch.length < size) stampScratch = new Uint8ClampedArray(size)
+    const out = stampScratch.subarray(0, size)
+    out.fill(0)
+    return out
+  }
+
+  /** Cuts a segment's stamps to the selection as it stands, in place. */
+  function cut(s: Stroke, stamped: Uint8ClampedArray, over: Rect, at: Rect): void {
     const within = clampToPage(at, s.pageW, s.pageH)
-    const mask = isEmptyRect(within) ? null : selection.maskPatchOf(s.page, within)
-    if (mask !== null) cutToMask(coverage, at, mask, within)
-    return coverage
+    if (isEmptyRect(within)) return
+    const mask = selection.maskPatchOf(s.page, within)
+    if (mask !== null) cutToMask(stamped, over, mask, within)
   }
 
   /**
@@ -223,7 +242,8 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     if (isEmptyRect(segment)) return
     const size = segment.w * segment.h
     if (coverageScratch.length < size) coverageScratch = new Uint8Array(size)
-    overlay.show(inked(coverageFor(s, segment, coverageScratch), segment, s.color), segment)
+    const coverage = coverageWithin(s.surface, segment, coverageScratch)
+    overlay.show(inked(coverage, segment, s.color), segment)
   }
 
   /**
@@ -361,10 +381,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     if (isEmptyRect(s.dirty)) return
 
     const at = s.dirty
-    // Outside a selection the stroke is cut to nothing, so neither the pixels
-    // nor the frame can grow past it: a covered pixel is the only kind the
-    // engine writes or measures a frame from.
-    const coverage = coverageFor(s, at)
+    // Outside a selection the stroke was cut to nothing as it was drawn, so
+    // neither the pixels nor the frame can grow past it: a covered pixel is the
+    // only kind the engine writes or measures a frame from.
+    const coverage = coverageWithin(s.surface, at)
 
     await s.taken
 

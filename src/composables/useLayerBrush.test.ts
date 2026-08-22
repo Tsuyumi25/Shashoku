@@ -405,6 +405,50 @@ describe('a selection bounds the stroke', () => {
     }
   })
 
+  /**
+   * Deselecting is a key, and a key is reachable while the hand is holding the
+   * pointer down. What the selection cut while it was up stays cut: it was drawn
+   * that way and it was seen that way on the canvas.
+   */
+  it('keeps what was cut while the selection was up, when it comes down mid-stroke', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    const selection = useSelectionStore()
+    selection.brushes.paint.size = 8
+    selectRect({ x: 0, y: 0, w: 100, h: PAGE.h })
+    const brush = useLayerBrush(container)
+
+    brush.onPointerDown(press(95, 50))
+    brush.onPointerMove(press(115, 50))
+    selection.deselect()
+    brush.onPointerUp()
+    await settle()
+
+    expect(layerPixels('r', { x: 95, y: 50, w: 1, h: 1 })[3]).toBe(255)
+    expect(layerPixels('r', { x: 110, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+
+  /** The other half of the same rule: from that moment on, the edge is gone. */
+  it('lets the rest of the stroke past the edge once the selection comes down', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    const selection = useSelectionStore()
+    selection.brushes.paint.size = 8
+    selectRect({ x: 0, y: 0, w: 100, h: PAGE.h })
+    const brush = useLayerBrush(container)
+
+    brush.onPointerDown(press(95, 50))
+    brush.onPointerMove(press(97, 50))
+    selection.deselect()
+    brush.onPointerMove(press(150, 50))
+    brush.onPointerUp()
+    await settle()
+
+    expect(layerPixels('r', { x: 150, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+
   it('leaves the frame inside the selection too', async () => {
     const { editor } = openWith(raster('r'))
     editor.selectOnly('r')

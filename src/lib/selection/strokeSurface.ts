@@ -118,6 +118,29 @@ export function coverageWithin(surface: StrokeSurface, at: Rect, into?: Uint8Arr
 }
 
 /**
+ * Raises the surface to `values` wherever those are the stronger, `values`
+ * being laid over `from`. Coverage a stamp did not reach is zero, which the
+ * ceiling passes over, so the whole of `from` can be handed in.
+ *
+ * The ceiling is taken here rather than by the stamp itself so that what is
+ * raised in has already been cut: a stamp taking the stronger of itself and an
+ * uncut surface would put back what a feathered selection had just taken away.
+ */
+export function raiseInto(surface: StrokeSurface, values: Uint8ClampedArray, from: Rect): void {
+  const part = intersectRect(surface.region, from)
+  if (isEmptyRect(part)) return
+  const to = surface.region
+  for (let row = 0; row < part.h; row++) {
+    const src = (part.y + row - from.y) * from.w + (part.x - from.x)
+    const dst = (part.y + row - to.y) * to.w + (part.x - to.x)
+    for (let col = 0; col < part.w; col++) {
+      const value = values[src + col]
+      if (value > surface.coverage[dst + col]) surface.coverage[dst + col] = value
+    }
+  }
+}
+
+/**
  * Cuts coverage down to a selection, in place. `coverage` is laid over `at` and
  * `mask` over `within`, which has to lie inside it.
  *
@@ -131,7 +154,7 @@ export function coverageWithin(surface: StrokeSurface, at: Rect, into?: Uint8Arr
  * the surface a stroke draws on is cut to the page.
  */
 export function cutToMask(
-  coverage: Uint8Array,
+  coverage: Uint8Array | Uint8ClampedArray,
   at: Rect,
   mask: Uint8ClampedArray,
   within: Rect,
