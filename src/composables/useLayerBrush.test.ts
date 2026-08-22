@@ -285,6 +285,27 @@ describe('what a stroke leaves behind', () => {
   })
 
   /**
+   * A release waits on the handover, so the write runs some turns after the hand
+   * let go — and by then the eyedropper is reachable again. What lands has to be
+   * the colour the hand was watching go down.
+   */
+  it('writes the colour the press began in, not one picked while it settled', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    editor.foreground = '#ff0000'
+    useSelectionStore().brushes.paint.size = 4
+    const brush = useLayerBrush(container)
+
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerUp()
+    editor.foreground = '#0000ff'
+    await settle()
+
+    expect([...layerPixels('r', { x: 50, y: 50, w: 1, h: 1 }).slice(0, 3)]).toEqual([0xff, 0, 0])
+  })
+
+  /**
    * The frame grows from the pixels rather than from the box handed over, so a
    * first stroke in the middle of the page does not drag a frame out of the
    * corner.
@@ -779,6 +800,26 @@ describe("the layer's own alpha lock", () => {
     await stroke(useLayerBrush(container), { x: 50, y: 50 })
 
     expect(fill.mock.calls[0][4]).toBe(true)
+  })
+
+  /**
+   * Read at the press for the same reason the colour is: the layer tree is
+   * clickable again the moment the hand comes up, while the write is still
+   * waiting on the handover.
+   */
+  it('goes by the lock as it stood at the press, not as it stands at the write', async () => {
+    const { editor, project } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    const fill = vi.spyOn(engine, 'rasterFill')
+    const brush = useLayerBrush(container)
+
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerUp()
+    project.setLayerAlphaLocked(PAGE_ID, 'r', true)
+    await settle()
+
+    expect(fill.mock.calls[0][4]).toBe(false)
   })
 
   /**

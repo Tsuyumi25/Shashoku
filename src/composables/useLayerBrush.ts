@@ -36,6 +36,11 @@ import type { MaskBrushMode } from '@/lib/selection/brushMask'
  * stroke is one gesture against one layer, and re-reading which layer is
  * selected on every segment would let a click in the panel move the paint
  * mid-stroke.
+ *
+ * The colour and the alpha lock are held for the same reason and one more: the
+ * release waits on a handover, so the commit runs after the hand has let go and
+ * the eyedropper and the layer tree are reachable again. Read there, they would
+ * write a stroke nobody watched being drawn.
  */
 interface Stroke {
   page: string
@@ -43,6 +48,8 @@ interface Stroke {
   pageH: number
   entry: RasterLayerEntry
   mode: MaskBrushMode
+  color: string
+  alphaLocked: boolean
   from: Point
   surface: StrokeSurface
   /** The box every stamp so far has landed in, which is what gets committed. */
@@ -196,7 +203,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    */
   function show(s: Stroke, segment: Rect): void {
     if (isEmptyRect(segment)) return
-    overlay.show(inked(coverageFor(s, segment), segment, editor.foreground), segment)
+    overlay.show(inked(coverageFor(s, segment), segment, s.color), segment)
   }
 
   /**
@@ -247,17 +254,20 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // The release awaits this and sees the same rejection; this only keeps a
     // failure from being reported as an unhandled one while the stroke is out.
     void taken.catch(() => {})
+    const alphaLocked = entry.alphaLocked
     const opened: Stroke = {
       page,
       pageW: file.page.width,
       pageH: file.page.height,
       entry,
       mode,
+      color: editor.foreground,
+      alphaLocked,
       from: at,
       surface: EMPTY_SURFACE,
       dirty: EMPTY_RECT,
       taken,
-      shown: overlay.begin(entry.id, operatorFor(mode, entry.alphaLocked)),
+      shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
     }
     stroke = opened
     strokeTo(at)
@@ -348,13 +358,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const patch =
       s.mode === 'erase'
         ? window.engine.rasterErase(s.entry.id, coverage, at)
-        : window.engine.rasterFill(
-            s.entry.id,
-            coverage,
-            at,
-            editor.foreground,
-            s.entry.alphaLocked,
-          )
+        : window.engine.rasterFill(s.entry.id, coverage, at, s.color, s.alphaLocked)
     /*
      * Taken down in the same task the write goes up in, so no frame is drawn
      * between the two. Dropped before the write rather than after, because the
