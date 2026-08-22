@@ -232,6 +232,7 @@ import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
 import { useLayerBrush } from '@/composables/useLayerBrush'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
+import { useRasterTarget } from '@/composables/useRasterTarget'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import {
@@ -244,7 +245,7 @@ import {
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { framedLayers, layerAt } from '@/lib/layerHit'
-import { artworkSignature, compositeArtwork } from '@/lib/pageComposite'
+import { artworkSignature, compositeArtwork, context2d } from '@/lib/pageComposite'
 import {
   distanceToSegment,
   nearestAnchor,
@@ -831,7 +832,13 @@ function onConnectMove(p: Anchor) {
 }
 
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.value)
-const selectionTool = useSelectionTool(containerRef, () => artwork.value, () => pageReady.value)
+/** The layer a pixel operation would land on, which is the one the wand reads. */
+const { target: wandTarget } = useRasterTarget()
+const selectionTool = useSelectionTool(
+  containerRef,
+  { wand: () => wandLayer.value, colour: () => artwork.value },
+  () => pageReady.value,
+)
 const layerBrush = useLayerBrush(containerRef)
 
 useResizeObserver(containerRef, (entries) => {
@@ -862,17 +869,40 @@ watch(
 )
 
 /**
- * The page's rasters composited into one page-sized picture, kept for the wand
- * to read. Never drawn from here — the stack on screen draws those same layers
- * itself, and this would put them on the page twice.
+ * The page's rasters composited into one page-sized picture, kept for the
+ * eyedropper to read. Never drawn from here — the stack on screen draws those
+ * same layers itself, and this would put them on the page twice.
  *
- * Composited rather than picked, because the base map has no type of its own:
- * it can be unlocked, reordered, dropped into a folder. "Which layer is the
- * artwork" therefore has no answer, while "what is at this point" always does.
+ * Composited rather than picked, because a colour is picked by pointing at one:
+ * whatever layer it happens to live on, and whatever is stacked over it, the
+ * answer has to be what the eye sees. The base map has no type of its own
+ * either — it can be unlocked, reordered, dropped into a folder — so "which
+ * layer is the artwork" has no answer, while "what is at this point" always
+ * does.
+ *
+ * Typesetting is left out of it, as it is out of the wand: a translation is
+ * something written onto the page, not part of the page's colour.
  */
 const artwork = ref<OffscreenCanvas | null>(null)
 /** Which composite the result being awaited belongs to. */
 let artworkRequest = 0
+
+/**
+ * The layer being worked on, alone, on the page's own grid — what the wand
+ * reads.
+ *
+ * One layer rather than the page because a selection is made in order to be
+ * filled, erased or handed to a model, and every one of those lands on this
+ * layer. A wand that followed an edge belonging to some other layer would hand
+ * back a shape that cannot be acted on where it was found.
+ *
+ * Page-sized, so nothing downstream has to know where the layer sits. Where it
+ * does not reach the canvas stays transparent, which the wand reads as a value
+ * of its own — the reason it compares alpha at all.
+ */
+const wandLayer = ref<OffscreenCanvas | null>(null)
+/** Which layer the result being awaited belongs to. */
+let wandRequest = 0
 
 /**
  * What a layer being edited is drawn from, so the wand reads the page as it is
@@ -885,12 +915,13 @@ function liveLayer(id: string) {
 }
 
 /**
- * What the wand's picture is of, so a change that redraws the page drops it.
+ * What the eyedropper's picture is of, so a change that redraws the page drops
+ * it.
  *
  * What has been *written*, not what has been drawn. Rebuilding this composites
  * the whole page out of every layer, and keyed on a stroke being shown it would
- * do that once per pointer event — for a picture nothing can read until the
- * hand comes up, since the wand is a different tool.
+ * do that once per pointer event — for a picture nothing reads until a key is
+ * held and a button pressed.
  */
 const artworkKey = computed(() => {
   const file = currentFile.value
@@ -904,11 +935,7 @@ watch(
   () => [currentFile.value?.pageDir, artworkKey.value] as const,
   async ([pageDir]) => {
     artwork.value = null
-    // Any gesture belonged to the picture being replaced, and so did the
-    // wand's reading of it.
-    selection.cancelGesture()
-    selectionTool.dropPageSample()
-    selectionOverlay.schedulePaint()
+    selectionTool.dropSample('colour')
     const mine = ++artworkRequest
     const file = currentFile.value
     if (!pageDir || !file) return
@@ -920,7 +947,7 @@ watch(
       })
       // Two edits close together each start one of these, and they can finish
       // in either order. Only the newest may land, or an older picture would
-      // overwrite it and the wand would read the page as it was.
+      // overwrite it and a colour would be picked off the page as it was.
       if (mine === artworkRequest) artwork.value = composited
     } catch (err) {
       console.error(err)
@@ -928,6 +955,79 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * What the wand's picture is of, so anything that changes it drops it: another
+ * layer selected, that layer painted on, or its frame moved out from under the
+ * pixels already read.
+ *
+ * The write counter rather than the pixels themselves, for the same reason the
+ * composite uses it — a stroke in progress redraws constantly and the wand
+ * cannot read anything until the hand comes up.
+ */
+const wandKey = computed(() => {
+  const entry = wandTarget.value
+  if (entry === null) return null
+  const { x, y, w, h } = raster.frameOf(entry)
+  const written = raster.holds(entry.id) ? `live@${raster.writesTo(entry.id)}` : entry.file
+  return `${entry.id}|${written}|${x},${y},${w},${h}`
+})
+
+watch(
+  () => [currentFile.value?.pageDir, wandKey.value] as const,
+  async ([pageDir]) => {
+    wandLayer.value = null
+    // Any gesture belonged to the picture being replaced, and so did the wand's
+    // reading of it.
+    selection.cancelGesture()
+    selectionTool.dropSample('wand')
+    selectionOverlay.schedulePaint()
+    const mine = ++wandRequest
+    const file = currentFile.value
+    const entry = wandTarget.value
+    if (!pageDir || !file || entry === null) return
+    try {
+      const drawn = await paintedAlone(entry, layersDirOf(pageDir), file.page)
+      if (mine === wandRequest) wandLayer.value = drawn
+    } catch (err) {
+      console.error(err)
+    }
+  },
+  { immediate: true },
+)
+
+/**
+ * One raster layer on a page-sized canvas, at the rectangle it occupies.
+ *
+ * The engine's pixels win wherever it holds the layer, and they bring their own
+ * frame: a write that grew the layer moved it, and the manifest is not told
+ * until the file naming the new frame is on disk. Falling back to the entry's
+ * frame in that window would put the layer where it used to be.
+ */
+async function paintedAlone(
+  entry: RasterLayerEntry,
+  layersDir: string,
+  page: { width: number; height: number },
+): Promise<OffscreenCanvas> {
+  const canvas = new OffscreenCanvas(page.width, page.height)
+  const ctx = context2d(canvas)
+  const live = raster.liveLayer(entry.id)
+  if (live !== null) {
+    ctx.drawImage(live.canvas, live.frame.x, live.frame.y)
+    return canvas
+  }
+  // A layer with no frame has no file worth reading, and an empty page-sized
+  // canvas is the truthful picture of it: transparent everywhere.
+  if (entry.w <= 0 || entry.h <= 0) return canvas
+  const bytes = await window.api.readImage(layersDir, entry.file)
+  const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
+  try {
+    ctx.drawImage(bitmap, entry.x, entry.y, entry.w, entry.h)
+  } finally {
+    bitmap.close()
+  }
+  return canvas
+}
 
 /**
  * Fitting is per page, not per decode: turning the page starts you fitted, but

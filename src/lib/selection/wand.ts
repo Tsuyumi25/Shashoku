@@ -5,10 +5,10 @@ import type { Point } from '@/lib/selection/rect'
 export const DEFAULT_WAND_TOLERANCE = 32
 
 /**
- * Everything of one colour reachable from where you clicked, sampled off the
- * raw page rather than off what is composited over it — the point of the wand
- * here is to catch a balloon's interior, and a translation sitting on top of it
- * is not part of the balloon.
+ * Everything of one colour reachable from where you clicked, sampled off one
+ * layer's own pixels — Photoshop's Sample All Layers, off, which is where it
+ * ships. What you are pointing at is the layer you are working on, and a
+ * translation typeset over a balloon has never been part of that balloon.
  *
  * Contiguous, as Photoshop is by default: a flood rather than a colour range,
  * so clicking one balloon does not select every balloon on the page.
@@ -31,12 +31,21 @@ export function magicWandRaster(
   const r0 = pixels[at]
   const g0 = pixels[at + 1]
   const b0 = pixels[at + 2]
+  const a0 = pixels[at + 3]
+  /*
+   * Alpha is compared like any other channel, and reading one layer rather than
+   * a whole page is what makes that necessary: a pixel that is not there is
+   * stored as transparent black, which is within tolerance of ink. Without this
+   * a click on the empty space around a drawing floods straight through its
+   * outline and takes the drawing with it.
+   */
   const matches = (x: number, y: number): boolean => {
     const i = (y * w + x) * 4
     return (
       Math.abs(pixels[i] - r0) <= tolerance &&
       Math.abs(pixels[i + 1] - g0) <= tolerance &&
-      Math.abs(pixels[i + 2] - b0) <= tolerance
+      Math.abs(pixels[i + 2] - b0) <= tolerance &&
+      Math.abs(pixels[i + 3] - a0) <= tolerance
     )
   }
 

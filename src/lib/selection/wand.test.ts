@@ -88,6 +88,27 @@ describe('magicWandRaster', () => {
     expect(isEmptyRect(magicWandRaster(px, W, H, { x: 3, y: 99 }).bounds)).toBe(true)
   })
 
+  /**
+   * The rule that reading one layer rather than a whole page makes necessary.
+   * Transparent is stored as transparent *black*, so on colour alone it is
+   * indistinguishable from ink — and everything outside a drawing is
+   * transparent, which would put a click beside a drawing straight through its
+   * outline.
+   */
+  it('does not cross between transparent and ink of the same colour', () => {
+    const px = new Uint8ClampedArray(W * H * 4)
+    // A black bar down the middle, nothing either side of it.
+    for (let y = 0; y < H; y++) {
+      const i = (y * W + 3) * 4
+      px[i + 3] = 255
+    }
+    const raster = magicWandRaster(px, W, H, { x: 0, y: 0 })
+    expect(selected(raster, 2, 0)).toBe(true)
+    expect(selected(raster, 3, 0)).toBe(false)
+    // And the far side is unreachable, the bar being a wall rather than a shade.
+    expect(selected(raster, 4, 0)).toBe(false)
+  })
+
   it('takes the whole page when the whole page matches', () => {
     const px = page(['......', '......', '......', '......', '......', '......'], TONES)
     const raster = magicWandRaster(px, W, H, { x: 3, y: 3 })

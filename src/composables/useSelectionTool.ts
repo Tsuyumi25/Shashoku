@@ -18,6 +18,9 @@ const DRAG_SLOP = 3
 /** How near its first vertex a click has to land to close a polygon, on screen. */
 const CLOSE_REACH_PX = 8
 
+/** Which of the two pictures a read is about. */
+export type Sampled = 'wand' | 'colour'
+
 const GESTURE_OF: Partial<Record<CanvasTool, SelectionGestureKind>> = {
   'marquee-rect': 'marquee-rect',
   'marquee-ellipse': 'marquee-ellipse',
@@ -33,11 +36,21 @@ const GESTURE_OF: Partial<Record<CanvasTool, SelectionGestureKind>> = {
 export function useSelectionTool(
   container: Ref<HTMLElement | null>,
   /**
-   * The page's artwork, already laid out on the page's own grid, or null while
-   * there is none to read. Page-sized on arrival, so a point on the page is a
-   * point in it and nothing here has to know where any layer sits.
+   * The two pictures this reads, both page-sized on arrival so that a point on
+   * the page is a point in them and nothing here has to know where a layer sits.
+   *
+   * Two rather than one because the tools that read them answer different
+   * questions, which is Photoshop's split as well. `wand` is the layer being
+   * worked on: a selection is made to be filled or erased, and it would be a
+   * lie for it to follow an edge that lives on some other layer. `colour` is
+   * everything, because picking a colour is picking one you can see — off the
+   * layer alone, an eyedropper on a fresh empty layer could only ever answer
+   * transparent.
    */
-  artwork: () => CanvasImageSource | null,
+  sources: {
+    wand: () => CanvasImageSource | null
+    colour: () => CanvasImageSource | null
+  },
   ready: () => boolean,
 ) {
   const editor = useEditorStore()
@@ -58,32 +71,41 @@ export function useSelectionTool(
   let altReleased = false
 
   /**
-   * The artwork's pixels, read back once per page and kept until something
-   * makes them wrong. The wand reads these rather than the screen: it is there
-   * to find a balloon, and a translation sitting inside that balloon is not
-   * part of it.
+   * Each picture read back once and kept until something makes it wrong.
+   *
+   * Read back rather than sampled off the screen: both tools work in the page's
+   * own pixels, and what is on screen has been through a zoom, a rotation and
+   * whatever is drawn over the page.
+   *
+   * Dropped from outside — whoever supplies a picture is the only one that
+   * knows when it stopped being true.
    */
-  let sample: { page: string; pixels: Uint8ClampedArray } | null = null
-
-  function dropPageSample(): void {
-    sample = null
+  const samples: Record<Sampled, { page: string; pixels: Uint8ClampedArray } | null> = {
+    wand: null,
+    colour: null,
   }
 
-  function pagePixels(): Uint8ClampedArray | null {
+  function dropSample(which: Sampled): void {
+    samples[which] = null
+  }
+
+  function pixelsOf(which: Sampled): Uint8ClampedArray | null {
     const page = editor.currentPageId
     const { w, h } = editor.viewContentSize
     if (page === null || !ready() || w <= 0 || h <= 0) return null
-    if (sample?.page === page) return sample.pixels
-    // Null while the composite is still out. Caching an empty read under this
-    // page's name would answer every later click for it too.
-    const source = artwork()
-    if (!source) return null
+    const held = samples[which]
+    if (held?.page === page) return held.pixels
+    // Null while the picture is still out, and for the wand while no raster
+    // layer is selected. Caching an empty read under this page's name would
+    // answer every later click for it too.
+    const picture = sources[which]()
+    if (!picture) return null
     const canvas = new OffscreenCanvas(w, h)
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    ctx.drawImage(source, 0, 0)
+    ctx.drawImage(picture, 0, 0)
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-    sample = { page, pixels }
+    samples[which] = { page, pixels }
     return pixels
   }
 
@@ -135,7 +157,7 @@ export function useSelectionTool(
     moved = false
 
     if (editor.tool === 'wand') {
-      const pixels = pagePixels()
+      const pixels = pixelsOf('wand')
       if (pixels !== null) {
         selection.applyShape(
           target,
@@ -225,17 +247,16 @@ export function useSelectionTool(
 
   /**
    * The colour of the page under the pointer, for whoever wants to sample it.
-   * The wand already decodes the page once and keeps it, so this costs a lookup
-   * rather than a read-back — which is why it is offered from here rather than
-   * being sampled again somewhere else.
+   * Offered from here because the read-back and the cache that makes it cheap
+   * are here; the page it reads is the whole one, not the wand's layer.
    */
   function colorAt(e: MouseEvent): string | null {
-    const pixels = pagePixels()
+    const pixels = pixelsOf('colour')
     const at = pageAt(e)
     const { w, h } = editor.viewContentSize
     if (pixels === null || at === null) return null
     return pixelHexAt(pixels, w, h, at.x, at.y)
   }
 
-  return { onPointerDown, onPointerMove, onPointerUp, onDoubleClick, dropPageSample, colorAt }
+  return { onPointerDown, onPointerMove, onPointerUp, onDoubleClick, dropSample, colorAt }
 }
