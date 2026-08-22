@@ -587,6 +587,33 @@ pub fn raster_fill(
     Ok(filled.map(|(journal, patch)| to_patch(journal, patch)))
 }
 
+/// Lays ready-made pixels onto the covered part of `mask` on a held layer, in
+/// one transaction against its tiles.
+///
+/// `rgba` is straight RGBA over `maskFrame`, row by row — the same rectangle the
+/// mask describes. What a fill does with one colour this does with a picture,
+/// and the mask still decides the shape, so handing over a whole tile of model
+/// output writes only the part that was selected. Null when the coverage is
+/// empty.
+#[napi]
+pub fn raster_paste(
+    id: String,
+    rgba: Buffer,
+    mask: Buffer,
+    mask_frame: LayerFrame,
+    alpha_locked: bool,
+) -> napi::Result<Option<LayerPatch>> {
+    let pasted = raster::paste(
+        &id,
+        rgba.as_ref(),
+        mask.as_ref(),
+        to_rect(&mask_frame),
+        alpha_locked,
+    )
+    .map_err(napi::Error::from_reason)?;
+    Ok(pasted.map(|(journal, patch)| to_patch(journal, patch)))
+}
+
 /// Takes the covered part of `mask` out of a held layer, in one transaction
 /// against its tiles.
 ///

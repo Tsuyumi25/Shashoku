@@ -389,6 +389,24 @@ export interface ShashokuEngineApi {
     alphaLocked: boolean,
   ): EngineLayerPatch | null;
   /**
+   * Lays ready-made pixels onto the covered part of `mask` on a held layer, in
+   * one transaction against its tiles.
+   *
+   * `rgba` is straight RGBA over `maskFrame`, row by row — the same rectangle
+   * the mask describes, so a pixel and its coverage are found the same way.
+   * What a fill does with one colour this does with a picture, and the mask
+   * still decides the shape: handing over a whole tile of model output writes
+   * only the part that was selected, and a feathered edge arrives as alpha
+   * rather than as a darker colour. Null when the coverage is empty.
+   */
+  rasterPaste(
+    id: string,
+    rgba: Uint8Array,
+    mask: Uint8Array,
+    maskFrame: EngineLayerFrame,
+    alphaLocked: boolean,
+  ): EngineLayerPatch | null;
+  /**
    * Takes the covered part of `mask` out of a held layer, in one transaction
    * against its tiles.
    *

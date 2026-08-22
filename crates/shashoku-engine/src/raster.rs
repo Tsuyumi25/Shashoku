@@ -363,7 +363,44 @@ impl RasterLayer {
         if color[3] == 0 {
             return Ok(None);
         }
-        self.write(mask, mask_frame, color, paint_blend(alpha_locked))
+        self.write(
+            mask,
+            mask_frame,
+            Paint::Solid(color),
+            paint_blend(alpha_locked),
+        )
+    }
+
+    /// Lays ready-made pixels onto the covered part of `mask`, in a single
+    /// transaction, and hands back what changed.
+    ///
+    /// `rgba` is straight RGBA over `mask_frame`, row by row — the same
+    /// rectangle the mask describes, so a pixel and its coverage are found the
+    /// same way. What a fill does with one colour this does with a picture, and
+    /// the mask still decides the shape: a caller handing over a whole tile of
+    /// model output gets only the part it asked for.
+    pub fn paste(
+        &mut self,
+        rgba: &[u8],
+        mask: &[u8],
+        mask_frame: Rect,
+        alpha_locked: bool,
+    ) -> Result<Option<(LayerJournal, Patch)>, String> {
+        let want = mask_frame.w as usize * mask_frame.h as usize * 4;
+        if rgba.len() != want {
+            return Err(format!(
+                "pixels are {} bytes for a {}×{} frame needing {want}",
+                rgba.len(),
+                mask_frame.w,
+                mask_frame.h
+            ));
+        }
+        self.write(
+            mask,
+            mask_frame,
+            Paint::Pixels(rgba),
+            paint_blend(alpha_locked),
+        )
     }
 
     /// Takes the covered part of `mask` out of the layer, in a single
@@ -379,14 +416,19 @@ impl RasterLayer {
         mask: &[u8],
         mask_frame: Rect,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
-        self.write(mask, mask_frame, [0, 0, 0, 255], Blend::Erase)
+        self.write(
+            mask,
+            mask_frame,
+            Paint::Solid([0, 0, 0, 255]),
+            Blend::Erase,
+        )
     }
 
     fn write(
         &mut self,
         mask: &[u8],
         mask_frame: Rect,
-        color: [u8; 4],
+        paint: Paint<'_>,
         blend: Blend,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
         check_mask(mask, mask_frame)?;
@@ -400,7 +442,7 @@ impl RasterLayer {
         // here rather than at commit — what lands on the paper is already the
         // shape, so the commit has one job.
         let mut scratch = TileGrid::<Rgba8>::new();
-        let painted = paint_mask(&mut scratch, mask, at, color);
+        let painted = paint_mask(&mut scratch, mask, at, paint);
         let written = painted.written;
         if written.is_empty() {
             return Ok(None);
@@ -424,15 +466,21 @@ impl RasterLayer {
          * whole. A colour short of opaque does the same, and so does the layer's
          * own alpha lock, which makes every pixel's result depend on the alpha
          * it landed on.
+         *
+         * A paste never qualifies: its whole point is that neighbouring pixels
+         * differ, so there is nothing here to find and no reason to look.
          */
-        let solid = if blend == Blend::Over && color[3] == 255 && !painted.whole.is_empty() {
-            let mut tile = Tile::<Rgba8>::blank();
-            for pixel in tile.bytes_mut().chunks_exact_mut(4) {
-                pixel.copy_from_slice(&color);
+        let solid = match paint {
+            Paint::Solid(color)
+                if blend == Blend::Over && color[3] == 255 && !painted.whole.is_empty() =>
+            {
+                let mut tile = Tile::<Rgba8>::blank();
+                for pixel in tile.bytes_mut().chunks_exact_mut(4) {
+                    pixel.copy_from_slice(&color);
+                }
+                Some(Arc::new(tile))
             }
-            Some(Arc::new(tile))
-        } else {
-            None
+            _ => None,
         };
 
         // The scratch declares which tiles the record is about. Every tile it
@@ -629,14 +677,37 @@ struct Painted {
     whole: HashSet<TileCoord>,
 }
 
-/// Lays one colour onto the scratch wherever the mask covers, and reports the
-/// tight rectangle it actually wrote.
+/// What a write lays down: one colour everywhere, or a picture the size of the
+/// mask's own rectangle.
+#[derive(Clone, Copy)]
+enum Paint<'a> {
+    Solid([u8; 4]),
+    /// Straight RGBA over the mask's rectangle, row by row.
+    Pixels(&'a [u8]),
+}
+
+impl Paint<'_> {
+    /// The colour for one pixel of the mask's rectangle, by its index in it.
+    #[inline]
+    fn at(&self, index: usize) -> [u8; 4] {
+        match self {
+            Self::Solid(color) => *color,
+            Self::Pixels(rgba) => {
+                let from = index * 4;
+                [rgba[from], rgba[from + 1], rgba[from + 2], rgba[from + 3]]
+            }
+        }
+    }
+}
+
+/// Lays paint onto the scratch wherever the mask covers, and reports the tight
+/// rectangle it actually wrote.
 ///
-/// The coverage scales the colour's own alpha, so a feathered edge arrives as
+/// The coverage scales the paint's own alpha, so a feathered edge arrives as
 /// alpha rather than as colour — under straight alpha, multiplying coverage into
 /// the channels is what makes a pasted feathered selection darken every time it
 /// is copied.
-fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 4]) -> Painted {
+fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, paint: Paint<'_>) -> Painted {
     let mut written = Rect::EMPTY;
     let mut whole = HashSet::new();
     let (tx0, ty0, tx1, ty1) = tile_span(at);
@@ -683,10 +754,12 @@ fn paint_mask(scratch: &mut TileGrid<Rgba8>, mask: &[u8], at: Rect, color: [u8; 
             for row in 0..covered.h {
                 let line = (covered.y + row - at.y) as usize * at.w as usize;
                 for col in 0..covered.w {
-                    let coverage = mask[line + (covered.x + col - at.x) as usize] as u32;
+                    let index = line + (covered.x + col - at.x) as usize;
+                    let coverage = mask[index] as u32;
                     if coverage == 0 {
                         continue;
                     }
+                    let color = paint.at(index);
                     let to = ((covered.y + row - coord.ty * TILE_SIZE) as usize
                         * TILE_SIZE as usize
                         + (covered.x + col - coord.tx * TILE_SIZE) as usize)
@@ -861,6 +934,20 @@ pub fn fill(
     })
 }
 
+/// Lays ready-made pixels onto the masked region of a held layer. The returned
+/// name is how the caller asks for this write to be taken back.
+pub fn paste(
+    id: &str,
+    rgba: &[u8],
+    mask: &[u8],
+    mask_frame: Rect,
+    alpha_locked: bool,
+) -> Result<Option<(String, Patch)>, String> {
+    record(id, |layer| {
+        layer.paste(rgba, mask, mask_frame, alpha_locked)
+    })
+}
+
 /// Takes the masked region out of a held layer. The returned name is how the
 /// caller asks for this write to be taken back.
 pub fn erase(id: &str, mask: &[u8], mask_frame: Rect) -> Result<Option<(String, Patch)>, String> {
@@ -1008,6 +1095,66 @@ mod tests {
         assert_eq!(pixel(&layer, 2, 2), RED.to_vec());
         assert_eq!(pixel(&layer, 5, 5), RED.to_vec());
         assert_eq!(pixel(&layer, 6, 6), vec![0, 0, 0, 0]);
+    }
+
+    /// A picture of four different pixels, laid over `at`, so that a test can
+    /// tell which one landed where.
+    fn stripes(at: Rect) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity((at.w * at.h) as usize * 4);
+        for row in 0..at.h {
+            for col in 0..at.w {
+                rgba.extend_from_slice(&[(col * 40) as u8, (row * 40) as u8, 7, 255]);
+            }
+        }
+        rgba
+    }
+
+    #[test]
+    fn a_paste_puts_each_pixel_where_the_mask_says() {
+        let mut layer = solid(frame(0, 0, 8, 8), [0, 0, 0, 0]);
+        let at = frame(2, 2, 4, 4);
+        let (_, patch) = layer
+            .paste(&stripes(at), &full_mask(4, 4), at, false)
+            .expect("a well-formed paste")
+            .expect("something to paste");
+
+        assert_eq!(patch.frame, frame(0, 0, 8, 8));
+        // The picture's own top-left corner, at the mask's top-left corner.
+        assert_eq!(pixel(&layer, 2, 2), vec![0, 0, 7, 255]);
+        // Third across, second down of the picture — so red 80, green 40.
+        assert_eq!(pixel(&layer, 4, 3), vec![80, 40, 7, 255]);
+        // Outside the mask nothing moved.
+        assert_eq!(pixel(&layer, 6, 6), vec![0, 0, 0, 0]);
+    }
+
+    /// The rule a feathered selection depends on, and the one that separates a
+    /// paste from drawing the picture directly: partial coverage has to arrive
+    /// as alpha, never as a darker colour. Multiplying coverage into the
+    /// channels is what makes a feathered paste darken every time it is redone.
+    #[test]
+    fn partial_coverage_reaches_a_paste_as_alpha_not_as_colour() {
+        let mut layer = solid(frame(0, 0, 8, 8), [0, 0, 0, 0]);
+        let at = frame(0, 0, 2, 1);
+        let rgba = vec![200, 100, 50, 255, 200, 100, 50, 255];
+        layer
+            .paste(&rgba, &[255, 51], at, false)
+            .expect("a well-formed paste")
+            .expect("something to paste");
+
+        assert_eq!(pixel(&layer, 0, 0), vec![200, 100, 50, 255]);
+        // A fifth of the coverage: the same colour, a fifth of the alpha.
+        assert_eq!(pixel(&layer, 1, 0), vec![200, 100, 50, 51]);
+    }
+
+    #[test]
+    fn a_paste_sized_wrong_for_its_frame_is_refused() {
+        let mut layer = solid(frame(0, 0, 8, 8), [0, 0, 0, 0]);
+        let at = frame(0, 0, 4, 4);
+        assert!(
+            layer
+                .paste(&vec![0u8; 4 * 4 * 4 - 1], &full_mask(4, 4), at, false)
+                .is_err()
+        );
     }
 
     #[test]

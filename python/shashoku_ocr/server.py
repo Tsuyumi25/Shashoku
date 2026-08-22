@@ -72,6 +72,12 @@ class Server:
             model = self.registry.get(request["model"])
             return {"lines": model.read(request["image"], request["boxes"])}
 
+        if op == "inpaint":
+            model = self.registry.get(request["model"])
+            answer = model.inpaint(request["image"], request["mask"])
+            answer.save(request["out"])
+            return {"out": request["out"], "width": answer.width, "height": answer.height}
+
         if op == "shutdown":
             self.stopping.set()
             return {"bye": True}
