@@ -112,9 +112,22 @@ def levelled(answer: np.ndarray, image: np.ndarray, hole: np.ndarray) -> np.ndar
 
     def relax(guess: np.ndarray, rim: np.ndarray, mask: np.ndarray, sweeps: int) -> np.ndarray:
         for _ in range(sweeps):
-            spread = np.zeros_like(guess)
-            spread[1:-1, 1:-1] = (
-                guess[:-2, 1:-1] + guess[2:, 1:-1] + guess[1:-1, :-2] + guess[1:-1, 2:]
+            # Every pixel needs four neighbours, and the ones on the outermost
+            # row and column of the tile have only three. Repeating the edge
+            # gives them a fourth equal to themselves, which is the same as
+            # saying the field does not change across the tile's edge — the
+            # truthful statement, since nothing outside the tile was ever read.
+            #
+            # ⚠️ Leaving those pixels out instead pins them to zero, and zero is
+            # not "unknown" here, it is "this pixel needed no correction". A hole
+            # touching the tile's edge — which is any selection within the
+            # context margin of the page's own edge — then drains through it: the
+            # rim's level reaches the edge, is thrown away, and the pixels inside
+            # average against the hole it leaves. The whole fill comes back short,
+            # not just its edge.
+            wide = np.pad(guess, 1, mode="edge")
+            spread = (
+                wide[:-2, 1:-1] + wide[2:, 1:-1] + wide[1:-1, :-2] + wide[1:-1, 2:]
             ) * 0.25
             guess = np.where(mask, spread, rim)
         return guess
