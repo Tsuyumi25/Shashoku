@@ -222,9 +222,10 @@ pub struct RasterLayer {
     /// same thing for the whole session.
     anchor_x: i32,
     anchor_y: i32,
-    /// The content's extent in layer-local pixels. Grows with writes and never
-    /// shrinks — a frame larger than its content wastes a little disk, a frame
-    /// smaller than its content loses pixels.
+    /// The content's extent in layer-local pixels. It always holds the content
+    /// and is usually exactly it: paint grows it by what was covered, erasing
+    /// walks it back in. The one place it stands wider is an erase that took the
+    /// last pixel, which leaves it where it was — see `write`.
     bounds: Rect,
     grid: TileGrid<Rgba8>,
 }
