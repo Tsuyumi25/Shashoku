@@ -3,6 +3,7 @@ import type { Rect } from '@/lib/selection/rect'
 import {
   NO_PLACEMENT,
   contentBounds,
+  hugContent,
   isMoved,
   placedFrame,
   type LayerPlacement,
@@ -74,7 +75,11 @@ describe('placedFrame', () => {
 })
 
 /** An image whose named pixels carry the given alpha and whose rest is empty. */
-function pixels(w: number, h: number, lit: Array<[number, number, number]>): Uint8ClampedArray {
+function pixels(
+  w: number,
+  h: number,
+  lit: Array<[number, number, number]>,
+): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(w * h * 4)
   for (const [x, y, alpha] of lit) out[(y * w + x) * 4 + 3] = alpha
   return out
@@ -124,5 +129,45 @@ describe('contentBounds', () => {
    */
   it('counts the faintest edge antialiasing leaves', () => {
     expect(contentBounds(pixels(4, 4, [[3, 3, 1]]), 4, 4)).toEqual({ x: 3, y: 3, w: 1, h: 1 })
+  })
+})
+
+describe('hugContent', () => {
+  const box: Rect = { x: 100, y: 200, w: 4, h: 4 }
+
+  /**
+   * The case Ctrl+J arrives in: the box a patch is drawn in is the selection's
+   * upright bounding box, and a lasso only fills part of it.
+   */
+  it('moves the frame onto the content and takes the pixels with it', () => {
+    const patch = pixels(4, 4, [
+      [1, 1, 255],
+      [2, 1, 200],
+    ])
+    const { frame, data } = hugContent(patch, box)
+
+    expect(frame).toEqual({ x: 101, y: 201, w: 2, h: 1 })
+    expect([data[3], data[7]]).toEqual([255, 200])
+    expect(data).toHaveLength(2 * 1 * 4)
+  })
+
+  it('gives a patch that already fills its box straight back', () => {
+    const patch = pixels(4, 4, [
+      [0, 0, 255],
+      [3, 3, 255],
+    ])
+    const { frame, data } = hugContent(patch, box)
+
+    expect(frame).toEqual(box)
+    expect(data).toBe(patch)
+  })
+
+  /** A frame of no area is one the save path skips, so the box stands. */
+  it('keeps the box when nothing came through at all', () => {
+    const patch = new Uint8ClampedArray(4 * 4 * 4)
+    const { frame, data } = hugContent(patch, box)
+
+    expect(frame).toEqual(box)
+    expect(data).toBe(patch)
   })
 })

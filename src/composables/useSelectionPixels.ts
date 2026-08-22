@@ -5,9 +5,10 @@ import { allEntries } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { nextAutoName } from '@/lib/autoName'
+import { hugContent } from '@/lib/layerTransform'
 import { context2d, encodePng } from '@/lib/pageComposite'
 import { maskPixels } from '@/lib/selection/fill'
-import { isEmptyRect } from '@/lib/selection/rect'
+import { isEmptyRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
@@ -135,9 +136,8 @@ export function useSelectionPixels() {
     const source = project.entryById(entry.id)
     if (source?.kind !== 'raster') return
 
-    const bytes = await encodePng(
-      await liftedPatch(source, layersDirOf(file.pageDir), bounds, mask),
-    )
+    const patch = await liftedPatch(source, layersDirOf(file.pageDir), bounds, mask)
+    const bytes = await encodePng(patch.canvas)
     const id = generateId()
     /*
      * A name nothing else has ever held, on every write. The manifest is
@@ -156,10 +156,7 @@ export function useSelectionPixels() {
       opacity: 1,
       blendMode: 'normal',
       file: layerFile,
-      x: bounds.x,
-      y: bounds.y,
-      w: bounds.w,
-      h: bounds.h,
+      ...patch.frame,
       alphaLocked: false,
     }
 
@@ -177,13 +174,22 @@ export function useSelectionPixels() {
     editor.selectOnly(id)
   }
 
-  /** The source's pixels inside the selection, wearing the selection's shape. */
+  /**
+   * The source's pixels inside the selection, wearing the selection's shape, in
+   * a frame that hugs whatever survived.
+   *
+   * The box asked for is the selection's, and that box is upright while the
+   * shape inside it need not be — a lasso arrives with transparent corners, and
+   * a frame is not something anything later gives back. The scan costs nothing:
+   * the mask is applied through an `ImageData` that has to be read back anyway,
+   * so the extents come along on the same pass.
+   */
   async function liftedPatch(
     source: RasterLayerEntry,
     layersDir: string,
-    bounds: { x: number; y: number; w: number; h: number },
+    bounds: Rect,
     mask: Uint8ClampedArray,
-  ): Promise<OffscreenCanvas> {
+  ): Promise<{ canvas: OffscreenCanvas; frame: Rect }> {
     const canvas = new OffscreenCanvas(bounds.w, bounds.h)
     const ctx = context2d(canvas)
     const bytes = await window.api.readImage(layersDir, source.file)
@@ -198,10 +204,24 @@ export function useSelectionPixels() {
     }
     const image = ctx.getImageData(0, 0, bounds.w, bounds.h)
     maskPixels(image.data, mask)
-    // Written rather than drawn: putImageData ignores compositing entirely, so
-    // the straight alpha the mask left survives into the PNG unmultiplied.
-    ctx.putImageData(image, 0, 0)
-    return canvas
+
+    const hugged = hugContent(image.data, bounds)
+    // Written rather than drawn, here and below: putImageData ignores
+    // compositing entirely, so the straight alpha the mask left survives into
+    // the PNG unmultiplied — and trimming out of the bytes already in hand,
+    // rather than cropping with a draw, keeps it from passing through
+    // premultiplied and back for the sake of a translation.
+    if (hugged.frame.w === bounds.w && hugged.frame.h === bounds.h) {
+      ctx.putImageData(image, 0, 0)
+      return { canvas, frame: hugged.frame }
+    }
+    const cropped = new OffscreenCanvas(hugged.frame.w, hugged.frame.h)
+    context2d(cropped).putImageData(
+      new ImageData(hugged.data, hugged.frame.w, hugged.frame.h),
+      0,
+      0,
+    )
+    return { canvas: cropped, frame: hugged.frame }
   }
 
   return { erasesPixels, liftsSelection, eraseSelection, liftSelection }

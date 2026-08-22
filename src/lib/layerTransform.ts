@@ -113,6 +113,38 @@ export function contentBounds(rgba: Uint8ClampedArray, w: number, h: number): Re
 }
 
 /**
+ * A patch trimmed to what is actually in it: the frame it deserves on the page,
+ * and its pixels inside that frame.
+ *
+ * `box` is where `data` sits on the page. The box a patch is drawn in is upright
+ * and what lands in it need not be — a lasso arrives with transparent corners,
+ * a turned rectangle with four of them — and a frame is not something anything
+ * later gives back.
+ *
+ * Nothing to trim gives the same pixels back rather than a copy of them, and so
+ * does nothing having come through at all: a frame of no area is one the save
+ * path skips outright.
+ */
+export function hugContent(
+  data: Uint8ClampedArray<ArrayBuffer>,
+  box: Rect,
+): { frame: Rect; data: Uint8ClampedArray<ArrayBuffer> } {
+  const held = contentBounds(data, box.w, box.h)
+  if (held === null || (held.w === box.w && held.h === box.h)) {
+    return { frame: { ...box }, data }
+  }
+  const out = new Uint8ClampedArray(held.w * held.h * 4)
+  for (let row = 0; row < held.h; row += 1) {
+    const from = ((held.y + row) * box.w + held.x) * 4
+    out.set(data.subarray(from, from + held.w * 4), row * held.w * 4)
+  }
+  return {
+    frame: { x: box.x + held.x, y: box.y + held.y, w: held.w, h: held.h },
+    data: out,
+  }
+}
+
+/**
  * Put a context where a placed layer's own top-left corner is the origin, so
  * whatever is drawn next lands as the placement asks.
  *
