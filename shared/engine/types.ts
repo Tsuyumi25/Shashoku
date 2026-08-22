@@ -494,6 +494,16 @@ export interface ShashokuEngineApi {
   maskWrite(region: EngineLayerFrame, bytes: Uint8Array): string;
   maskSelectAll(): string;
   maskInvert(): string;
+  /**
+   * The selection grown outward by `pixels`, on the same distance field a
+   * layer-style stroke is built on — the offset is a real distance, so a corner
+   * comes out round rather than notched at 45° the way Photoshop's own Expand
+   * leaves it, and a feathered rim grows out of where its coverage says it is.
+   *
+   * Null when nothing is selected. Throws for an offset that is not a positive
+   * finite number.
+   */
+  maskGrow(pixels: number): string | null;
   /** Swaps a record against the selection. Undo and redo are this same call. */
   maskApplyJournal(journal: string): void;
   maskDropJournal(journal: string): void;

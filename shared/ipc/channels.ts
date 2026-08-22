@@ -28,6 +28,7 @@ export const CHANNELS = {
   ocrUnload: "ocr:unload",
   ocrStop: "ocr:stop",
   ocrStatus: "ocr:status",
+  inpaintErase: "inpaint:erase",
   windowSetOverlay: "window:set-overlay",
   windowWillClose: "window:will-close",
   windowCloseReady: "window:close-ready",

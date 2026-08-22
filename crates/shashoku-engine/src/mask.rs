@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::raster::Rect;
+use crate::stroke::{coverage_at, signed_distance_field};
 use crate::tile::{Alpha8, TILE_SIZE, Tile, TileCoord, TileGrid, TileJournal};
 
 /// The one selection there is, and what it is for.
@@ -353,6 +354,58 @@ pub fn invert() -> String {
     file(held, &mut journal)
 }
 
+/// The selection grown outward by `pixels`, measured as a straight distance
+/// from its edge.
+///
+/// The same distance field a layer-style stroke is built on, and for the same
+/// reason: what is wanted is a band grown from the content's edge, which is
+/// what Photoshop's stroke means by a width and what `Select > Modify > Expand`
+/// only approximates — that one cuts a 45° notch at every corner, an octagon
+/// standing in for a circle. Here the offset is a real distance, so a corner
+/// comes out round because a round corner is what being five pixels from the
+/// edge describes.
+///
+/// The edge arrives antialiased rather than as a hard step, and a feathered
+/// selection grows out of its own half-covered rim rather than out of whatever
+/// the rim was rounded to.
+///
+/// None when nothing is selected: growing nothing is not a step.
+pub fn grow(pixels: f32) -> Result<Option<String>, String> {
+    if !pixels.is_finite() || pixels <= 0.0 {
+        return Err(format!("cannot grow a selection by {pixels}"));
+    }
+    let (bounds, page) = {
+        let held = state();
+        (held.held.bounds, held.held.page_rect())
+    };
+    let Some(bounds) = bounds else {
+        return Ok(None);
+    };
+
+    // One pixel past the offset, so the whole antialiased rim of the grown edge
+    // has somewhere to land. Clipped to the page because a selection is measured
+    // in page pixels — where the page stops, the growth stops with it.
+    let margin = pixels.ceil() as i32 + 1;
+    let region = Rect {
+        x: bounds.x - margin,
+        y: bounds.y - margin,
+        w: bounds.w + margin * 2,
+        h: bounds.h + margin * 2,
+    }
+    .intersect(page);
+    if region.is_empty() {
+        return Ok(None);
+    }
+
+    let coverage: Vec<f32> = read(region).iter().map(|&v| v as f32 / 255.0).collect();
+    let field = signed_distance_field(&coverage, region.w as usize, region.h as usize);
+    let grown: Vec<u8> = field
+        .iter()
+        .map(|&distance| (coverage_at(distance, pixels) * 255.0).round() as u8)
+        .collect();
+    write(region, &grown).map(Some)
+}
+
 /// Swaps a record against the selection. Undo and redo are the same call.
 pub fn apply_journal(name: &str) {
     let held = &mut *state();
@@ -580,6 +633,65 @@ mod tests {
         write(rect(0, 0, 4, 1), &[0, 128, 255, 1]).expect("a well-formed write");
         invert();
         assert_eq!(read(rect(0, 0, 4, 1)), vec![255, 127, 0, 254]);
+    }
+
+    #[test]
+    fn growing_reaches_exactly_as_far_as_it_was_asked_to() {
+        let _alone = alone();
+        hold("p1", 64, 64);
+        covered(rect(30, 30, 4, 4));
+        grow(5.0).expect("a well-formed grow").expect("a step");
+
+        // Straight out from the middle of an edge: the fifth pixel is whole and
+        // the sixth is nothing, because the offset is a distance rather than a
+        // count of dilations.
+        assert_eq!(read(rect(25, 31, 1, 1))[0], 255);
+        assert_eq!(read(rect(24, 31, 1, 1))[0], 0);
+        assert_eq!(bounds(), Some(rect(25, 25, 14, 14)));
+    }
+
+    /// The reason this is built on the distance field rather than on a square
+    /// or an octagon: five pixels away is a circle, so a corner comes out round.
+    /// A square kernel would have taken the diagonal too, and Photoshop's own
+    /// Expand would have cut it at 45°.
+    #[test]
+    fn a_corner_comes_out_round_rather_than_square() {
+        let _alone = alone();
+        hold("p1", 64, 64);
+        covered(rect(30, 30, 4, 4));
+        grow(5.0).expect("a well-formed grow").expect("a step");
+
+        // Diagonally out from the corner pixel (30,30): four across and four
+        // down is 5.66 away, past the offset, while four across alone is not.
+        assert_eq!(read(rect(26, 30, 1, 1))[0], 255);
+        assert_eq!(read(rect(26, 26, 1, 1))[0], 0);
+    }
+
+    /// A feathered rim is where its own coverage says it is, so growth starts
+    /// from the half-covered edge rather than from whatever it rounds to.
+    #[test]
+    fn a_feathered_edge_grows_out_of_its_own_rim() {
+        let _alone = alone();
+        hold("p1", 16, 1);
+        write(rect(0, 0, 16, 1), &[255, 255, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .expect("a well-formed write");
+        grow(2.0).expect("a well-formed grow").expect("a step");
+
+        // Half coverage put the edge through pixel 2's centre, so the edge was
+        // at 2.5 and two pixels further is 4.5 — pixel 4's centre exactly. It
+        // therefore comes back half covered in its turn, which is the whole
+        // claim: the growth was measured from where the rim actually was and
+        // not from the pixel it was rounded to.
+        assert_eq!(read(rect(3, 0, 1, 1))[0], 255);
+        assert_eq!(read(rect(4, 0, 1, 1))[0], 128);
+        assert_eq!(read(rect(5, 0, 1, 1))[0], 0);
+    }
+
+    #[test]
+    fn growing_nothing_is_not_a_step() {
+        let _alone = alone();
+        hold("p1", 64, 64);
+        assert_eq!(grow(5.0).expect("a well-formed grow"), None);
     }
 
     #[test]

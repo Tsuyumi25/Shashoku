@@ -52,6 +52,7 @@
     >
       <SourceCandidates />
       <TranslationCandidates />
+      <RetouchProbe />
     </SplitterPanel>
 
     <ResizeHandle />
@@ -220,6 +221,7 @@ import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import SourceCandidates from '@/components/SourceCandidates.vue'
+import RetouchProbe from '@/components/RetouchProbe.vue'
 import TranslationCandidates from '@/components/TranslationCandidates.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import TagList from '@/components/TagList.vue'

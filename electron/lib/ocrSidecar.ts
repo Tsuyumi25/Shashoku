@@ -6,7 +6,12 @@ import { CHANNELS } from "@shared/ipc/channels";
 import type { OcrModel, OcrStatus } from "@shared/ocr/types";
 
 /**
- * The OCR engine, as a process the main process owns.
+ * The Python models, as a process the main process owns.
+ *
+ * Named for OCR because that is what it was built for and what most of it still
+ * is, but the retoucher lives here too: the models share an interpreter and a
+ * set of torch imports, and a second process would pay for both again to run
+ * one more network.
  *
  * A child rather than a `utilityProcess`, because that one forks a Node script
  * and this is a Python interpreter. One line of JSON per request on its stdin,
@@ -20,6 +25,9 @@ import type { OcrModel, OcrStatus } from "@shared/ocr/types";
  * process itself is tens of milliseconds, because nothing heavy is imported
  * until a model is asked for.
  */
+
+/** The retoucher, which is not one of the OCR models and is not chosen between. */
+const INPAINT_MODEL = "anime-lama";
 
 /** Long enough for a page of crops, short enough that a hung engine is not forever. */
 const REQUEST_TIMEOUT_MS = 180_000;
@@ -72,7 +80,9 @@ class OcrSidecar {
   private pending = new Map<number, Pending>();
   private nextId = 1;
   private starting: Promise<void> | null = null;
-  private loading = new Map<OcrModel, Promise<void>>();
+  // Keyed by the registry's own names rather than by `OcrModel`, because not
+  // everything the sidecar holds is one.
+  private loading = new Map<string, Promise<void>>();
 
   private announce(status: OcrStatus) {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -176,19 +186,41 @@ class OcrSidecar {
    * never as a guess about what might be wanted next.
    */
   private ensureLoaded(model: OcrModel): Promise<void> {
+    return this.loadOnce(model, {
+      began: () => this.announce({ state: "loading", model }),
+      done: () => this.announce({ state: "ready", model }),
+      failed: (problem) => this.announce({ state: "error", model, detail: String(problem) }),
+    });
+  }
+
+  /**
+   * The load itself, once per model however many callers ask at once.
+   *
+   * Separate from the announcements because those speak `OcrStatus`, which the
+   * retoucher is not: it has no place in a list of readers and detectors, and
+   * saying so would put it there.
+   */
+  private loadOnce(
+    model: string,
+    say: { began(): void; done(): void; failed(problem: unknown): void } = {
+      began: () => {},
+      done: () => {},
+      failed: () => {},
+    },
+  ): Promise<void> {
     const already = this.loading.get(model);
     if (already) return already;
 
     const attempt = (async () => {
-      this.announce({ state: "loading", model });
+      say.began();
       try {
         await this.request<{ elapsedMs: number }>("load", { model });
-        this.announce({ state: "ready", model });
+        say.done();
       } catch (problem) {
         // Dropped so the next attempt really tries again rather than replaying
         // a stored failure.
         this.loading.delete(model);
-        this.announce({ state: "error", model, detail: String(problem) });
+        say.failed(problem);
         throw problem;
       }
     })();
@@ -220,6 +252,23 @@ class OcrSidecar {
       boxes: crops,
     });
     return lines;
+  }
+
+  /**
+   * One region redrawn wherever its mask covers, all three of them as files.
+   *
+   * Files rather than bytes over the pipe: the protocol is one line of JSON and
+   * a page-sized picture in base64 would be megabytes of it. Who owns those
+   * files and when they go is the caller's, not this one's.
+   */
+  async inpaint(imagePath: string, maskPath: string, outPath: string) {
+    await this.loadOnce(INPAINT_MODEL);
+    return this.request<{ out: string; width: number; height: number }>("inpaint", {
+      model: INPAINT_MODEL,
+      image: imagePath,
+      mask: maskPath,
+      out: outPath,
+    });
   }
 
   async unload(model: OcrModel) {

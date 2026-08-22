@@ -1,4 +1,4 @@
-import type { ManifestJson } from '@shared/page/types'
+import type { ManifestJson, RasterLayerEntry } from '@shared/page/types'
 import {
   pageStack,
   type RasterStackNode,
@@ -230,6 +230,44 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
  */
 export async function compositeArtwork(input: CompositeInput): Promise<OffscreenCanvas> {
   return await compositeWith(input, () => {})
+}
+
+/**
+ * One raster layer on a page-sized canvas, at the rectangle it occupies.
+ *
+ * What the wand reads and what the retoucher is shown, which is why it is one
+ * function: those two have to agree about what "this layer" means down to the
+ * pixel, or a selection would be traced on one picture and acted on in another.
+ *
+ * The engine's pixels win wherever it holds the layer, and they bring their own
+ * frame — a write that grew the layer moved it, and the manifest is not told
+ * until the file naming the new frame is on disk. Falling back to the entry's
+ * frame in that window would draw the layer where it used to be.
+ */
+export async function compositeLayerAlone(input: {
+  entry: RasterLayerEntry
+  page: Size
+  loadLayer(file: string): Promise<Uint8Array>
+  /** The layer's live pixels, when the engine is holding it. See `CompositeInput`. */
+  live: { canvas: OffscreenCanvas; frame: Frame } | null
+}): Promise<OffscreenCanvas> {
+  const canvas = new OffscreenCanvas(input.page.w, input.page.h)
+  const ctx = context2d(canvas)
+  if (input.live !== null) {
+    ctx.drawImage(input.live.canvas, input.live.frame.x, input.live.frame.y)
+    return canvas
+  }
+  // A layer with no frame has no file worth reading, and an empty page-sized
+  // canvas is the truthful picture of it: transparent everywhere.
+  const { x, y, w, h, file } = input.entry
+  if (w <= 0 || h <= 0) return canvas
+  const bitmap = await createImageBitmap(new Blob([(await input.loadLayer(file)) as BlobPart]))
+  try {
+    ctx.drawImage(bitmap, x, y, w, h)
+  } finally {
+    bitmap.close()
+  }
+  return canvas
 }
 
 /**

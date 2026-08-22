@@ -764,6 +764,15 @@ pub fn mask_invert() -> String {
     mask::invert()
 }
 
+/// The selection grown outward by `pixels`, on the same distance field a
+/// layer-style stroke is built on — so the offset is a real distance and a
+/// corner comes out round, rather than the 45° notch `Select > Modify > Expand`
+/// leaves. Null when nothing is selected.
+#[napi]
+pub fn mask_grow(pixels: f64) -> napi::Result<Option<String>> {
+    mask::grow(pixels as f32).map_err(napi::Error::from_reason)
+}
+
 /// Swaps a record against the selection. Undo and redo are this same call.
 #[napi]
 pub fn mask_apply_journal(journal: String) {

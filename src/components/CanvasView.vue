@@ -245,7 +245,7 @@ import {
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { framedLayers, layerAt } from '@/lib/layerHit'
-import { artworkSignature, compositeArtwork, context2d } from '@/lib/pageComposite'
+import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
   distanceToSegment,
   nearestAnchor,
@@ -987,7 +987,12 @@ watch(
     const entry = wandTarget.value
     if (!pageDir || !file || entry === null) return
     try {
-      const drawn = await paintedAlone(entry, layersDirOf(pageDir), file.page)
+      const drawn = await compositeLayerAlone({
+        entry,
+        page: { w: file.page.width, h: file.page.height },
+        loadLayer: (name) => window.api.readImage(layersDirOf(pageDir), name),
+        live: liveLayer(entry.id),
+      })
       if (mine === wandRequest) wandLayer.value = drawn
     } catch (err) {
       console.error(err)
@@ -995,39 +1000,6 @@ watch(
   },
   { immediate: true },
 )
-
-/**
- * One raster layer on a page-sized canvas, at the rectangle it occupies.
- *
- * The engine's pixels win wherever it holds the layer, and they bring their own
- * frame: a write that grew the layer moved it, and the manifest is not told
- * until the file naming the new frame is on disk. Falling back to the entry's
- * frame in that window would put the layer where it used to be.
- */
-async function paintedAlone(
-  entry: RasterLayerEntry,
-  layersDir: string,
-  page: { width: number; height: number },
-): Promise<OffscreenCanvas> {
-  const canvas = new OffscreenCanvas(page.width, page.height)
-  const ctx = context2d(canvas)
-  const live = raster.liveLayer(entry.id)
-  if (live !== null) {
-    ctx.drawImage(live.canvas, live.frame.x, live.frame.y)
-    return canvas
-  }
-  // A layer with no frame has no file worth reading, and an empty page-sized
-  // canvas is the truthful picture of it: transparent everywhere.
-  if (entry.w <= 0 || entry.h <= 0) return canvas
-  const bytes = await window.api.readImage(layersDir, entry.file)
-  const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]))
-  try {
-    ctx.drawImage(bitmap, entry.x, entry.y, entry.w, entry.h)
-  } finally {
-    bitmap.close()
-  }
-  return canvas
-}
 
 /**
  * Fitting is per page, not per decode: turning the page starts you fitted, but

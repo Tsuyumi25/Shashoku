@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { createWindow } from "./window";
+import { registerInpaintHandlers } from "./ipc/inpaint";
 import { registerOcrHandlers } from "./ipc/ocr";
 import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
@@ -25,6 +26,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  registerInpaintHandlers();
   registerOcrHandlers();
   registerPreferencesHandlers();
   registerProjectHandlers();

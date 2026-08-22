@@ -300,6 +300,23 @@ export const useSelectionStore = defineStore('selection', () => {
     pushMaskCommand('invert-selection', journals, target.page)
   }
 
+  /**
+   * The selection pushed outward by a real distance, on the distance field a
+   * layer-style stroke is built on.
+   *
+   * Nothing held is nothing to grow, and unlike selecting all or inverting there
+   * is no sense in which growing an empty selection means anything — so this one
+   * does not reach for `maskHold` first.
+   */
+  function grow(target: MaskTarget, pixels: number): void {
+    if (!isHeldFor(target)) return
+    const journal = window.engine.maskGrow(pixels)
+    if (journal === null) return
+    sync()
+    revision.value++
+    pushMaskCommand('grow-selection', [journal], target.page)
+  }
+
   // ---- gestures ------------------------------------------------------------
 
   /**
@@ -804,6 +821,7 @@ export const useSelectionStore = defineStore('selection', () => {
     deselect,
     selectAll,
     invert,
+    grow,
     beginGesture,
     trackPointer,
     pressPointer,

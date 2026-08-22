@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ShashokuEngineApi } from "@shared/engine/types";
+import type { ShashokuInpaintApi } from "@shared/inpaint/types";
 import type { OcrStatus, ShashokuOcrApi } from "@shared/ocr/types";
 import { CHANNELS, type ShashokuApi, type WritePageInput } from "@shared/ipc/channels";
 
@@ -146,6 +147,8 @@ const engineApi: ShashokuEngineApi = {
   rasterReleaseAll: () => engine.rasterReleaseAll(),
   rasterFill: (id, mask, maskFrame, color, alphaLocked) =>
     engine.rasterFill(id, mask, maskFrame, color, alphaLocked),
+  rasterPaste: (id, rgba, mask, maskFrame, alphaLocked) =>
+    engine.rasterPaste(id, rgba, mask, maskFrame, alphaLocked),
   rasterErase: (id, mask, maskFrame) => engine.rasterErase(id, mask, maskFrame),
   rasterRead: (id, region) => engine.rasterRead(id, region),
   rasterApplyJournal: (journal) => engine.rasterApplyJournal(journal),
@@ -159,6 +162,7 @@ const engineApi: ShashokuEngineApi = {
   maskWrite: (region, bytes) => engine.maskWrite(region, bytes),
   maskSelectAll: () => engine.maskSelectAll(),
   maskInvert: () => engine.maskInvert(),
+  maskGrow: (pixels) => engine.maskGrow(pixels),
   maskApplyJournal: (journal) => engine.maskApplyJournal(journal),
   maskDropJournal: (journal) => engine.maskDropJournal(journal),
   maskAbsorbJournal: (into, later) => engine.maskAbsorbJournal(into, later),
@@ -187,6 +191,11 @@ const ocrApi: ShashokuOcrApi = {
   },
 };
 
+const inpaintApi: ShashokuInpaintApi = {
+  erase: (request) => ipcRenderer.invoke(CHANNELS.inpaintErase, request),
+};
+
 contextBridge.exposeInMainWorld("api", api);
 contextBridge.exposeInMainWorld("engine", engineApi);
 contextBridge.exposeInMainWorld("ocr", ocrApi);
+contextBridge.exposeInMainWorld("inpaint", inpaintApi);
