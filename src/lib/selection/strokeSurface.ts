@@ -90,9 +90,20 @@ export function surfaceHolding(
  * whole frame whenever that frame moves, and the stroke has only reached part
  * of it. What the stroke has not reached is uncovered, which is what the zeroes
  * this starts as already say.
+ *
+ * `into` is somewhere to answer rather than a buffer to allocate, for callers
+ * on the pointer's own path. It is cleared first and it is used only when it
+ * holds `at`, so passing one changes nothing but the garbage left behind.
  */
-export function coverageWithin(surface: StrokeSurface, at: Rect): Uint8Array {
-  const out = new Uint8Array(Math.max(0, at.w) * Math.max(0, at.h))
+export function coverageWithin(surface: StrokeSurface, at: Rect, into?: Uint8Array): Uint8Array {
+  const size = Math.max(0, at.w) * Math.max(0, at.h)
+  let out: Uint8Array
+  if (into !== undefined && into.length >= size) {
+    out = into.subarray(0, size)
+    out.fill(0)
+  } else {
+    out = new Uint8Array(size)
+  }
   const part = intersectRect(surface.region, at)
   if (isEmptyRect(part)) return out
   const from = surface.region

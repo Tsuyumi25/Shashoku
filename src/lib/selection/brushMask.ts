@@ -62,15 +62,22 @@ export function stampMaskCircle(
   // Kept under 1 so a fully hard brush still has a one-pixel ramp to sit on,
   // rather than dividing by a zero-width falloff.
   const inner = radius * Math.min(0.999, hardness)
+  // Distances are compared as squares, so the core — which is most of a hard
+  // brush's pixels — never takes a root, and the rim takes one only once the
+  // pixel is known to be inside. This is the innermost loop of the whole brush.
+  const outside = radius * radius
+  const solid = inner * inner
   const y1 = bounds.y + bounds.h
   const x1 = bounds.x + bounds.w
 
   for (let y = bounds.y; y < y1; y++) {
     const row = y * w
+    const dy2 = (y - cy) * (y - cy)
     for (let x = bounds.x; x < x1; x++) {
-      const dist = Math.hypot(x - cx, y - cy)
-      if (dist > radius) continue
-      const strength = dist <= inner ? 1 : 1 - (dist - inner) / (radius - inner)
+      const dx = x - cx
+      const d2 = dx * dx + dy2
+      if (d2 > outside) continue
+      const strength = d2 <= solid ? 1 : 1 - (Math.sqrt(d2) - inner) / (radius - inner)
       if (strength <= 0) continue
       const value = strength * opacity * 255
       const held = mask[row + x]

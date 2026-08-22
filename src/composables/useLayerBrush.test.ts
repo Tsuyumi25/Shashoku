@@ -46,7 +46,14 @@ class FakeCanvas {
         this.draws.push({ source, x, y })
       },
       putImageData: (image: FakeImageData, x: number, y: number) => {
-        this.puts.push({ image, x, y })
+        // Copied, because the real one takes the pixels into the canvas and the
+        // caller's buffer is reused between segments. Holding the reference
+        // would make every put ever recorded read as the most recent one.
+        this.puts.push({
+          image: new FakeImageData(new Uint8ClampedArray(image.data), image.width, image.height),
+          x,
+          y,
+        })
       },
       getImageData: (_x: number, _y: number, w: number, h: number) => ({
         data: new Uint8ClampedArray(Math.max(0, w * h * 4)),
@@ -58,13 +65,21 @@ class FakeCanvas {
   }
 }
 
+/** Both of the real constructor's forms: a blank one, and one over a buffer. */
 class FakeImageData {
   data: Uint8ClampedArray
-  constructor(
-    public width: number,
-    public height: number,
-  ) {
-    this.data = new Uint8ClampedArray(width * height * 4)
+  width: number
+  height: number
+  constructor(a: number | Uint8ClampedArray, b: number, c?: number) {
+    if (typeof a === 'number') {
+      this.width = a
+      this.height = b
+      this.data = new Uint8ClampedArray(a * b * 4)
+    } else {
+      this.data = a
+      this.width = b
+      this.height = c ?? 0
+    }
   }
 }
 

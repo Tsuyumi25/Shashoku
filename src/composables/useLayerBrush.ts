@@ -104,6 +104,24 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
 
   let stroke: Stroke | null = null
 
+  /**
+   * What a preview is worked out in, kept between events instead of allocated
+   * per one.
+   *
+   * A 500 px brush stamps a quarter of a million pixels, so a fresh coverage
+   * array and a fresh `ImageData` every pointer event is around a megabyte of
+   * garbage a frame — and the collector is most of what is left of the dropped
+   * frames now that a stroke no longer crosses the addon boundary. The ink one
+   * saves a second thing outright: `new ImageData` clears a buffer that the very
+   * next lines overwrite in full.
+   *
+   * The release does not use them. It asks for the whole of what the stroke
+   * covered, which would leave these as wide as the widest stroke of the session
+   * for as long as the page is open, and it happens once.
+   */
+  let coverageScratch = new Uint8Array(0)
+  let inkScratch = new Uint8ClampedArray(0)
+
   function pageAt(e: MouseEvent): Point | null {
     const el = container.value
     if (!el) return null
@@ -182,8 +200,8 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    * was cut differently from the write it is standing in for would be showing
    * something the release then takes away.
    */
-  function coverageFor(s: Stroke, at: Rect): Uint8Array {
-    const coverage = coverageWithin(s.surface, at)
+  function coverageFor(s: Stroke, at: Rect, into?: Uint8Array): Uint8Array {
+    const coverage = coverageWithin(s.surface, at, into)
     const within = clampToPage(at, s.pageW, s.pageH)
     const mask = isEmptyRect(within) ? null : selection.maskPatchOf(s.page, within)
     if (mask !== null) cutToMask(coverage, at, mask, within)
@@ -203,7 +221,9 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    */
   function show(s: Stroke, segment: Rect): void {
     if (isEmptyRect(segment)) return
-    overlay.show(inked(coverageFor(s, segment), segment, s.color), segment)
+    const size = segment.w * segment.h
+    if (coverageScratch.length < size) coverageScratch = new Uint8Array(size)
+    overlay.show(inked(coverageFor(s, segment, coverageScratch), segment, s.color), segment)
   }
 
   /**
@@ -215,8 +235,9 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    */
   function inked(coverage: Uint8Array, at: Rect, color: string): ImageData {
     const { r, g, b } = hexToRgb(color) ?? { r: 0, g: 0, b: 0 }
-    const image = new ImageData(Math.max(1, at.w), Math.max(1, at.h))
-    const out = image.data
+    const size = coverage.length * 4
+    if (inkScratch.length < size) inkScratch = new Uint8ClampedArray(size)
+    const out = inkScratch
     for (let i = 0; i < coverage.length; i++) {
       const p = i * 4
       out[p] = r
@@ -224,7 +245,11 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       out[p + 2] = b
       out[p + 3] = coverage[i]
     }
-    return image
+    // Handed over rather than copied, and drawn in the same task: the overlay
+    // takes the pixels into its canvas, after which this is free to be the next
+    // segment's. Sharing a buffer means the size has to be exactly `at`, so an
+    // empty segment could not be answered here — the one caller returns first.
+    return new ImageData(out.subarray(0, size), at.w, at.h)
   }
 
   function onPointerDown(e: PointerEvent): boolean {
