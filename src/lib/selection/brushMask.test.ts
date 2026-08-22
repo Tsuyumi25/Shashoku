@@ -140,6 +140,18 @@ describe('strokeMask', () => {
   })
 
   /**
+   * The thinnest brush is where spacing has no slack to lose: the stamp is a
+   * pixel wide and the spacing is clamped to a pixel, so one stamp too few is a
+   * hole rather than a slightly thinner rim.
+   */
+  it('leaves no hole when the thinnest brush moves under two spacings', () => {
+    const mask = blank()
+    strokeMask(mask, W, H, { x: 5, y: 10 }, { x: 6.9, y: 10 }, shape(0.5, 1), 'paint')
+    expect(at(mask, 6, 10)).toBe(255)
+    expect(at(mask, 7, 10)).toBe(255)
+  })
+
+  /**
    * A stroke that crosses itself is the case the ceiling exists for: the stamps
    * along the way overlap constantly, so accumulation would show up as a line
    * that darkens wherever the hand slowed down.

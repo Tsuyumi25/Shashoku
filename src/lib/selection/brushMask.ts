@@ -88,6 +88,13 @@ export function stampMaskCircle(
  * A stroke as stamps along the way, so a fast drag is a line rather than a row
  * of dots. Returns where the last stamp landed, which is where the next segment
  * has to start from.
+ *
+ * The count is rounded up rather than down. Rounding down lets a segment 1.9
+ * spacings long put down a single stamp, leaving the pair a whole spacing
+ * further apart than the setting asks for — invisible on a wide brush, where
+ * stamps a quarter of a radius apart overlap heavily either way, and a dotted
+ * line below radius 4, where the spacing is clamped to a pixel and the stamp is
+ * a pixel wide.
  */
 export function strokeMask(
   mask: Uint8ClampedArray,
@@ -102,7 +109,7 @@ export function strokeMask(
   const dy = to.y - from.y
   const dist = Math.hypot(dx, dy)
   const step = Math.max(1, shape.radius * 0.25)
-  const steps = Math.floor(dist / step)
+  const steps = Math.ceil(dist / step)
   if (steps === 0) return stampMaskCircle(mask, w, h, to.x, to.y, shape, mode)
 
   let dirty = EMPTY_RECT
