@@ -341,6 +341,30 @@ describe('what a stroke leaves behind', () => {
     expect(frame!.h).toBeLessThan(12)
   })
 
+  /**
+   * The other direction of the same rule, and the one a hand notices: the frame
+   * is what the layer tree's thumbnail is drawn into and what the canvas draws
+   * an outline around, so a frame that grew and could not come back in leaves
+   * both of them standing where the pixels no longer are.
+   */
+  it('pulls the frame back in when the eraser takes an edge away', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 8
+    const brush = useLayerBrush(container)
+    await stroke(brush, { x: 50, y: 50 }, { x: 150, y: 50 })
+    const grown = useRasterStore().liveLayer('r')!.frame
+    expect(grown.x + grown.w).toBeGreaterThan(150)
+
+    editor.setTool('eraser')
+    await stroke(useLayerBrush(container), { x: 150, y: 50 }, { x: 100, y: 50 })
+
+    const pulled = useRasterStore().liveLayer('r')!.frame
+    expect(pulled.x + pulled.w).toBeLessThan(grown.x + grown.w)
+    expect(pulled.x).toBe(grown.x)
+  })
+
   it('is one step however many segments it was drawn from', async () => {
     const { editor } = openWith(raster('r'))
     editor.selectOnly('r')

@@ -290,6 +290,60 @@ impl RasterLayer {
         self.bounds.offset(self.anchor_x, self.anchor_y)
     }
 
+    /// The tight box the content actually stands on, in layer-local pixels, or
+    /// `None` when nothing is left of it.
+    ///
+    /// Two steps, and that is what keeps the cost off the size of the layer.
+    /// Which tiles stand at all is free and already within a tile of the answer,
+    /// because a tile emptied outright stops standing; the walk inward from
+    /// there then has at most a tile's worth of lines to cross on each side.
+    fn content_bounds(&self) -> Option<Rect> {
+        let mut held = Rect::EMPTY;
+        for coord in self.grid.occupied() {
+            held = held.union(tile_rect(coord));
+        }
+        let held = held.intersect(self.bounds);
+        if held.is_empty() {
+            return None;
+        }
+
+        // Any non-zero alpha is content, which is the threshold hit testing and
+        // the marching ants already share. Anything higher would drop the faint
+        // rim antialiasing leaves, and a pixel outside the frame is a pixel the
+        // next encode does not write.
+        let inked = |x: i32, y: i32| self.grid.pixel(x, y).is_some_and(|px| px[3] != 0);
+        let row = |y: i32| (held.x..held.right()).any(|x| inked(x, y));
+        let column = |x: i32, top: i32, bottom: i32| (top..=bottom).any(|y| inked(x, y));
+
+        let mut top = held.y;
+        while top < held.bottom() && !row(top) {
+            top += 1;
+        }
+        // A tile can stand and hold nothing: undo hangs back whatever tile the
+        // write found, and that one may have been blank.
+        if top == held.bottom() {
+            return None;
+        }
+        let mut bottom = held.bottom() - 1;
+        while !row(bottom) {
+            bottom -= 1;
+        }
+        let mut left = held.x;
+        while !column(left, top, bottom) {
+            left += 1;
+        }
+        let mut right = held.right() - 1;
+        while !column(right, top, bottom) {
+            right -= 1;
+        }
+        Some(Rect {
+            x: left,
+            y: top,
+            w: right - left + 1,
+            h: bottom - top + 1,
+        })
+    }
+
     /// Fills the covered part of `mask` with one colour, in a single
     /// transaction, and hands back what changed.
     ///
@@ -407,12 +461,23 @@ impl RasterLayer {
         let tiles = tx.commit();
 
         let before = self.bounds;
-        // Only paint moves a frame. Taking pixels out could shrink one, but a
-        // frame that shrank would have to be recomputed from the whole layer,
-        // and a frame larger than its content costs a little disk while a frame
-        // smaller than its content loses pixels.
+        /*
+         * A frame follows its content in both directions. Paint grows it by the
+         * tight box the mask actually covered; erasing walks back in from the
+         * edges, because taking pixels out is the only write that can leave a
+         * frame standing on nothing.
+         *
+         * An erase that took the last pixel is the one exception: the frame
+         * stays where it was. Nothing downstream can use a frame of no area — a
+         * transform has no box to measure against, and the save path skips a
+         * layer whose frame has none, so shrinking to nothing would keep the
+         * erase off the disk it was meant to reach. Baking a placement makes the
+         * same call when its resample comes out empty.
+         */
         if blend != Blend::Erase {
             self.bounds = self.bounds.union(written);
+        } else if let Some(held) = self.content_bounds() {
+            self.bounds = held;
         }
         let journal = LayerJournal {
             layer: String::new(),
@@ -1287,16 +1352,70 @@ mod tests {
         );
     }
 
-    // Only paint moves a frame. A frame that shrank would have to be recomputed
-    // from the whole layer, and one larger than its content costs only disk.
+    // The one direction a frame does not follow its pixels. A frame of nothing
+    // has no handle to grab and nothing for a transform to measure against.
     #[test]
-    fn an_erase_leaves_the_frame_where_it_was() {
+    fn an_erase_that_takes_everything_leaves_the_frame_where_it_was() {
         let mut layer = solid(frame(5, 5, 4, 4), [0, 0, 255, 255]);
         layer
             .erase(&full_mask(4, 4), frame(5, 5, 4, 4))
             .expect("a well-formed erase")
             .expect("something to erase");
         assert_eq!(layer.frame(), frame(5, 5, 4, 4));
+    }
+
+    /// The complaint this exists for: a frame that grew and could never come
+    /// back in, so the thumbnail, the outline and the pivot a transform turns
+    /// about all stayed out where the pixels no longer were.
+    #[test]
+    fn an_erase_along_an_edge_pulls_the_frame_in() {
+        let mut layer = solid(frame(5, 5, 10, 4), [0, 0, 255, 255]);
+        layer
+            .erase(&full_mask(6, 4), frame(9, 5, 6, 4))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(layer.frame(), frame(5, 5, 4, 4));
+    }
+
+    #[test]
+    fn an_erase_in_the_middle_leaves_the_frame_alone() {
+        let mut layer = solid(frame(5, 5, 10, 10), [0, 0, 255, 255]);
+        layer
+            .erase(&full_mask(2, 2), frame(9, 9, 2, 2))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(layer.frame(), frame(5, 5, 10, 10));
+    }
+
+    /// The frame rides inside the same swap the pixels do, so coming back in is
+    /// taken back exactly the way going out is.
+    #[test]
+    fn undoing_an_erase_that_shrank_the_frame_puts_the_frame_back() {
+        let mut layer = solid(frame(5, 5, 10, 4), [0, 0, 255, 255]);
+        let (mut journal, _) = layer
+            .erase(&full_mask(6, 4), frame(9, 5, 6, 4))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(layer.frame(), frame(5, 5, 4, 4));
+
+        layer.apply(&mut journal);
+        assert_eq!(layer.frame(), frame(5, 5, 10, 4));
+
+        layer.apply(&mut journal);
+        assert_eq!(layer.frame(), frame(5, 5, 4, 4));
+    }
+
+    /// A frame is pulled in to where the pixels are, not to where the tiles
+    /// happen to end — it drives a transform's handles, so a tile-aligned answer
+    /// would put them up to 63 pixels off the content.
+    #[test]
+    fn the_frame_comes_back_to_the_pixel_rather_than_the_tile() {
+        let mut layer = solid(frame(0, 0, 200, 8), [0, 0, 255, 255]);
+        layer
+            .erase(&full_mask(197, 8), frame(3, 0, 197, 8))
+            .expect("a well-formed erase")
+            .expect("something to erase");
+        assert_eq!(layer.frame(), frame(0, 0, 3, 8));
     }
 
     #[test]
