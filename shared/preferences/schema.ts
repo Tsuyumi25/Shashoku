@@ -1,6 +1,5 @@
 import {
   MAX_FONT_SAMPLE_PX,
-  MIN_SECTION_HEIGHT,
   MIN_FONT_SAMPLE_PX,
   MIN_UNDO_PIXEL_BYTES,
   MIN_UNDO_PIXEL_STEPS,
@@ -59,8 +58,6 @@ export function parsePreferences(raw: string): Preferences {
     scanPoints,
     panelLayout,
     sidePanel,
-    sectionOpen,
-    sectionHeight,
     undoPixelSteps,
     undoPixelBytes,
     ocr,
@@ -109,19 +106,6 @@ export function parsePreferences(raw: string): Preferences {
   if (sidePanel === "layers" || sidePanel === "labels") {
     prefs.sidePanel = sidePanel;
   }
-  if (isRecord(sectionOpen)) {
-    for (const section of ["recognizers", "source", "translation"] as const) {
-      if (typeof sectionOpen[section] === "boolean") prefs.sectionOpen[section] = sectionOpen[section];
-    }
-  }
-  if (isRecord(sectionHeight)) {
-    for (const section of ["source", "translation"] as const) {
-      const px = sectionHeight[section];
-      if (typeof px === "number" && Number.isFinite(px)) {
-        prefs.sectionHeight[section] = Math.max(MIN_SECTION_HEIGHT, px);
-      }
-    }
-  }
   // Floored rather than range-checked at the top: a ceiling somebody wants to
   // be enormous is their business, and one small enough to hold nothing is the
   // only setting that would break undo outright.
@@ -161,8 +145,6 @@ export function serializePreferences(prefs: Preferences): string {
       scanPoints: prefs.scanPoints,
       panelLayout: prefs.panelLayout,
       sidePanel: prefs.sidePanel,
-      sectionOpen: prefs.sectionOpen,
-      sectionHeight: prefs.sectionHeight,
       undoPixelSteps: prefs.undoPixelSteps,
       undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,

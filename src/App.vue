@@ -3,21 +3,6 @@
     <TitleBar />
 
     <div class="flex min-h-0 flex-1">
-      <!--
-        The window's leftmost column, and a fixed width: a sibling of the
-        splitter rather than a panel in it, so it takes no part in the columns'
-        arithmetic and the saved column sizes go on meaning what they meant.
-
-        Standing rather than following the workbench. Which tool is up is
-        sticky state that outlives a trip to the other views, so picking one
-        from there is picking what you will come back to; and a column that
-        came and went would slide everything beside it every time the view
-        changed.
-      -->
-      <div class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
-        <ToolRail class="min-h-0 flex-1" />
-      </div>
-
       <SplitterGroup direction="horizontal" class="min-w-0 flex-1">
         <SplitterPanel
           :order="1"
@@ -26,10 +11,9 @@
           class="flex min-w-0 flex-col border-r border-border bg-card"
         >
           <!--
-            The editor's sidebar and the library stay mounted rather than
-            swapping: the buckets hold a series read off disk, and the library
-            holds a scan, and neither is worth doing again for a trip to the
-            other side.
+            The sidebar and the library stay mounted rather than swapping: the
+            library holds a scan that is not worth doing again for a trip to
+            the other side.
           -->
           <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
             <TranslateSidebar />
@@ -81,7 +65,6 @@ import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
-import ToolRail from '@/components/ToolRail.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'

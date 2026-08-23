@@ -1,5 +1,10 @@
 <template>
-  <FoldSection section="translation" title="譯文" :count="`${rows.length} 條`" last>
+  <div class="flex min-h-0 flex-1 flex-col">
+    <div class="pane-head">
+      <span class="text-xs font-medium text-muted-foreground">譯文</span>
+      <span class="ml-auto pr-2 text-xs text-muted-foreground">{{ rows.length }} 條</span>
+    </div>
+
     <div v-if="!object" class="px-3 py-4 text-center select-none">
       <span class="text-xs text-muted-foreground">選一顆文字物件</span>
     </div>
@@ -12,7 +17,7 @@
         row: what makes a list of candidates worth having is comparing them
         twice, and a list that rearranges itself under that is unreadable.
       -->
-      <div ref="listEl" class="py-0.5">
+      <div ref="listEl" class="min-h-0 flex-1 overflow-y-auto py-0.5">
         <p v-if="!rows.length" class="list-empty">
           還沒有候選。<br />自己寫一句，或讓模型產一批。
         </p>
@@ -67,9 +72,9 @@
         </Draggable>
       </div>
 
-      <button type="button" class="addrow" @click="propose()">＋ 新增譯文候選</button>
+      <button type="button" class="addrow shrink-0" @click="propose()">＋ 新增譯文候選</button>
     </template>
-  </FoldSection>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -78,7 +83,6 @@ import { GripVertical } from '@lucide/vue'
 import Draggable from 'vuedraggable'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
-import FoldSection from '@/components/FoldSection.vue'
 import { vAutoGrow } from '@/lib/autoGrow'
 
 /**
@@ -170,9 +174,8 @@ function propose() {
   if (!id) return
   project.setLabelTranslation(pageId.value, o.id, id)
   void nextTick(() => {
-    // Asked for by scrolling the row into view rather than the list to its
-    // end: the scroller is the section above this list now, and how far
-    // down the new one sits depends on a height somebody dragged.
+    // Into view rather than to the list's end: nearest leaves the scroll
+    // where it is when the new row is already showing.
     const input = listEl.value?.querySelector<HTMLTextAreaElement>('.cand-on .cand-input')
     input?.scrollIntoView({ block: 'nearest' })
     input?.focus()
@@ -181,6 +184,16 @@ function propose() {
 </script>
 
 <style scoped>
+.pane-head {
+  display: flex;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding-left: 0.5rem;
+  user-select: none;
+}
+
 .list-empty {
   padding: 1rem 0.75rem;
   text-align: center;

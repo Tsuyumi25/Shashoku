@@ -4,10 +4,6 @@
     by hand can be grown and handed to the model at all, and what the result
     looks like on a real page — the two things no amount of reading the model's
     card answers.
-
-    Deliberately not a `FoldSection`: those are keyed by a `CandidateSection`
-    that is written into everyone's preferences, and putting a scratch panel in
-    there would mean migrating a stored file for something meant to be deleted.
   -->
   <div class="shrink-0 border-t border-border">
     <div class="probe-head">

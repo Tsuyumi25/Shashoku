@@ -38,8 +38,8 @@
 
     <!--
       Not a tool but a door, parked at the rail's foot where editors keep
-      their manage gear. The rail is the one column standing in every view,
-      so settings is reachable wherever the reader happens to be.
+      their manage gear. The title bar's menu carries the same door, which is
+      the way in from the views this rail does not stand in.
     -->
     <div class="rail-divider" />
     <button type="button" class="rail-btn" title="設定" @click="ui.settingsOpen = true">
