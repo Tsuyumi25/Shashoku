@@ -34,6 +34,9 @@
       };
 
       engine = pkgs.callPackage ./nix/engine.nix { };
+
+      app = pkgs.callPackage ./nix/app.nix { inherit sidecar engine; };
+
       electronLibs = with pkgs; [
         glib
         nss
@@ -80,7 +83,10 @@
       ];
     in
     {
-      packages.${system} = { inherit sidecar engine; };
+      packages.${system} = {
+        inherit sidecar engine app;
+        default = app;
+      };
 
       checks.${system} = {
         sidecar = pkgs.runCommand "shashoku-sidecar-check" { } ''
@@ -92,6 +98,40 @@
         engine = pkgs.runCommand "shashoku-engine-check"
           { SHASHOKU_ENGINE = "${engine}/${engine.nodeModule}"; } ''
           ${lib.getExe pkgs.nodejs_22} ${./nix/checks/engine.js}
+          touch "$out"
+        '';
+
+        app = pkgs.runCommand "shashoku-app-check"
+          {
+            SHASHOKU_APP_ROOT = "${app}/share/shashoku";
+            nativeBuildInputs = [ pkgs.xvfb-run ];
+          } ''
+          export HOME="$TMPDIR"
+
+          # From nowhere in particular, which is what the application gives it:
+          # an interpreter named through SHASHOKU_PYTHON carries the package, so
+          # the sidecar is started with no working directory of its own.
+          ${sidecar}/bin/python -m shashoku_ocr </dev/null > sidecar.log 2>&1
+          grep -q "sidecar ready" sidecar.log
+
+          # Under the runtime the application has, rather than a Node beside it.
+          ELECTRON_RUN_AS_NODE=1 ${lib.getExe app.electron} ${./nix/checks/app.js}
+
+          # Through the wrapper, which nothing above goes through and which is
+          # the only thing a person runs. The line waited for is printed after
+          # the main bundle has finished loading — which is where a package that
+          # cannot start stops, window or no window. The port is left to the
+          # system so a build outside a sandbox cannot collide with a running
+          # copy.
+          SHASHOKU_MCP_PORT=0 \
+            xvfb-run -a "${app}/bin/shashoku" --no-sandbox > app.log 2>&1 &
+          for _ in $(seq 100); do
+            grep -q "\[mcp\] listening" app.log && break
+            sleep 0.2
+          done
+          kill %1
+          grep -q "\[mcp\] listening" app.log
+
           touch "$out"
         '';
       };
