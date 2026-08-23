@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
 import { CHANNELS } from "@shared/ipc/channels";
+import { forgetReady } from "./mcp/bridge";
 
 /**
  * How long the window waits for the renderer to say its last writes have
@@ -42,6 +43,10 @@ export function createWindow(): BrowserWindow {
       sandbox: false,
     },
   });
+
+  // Every document this window loads, the first included: what answers MCP is
+  // whatever has mounted, and a load beginning is that becoming untrue again.
+  win.webContents.on("did-start-loading", forgetReady);
 
   // Built hidden and revealed only once maximized, so the first frame on screen
   // is already full size. maximize() reveals a hidden window by itself but

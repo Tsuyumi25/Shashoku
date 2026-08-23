@@ -18,8 +18,63 @@ let getWindow: () => BrowserWindow | null = () => null;
 // agent on the other end learns more from a prompt failure than from silence.
 const ANSWER_TIMEOUT_MS = 10_000;
 
+/**
+ * Longer than the answer timeout because it covers a different thing: not a
+ * renderer refusing to reply but an application still starting. A cold launch
+ * has to load a bundle and mount an interface, and an agent that connected
+ * while that happened should wait rather than be told the window is broken.
+ */
+const READY_TIMEOUT_MS = 60_000;
+
+/**
+ * Whether the window can be spoken to yet.
+ *
+ * The endpoint begins listening before the window is built, so an early tool
+ * call reaches a window whose handler is not attached — and `send` delivers
+ * rather than queues, so that call is not slow, it is lost. Holding it here
+ * until the renderer says it has mounted is the difference between a race the
+ * fast machine wins and a wait.
+ */
+let answering = false;
+let waiting: (() => void)[] = [];
+
+function announceReady() {
+  answering = true;
+  const held = waiting;
+  waiting = [];
+  for (const resume of held) resume();
+}
+
+/**
+ * A document is loading, so whatever had mounted is on its way out. Held calls
+ * stay held and are released by the next mount rather than by this one, which
+ * is what makes a reload a pause instead of a window with no handler being
+ * spoken to.
+ */
+export function forgetReady() {
+  answering = false;
+}
+
+/** Bounded, so an interface that never mounts is a failure and not a hang. */
+function waitUntilReady(): Promise<void> {
+  if (answering) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Shashoku is still starting up")),
+      READY_TIMEOUT_MS,
+    );
+    waiting.push(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export function registerMcpBridge(windowGetter: () => BrowserWindow | null) {
   getWindow = windowGetter;
+  // Not `once`: a reload mounts again and says so again, and the gate has been
+  // shut behind it in the meantime.
+  ipcMain.on(CHANNELS.mcpReady, announceReady);
   ipcMain.on(CHANNELS.mcpReply, (_e, reply: McpReply) => {
     const entry = pending.get(reply.id);
     if (!entry) return;
@@ -30,10 +85,13 @@ export function registerMcpBridge(windowGetter: () => BrowserWindow | null) {
   });
 }
 
-export function askRenderer<T>(method: McpQueryMethod, params?: unknown): Promise<T> {
+export async function askRenderer<T>(method: McpQueryMethod, params?: unknown): Promise<T> {
+  await waitUntilReady();
+  // Read after the wait, not before: what was open when an agent connected
+  // says nothing about what is open now.
   const win = getWindow();
   if (!win || win.isDestroyed()) {
-    return Promise.reject(new Error("Shashoku window is not open"));
+    throw new Error("Shashoku window is not open");
   }
   const id = randomUUID();
   return new Promise<T>((resolve, reject) => {

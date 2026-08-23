@@ -34,6 +34,7 @@ export const CHANNELS = {
   windowCloseReady: "window:close-ready",
   mcpQuery: "mcp:query",
   mcpReply: "mcp:reply",
+  mcpReady: "mcp:ready",
 } as const;
 
 export interface ScanRootResult {
@@ -172,4 +173,10 @@ export interface ShashokuApi {
    */
   onMcpQuery(handler: (query: McpQuery) => void): void;
   mcpReply(reply: McpReply): void;
+  /**
+   * The renderer can answer from now on. Sent once the interface has mounted,
+   * because a query is delivered rather than queued — one sent at a window
+   * that has not attached its handler yet is simply gone.
+   */
+  mcpReady(): void;
 }

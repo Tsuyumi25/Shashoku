@@ -37,3 +37,8 @@ registerMcpAnswers();
 await usePreferencesStore().hydrate();
 
 app.mount("#app");
+
+// After mounting, because that is what "can answer" means here: the queries
+// read stores the interface owns, and the main process holds anything that
+// arrives before this rather than sending it at a window that would drop it.
+window.api.mcpReady();
