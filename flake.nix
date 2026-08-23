@@ -164,6 +164,11 @@
           pnpm_10
           cargo
           rustc
+          # The gate's own tools, so that what it says on a machine is what it
+          # says in CI. A clippy from somewhere else is a different set of
+          # lints, and the answer would depend on whose shell asked.
+          clippy
+          rustfmt
           uv
         ];
         shellHook = ''
