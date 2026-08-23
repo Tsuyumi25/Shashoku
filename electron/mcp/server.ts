@@ -278,13 +278,21 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, port: number
 }
 
 export function startMcpServer() {
-  const port = Number(process.env.SHASHOKU_MCP_PORT ?? DEFAULT_PORT);
+  const wanted = Number(process.env.SHASHOKU_MCP_PORT ?? DEFAULT_PORT);
+  /**
+   * Where it actually listens, which is only the same number when one was
+   * asked for. Port 0 means "whichever is free", and the rebinding guard
+   * compares the Host header against this — told the 0, it would refuse every
+   * request that ever arrived. Read inside the listen callback, so it is
+   * settled before any request can reach the handler below.
+   */
+  let bound = wanted;
   const httpServer = createServer((req, res) => {
     if (!req.url?.startsWith("/mcp")) {
       res.writeHead(404).end();
       return;
     }
-    void handleMcp(req, res, port).catch((err) => {
+    void handleMcp(req, res, bound).catch((err) => {
       console.error("[mcp] request failed", err);
       if (!res.headersSent) res.writeHead(500).end();
     });
@@ -296,8 +304,10 @@ export function startMcpServer() {
   void loadToken()
     .then((held) => {
       token = held;
-      httpServer.listen(port, "127.0.0.1", () => {
-        console.log(`[mcp] listening on http://127.0.0.1:${port}/mcp`);
+      httpServer.listen(wanted, "127.0.0.1", () => {
+        const address = httpServer.address();
+        if (address !== null && typeof address !== "string") bound = address.port;
+        console.log(`[mcp] listening on http://127.0.0.1:${bound}/mcp`);
         const home = process.env.SHASHOKU_MCP_TOKEN
           ? "env SHASHOKU_MCP_TOKEN"
           : join(app.getPath("userData"), "mcp-token");
