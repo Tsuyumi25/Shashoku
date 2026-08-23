@@ -64,6 +64,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: stable
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # `postinstall` fetches an Electron for development. Nothing below opens
@@ -72,6 +73,21 @@ jobs:
       - run: pnpm install --frozen-lockfile
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      # Layout first, because it is the one thing here nobody has to read a
+      # diagnostic to fix, and because a tree left to drift turns some later
+      # `cargo fmt` into a diff whose real change is buried in whitespace.
+      - run: cargo fmt --all -- --check
+
+      # Then what compiles but probably does not mean what it says. The suite
+      # below answers whether the behaviour is right; this answers a smaller and
+      # different question, which is why it is worth its own line.
+      #
+      # `--locked` here too, and for a reason the step below cannot supply: this
+      # is a cargo invocation like any other, so left to itself it would repair
+      # a stale lockfile and hand the repaired one to the check that was meant
+      # to catch it.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       # `--locked` because everything below is a cargo build in disguise, and
       # cargo's own answer to a manifest the lockfile no longer matches is to

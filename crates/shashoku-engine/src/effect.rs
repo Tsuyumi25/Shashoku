@@ -39,9 +39,7 @@ fn to_u8(v: f32) -> u8 {
 /// through a reconstruction of itself.
 fn compose_stroke(rgba: &[u8], width: usize, height: usize, spec: &StrokeSpec) -> Vec<u8> {
     let count = width * height;
-    let coverage: Vec<f32> = (0..count)
-        .map(|i| rgba[i * 4 + 3] as f32 / 255.0)
-        .collect();
+    let coverage: Vec<f32> = (0..count).map(|i| rgba[i * 4 + 3] as f32 / 255.0).collect();
     let field = signed_distance_field(&coverage, width, height);
     let (outer, inner) = band_offsets(spec.position, spec.width);
     let (sr, sg, sb, sa) = unit(spec.color);
@@ -132,7 +130,12 @@ mod tests {
 
     #[test]
     fn an_outside_stroke_lands_beyond_the_content_and_leaves_it_alone() {
-        let out = stroked(&square(8), W, H, &[spec(3.0, StrokePosition::Outside, BLUE)]);
+        let out = stroked(
+            &square(8),
+            W,
+            H,
+            &[spec(3.0, StrokePosition::Outside, BLUE)],
+        );
 
         // Two past the edge is band, two inside it is still the content's own.
         assert_eq!(at(&out, 6, 16), (0, 0, 255, 255));
@@ -191,9 +194,7 @@ mod tests {
                 content[(y * W + 12) * 4 + 3] = rim;
             }
             let out = stroked(&content, W, H, &[spec(4.0, StrokePosition::Outside, BLUE)]);
-            (0..12)
-                .map(|x| at(&out, x, 16).3 as u32)
-                .sum::<u32>()
+            (0..12).map(|x| at(&out, x, 16).3 as u32).sum::<u32>()
         };
 
         // A rim that covers more of its pixel puts the edge further out, and the

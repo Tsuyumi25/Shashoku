@@ -759,16 +759,15 @@ fn paint_run(
     // shadow — comes back to.
     if let Some(spec) = stroke.as_ref().filter(|spec| {
         inked && weight == 0.0 && fill.3 == 255 && spec.position == StrokePosition::Outside
-    }) {
-        if let Some(ink) = outside_band(&path, spec.width, run.width, run.height) {
-            return Ok(TextBitmap {
-                width: run.width,
-                height: run.height,
-                rgba: compose(|i| (coverage[i], ink[i]), count, fill, spec.color),
-                baseline: run.baseline,
-                clusters: run.clusters,
-            });
-        }
+    }) && let Some(ink) = outside_band(&path, spec.width, run.width, run.height)
+    {
+        return Ok(TextBitmap {
+            width: run.width,
+            height: run.height,
+            rgba: compose(|i| (coverage[i], ink[i]), count, fill, spec.color),
+            baseline: run.baseline,
+            clusters: run.clusters,
+        });
     }
 
     let field = (inked || weight != 0.0)
@@ -806,6 +805,10 @@ fn paint_run(
 // ────────────────────────────────────────────────────────────────────────────
 // Public horizontal / vertical render — now with fill + stroke support
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 pub fn render_text(
     font_bytes: &[u8],
     text: &str,
@@ -823,6 +826,10 @@ pub fn render_text(
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 pub fn render_vertical(
     font_bytes: &[u8],
     text: &str,
@@ -853,6 +860,10 @@ fn measure_run(mut run: BuiltRun, rotation: f32) -> TextMeasure {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 pub fn measure_text(
     font_bytes: &[u8],
     text: &str,
@@ -867,6 +878,10 @@ pub fn measure_text(
     Ok(measure_run(run, rotation))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 pub fn measure_vertical(
     font_bytes: &[u8],
     text: &str,
@@ -1060,6 +1075,10 @@ fn build_notdef_path(
 /// Takes no font because there is none to take — that is the whole case. It
 /// still goes through `paint_run`, so the boxes pick up the object's fill and
 /// stroke and are antialiased by the same path as its text would have been.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 pub fn render_notdef(
     text: &str,
     size_px: f32,

@@ -416,12 +416,7 @@ impl RasterLayer {
         mask: &[u8],
         mask_frame: Rect,
     ) -> Result<Option<(LayerJournal, Patch)>, String> {
-        self.write(
-            mask,
-            mask_frame,
-            Paint::Solid([0, 0, 0, 255]),
-            Blend::Erase,
-        )
+        self.write(mask, mask_frame, Paint::Solid([0, 0, 0, 255]), Blend::Erase)
     }
 
     fn write(
@@ -1152,7 +1147,7 @@ mod tests {
         let at = frame(0, 0, 4, 4);
         assert!(
             layer
-                .paste(&vec![0u8; 4 * 4 * 4 - 1], &full_mask(4, 4), at, false)
+                .paste(&[0u8; 4 * 4 * 4 - 1], &full_mask(4, 4), at, false)
                 .is_err()
         );
     }
@@ -1630,7 +1625,7 @@ mod tests {
     #[test]
     fn a_read_larger_than_any_machine_is_refused_rather_than_attempted() {
         let _alone = alone();
-        take("l", &[], frame(0, 0, 0, 0));
+        take("l", &[], frame(0, 0, 0, 0)).expect("a well-formed layer");
 
         assert!(read("l", frame(0, 0, 1_000_000, 1_000_000)).is_err());
         // The layer is still there and still answers; the refusal is the read's,

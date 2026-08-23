@@ -336,6 +336,13 @@ pub fn uncovered_clusters(font: FontSource, text: String) -> napi::Result<Vec<u3
     render::uncovered_clusters(data.as_slice(), &text, face_index).map_err(napi::Error::from_reason)
 }
 
+// `allow` and not `expect`: the macro re-emits the item, and the fulfilment
+// bookkeeping loses track of an expectation across that even though the lint
+// itself is silenced by it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn render_text(
     font: FontSource,
@@ -381,6 +388,10 @@ pub fn render_text(
 /// `render_text` stopped where painting would start. Takes only the arguments
 /// that shape the frame — colours, stroke and weight cannot move it, though the
 /// padding sized for them can, and that stays the caller's to pass.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn measure_text(
     font: FontSource,
@@ -896,6 +907,10 @@ pub fn import_base_map(source_path: String, dest_path: String) -> AsyncTask<Impo
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn render_vertical(
     font: FontSource,
@@ -939,6 +954,10 @@ pub fn render_vertical(
 }
 
 /// `render_vertical` stopped where painting would start.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn measure_vertical(
     font: FontSource,
@@ -968,6 +987,10 @@ pub fn measure_vertical(
 /// A grid of boxes to draw where a text object names a family this machine has
 /// no face for. Takes the text but no font: the characters and line breaks are
 /// still known, and they are what the grid is shaped by.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn render_notdef(
     text: String,
@@ -1009,6 +1032,10 @@ pub fn render_notdef(
 }
 
 /// `render_notdef` stopped where painting would start.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the addon's contract, mirrored by hand in shared/engine/types.ts"
+)]
 #[napi]
 pub fn measure_notdef(
     text: String,

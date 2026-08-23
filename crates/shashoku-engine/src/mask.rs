@@ -673,8 +673,11 @@ mod tests {
     fn a_feathered_edge_grows_out_of_its_own_rim() {
         let _alone = alone();
         hold("p1", 16, 1);
-        write(rect(0, 0, 16, 1), &[255, 255, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-            .expect("a well-formed write");
+        write(
+            rect(0, 0, 16, 1),
+            &[255, 255, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .expect("a well-formed write");
         grow(2.0).expect("a well-formed grow").expect("a step");
 
         // Half coverage put the edge through pixel 2's centre, so the edge was
