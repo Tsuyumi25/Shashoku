@@ -108,6 +108,15 @@
           } ''
           export HOME="$TMPDIR"
 
+          # Whatever failed, the reason is in one of these — and a check that
+          # only reports which grep came up empty makes someone reproduce the
+          # whole build to read a line it already had.
+          show() { trap - ERR; for f in sidecar.log app.log; do
+            [ -f "$f" ] && { echo "=== $f"; cat "$f"; }
+          done; }
+          trap 'show' ERR
+          set -E
+
           # From nowhere in particular, which is what the application gives it:
           # an interpreter named through SHASHOKU_PYTHON carries the package, so
           # the sidecar is started with no working directory of its own.
@@ -123,14 +132,27 @@
           # cannot start stops, window or no window. The port is left to the
           # system so a build outside a sandbox cannot collide with a running
           # copy.
+          # Named rather than minted, because the check has to present it: the
+          # application would otherwise keep the token in a file under a home
+          # directory this build throws away.
+          export SHASHOKU_MCP_TOKEN=shashoku-check
+
           SHASHOKU_MCP_PORT=0 \
             xvfb-run -a "${app}/bin/shashoku" --no-sandbox > app.log 2>&1 &
           for _ in $(seq 100); do
             grep -q "\[mcp\] listening" app.log && break
             sleep 0.2
           done
-          kill %1
           grep -q "\[mcp\] listening" app.log
+
+          # Then knock, and wait for the window to answer. Listening is printed
+          # before the window exists and a dead renderer leaves the process up,
+          # so this is the first step that any of the assembly below the main
+          # process has to survive.
+          SHASHOKU_MCP_ENDPOINT="$(sed -n 's|.*\[mcp\] listening on \([^[:space:]]*\).*|\1|p' app.log | head -1)" \
+            ELECTRON_RUN_AS_NODE=1 ${lib.getExe app.electron} ${./nix/checks/renderer.js}
+
+          kill %1
 
           touch "$out"
         '';
