@@ -29,7 +29,10 @@ export function createWindow(): BrowserWindow {
     titleBarOverlay: { color: "#2c2c2b", symbolColor: "#b7b5a9", height: OVERLAY_HEIGHT },
     show: false,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.cjs"),
+      // Not `__dirname`: electron-vite defines it by appending a shim after
+      // the bundle's last import statement, and a bundled dependency's doc
+      // comment can move that point past this line.
+      preload: join(import.meta.dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       // The default sandbox restricts preload's require() to a whitelist
@@ -78,7 +81,7 @@ export function createWindow(): BrowserWindow {
     // over the same corner (the trade VS Code accepted for WCO too).
     win.webContents.openDevTools({ mode: "undocked" });
   } else {
-    win.loadFile(join(__dirname, "../renderer/index.html"));
+    win.loadFile(join(import.meta.dirname, "../renderer/index.html"));
   }
 
   return win;
