@@ -1625,12 +1625,9 @@ mod align_tests {
     /// uniform on the em, and part ways the moment real advances arrive.
     #[test]
     fn a_short_line_of_real_glyphs_is_offset_by_what_it_measures() {
-        use super::installed_face::{PADDING, SIZE, drawing};
+        use super::given_face::{PADDING, SIZE, drawing};
         const TEXT: &str = "WWW\nW";
-        let Some((bytes, face)) = drawing(TEXT) else {
-            eprintln!("no font on this machine — the real-face align test did not run");
-            return;
-        };
+        let (bytes, face) = drawing(TEXT);
         let run = |align| {
             build_horizontal_path(&bytes, TEXT, SIZE, PADDING, face, Phase::default(), align)
                 .unwrap()
@@ -1995,13 +1992,10 @@ mod stroke_tests {
     /// since a cancelled ring reads as a deficit of 1.
     #[test]
     fn the_fast_lane_stays_near_the_field_on_a_real_face() {
-        use super::installed_face::drawing;
+        use super::given_face::drawing;
 
         const TEXT: &str = "鬱。o8";
-        let Some((bytes, face)) = drawing(TEXT) else {
-            eprintln!("no face for the sample text — fast lane reconciliation did not run");
-            return;
-        };
+        let (bytes, face) = drawing(TEXT);
         let ink = spec(4.0, StrokePosition::Outside);
         for size in [40.0f32, 200.0] {
             let run =
@@ -2032,43 +2026,49 @@ mod stroke_tests {
     }
 }
 
-/// A face this machine happens to have, for the properties that only a real run
-/// of glyphs has. There is no font in this repository to draw one with, and
-/// vendoring one to test a translation would be a poor trade — so these take
-/// whatever is installed and say so when there is nothing, rather than passing
-/// on a machine where they never ran.
+/// The face these tests draw with: a three-kilobyte cut of M PLUS 1 carrying
+/// the eight glyphs they ask for. See `tests/fonts/README.md`.
+///
+/// Reading the machine's installed fonts made the subject of these tests
+/// whichever face was enumerated first, which is a different font per machine
+/// and none at all in a sandbox — where they returned without running while the
+/// suite reported success.
 #[cfg(test)]
-mod installed_face {
+mod given_face {
     use super::*;
-    use crate::enumerate;
 
     pub const SIZE: f32 = 32.0;
     pub const PADDING: u32 = 4;
 
-    pub fn drawing(text: &str) -> Option<(Vec<u8>, u32)> {
-        let faces = enumerate::scan(&enumerate::default_dirs(), &[]);
-        faces.into_iter().find_map(|face| {
-            let bytes = std::fs::read(&face.path).ok()?;
-            // Some collections carry faces skrifa declines; only a face that
-            // actually draws is any use here.
-            let run = build_horizontal_path(
-                &bytes,
-                text,
-                SIZE,
-                PADDING,
-                face.face_index,
-                Phase::default(),
-                Align::default(),
-            )
-            .ok()?;
-            run.path.is_some().then_some((bytes, face.face_index))
-        })
+    const FONT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fonts/Mplus1-Regular.subset.otf"
+    ));
+
+    /// Never absent, and never a reason to skip. A subset that has stopped
+    /// drawing what these tests ask of it is a broken fixture and says so.
+    pub fn drawing(text: &str) -> (Vec<u8>, u32) {
+        let run = build_horizontal_path(
+            FONT,
+            text,
+            SIZE,
+            PADDING,
+            0,
+            Phase::default(),
+            Align::default(),
+        )
+        .unwrap_or_else(|err| panic!("the test font will not lay out {text:?}: {err}"));
+        assert!(
+            run.path.is_some(),
+            "the test font drew nothing for {text:?}"
+        );
+        (FONT.to_vec(), 0)
     }
 }
 
 #[cfg(test)]
 mod measure_tests {
-    use super::installed_face::{PADDING, SIZE, drawing};
+    use super::given_face::{PADDING, SIZE, drawing};
     use super::*;
 
     const TURNS: [f32; 3] = [0.0, 0.6, std::f32::consts::FRAC_PI_2];
@@ -2094,10 +2094,7 @@ mod measure_tests {
 
     #[test]
     fn a_measured_run_is_the_frame_its_render_comes_back_in() {
-        let Some((bytes, face)) = drawing("Hg\ngh") else {
-            eprintln!("no font on this machine — measure tests did not run");
-            return;
-        };
+        let (bytes, face) = drawing("Hg\ngh");
         for turn in TURNS {
             let m = measure_text(
                 &bytes,
@@ -2130,10 +2127,7 @@ mod measure_tests {
 
     #[test]
     fn a_measured_column_is_the_frame_its_render_comes_back_in() {
-        let Some((bytes, face)) = drawing("Hg\ngh") else {
-            eprintln!("no font on this machine — measure tests did not run");
-            return;
-        };
+        let (bytes, face) = drawing("Hg\ngh");
         for turn in TURNS {
             let m = measure_vertical(
                 &bytes,
@@ -2191,12 +2185,12 @@ mod measure_tests {
 
 #[cfg(test)]
 mod phase_tests {
-    use super::installed_face::{PADDING, SIZE, drawing};
+    use super::given_face::{PADDING, SIZE, drawing};
     use super::*;
 
     const TEXT: &str = "Hg";
 
-    fn any_face() -> Option<(Vec<u8>, u32)> {
+    fn any_face() -> (Vec<u8>, u32) {
         drawing(TEXT)
     }
 
@@ -2224,12 +2218,18 @@ mod phase_tests {
     /// The property everything else rests on: what the phase moves is the
     /// outline, in bitmap pixels, in the direction the caller means. A whole
     /// pixel is the one offset whose answer can be stated exactly.
+    ///
+    /// ⚠️ Exactly, for ink that stays inside. The bitmap is sized from the
+    /// unphased outline and deliberately does not grow — the test below says so
+    /// — which leaves a phase able to push a deep descender's faintest row past
+    /// the bottom edge. What goes past does not simply vanish: measured against
+    /// a face that reaches the edge, the row that should have arrived unchanged
+    /// came back heavier, and why has not been chased down. The fixture's `g`
+    /// stops short of the edge, so this passes without ever reaching that —
+    /// worth knowing before changing the fixture or the string.
     #[test]
     fn a_whole_pixel_of_phase_moves_the_ink_exactly_one_cell() {
-        let Some((bytes, face)) = any_face() else {
-            eprintln!("no font on this machine — phase tests did not run");
-            return;
-        };
+        let (bytes, face) = any_face();
         let at_rest = draw(&bytes, face, Phase::default());
         let moved = draw(&bytes, face, Phase { x: 1.0, y: 2.0 });
 
@@ -2246,9 +2246,7 @@ mod phase_tests {
 
     #[test]
     fn moving_the_run_inside_the_bitmap_does_not_resize_it() {
-        let Some((bytes, face)) = any_face() else {
-            return;
-        };
+        let (bytes, face) = any_face();
         let at_rest = draw(&bytes, face, Phase::default());
         let moved = draw(&bytes, face, Phase { x: 0.5, y: 0.75 });
         assert_eq!((at_rest.width, at_rest.height), (moved.width, moved.height));
@@ -2258,9 +2256,7 @@ mod phase_tests {
     /// area, so the ink softens rather than moving to another cell.
     #[test]
     fn half_a_pixel_of_phase_spreads_the_ink_without_losing_it() {
-        let Some((bytes, face)) = any_face() else {
-            return;
-        };
+        let (bytes, face) = any_face();
         let ink = |bmp: &TextBitmap| -> u64 {
             (0..bmp.width * bmp.height)
                 .map(|i| bmp.rgba[(i * 4 + 3) as usize] as u64)
@@ -2288,9 +2284,7 @@ mod phase_tests {
     /// Both are measured on the bitmap, so both have to follow what it holds.
     #[test]
     fn the_baseline_and_the_clusters_travel_with_the_run() {
-        let Some((bytes, face)) = any_face() else {
-            return;
-        };
+        let (bytes, face) = any_face();
         let at_rest = draw(&bytes, face, Phase::default());
         let moved = draw(&bytes, face, Phase { x: 0.25, y: 0.5 });
 
@@ -2303,9 +2297,7 @@ mod phase_tests {
     /// down them, so the axis its phase lands on is the other one.
     #[test]
     fn a_vertical_run_moves_on_both_axes_too() {
-        let Some((bytes, face)) = any_face() else {
-            return;
-        };
+        let (bytes, face) = any_face();
         let at_rest = render_vertical(
             &bytes,
             TEXT,
