@@ -39,15 +39,19 @@
         libGL
         wayland
       ];
-      # What the OCR sidecar's wheels expect to find. They are manylinux
-      # builds, so they link against a distribution's libraries rather than
-      # carrying their own: numpy wants libstdc++, opencv wants the X client
-      # library whether or not anything is ever drawn. Named here rather than
-      # left to whatever the system's nix-ld happens to hold, so a checkout
-      # behaves the same on a machine configured differently.
+      # What the OCR sidecar's wheels link against. They are manylinux builds,
+      # so they expect a distribution's libraries rather than carrying their
+      # own — opencv names the X client libraries whether or not anything is
+      # ever drawn. Complete on its own rather than leaning on `electronLibs`
+      # beside it, so moving something out of that list cannot break OCR.
       sidecarLibs = with pkgs; [
         stdenv.cc.cc.lib
         zlib
+        libxcb
+        libx11
+        libxext
+        libGL
+        glib
       ];
     in
     {
