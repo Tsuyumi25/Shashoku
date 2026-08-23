@@ -1,7 +1,5 @@
 <template>
   <div class="flex h-full min-h-0 flex-col select-none">
-    <LayerBlending />
-
     <div class="min-h-0 flex-1 overflow-y-auto" @dragover.prevent @drop.prevent="onDrop">
       <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
         {{ editor.currentPageId ? '本頁沒有圖層' : '尚未開啟頁面' }}
@@ -180,7 +178,6 @@ import {
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
 import { layersDirOf } from '@shared/ssk/constants'
-import LayerBlending from '@/components/LayerBlending.vue'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'

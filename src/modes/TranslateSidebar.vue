@@ -25,17 +25,17 @@
 
     <SplitterPanel :order="3" :default-size="33" :min-size="15" class="flex min-h-0 flex-col">
       <div class="flex h-7 shrink-0 items-center border-b border-border pl-2 select-none">
-        <span class="text-xs font-medium text-muted-foreground">文字樣式</span>
+        <span class="text-xs font-medium text-muted-foreground">外觀</span>
       </div>
-      <LabelStyleEditor class="min-h-0 flex-1" />
+      <AppearancePanel class="min-h-0 flex-1" />
     </SplitterPanel>
   </SplitterGroup>
 </template>
 
 <script setup lang="ts">
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import AppearancePanel from '@/components/AppearancePanel.vue'
 import BucketList from '@/components/BucketList.vue'
-import LabelStyleEditor from '@/components/LabelStyleEditor.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import StyleRecommendations from '@/components/StyleRecommendations.vue'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -48,6 +48,11 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
  * hand. Kept on the far side of the canvas from the lists that build a
  * selection, so that picking objects and deciding about them are not the same
  * corner of the screen fighting for room.
+ *
+ * The first two are text's alone — they count how a chapter is typeset — while
+ * the third takes whatever is selected. That is not an inconsistency: how a
+ * node looks is a question every node answers, and how a chapter is set is a
+ * question only text has.
  */
 const preferences = usePreferencesStore()
 </script>

@@ -12,12 +12,13 @@ import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/pr
 import { screenToPagePx } from '@/lib/coords'
 import { generateId as generateLabelId } from '@shared/page/schema'
 import { textOf } from '@shared/page/text'
-import { allEntries, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
 import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
+import type { AppearanceKind, AppearanceTarget } from '@/lib/appearance'
 import { deriveStyle } from '@/lib/styleRecommendation'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
@@ -1089,48 +1090,31 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * What the blending controls act on: everything selected that is on the open
-   * page, in tree order.
+   * Everything the panel was showing, in one step of history — as with
+   * deleting, dimming five layers is one act and five entries to undo would say
+   * it was five.
    *
-   * The selection reaches across pages, and these controls show one page's
-   * tree — so anything selected elsewhere is deliberately left alone rather
-   * than changed by a slider nobody could see it under.
+   * `before` is what those nodes were when the drag began rather than something
+   * reconstructed afterwards, by which time they have already moved: the slider
+   * writes straight through so the page keeps up with the hand, and only the
+   * release enters the stack.
    */
-  function layersToBlend(): LayerEntry[] {
-    const page = currentPageId.value
-    if (page === null) return []
-    const file = useProjectStore().pageById(page)
-    if (!file) return []
-    return allEntries(file.page.layers).filter(
-      (e) => selectedIds.value.has(e.id) && !isLocked(file.page.layers, e.id),
-    )
-  }
-
-  /**
-   * Everything selected, in one step of history — as with deleting, dimming
-   * five layers is one act and five entries to undo would say it was five.
-   *
-   * `before` is read at the start of the drag rather than reconstructed, and
-   * the whole thing is recorded on release: the slider writes straight through
-   * so the page keeps up with the hand, which would otherwise leave a frame's
-   * worth of entries to undo one at a time.
-   */
-  function cmdSetLayerOpacity(
-    pageId: string,
-    before: ReadonlyMap<string, number>,
+  function cmdSetOpacity(
+    before: readonly { pageId: string; id: string; opacity: number }[],
     opacity: number,
   ) {
-    const moved = [...before].filter(([id, was]) => was !== opacity && !isLayerLocked(id))
+    const moved = before.filter((was) => was.opacity !== opacity && !isLayerLocked(was.id))
     if (moved.length === 0) return
     const project = useProjectStore()
     pushCommand(
       {
         label: `set-opacity ${moved.length}`,
         do: () => {
-          for (const [id] of moved) project.setLayerOpacity(pageId, id, opacity)
+          for (const { pageId, id } of moved) project.setLayerOpacity(pageId, id, opacity)
         },
         undo: () => {
-          for (const [id, was] of moved) project.setLayerOpacity(pageId, id, was)
+          for (const { pageId, id, opacity: was } of moved)
+            project.setLayerOpacity(pageId, id, was)
         },
       },
       { alreadyApplied: true },
@@ -1143,27 +1127,27 @@ export const useEditorStore = defineStore('editor', () => {
    * hold both folders and layers, and pass-through is refused on everything but
    * a folder.
    */
-  function cmdSetLayerBlendMode(
-    pageId: string,
-    before: ReadonlyMap<string, string>,
+  function cmdSetBlendMode(
+    before: readonly { pageId: string; id: string; blendMode: string }[],
     blendMode: string,
   ) {
     const project = useProjectStore()
-    const moved: Array<[string, string]> = []
-    for (const [id, was] of before) {
-      if (was === blendMode || isLayerLocked(id)) continue
-      if (!project.setLayerBlendMode(pageId, id, blendMode)) continue
-      moved.push([id, was])
+    const moved: { pageId: string; id: string; blendMode: string }[] = []
+    for (const was of before) {
+      if (was.blendMode === blendMode || isLayerLocked(was.id)) continue
+      if (!project.setLayerBlendMode(was.pageId, was.id, blendMode)) continue
+      moved.push(was)
     }
     if (moved.length === 0) return
     pushCommand(
       {
         label: `set-blend-mode ${moved.length}`,
         do: () => {
-          for (const [id] of moved) project.setLayerBlendMode(pageId, id, blendMode)
+          for (const { pageId, id } of moved) project.setLayerBlendMode(pageId, id, blendMode)
         },
         undo: () => {
-          for (const [id, was] of moved) project.setLayerBlendMode(pageId, id, was)
+          for (const { pageId, id, blendMode: was } of moved)
+            project.setLayerBlendMode(pageId, id, was)
         },
       },
       { alreadyApplied: true },
@@ -1253,17 +1237,33 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  /** Every selected text object a change is allowed to reach, with its page. */
-  function selectedTextObjects(): { pageId: string; label: TextLayerEntry }[] {
+  /**
+   * Everything selected that a change is allowed to reach, with the page each
+   * one is on — every kind of node, not only text.
+   *
+   * The one answer to "what is this batch", so that the panel a person reads and
+   * the command that writes cannot be looking at two different lists. Handing a
+   * command the selection to go and ask about itself is what lets those two
+   * drift: the day the panel offers less than the whole selection, the write
+   * would silently still take all of it.
+   */
+  function selectedNodes(): AppearanceTarget<LayerEntry>[] {
     const project = useProjectStore()
-    const out: { pageId: string; label: TextLayerEntry }[] = []
+    const out: AppearanceTarget<LayerEntry>[] = []
     for (const id of unlockedSelection()) {
       const pageId = project.pageOfEntry(id)
       if (pageId === null) continue
-      const label = project.labelById(pageId, id)
-      if (label) out.push({ pageId, label })
+      const entry = project.entryById(id)
+      if (entry) out.push({ pageId, entry })
     }
     return out
+  }
+
+  /** Every selected text object a change is allowed to reach, with its page. */
+  function selectedTextObjects(): AppearanceTarget<TextLayerEntry>[] {
+    return selectedNodes().filter(
+      (t): t is AppearanceTarget<TextLayerEntry> => t.entry.kind === 'text',
+    )
   }
 
   /**
@@ -1272,13 +1272,29 @@ export const useEditorStore = defineStore('editor', () => {
    * an operation about to change forty objects on six pages has to say so.
    */
   const batchScope = computed(() => {
-    const objects = selectedTextObjects()
-    const pages = new Set(objects.map((o) => o.pageId))
+    const targets = selectedNodes()
+    const pages = new Set(targets.map((t) => t.pageId))
     return {
-      objects: objects.length,
+      objects: targets.length,
       pages: pages.size,
       offPage: [...pages].some((p) => p !== currentPageId.value),
     }
+  })
+
+  /**
+   * Which consumer this selection is for. The whole of what the outer panel
+   * knows: it reads `kind` and nothing else about a node, so adding a section
+   * to one consumer is not an edit here.
+   *
+   * A folder is its own answer rather than a mixture — it is one kind of thing
+   * that has nothing of its own to adjust yet, which is a different sentence
+   * from "these disagree about what they are".
+   */
+  const appearanceKind = computed<AppearanceKind>(() => {
+    const kinds = new Set(selectedNodes().map((t) => t.entry.kind))
+    if (kinds.size === 0) return 'none'
+    if (kinds.size > 1) return 'mixed'
+    return [...kinds][0]
   })
 
   /**
@@ -1286,14 +1302,16 @@ export const useEditorStore = defineStore('editor', () => {
    * one of them back at once — anything else would leave the selection half
    * changed, which is a state the user never asked for and cannot see.
    */
-  function cmdApplyStyleToSelection(patch: Partial<TextStyle>) {
+  function cmdApplyStyle(
+    targets: readonly AppearanceTarget<TextLayerEntry>[],
+    patch: Partial<TextStyle>,
+  ) {
     const project = useProjectStore()
-    const targets = selectedTextObjects()
     if (targets.length === 0 || Object.keys(patch).length === 0) return
-    const before = targets.map(({ pageId, label }) => ({
+    const before = targets.map(({ pageId, entry }) => ({
       pageId,
-      id: label.id,
-      style: { ...label.style },
+      id: entry.id,
+      style: { ...entry.style },
     }))
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const write = (states: typeof before) => {
@@ -1312,14 +1330,16 @@ export const useEditorStore = defineStore('editor', () => {
    * changing its width — so a patch per effect would need a key to address one
    * by, and there is nothing to key on.
    */
-  function cmdApplyEffectsToSelection(effects: readonly LayerEffect[]) {
+  function cmdApplyEffects(
+    targets: readonly AppearanceTarget[],
+    effects: readonly LayerEffect[],
+  ) {
     const project = useProjectStore()
-    const targets = selectedTextObjects()
     if (targets.length === 0) return
-    const before = targets.map(({ pageId, label }) => ({
+    const before = targets.map(({ pageId, entry }) => ({
       pageId,
-      id: label.id,
-      effects: cloneEffects(label.effects),
+      id: entry.id,
+      effects: cloneEffects(entry.effects),
     }))
     const after = before.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
     const write = (states: typeof before) => {
@@ -1364,12 +1384,12 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const targets = selectedTextObjects()
     if (targets.length === 0) return
-    const adding = !targets.every(({ label }) => label.tags.includes(tag))
-    const before = targets.map(({ pageId, label }) => ({
+    const adding = !targets.every(({ entry }) => entry.tags.includes(tag))
+    const before = targets.map(({ pageId, entry }) => ({
       pageId,
-      id: label.id,
-      tags: [...label.tags],
-      style: { ...label.style },
+      id: entry.id,
+      tags: [...entry.tags],
+      style: { ...entry.style },
     }))
     const sample = chapterBucketObjects()
     const { tags: registry, seedStyle } = project.header
@@ -1615,14 +1635,15 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetLayerAlphaLocked,
     isLayerLocked,
     cmdRenameLayer,
-    cmdSetLayerOpacity,
-    cmdSetLayerBlendMode,
-    layersToBlend,
+    cmdSetOpacity,
+    cmdSetBlendMode,
     cmdUpdateLabelText,
+    selectedNodes,
     selectedTextObjects,
     batchScope,
-    cmdApplyStyleToSelection,
-    cmdApplyEffectsToSelection,
+    appearanceKind,
+    cmdApplyStyle,
+    cmdApplyEffects,
     cmdToggleTagOnSelection,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,

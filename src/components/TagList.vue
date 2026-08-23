@@ -111,7 +111,7 @@ const selectionSize = computed(() => editor.batchScope.objects)
 
 function carriedByAll(name: string): boolean {
   if (selectionSize.value === 0) return false
-  return editor.selectedTextObjects().every(({ label }) => label.tags.includes(name))
+  return editor.selectedTextObjects().every(({ entry }) => entry.tags.includes(name))
 }
 
 function applyHint(name: string): string {

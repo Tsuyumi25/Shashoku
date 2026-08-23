@@ -65,7 +65,7 @@ import { computed, shallowRef, watch } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
-import { sharedValue } from '@shared/text-style/batch'
+import { sharedValue } from '@shared/batch/value'
 import { sameTagSet, tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import {
@@ -81,7 +81,7 @@ const project = useProjectStore()
 const editor = useEditorStore()
 
 const targets = computed(() => editor.selectedTextObjects())
-const styles = computed(() => targets.value.map((t) => t.label.style))
+const styles = computed(() => targets.value.map((t) => t.entry.style))
 
 /**
  * The three states `sharedValue` already draws everywhere else, asked of the
@@ -94,10 +94,10 @@ type TagState = { kind: 'none' } | { kind: 'many' } | { kind: 'one'; value: stri
 const tagState = computed<TagState>(() => {
   const first = targets.value[0]
   if (!first) return { kind: 'none' }
-  for (const { label } of targets.value) {
-    if (!sameTagSet(label.tags, first.label.tags)) return { kind: 'many' }
+  for (const { entry } of targets.value) {
+    if (!sameTagSet(entry.tags, first.entry.tags)) return { kind: 'many' }
   }
-  return { kind: 'one', value: tagsInRegistryOrder(first.label.tags, project.header.tags) }
+  return { kind: 'one', value: tagsInRegistryOrder(first.entry.tags, project.header.tags) }
 })
 
 /**
@@ -130,7 +130,7 @@ const fontFamily = computed(() => {
  */
 const sampleKey = computed(() => {
   if (tagState.value.kind !== 'one') return ''
-  const ids = targets.value.map((t) => t.label.id).sort()
+  const ids = targets.value.map((t) => t.entry.id).sort()
   return JSON.stringify([tagState.value.value, ids])
 })
 
@@ -226,6 +226,6 @@ function applyHint(row: StyleRow, candidate: StyleCandidate): string {
 }
 
 function apply(candidate: StyleCandidate) {
-  editor.cmdApplyStyleToSelection(candidate.patch)
+  editor.cmdApplyStyle(editor.selectedTextObjects(), candidate.patch)
 }
 </script>

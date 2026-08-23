@@ -1,15 +1,12 @@
 <template>
-  <div
-    class="grid shrink-0 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 border-b border-border px-2 py-1.5 text-xs select-none"
-    :class="target === null && 'opacity-40'"
-  >
+  <div class="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
     <label class="text-muted-foreground">模式</label>
     <select
-      class="h-6 w-full min-w-0 rounded border border-input bg-background px-1 disabled:cursor-not-allowed"
-      :value="target?.blendMode ?? 'normal'"
-      :disabled="target === null"
+      class="h-6 w-full min-w-0 rounded border border-input bg-background px-1"
+      :value="blendMode.kind === 'one' ? blendMode.value : ''"
       @change="onBlendMode"
     >
+      <option v-if="blendMode.kind === 'many'" value="">{{ MIXED_TEXT }}</option>
       <option v-for="mode in modes" :key="mode" :value="mode">{{ BLEND_LABELS[mode] }}</option>
     </select>
 
@@ -20,9 +17,8 @@
         min="0"
         max="100"
         step="1"
-        class="h-6 min-w-0 flex-1 accent-primary disabled:cursor-not-allowed"
-        :value="percent"
-        :disabled="target === null"
+        class="h-6 min-w-0 flex-1 accent-primary"
+        :value="percent ?? 100"
         @input="onSlide"
         @change="onSlideEnd"
       />
@@ -32,8 +28,8 @@
         max="100"
         step="1"
         class="h-6 w-12 rounded border border-input bg-background px-1 text-right"
-        :value="percent"
-        :disabled="target === null"
+        :value="percent ?? ''"
+        :placeholder="percent === null ? MIXED_TEXT : ''"
         @change="onTypedPercent"
       />
       <span class="text-muted-foreground">%</span>
@@ -46,18 +42,22 @@ import { computed } from 'vue'
 import type { LayerEntry } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { BLEND_MODE_ALLOWLIST } from '@shared/page/schema'
-import { findEntry } from '@shared/page/tree'
+import { sharedValue } from '@shared/batch/value'
+import type { AppearanceTarget } from '@/lib/appearance'
+import { MIXED_TEXT } from '@/lib/appearanceText'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
- * The two controls every layer panel has, over the tree they act on.
+ * What every node has however different they are: how much of it shows, and how
+ * what shows meets what is under it.
  *
- * They read the cursor — whichever row was touched last — and write to
- * everything selected, which is how Photoshop's do and what keeps dimming five
- * layers one act rather than five. Always on screen, greyed when there is
- * nothing to act on: a strip that came and went would make the tree jump.
+ * Shown by all three consumers, which is the point of it being its own section —
+ * adjusting a text object and a layer together is the one thing a mixed
+ * selection can do, and it is the same two controls doing it.
  */
+const props = defineProps<{ targets: readonly AppearanceTarget[] }>()
+
 const project = useProjectStore()
 const editor = useEditorStore()
 
@@ -82,50 +82,55 @@ const BLEND_LABELS: Record<string, string> = {
   luminosity: '明度',
 }
 
-/** What the controls show. The cursor is the row touched last, as everywhere else. */
-const target = computed<LayerEntry | null>(() => {
-  const page = editor.currentPageId
-  const id = editor.cursorId
-  if (page === null || id === null) return null
-  const file = project.pageById(page)
-  return file ? (findEntry(file.page.layers, id) ?? null) : null
-})
+const entries = computed<LayerEntry[]>(() => props.targets.map((t) => t.entry))
 
-// Offered only where it means something, which is also where the parser will
-// take it — a folder is the only thing with a buffer of its own to decline.
-const modes = computed(() =>
-  BLEND_MODE_ALLOWLIST.filter((m) => m !== PASS_THROUGH || target.value?.kind === 'group'),
+const blendMode = computed(() => sharedValue(entries.value, 'blendMode'))
+
+const opacity = computed(() => sharedValue(entries.value, 'opacity'))
+
+/** Null when the selection has no single answer, which the number field says. */
+const percent = computed(() =>
+  opacity.value.kind === 'one' ? Math.round(opacity.value.value * 100) : null,
 )
 
-const percent = computed(() => Math.round((target.value?.opacity ?? 1) * 100))
-
-function affected(): LayerEntry[] {
-  return editor.layersToBlend()
-}
+// Offered only where it means something, which is also where the parser will
+// take it — a folder is the only thing with a buffer of its own to decline, so
+// a selection holding anything else must not be offered it.
+const modes = computed(() =>
+  BLEND_MODE_ALLOWLIST.filter(
+    (m) => m !== PASS_THROUGH || entries.value.every((e) => e.kind === 'group'),
+  ),
+)
 
 function clampPercent(raw: number): number | null {
   if (!Number.isFinite(raw)) return null
   return Math.min(100, Math.max(0, Math.round(raw)))
 }
 
+function opacitiesNow() {
+  return props.targets.map(({ pageId, entry }) => ({
+    pageId,
+    id: entry.id,
+    opacity: entry.opacity,
+  }))
+}
+
+function writeOpacity(value: number) {
+  for (const { pageId, entry } of props.targets) project.setLayerOpacity(pageId, entry.id, value)
+}
+
 /**
  * Where the drag began, taken once at its first frame. Reconstructing it from
  * the current value afterwards cannot work — by then it has already moved.
  */
-let slideFrom: Map<string, number> | null = null
-
-function writeOpacity(value: number) {
-  const page = editor.currentPageId
-  if (page === null) return
-  for (const entry of affected()) project.setLayerOpacity(page, entry.id, value)
-}
+let slideFrom: ReturnType<typeof opacitiesNow> | null = null
 
 function onSlide(e: Event) {
   const next = clampPercent((e.target as HTMLInputElement).valueAsNumber)
   if (next === null) return
   // Straight through so the page keeps up with the hand; only the release
   // below enters the undo stack.
-  if (slideFrom === null) slideFrom = new Map(affected().map((entry) => [entry.id, entry.opacity]))
+  if (slideFrom === null) slideFrom = opacitiesNow()
   writeOpacity(next / 100)
 }
 
@@ -133,27 +138,27 @@ function onSlideEnd(e: Event) {
   const next = clampPercent((e.target as HTMLInputElement).valueAsNumber)
   const from = slideFrom
   slideFrom = null
-  const page = editor.currentPageId
-  if (next === null || from === null || page === null) return
-  editor.cmdSetLayerOpacity(page, from, next / 100)
+  if (next === null || from === null) return
+  editor.cmdSetOpacity(from, next / 100)
 }
 
 function onTypedPercent(e: Event) {
   const next = clampPercent((e.target as HTMLInputElement).valueAsNumber)
-  const page = editor.currentPageId
-  if (next === null || page === null) return
-  const from = new Map(affected().map((entry) => [entry.id, entry.opacity]))
+  if (next === null) return
+  const from = opacitiesNow()
   writeOpacity(next / 100)
-  editor.cmdSetLayerOpacity(page, from, next / 100)
+  editor.cmdSetOpacity(from, next / 100)
 }
 
 function onBlendMode(e: Event) {
   const next = (e.target as HTMLSelectElement).value
-  const page = editor.currentPageId
-  if (page === null) return
-  editor.cmdSetLayerBlendMode(
-    page,
-    new Map(affected().map((entry) => [entry.id, entry.blendMode])),
+  if (next === '') return
+  editor.cmdSetBlendMode(
+    props.targets.map(({ pageId, entry }) => ({
+      pageId,
+      id: entry.id,
+      blendMode: entry.blendMode,
+    })),
     next,
   )
 }

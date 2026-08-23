@@ -877,7 +877,7 @@ describe('layer tree edits', () => {
       lock(project, 'g')
 
       editor.cmdRenameLayer(PAGE, 'g', 'g', '塗白')
-      editor.cmdSetLayerBlendMode(PAGE, new Map([['g', PASS_THROUGH]]), 'multiply')
+      editor.cmdSetBlendMode([{ pageId: PAGE, id: 'g', blendMode: PASS_THROUGH }], 'multiply')
 
       expect(editor.canUndo).toBe(false)
     })
@@ -1024,13 +1024,13 @@ describe('layer tree edits', () => {
 
     it('fades everything selected in one step of history', () => {
       const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
-      const before = new Map([
-        ['a', 1],
-        ['b', 1],
-      ])
-      for (const id of before.keys()) project.setLayerOpacity(PAGE, id, 0.4)
+      const before = [
+        { pageId: PAGE, id: 'a', opacity: 1 },
+        { pageId: PAGE, id: 'b', opacity: 1 },
+      ]
+      for (const { id } of before) project.setLayerOpacity(PAGE, id, 0.4)
 
-      editor.cmdSetLayerOpacity(PAGE, before, 0.4)
+      editor.cmdSetOpacity(before, 0.4)
 
       expect([opacityOf(project, 'a'), opacityOf(project, 'b')]).toEqual([0.4, 0.4])
       expect(opacityOf(project, 'c')).toBe(1)
@@ -1042,14 +1042,14 @@ describe('layer tree edits', () => {
     // A slider nudged and put back is not something anyone wants to undo.
     it('keeps an opacity that came back where it started out of the stack', () => {
       const { editor } = openTree([label('a')], ['a'])
-      editor.cmdSetLayerOpacity(PAGE, new Map([['a', 1]]), 1)
+      editor.cmdSetOpacity([{ pageId: PAGE, id: 'a', opacity: 1 }], 1)
       expect(editor.canUndo).toBe(false)
     })
 
     it('changes a blend mode and puts it back', () => {
       const { project, editor } = openTree([label('a')], ['a'])
 
-      editor.cmdSetLayerBlendMode(PAGE, new Map([['a', 'normal']]), 'multiply')
+      editor.cmdSetBlendMode([{ pageId: PAGE, id: 'a', blendMode: 'normal' }], 'multiply')
       expect(blendOf(project, 'a')).toBe('multiply')
 
       editor.undo()
@@ -1063,12 +1063,12 @@ describe('layer tree edits', () => {
     it('refuses pass-through on anything that is not a folder', () => {
       const { project, editor } = openTree([label('a'), folder('g', [])], ['a'])
 
-      editor.cmdSetLayerBlendMode(PAGE, new Map([['a', 'normal']]), PASS_THROUGH)
+      editor.cmdSetBlendMode([{ pageId: PAGE, id: 'a', blendMode: 'normal' }], PASS_THROUGH)
       expect(blendOf(project, 'a')).toBe('normal')
       // And it leaves no entry that would undo to nothing.
       expect(editor.canUndo).toBe(false)
 
-      editor.cmdSetLayerBlendMode(PAGE, new Map([['g', 'normal']]), PASS_THROUGH)
+      editor.cmdSetBlendMode([{ pageId: PAGE, id: 'g', blendMode: 'normal' }], PASS_THROUGH)
       expect(blendOf(project, 'g')).toBe(PASS_THROUGH)
     })
 
@@ -1077,12 +1077,11 @@ describe('layer tree edits', () => {
       const { project, editor } = openTree([label('a'), folder('g', [])], ['a'])
       project.setLayerBlendMode(PAGE, 'g', 'multiply')
 
-      editor.cmdSetLayerBlendMode(
-        PAGE,
-        new Map([
-          ['a', 'normal'],
-          ['g', 'multiply'],
-        ]),
+      editor.cmdSetBlendMode(
+        [
+          { pageId: PAGE, id: 'a', blendMode: 'normal' },
+          { pageId: PAGE, id: 'g', blendMode: 'multiply' },
+        ],
         PASS_THROUGH,
       )
 
@@ -1095,10 +1094,13 @@ describe('layer tree edits', () => {
     })
 
     /**
-     * The selection reaches across pages while these controls show one page's
-     * tree, so what is out of sight has to stay out of reach.
+     * The panel takes the whole selection rather than the part of it on the
+     * open page, and it says how far that reaches before anyone touches a
+     * control. What is out of sight is therefore in reach and said out loud —
+     * the alternative is a slider that silently does less than the count above
+     * it claims.
      */
-    it('acts only on what is selected on the open page', () => {
+    it('reaches everything selected, whichever page it is on', () => {
       const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
       project.allFiles.push({
         pageId: 'p002.png',
@@ -1120,7 +1122,135 @@ describe('layer tree edits', () => {
       editor.toggleSelected('z')
       editor.currentPageId = PAGE
 
-      expect(editor.layersToBlend().map((e) => e.id)).toEqual(['a'])
+      expect(editor.selectedNodes().map((t) => t.entry.id).sort()).toEqual(['a', 'z'])
+      expect(editor.batchScope).toEqual({ objects: 2, pages: 2, offPage: true })
+
+      // The panel writes straight through and records on release, so the step
+      // that has to reach both pages is the one that puts them back.
+      const before = editor.selectedNodes().map((t) => ({
+        pageId: t.pageId,
+        id: t.entry.id,
+        opacity: t.entry.opacity,
+      }))
+      for (const { pageId, id } of before) project.setLayerOpacity(pageId, id, 0.5)
+      editor.cmdSetOpacity(before, 0.5)
+
+      const away = () => findEntry(project.pageById('p002.png')?.page.layers ?? [], 'z')?.opacity
+      expect([opacityOf(project, 'a'), away()]).toEqual([0.5, 0.5])
+
+      editor.undo()
+      expect([opacityOf(project, 'a'), away()]).toEqual([1, 1])
+    })
+  })
+
+  /**
+   * The whole of what the outer panel decides. It reads `kind` off a node and
+   * nothing else, so these five answers are the entire interface between it and
+   * the consumers below.
+   */
+  describe('who a selection is handed to', () => {
+    it('has nobody to hand nothing to', () => {
+      const { editor } = openTree([label('a')], ['a'])
+      expect(editor.appearanceKind).toBe('none')
+    })
+
+    it('hands a run of text objects to the text consumer', () => {
+      const { editor } = openTree([label('a'), label('b')], ['a', 'b'])
+      editor.selectOnly('a')
+      editor.toggleSelected('b')
+      expect(editor.appearanceKind).toBe('text')
+    })
+
+    it('hands a run of layers to the layer consumer', () => {
+      const { editor } = openTree([raster('r1'), raster('r2')], [])
+      editor.selectOnly('r1')
+      editor.toggleSelected('r2')
+      expect(editor.appearanceKind).toBe('raster')
+    })
+
+    it('calls a selection that disagrees about what it holds a mixture', () => {
+      const { editor } = openTree([label('a'), raster('r')], ['a'])
+      editor.selectOnly('a')
+      editor.toggleSelected('r')
+      expect(editor.appearanceKind).toBe('mixed')
+    })
+
+    /**
+     * A folder is a kind with nothing of its own to adjust yet, which is a
+     * different sentence from "these disagree" — and only the second is worth
+     * saying out loud to whoever is looking at the panel.
+     */
+    it('calls a folder a folder rather than a mixture', () => {
+      const { editor } = openTree([folder('g', [])], [])
+      editor.selectOnly('g')
+      expect(editor.appearanceKind).toBe('group')
+    })
+
+    /** A locked node is out of reach, so it is not part of what is handed over. */
+    it('leaves a locked node out of the batch entirely', () => {
+      const { project, editor } = openTree([label('a'), raster('r')], ['a'])
+      project.setLayerLocked(PAGE, 'r', true)
+      editor.selectOnly('a')
+      editor.toggleSelected('r')
+
+      expect(editor.appearanceKind).toBe('text')
+      expect(editor.batchScope).toEqual({ objects: 1, pages: 1, offPage: false })
+    })
+
+    /** Counted by node, not by text object: a layer is something to adjust too. */
+    it('counts every kind of node the batch reaches', () => {
+      const { editor } = openTree([label('a'), raster('r'), folder('g', [])], ['a'])
+      editor.selectOnly('a')
+      editor.toggleSelected('r')
+      editor.toggleSelected('g')
+      expect(editor.batchScope.objects).toBe(3)
+    })
+  })
+
+  describe('effects on the batch', () => {
+    const STROKE = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
+    const effectsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.effects
+
+    /** The point of the whole batch: a layer wears one exactly as an object does. */
+    it('puts a stroke on layers and objects alike, in one step', () => {
+      const { project, editor } = openTree([label('a'), raster('r')], ['a'])
+      editor.selectOnly('a')
+      editor.toggleSelected('r')
+
+      editor.cmdApplyEffects(editor.selectedNodes(), [STROKE])
+      expect([effectsOf(project, 'a'), effectsOf(project, 'r')]).toEqual([[STROKE], [STROKE]])
+
+      editor.undo()
+      expect([effectsOf(project, 'a'), effectsOf(project, 'r')]).toEqual([[], []])
+    })
+
+    /** Two nodes handed one array would have the first in-place edit change both. */
+    it('gives each node a list of its own', () => {
+      const { project, editor } = openTree([raster('r1'), raster('r2')], [])
+      editor.selectOnly('r1')
+      editor.toggleSelected('r2')
+
+      editor.cmdApplyEffects(editor.selectedNodes(), [STROKE])
+
+      expect(effectsOf(project, 'r1')).not.toBe(effectsOf(project, 'r2'))
+      expect(effectsOf(project, 'r1')?.[0]).not.toBe(effectsOf(project, 'r2')?.[0])
+    })
+
+    /**
+     * The command writes what it was handed rather than going back to ask the
+     * selection — which is what keeps the panel a person read and the write that
+     * followed from ever being about two different batches.
+     */
+    it('writes the targets it was given and not the selection', () => {
+      const { project, editor } = openTree([raster('r1'), raster('r2')], [])
+      editor.selectOnly('r1')
+      editor.toggleSelected('r2')
+
+      editor.cmdApplyEffects(editor.selectedNodes().slice(0, 1), [STROKE])
+
+      expect(effectsOf(project, 'r1')).toEqual([STROKE])
+      expect(effectsOf(project, 'r2')).toEqual([])
     })
   })
 })
