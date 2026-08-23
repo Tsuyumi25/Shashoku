@@ -1,0 +1,149 @@
+# What a clean machine can do with this repository, which the machine it is
+# written on cannot answer: every toolchain here is warm there, so a build step
+# that only works because something was already lying around looks identical to
+# one that works.
+#
+# Two jobs because they answer at two speeds. The fast one is the suite; the
+# slow one is whether the four toolchains still assemble into an application.
+name: Check
+
+# Branch pushes are covered by the pull request that carries them, and running
+# both would build the same tree twice — the Nix job is far too expensive to
+# spend on a duplicate. `workflow_dispatch` is how a branch with no pull
+# request gets checked anyway.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run has nothing left to say: whatever it reports is about a tree
+# nobody is looking at any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Nothing here writes anything. A pull request may edit `flake.nix`, which this
+# then builds — so what the token can reach has to be decided before the code
+# being run is trusted, not after.
+permissions:
+  contents: read
+
+jobs:
+  # The addon is built before the suite because the tests drive the real
+  # engine — the selection's coverage and every layer's pixels live in its
+  # tiles, and a stand-in there would be a second implementation of the very
+  # invariants the tiles exist to keep.
+  #
+  # Debug rather than release: the release profile is whole-program LTO in a
+  # single codegen unit, which is for the artifact people run and not for a
+  # suite that only has to answer whether the code is right.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Before the Node setup, which reads the store location off it. No
+      # version here: the manifest's `packageManager` names one, and this is
+      # the same lockfile every platform installs from.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Named from this Action's own history. Its `@stable` ref is a generated
+      # commit sitting off to one side of it — regenerated, and collectable once
+      # it is no longer pointed at — so a pin taken from there is a pin to
+      # something that can stop existing. The toolchain then has to be said out
+      # loud, since it was that ref which used to be saying it.
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # `postinstall` fetches an Electron for development. Nothing below opens
+      # a window — the suite runs under Node — and the package's typings, which
+      # the typecheck does read, arrive whether or not the binary does.
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      # `--locked` because everything below is a cargo build in disguise, and
+      # cargo's own answer to a manifest the lockfile no longer matches is to
+      # rewrite the lockfile and carry on. That would have CI repair the working
+      # tree and then report green on a resolution nobody committed.
+      - run: cargo test --workspace --locked
+
+      - run: pnpm engine:build:debug
+      - run: pnpm typecheck
+
+      # A typecheck is not a build. Alias resolution, the main/preload split and
+      # the ESM/CJS boundary are all decided by the bundler, and each of them can
+      # be red while `vue-tsc` is green. Cheap next to anything in the other job.
+      - run: pnpm build
+
+      - run: pnpm test
+
+  # `nix flake check` builds all three derivations and runs their checks: the
+  # crate's own tests fall out of the engine build, and the scripts then ask
+  # what only an assembled package can be asked — that the OCR environment
+  # computes rather than merely imports, that Node can load the addon, and that
+  # the wrapper a person actually runs starts a window that answers.
+  nix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # This action rather than the installer it is built on, because its tags
+      # follow Determinate Nix releases — pinning the installer still leaves the
+      # Nix it installs free to move.
+      - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11 # v3.22.2
+
+      # This repository's own Actions cache and nothing else — it does carry
+      # across runs, which is the point, but it is reachable from nowhere but
+      # here. Left alone, FlakeHub turns itself on wherever the token allows,
+      # which would make this an outside service with an account behind it.
+      # Publishing a closure users can pull from is the distribution question
+      # and is answered with the rest of that.
+      #
+      # ⚠️ The pin fixes the Action and not the cache helper it fetches, which
+      # comes off that project's `main` by default. Naming a revision instead
+      # would finish the job, but the helper's newest release is a year behind
+      # the branch this Action expects, so there is nothing settled to point at
+      # — the last link stays movable, deliberately and not by oversight.
+      - uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+        with:
+          use-flakehub: false
+          diagnostic-endpoint: ""
+
+      # Whether the lockfile still resolves to what the manifest asks for. The
+      # Nix side consumes `uv.lock` through uv2nix and would happily build a
+      # stale one, so a sidecar that starts is not evidence that the lock is
+      # current. `uv` comes from the devShell rather than a second setup step.
+      - name: Check the Python lock
+        run: nix develop --no-update-lock-file -c uv lock --check --project python
+
+      # Evaluation alone first. A flake that does not evaluate says so in
+      # seconds, and finding that out after a gigabyte of PyTorch has been
+      # fetched is the same answer arriving much later.
+      - run: nix flake check --no-build --show-trace --no-update-lock-file
+
+      # `--no-update-lock-file` because a flake command may otherwise amend
+      # `flake.lock` to make itself succeed, and a green built on an input this
+      # repository does not name is the same false answer as a rewritten
+      # `Cargo.lock`.
+      #
+      # No path filter above it. The application derivation's sources include
+      # the renderer, so nearly every commit is a rebuild the filter would have
+      # had to allow through anyway — what makes this cheap is the cache, plus
+      # the OCR environment reading only `python/`, which leaves the gigabyte
+      # untouched by a change to a component.
+      - run: nix flake check --no-update-lock-file --print-build-logs
