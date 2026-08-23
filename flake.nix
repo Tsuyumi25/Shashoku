@@ -25,12 +25,15 @@
 
   outputs = { nixpkgs, pyproject-nix, uv2nix, pyproject-build-systems, ... }:
     let
+      inherit (nixpkgs) lib;
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
       sidecar = pkgs.callPackage ./nix/sidecar.nix {
         inherit pyproject-nix uv2nix pyproject-build-systems;
       };
+
+      engine = pkgs.callPackage ./nix/engine.nix { };
       electronLibs = with pkgs; [
         glib
         nss
@@ -77,12 +80,18 @@
       ];
     in
     {
-      packages.${system} = { inherit sidecar; };
+      packages.${system} = { inherit sidecar engine; };
 
       checks.${system} = {
         sidecar = pkgs.runCommand "shashoku-sidecar-check" { } ''
           export HOME="$TMPDIR"
           ${sidecar}/bin/python ${./nix/checks/sidecar.py}
+          touch "$out"
+        '';
+
+        engine = pkgs.runCommand "shashoku-engine-check"
+          { SHASHOKU_ENGINE = "${engine}/${engine.nodeModule}"; } ''
+          ${lib.getExe pkgs.nodejs_22} ${./nix/checks/engine.js}
           touch "$out"
         '';
       };
