@@ -41,9 +41,15 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-function interpreter(): string {
-  if (process.env.SHASHOKU_PYTHON) return process.env.SHASHOKU_PYTHON;
-  return join(app.getAppPath(), "python", ".venv", "bin", "python");
+function launchSpec(): { interpreter: string; cwd?: string } {
+  const supplied = process.env.SHASHOKU_PYTHON;
+  if (supplied) return { interpreter: supplied };
+
+  const root = app.getAppPath();
+  return {
+    interpreter: join(root, "python", ".venv", "bin", "python"),
+    cwd: join(root, "python"),
+  };
 }
 
 /**
@@ -116,8 +122,9 @@ class OcrSidecar {
 
     this.starting = new Promise<void>((ready, failed) => {
       this.announce({ state: "starting" });
-      const child = spawn(interpreter(), ["-m", "shashoku_ocr"], {
-        cwd: join(app.getAppPath(), "python"),
+      const { interpreter, cwd } = launchSpec();
+      const child = spawn(interpreter, ["-m", "shashoku_ocr"], {
+        cwd,
         env: sanitizedEnv(),
       });
       this.child = child;
