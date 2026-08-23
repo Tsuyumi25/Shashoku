@@ -356,6 +356,28 @@ export interface ShashokuEngineApi {
   ): Uint8Array;
 
   /**
+   * A picture with a node's effects composed onto it, straight RGBA in and out.
+   *
+   * Takes the pixels rather than a layer id: what a node looks like with its
+   * effects on is a question about a picture, not about anything the engine is
+   * holding. A text object's stroke comes back through `renderText` for the same
+   * reason — both are one band read off one distance field, so a layer's stroke
+   * and a letter's are the same effect rather than two that happen to agree.
+   *
+   * Applied in list order, each grown from what the ones before it left.
+   *
+   * ⚠️ The caller sizes the region, and a band reaches past the content it grew
+   * from — a region no wider than the content clips its own stroke. Leave a
+   * margin of the widest stroke plus a pixel for its own soft edge.
+   */
+  strokeLayer(
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+    strokes: readonly EngineStrokeSpec[],
+  ): Uint8Array;
+
+  /**
    * Hands a layer's whole pixels over, once, on its first edit.
    *
    * Whole rather than lazily and once rather than per region: the crossing is

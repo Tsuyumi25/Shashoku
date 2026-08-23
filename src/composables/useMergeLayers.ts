@@ -18,6 +18,7 @@ import {
   hasPixels,
   rasterNodes,
 } from '@/lib/pageComposite'
+import { effectedFrame } from '@/lib/layerEffects'
 import { EMPTY_RECT, clampToPage, isEmptyRect, unionRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
@@ -65,13 +66,20 @@ export function useMergeLayers() {
   const canMergeSelection = computed(() => selectionParts().length >= 2)
   const canMergeDown = computed(() => downParts().length === 2)
 
-  /** The box the merged pixels land in: what the sources cover, and no more. */
+  /**
+   * The box the merged pixels land in: what the sources cover, and no more.
+   *
+   * A source carrying effects covers more than its own frame — the band reaches
+   * past it — and merging is where those stop being composited and become
+   * pixels. A box drawn from the frames alone would shave the band off in the
+   * one step that makes it permanent.
+   */
   function frameOf(nodes: ReturnType<typeof pageStack>, page: { w: number; h: number }): Rect {
     let box: Rect = EMPTY_RECT
     for (const node of rasterNodes(nodes)) {
       if (!hasPixels(node)) continue
       const { x, y, w, h } = node.entry
-      box = unionRect(box, { x, y, w, h })
+      box = unionRect(box, effectedFrame({ x, y, w, h }, node.entry.effects))
     }
     return clampToPage(box, page.w, page.h)
   }

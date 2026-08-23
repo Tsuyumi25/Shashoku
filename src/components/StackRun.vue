@@ -10,6 +10,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
+import { layerWithEffects, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
@@ -89,17 +90,55 @@ function drawRaster(ctx: CanvasRenderingContext2D, node: RasterStackNode): void 
   if (!source) return
   const { x, y, w: fw, h: fh } = live?.frame ?? node.entry
   if (fw <= 0 || fh <= 0) return
+
+  // The band reaches past the layer, so what is drawn and where both grow. A
+  // layer carrying no effects has none of this and draws its own bitmap.
+  const effected = effectedRasters.value.get(node.entry.id) ?? null
+  const picture = effected?.canvas ?? source
+  const { w, h } = effected?.frame ?? { w: fw, h: fh }
+
   if (props.place) {
     // Around the layer's own middle, and undone afterwards so a preview can
     // never leak onto whatever else this canvas holds.
     ctx.save()
     applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
-    ctx.drawImage(source, 0, 0, fw, fh)
+    // The placement is the layer's, so a band drawn under it has to be put back
+    // where it sits relative to the layer's own corner.
+    const offset = effected ? effected.frame.x - x : 0
+    ctx.drawImage(picture, offset, offset, w, h)
     ctx.restore()
     return
   }
-  ctx.drawImage(source, x, y, fw, fh)
+  ctx.drawImage(picture, effected?.frame.x ?? x, effected?.frame.y ?? y, w, h)
 }
+
+/**
+ * Every raster in this run that carries effects, composed.
+ *
+ * A computed for the same reason `drawnTexts` is one: it is the cache. Nothing
+ * here is cheap — a band costs a distance field over the layer's whole frame —
+ * and a repaint happens on every pan, zoom and neighbouring stroke.
+ *
+ * ⚠️ What it is keyed on is what makes it correct, and painting on a layer that
+ * carries a stroke moves that key on every segment of the brush. That case
+ * recomputes the field per segment; there is no incremental band yet.
+ */
+const effectedRasters = computed(() => {
+  // Read so the recompute follows a layer's pixels, whether they arrived from a
+  // file or from the hand.
+  void props.bitmaps.revision.value
+  void raster.revision
+  const out = new Map<string, EffectedLayer>()
+  for (const node of props.nodes) {
+    if (node.kind !== 'raster' || node.entry.effects.length === 0) continue
+    const live = raster.liveLayer(node.entry.id)
+    const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
+    if (!source) continue
+    const effected = layerWithEffects(source, live?.frame ?? node.entry, node.entry.effects)
+    if (effected) out.set(node.entry.id, effected)
+  }
+  return out
+})
 
 /**
  * Every text object in this run, already typeset.
@@ -232,6 +271,9 @@ watch(
 
 /** Typeset text already tracks its own inputs; this is only the repaint. */
 watch(drawnTexts, schedulePaint)
+
+/** And the same for a layer's own effects, which track theirs. */
+watch(effectedRasters, schedulePaint)
 
 /**
  * A write lands on screen in the same call stack that made it, rather than on

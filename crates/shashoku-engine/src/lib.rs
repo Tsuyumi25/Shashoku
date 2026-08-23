@@ -7,6 +7,7 @@ use napi::{Env, Task};
 use napi_derive::napi;
 use skrifa::{FontRef, MetadataProvider, string::StringId};
 
+mod effect;
 mod encode;
 mod enumerate;
 mod import;
@@ -202,8 +203,7 @@ pub struct StrokeInput {
     pub position: Option<String>,
 }
 
-fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<StrokeSpec>> {
-    let Some(input) = input else { return Ok(None) };
+fn stroke_input_to_one(input: StrokeInput) -> napi::Result<StrokeSpec> {
     let color = parse_hex_rgba(&input.color).map_err(napi::Error::from_reason)?;
     let position = match input.position.as_deref().unwrap_or("outside") {
         "outside" => StrokePosition::Outside,
@@ -215,11 +215,15 @@ fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<Strok
             )));
         }
     };
-    Ok(Some(StrokeSpec {
+    Ok(StrokeSpec {
         width: input.width as f32,
         color,
         position,
-    }))
+    })
+}
+
+fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<StrokeSpec>> {
+    input.map(stroke_input_to_one).transpose()
 }
 
 fn fill_from_opt(fill: Option<String>) -> napi::Result<render::Rgba> {
@@ -468,6 +472,37 @@ pub fn encode_image(
     let bytes =
         encode::encode(rgba.as_ref(), width, height, &spec).map_err(napi::Error::from_reason)?;
     Ok(bytes.into())
+}
+
+/// A picture with a node's effects composed onto it, straight RGBA in and out.
+///
+/// Takes the pixels rather than a layer id: this is what a node looks like once
+/// its effects are on, which is a question about a picture and not about
+/// anything the engine is holding. The text path answers the same question for
+/// an outline, and both come back to one distance field.
+///
+/// ⚠️ The caller sizes the region, and a band reaches past the content it grew
+/// from — so a region no wider than the content clips its own stroke. Leave a
+/// margin of the widest stroke plus a pixel for its own soft edge.
+#[napi]
+pub fn stroke_layer(
+    rgba: Buffer,
+    width: u32,
+    height: u32,
+    strokes: Vec<StrokeInput>,
+) -> napi::Result<Buffer> {
+    let count = width as usize * height as usize * 4;
+    if rgba.len() != count {
+        return Err(napi::Error::from_reason(format!(
+            "rgba is {} bytes for a {width}×{height} region, which needs {count}",
+            rgba.len()
+        )));
+    }
+    let specs = strokes
+        .into_iter()
+        .map(stroke_input_to_one)
+        .collect::<napi::Result<Vec<_>>>()?;
+    Ok(effect::stroked(rgba.as_ref(), width as usize, height as usize, &specs).into())
 }
 
 // ────────────────────────────────────────────────────────────────────────────

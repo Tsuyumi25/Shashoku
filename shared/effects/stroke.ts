@@ -11,19 +11,24 @@ export function strokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
   return effects.find((e) => e.kind === 'stroke') ?? null
 }
 
+function specOf(stroke: StrokeEffect): EngineStrokeSpec {
+  return { width: stroke.width, color: stroke.color, position: stroke.position }
+}
+
 /**
- * The stroke as the engine takes it — a plain value, because everything
- * crossing contextBridge has to be structured-cloneable and a list read off a
- * Vue store is a Proxy.
+ * The stroke as the engine's text calls take it — one, because those paint a
+ * run in a single pass and take a single stroke. A text object carrying two
+ * therefore shows the first; the layer path below honours the whole list, since
+ * its call composes them one after another.
  */
 export function engineStrokeFor(effects: readonly LayerEffect[]): EngineStrokeSpec | undefined {
   const stroke = strokeOf(effects)
-  if (!stroke) return undefined
-  return {
-    width: stroke.width,
-    color: stroke.color,
-    position: stroke.position,
-  }
+  return stroke ? specOf(stroke) : undefined
+}
+
+/** Every stroke, in the order they are applied. */
+export function engineStrokesFor(effects: readonly LayerEffect[]): EngineStrokeSpec[] {
+  return effects.filter((e) => e.kind === 'stroke').map(specOf)
 }
 
 /**

@@ -527,7 +527,7 @@ fn build_vertical_path(
 /// The two boundaries a stroke position asks for, as signed distances from the
 /// shape's own edge, negative inward: the outer edge of the stroke, and the
 /// edge past which the fill takes over again.
-fn band_offsets(position: StrokePosition, width: f32) -> (f32, f32) {
+pub fn band_offsets(position: StrokePosition, width: f32) -> (f32, f32) {
     match position {
         StrokePosition::Outside => (width, 0.0),
         StrokePosition::Center => (width * 0.5, -width * 0.5),

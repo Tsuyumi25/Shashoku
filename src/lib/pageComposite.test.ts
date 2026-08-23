@@ -99,6 +99,18 @@ describe('what the artwork composite would read', () => {
     )
   })
 
+  // A stroke is composited rather than written into the layer, so the file the
+  // signature names is unchanged while the picture under the wand is not.
+  it('changes when a raster grows a stroke', () => {
+    expect(sign([raster('a')])).not.toBe(
+      sign([
+        raster('a', {
+          effects: [{ kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }],
+        }),
+      ]),
+    )
+  })
+
   // Typing is the most frequent edit there is, and the composite leaves text
   // out — so it must not throw away a sample that is still good.
   it('holds still while text is added, moved and edited', () => {

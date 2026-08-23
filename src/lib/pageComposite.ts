@@ -8,6 +8,7 @@ import {
 import { textOf } from '@shared/page/text'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { layerWithEffects } from '@/lib/layerEffects'
 import { sampleSource } from '@/lib/fontSampleCache'
 
 /**
@@ -180,7 +181,12 @@ export function drawStack(
       const source = live?.canvas ?? paint.rasters.get(node.entry.file)
       if (source) {
         const { x, y, w, h } = live?.frame ?? node.entry
-        ctx.drawImage(source, x, y, w, h)
+        // A band reaches past the layer, so what gets drawn is the bigger
+        // picture at the bigger rectangle — clipping it back to the layer's own
+        // frame is exactly the edge the margin exists to hold.
+        const effected = layerWithEffects(source, { x, y, w, h }, node.entry.effects)
+        if (effected) ctx.drawImage(effected.canvas, effected.frame.x, effected.frame.y)
+        else ctx.drawImage(source, x, y, w, h)
       }
     } else if (node.kind === 'text') {
       paint.drawText(ctx, node)
@@ -304,7 +310,9 @@ export function artworkSignature(
 ): string {
   const parts: string[] = []
   for (const node of nodes) {
-    const paint = `${node.opacity}|${node.blendMode}`
+    // Effects are in here for the same reason opacity is: they move pixels the
+    // wand reads without any layer's own pixels having changed.
+    const paint = `${node.opacity}|${node.blendMode}|${JSON.stringify(node.entry.effects)}`
     if (node.kind === 'raster') {
       const { file, x, y, w, h } = node.entry
       const live = liveAt?.(node.entry.id) ?? null

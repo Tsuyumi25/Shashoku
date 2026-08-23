@@ -141,6 +141,16 @@ const engineApi: ShashokuEngineApi = {
   measureNotdef: (text, sizePx, padding, vertical, rotation, phaseX, phaseY, align) =>
     engine.measureNotdef(text, sizePx, padding, vertical, rotation, phaseX, phaseY, align),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),
+  // Copied rather than passed through: the list comes off a Vue store, and
+  // structured clone refuses a Proxy with nothing said but "an object could not
+  // be cloned".
+  strokeLayer: (rgba, width, height, strokes) =>
+    engine.strokeLayer(
+      rgba,
+      width,
+      height,
+      strokes.map((s) => ({ width: s.width, color: s.color, position: s.position })),
+    ),
   rasterTake: (id, rgba, frame) => engine.rasterTake(id, rgba, frame),
   rasterHolds: (id) => engine.rasterHolds(id),
   rasterRelease: (id) => engine.rasterRelease(id),
