@@ -22,18 +22,22 @@ app asks: a box drawn by hand is as good an input to reading as a detected one.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
+from ..assets import cache_dir
 from ..crop import crops
 
 # One multilingual checkpoint per task, so the language only decides whether
 # the request is allowed rather than which weights answer it. `japan` is absent
 # from the tiny build, which is half the reason this is the medium one.
 MODEL_TYPE = "medium"
+
+# Left to itself, RapidOCR downloads into its own installation tree, which is
+# only writable when a virtualenv is what put it there.
+MODEL_ROOT = cache_dir() / "rapidocr"
 
 # Finding where ink is does not depend on what language the ink is in, and the
 # detector's own vocabulary of languages says so — it offers no Japanese to
@@ -50,14 +54,9 @@ class PpOcrReader:
         return self.engine is not None
 
     def cached(self) -> bool:
-        # RapidOCR keeps its weights beside itself rather than in a shared
-        # cache, and names them after the model it resolved, so the question is
-        # whether those two files are on disk.
-        import rapidocr
-
-        models = Path(rapidocr.__file__).parent / "models"
+        # RapidOCR names its weights after the model it resolved.
         return all(
-            (models / f"PP-OCRv6_{task}_{MODEL_TYPE}.onnx").is_file() for task in ("det", "rec")
+            (MODEL_ROOT / f"PP-OCRv6_{task}_{MODEL_TYPE}.onnx").is_file() for task in ("det", "rec")
         )
 
     def load(self) -> None:
@@ -74,6 +73,7 @@ class PpOcrReader:
                 **{f"Rec.{k}": v for k, v in shared.items()},
                 "Det.lang_type": LangDet(DETECT_LANGUAGE),
                 "Rec.lang_type": LangRec(READ_LANGUAGE),
+                "Global.model_root_dir": str(MODEL_ROOT),
                 # Detection and recognition are both v6 above. The angle
                 # classifier below is not, and stays a v4 for one reason: it is
                 # built whatever `use_cls` says, so it has to name weights that
