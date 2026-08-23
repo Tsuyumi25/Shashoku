@@ -3,12 +3,34 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, ... }:
+  outputs = { nixpkgs, pyproject-nix, uv2nix, pyproject-build-systems, ... }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+
+      sidecar = pkgs.callPackage ./nix/sidecar.nix {
+        inherit pyproject-nix uv2nix pyproject-build-systems;
+      };
       electronLibs = with pkgs; [
         glib
         nss
@@ -55,6 +77,16 @@
       ];
     in
     {
+      packages.${system} = { inherit sidecar; };
+
+      checks.${system} = {
+        sidecar = pkgs.runCommand "shashoku-sidecar-check" { } ''
+          export HOME="$TMPDIR"
+          ${sidecar}/bin/python ${./nix/checks/sidecar.py}
+          touch "$out"
+        '';
+      };
+
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           nodejs_22
