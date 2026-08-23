@@ -12,6 +12,7 @@
     >{{ isMixed('fontFamily') ? MIXED_TEXT : value.fontFamily || '選擇字型' }}</span>
     <ChevronDown :size="12" class="shrink-0 text-muted-foreground" />
   </button>
+  <StyleSuggestions field="fontFamily" :set="suggestions ?? null" @pick="onPick" />
 
   <template v-if="weightFaces">
     <label class="text-muted-foreground">字重</label>
@@ -53,6 +54,7 @@
     />
     <span class="text-muted-foreground">px</span>
   </div>
+  <StyleSuggestions field="fontSizePx" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">方向</label>
   <ToggleGroupRoot
@@ -64,6 +66,7 @@
     <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
     <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
   </ToggleGroupRoot>
+  <StyleSuggestions field="direction" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">對齊</label>
   <ToggleGroupRoot
@@ -81,6 +84,7 @@
       {{ choice.label }}
     </ToggleGroupItem>
   </ToggleGroupRoot>
+  <StyleSuggestions field="align" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">文字色</label>
   <div class="flex items-center gap-1.5">
@@ -95,6 +99,7 @@
       :class="isMixed('color') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
     >{{ isMixed('color') ? MIXED_TEXT : value.color }}</span>
   </div>
+  <StyleSuggestions field="color" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">行距</label>
   <div class="flex items-center gap-1">
@@ -109,6 +114,7 @@
     />
     <span class="text-muted-foreground">%</span>
   </div>
+  <StyleSuggestions field="leadingPercent" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">字粗</label>
   <div class="flex items-center gap-1.5">
@@ -127,7 +133,7 @@
       :class="isMixed('weightPx') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
     >{{ isMixed('weightPx') ? '—' : weightLabel }}</span>
   </div>
-
+  <StyleSuggestions field="weightPx" :set="suggestions ?? null" @pick="onPick" />
 </template>
 
 <script setup lang="ts">
@@ -137,7 +143,9 @@ import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
 import { engineStrokeFor } from '@shared/effects/stroke'
+import StyleSuggestions from '@/components/appearance/StyleSuggestions.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import type { StyleSuggestionSet } from '@/composables/useStyleRecommendations'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
 import { MIXED_TEXT } from '@/lib/appearanceText'
 
@@ -147,6 +155,12 @@ import { MIXED_TEXT } from '@/lib/appearanceText'
  *
  * Rows only: the caller owns the grid these land in, so a section can put its
  * own heading above them and another consumer's controls below.
+ *
+ * Each control may carry a strip of what the project already sets for that
+ * field. It hangs here rather than in a panel of its own because a candidate
+ * and the control it would fill are the same field asked twice — apart, the two
+ * of them are a value to read and a value to type; together, one is the other's
+ * answer.
  */
 const props = defineProps<{
   /**
@@ -167,7 +181,22 @@ const props = defineProps<{
    * is chosen against the stroke it will actually be seen through.
    */
   effects: readonly LayerEffect[]
+  /**
+   * What to offer under each control, or null when there is nothing to count
+   * under. Passed whole rather than per field so that the panel above decides
+   * once whether this selection has a meaning, and every strip agrees.
+   */
+  suggestions?: StyleSuggestionSet | null
 }>()
+
+/**
+ * A candidate applied through the same channel a control uses. The two of them
+ * writing by different routes is exactly how a panel and a command come to
+ * disagree about which objects a change reaches.
+ */
+function onPick(patch: Partial<TextStyle>) {
+  emit('patch', patch)
+}
 
 function isMixed(field: keyof TextStyle): boolean {
   return props.mixed?.includes(field) ?? false

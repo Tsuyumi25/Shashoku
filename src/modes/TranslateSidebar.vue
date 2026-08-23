@@ -2,7 +2,7 @@
   <SplitterGroup
     direction="vertical"
     class="min-h-0 flex-1"
-    auto-save-id="translate:sidebar"
+    auto-save-id="translate:sidebar:v2"
     :storage="preferences.panelStorage"
   >
     <SplitterPanel :order="1" :default-size="34" :min-size="15" class="flex min-h-0 flex-col">
@@ -14,16 +14,7 @@
 
     <ResizeHandle vertical />
 
-    <SplitterPanel :order="2" :default-size="33" :min-size="15" class="flex min-h-0 flex-col">
-      <div class="flex h-7 shrink-0 items-center border-b border-border pl-2 select-none">
-        <span class="text-xs font-medium text-muted-foreground">樣式推薦</span>
-      </div>
-      <StyleRecommendations class="min-h-0 flex-1" />
-    </SplitterPanel>
-
-    <ResizeHandle vertical />
-
-    <SplitterPanel :order="3" :default-size="33" :min-size="15" class="flex min-h-0 flex-col">
+    <SplitterPanel :order="2" :default-size="66" :min-size="15" class="flex min-h-0 flex-col">
       <div class="flex h-7 shrink-0 items-center border-b border-border pl-2 select-none">
         <span class="text-xs font-medium text-muted-foreground">外觀</span>
       </div>
@@ -37,22 +28,17 @@ import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import AppearancePanel from '@/components/AppearancePanel.vue'
 import BucketList from '@/components/BucketList.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
-import StyleRecommendations from '@/components/StyleRecommendations.vue'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /**
- * What a selection means, what its kind looks like, and what it looks like —
- * the questions a batch pass moves between, stacked. The first two are the same
- * count read twice, one as an audit and one as a prescription, so they sit
- * together; the last is where a value that neither of them offers gets set by
- * hand. Kept on the far side of the canvas from the lists that build a
- * selection, so that picking objects and deciding about them are not the same
- * corner of the screen fighting for room.
+ * What a selection means, and what it looks like — the two questions a batch
+ * pass moves between, stacked. Kept on the far side of the canvas from the
+ * lists that build a selection, so that picking objects and deciding about them
+ * are not the same corner of the screen fighting for room.
  *
- * The first two are text's alone — they count how a chapter is typeset — while
- * the third takes whatever is selected. That is not an inconsistency: how a
- * node looks is a question every node answers, and how a chapter is set is a
- * question only text has.
+ * The first is text's alone, since only text carries a meaning; the second
+ * takes whatever is selected. That is not an inconsistency — how a node looks
+ * is a question every node answers.
  */
 const preferences = usePreferencesStore()
 </script>
