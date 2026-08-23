@@ -19,7 +19,6 @@ export const SKELETON_FIELDS = [
   'color',
   'leadingPercent',
   'weightPx',
-  'effects',
 ] as const satisfies readonly (keyof TextStyle)[]
 
 /**

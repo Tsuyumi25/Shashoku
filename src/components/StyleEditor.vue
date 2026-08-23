@@ -142,13 +142,13 @@
         :checked="stroke !== null"
         @change="onToggleStroke($event)"
       />
-      <span v-if="isMixed('effects')" class="text-[10px] text-muted-foreground/60">
+      <span v-if="effectsMixed" class="text-[10px] text-muted-foreground/60">
         {{ MIXED_TEXT }}
       </span>
       <span v-else-if="stroke === null" class="text-[10px] text-muted-foreground/60">關閉</span>
     </div>
 
-    <template v-if="stroke !== null && !isMixed('effects')">
+    <template v-if="stroke !== null && !effectsMixed">
       <label class="pl-3 text-muted-foreground">├ 寬度</label>
       <div class="flex items-center gap-1">
         <input
@@ -192,13 +192,10 @@
 import { computed, useTemplateRef, watchEffect } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
-import type {
-  StrokeEffect,
-  StrokePosition,
-  TextAlign,
-  TextDirection,
-  TextStyle,
-} from '@shared/text-style/types'
+import type { LayerEffect, StrokeEffect, StrokePosition } from '@shared/effects/types'
+import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
+import { DEFAULT_STROKE } from '@shared/effects/types'
+import { strokeOf, withStroke } from '@shared/effects/stroke'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
 
@@ -215,6 +212,14 @@ const props = defineProps<{
    * for a selection also holding 48s would turn a glance into an edit.
    */
   mixed?: readonly (keyof TextStyle)[]
+  /**
+   * What the node carries on top of its text, standing for the whole selection
+   * the same way `value` does. Held by the node rather than by the style, so it
+   * arrives and leaves on its own channel.
+   */
+  effects: readonly LayerEffect[]
+  /** Whether the selection disagrees about those. */
+  effectsMixed?: boolean
 }>()
 
 const MIXED_TEXT = '多個值'
@@ -273,11 +278,12 @@ const strokeToggleEl = useTemplateRef<HTMLInputElement>('strokeToggleEl')
 
 // Neither on nor off, which no attribute can say — only the DOM property can.
 watchEffect(() => {
-  if (strokeToggleEl.value) strokeToggleEl.value.indeterminate = isMixed('effects')
+  if (strokeToggleEl.value) strokeToggleEl.value.indeterminate = props.effectsMixed ?? false
 })
 
 const emit = defineEmits<{
   patch: [patch: Partial<TextStyle>]
+  effects: [effects: LayerEffect[]]
 }>()
 
 const picker = useFontPicker()
@@ -315,9 +321,7 @@ async function openFont() {
   if (Object.keys(patch).length > 0) emit('patch', patch)
 }
 
-const stroke = computed<StrokeEffect | null>(
-  () => (props.value.effects.find((e) => e.kind === 'stroke') as StrokeEffect | undefined) ?? null,
-)
+const stroke = computed<StrokeEffect | null>(() => strokeOf(props.effects))
 
 function onNumber(key: 'fontSizePx' | 'leadingPercent', e: Event) {
   const raw = (e.target as HTMLInputElement).valueAsNumber
@@ -389,22 +393,12 @@ function onWeightReset() {
   emit('patch', { weightPx: 0 })
 }
 
-function nonStrokeEffects() {
-  return props.value.effects.filter((e) => e.kind !== 'stroke')
-}
-
 function commitStroke(next: StrokeEffect | null) {
-  const others = nonStrokeEffects()
-  emit('patch', { effects: next === null ? others : [next, ...others] })
+  emit('effects', withStroke(props.effects, next))
 }
 
 function onToggleStroke(e: Event) {
-  const enabled = (e.target as HTMLInputElement).checked
-  if (enabled) {
-    commitStroke({ kind: 'stroke', width: 3, color: '#000000', position: 'outside' })
-  } else {
-    commitStroke(null)
-  }
+  commitStroke((e.target as HTMLInputElement).checked ? { ...DEFAULT_STROKE } : null)
 }
 
 function onStrokeWidth(e: Event) {

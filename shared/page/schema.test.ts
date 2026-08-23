@@ -73,6 +73,7 @@ function textEntry(extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     rotation: 0,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     translations: [],
     translation: null,
     ...extra,
@@ -302,6 +303,44 @@ describe('opacity and blend mode', () => {
   })
 })
 
+describe('the effects a node carries', () => {
+  const firstEntry = (m: ManifestJson) => m.layers[0]
+  const STROKE = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
+
+  it('reads an entry that names none as carrying none', () => {
+    expect(firstEntry(parseManifest(raw(UPRIGHT))).effects).toEqual([])
+    expect(firstEntry(parseManifest(raw(PATCH, []))).effects).toEqual([])
+  })
+
+  it('leaves an empty list out of the file rather than writing one on every entry', () => {
+    const out = serializeManifest(manifestWith(textEntry()))
+    expect(JSON.parse(out).layers[0]).not.toHaveProperty('effects')
+  })
+
+  /** Not a text object's own property any more: a layer wears one the same way. */
+  it('round trips a stroke on a raster layer as readily as on a text object', () => {
+    for (const entry of [{ ...PATCH, effects: [STROKE] }, { ...UPRIGHT, effects: [STROKE] }]) {
+      const order = entry.kind === 'text' ? ['a'] : []
+      expect(firstEntry(parseManifest(raw(entry, order))).effects).toEqual([STROKE])
+    }
+  })
+
+  it('refuses an effect of a kind it has never heard of', () => {
+    expect(() => parseManifest(raw({ ...UPRIGHT, effects: [{ kind: 'glow' }] }))).toThrow(
+      PageParseError,
+    )
+  })
+
+  /**
+   * A stroke moves pixels, so a page that grew one is a different picture and
+   * every thumbnail of it has to be redrawn.
+   */
+  it('counts towards what a page looks like', () => {
+    const plain = textEntry()
+    expect(serializeLayers([{ ...plain, effects: [STROKE] }])).not.toBe(serializeLayers([plain]))
+  })
+})
+
 describe('a raster layer carries its own frame', () => {
   const firstRaster = (m: ManifestJson) => m.layers[0] as RasterLayerEntry
 
@@ -349,6 +388,7 @@ describe('parseManifest', () => {
           locked: false,
           opacity: 1,
           blendMode: 'pass-through',
+          effects: [],
           children: [
             textEntry(),
             textEntry({ id: 'b', lines: ['ゴゴゴ'] }),
@@ -364,19 +404,30 @@ describe('parseManifest', () => {
     expect(() => parseManifest(older)).toThrow(PageParseError)
   })
 
-  // The version this one replaces stored a fraction of the raw, which cannot be
-  // converted without the page's own size — and this parser has never seen it.
-  it('refuses the version before it rather than reading the old unit as the new one', () => {
-    const v4 = JSON.stringify({
+  // The version this one replaces kept every effect inside the text style,
+  // where this parser no longer looks. Reading such a page would silently drop
+  // the stroke off every object on it, so it is refused instead — and the
+  // refusal has to be the version's, since the style parser ignores keys it does
+  // not know and would raise nothing.
+  it('refuses the version before it rather than reading it and losing the strokes', () => {
+    const before = JSON.stringify({
       schemaVersion: MANIFEST_SCHEMA_VERSION - 1,
       revision: 0,
       name: 'p',
       width: 1200,
       height: 1700,
       readingOrder: ['a'],
-      layers: [{ ...UPRIGHT, x: 0.5, y: 0.5 }],
+      layers: [
+        {
+          ...UPRIGHT,
+          style: {
+            ...DEFAULT_TEXT_STYLE,
+            effects: [{ kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }],
+          },
+        },
+      ],
     })
-    expect(() => parseManifest(v4)).toThrow(PageParseError)
+    expect(() => parseManifest(before)).toThrow(PageParseError)
   })
 
   /**

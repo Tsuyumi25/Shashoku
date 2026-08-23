@@ -2,7 +2,6 @@ import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
 import { FONT_FIELDS, SKELETON_FIELDS, SKIN_FIELDS } from '@shared/text-style/fields'
-import { cloneEffects, cloneTextStyle } from '@shared/text-style/clone'
 import { groupByValue, type BucketObject, type StyleBucket, type TagGroup } from '@/lib/valueBuckets'
 
 /**
@@ -50,14 +49,10 @@ interface RowSpec {
   patch: (style: TextStyle) => Partial<TextStyle>
 }
 
-/**
- * Fields lifted off one object to be put on another, so the effects are copied
- * rather than referenced — see `cloneTextStyle`.
- */
+/** Fields lifted off one object to be put on another. */
 function pick(style: TextStyle, fields: readonly (keyof TextStyle)[]): Partial<TextStyle> {
   const out: Partial<TextStyle> = {}
   for (const field of fields) Object.assign(out, { [field]: style[field] })
-  if (out.effects) out.effects = cloneEffects(out.effects)
   return out
 }
 
@@ -175,14 +170,14 @@ export function deriveStyle(
     const size = tally(members, (s) => String(s.fontSizePx))[0]!
     const clears = size.count / members.length >= sizeThreshold
 
-    return cloneTextStyle({
+    return {
       ...winner.style,
       ...pick(font.value, FONT_FIELDS),
       fontSizePx: clears ? size.value.fontSizePx : seedStyle.fontSizePx,
-    })
+    }
   }
 
-  return cloneTextStyle(seedStyle)
+  return { ...seedStyle }
 }
 
 /**

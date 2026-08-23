@@ -136,6 +136,7 @@
           :handles="!connecting"
           :text="object.text"
           :text-style="object.style"
+          :effects="object.effects"
           :x="object.x"
           :y="object.y"
           :rotation="object.rotation"
@@ -380,6 +381,7 @@ const objects = computed(() => {
     rotation: label.rotation,
     accent: accentOf(label.tags),
     style: previewedStyle(label.id, label.style),
+    effects: label.effects,
     tags: tagsInRegistryOrder(label.tags, project.header.tags).map((name) => ({
       name,
       color: tagColor(name, project.header.tags),
@@ -640,7 +642,13 @@ function sweepObjects() {
   const hit: string[] = []
   for (const object of objects.value) {
     if (object.locked) continue
-    const drawn = drawnLabel(object.text, object.style, { x: object.x, y: object.y }, object.rotation)
+    const drawn = drawnLabel(
+      object.text,
+      object.style,
+      object.effects,
+      { x: object.x, y: object.y },
+      object.rotation,
+    )
     const box: Obb = {
       center: drawn.center,
       w: drawn.box.w,
@@ -675,6 +683,7 @@ const objectBoxes = computed(() => {
     const drawn = drawnLabel(
       object.text,
       object.style,
+      object.effects,
       { x: object.x, y: object.y },
       object.rotation,
     )

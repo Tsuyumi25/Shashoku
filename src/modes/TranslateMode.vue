@@ -267,6 +267,7 @@ function onAddLayer() {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: `${id}.png`,
     x: 0,
     y: 0,

@@ -155,6 +155,7 @@ export function useSelectionPixels() {
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      effects: [],
       file: layerFile,
       ...patch.frame,
       alphaLocked: false,

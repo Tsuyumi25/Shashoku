@@ -23,23 +23,11 @@ export type TextDirection = 'horizontal' | 'vertical'
 export type TextAlign = 'start' | 'center' | 'end'
 
 
-export type StrokePosition = 'inside' | 'center' | 'outside'
-
-
-export interface StrokeEffect {
-  kind: 'stroke'
-  
-  width: number
-  
-  color: string
-  
-  position: StrokePosition
-}
-
-
-export type TextEffect = StrokeEffect
-
-
+/**
+ * How a text object is set. Effects are deliberately not here: what is added on
+ * top of a node is a property of the node, and a raster layer that has no style
+ * still has an edge to grow a band from. See `shared/effects`.
+ */
 export interface TextStyle {
 
   fontFamily: string
@@ -99,8 +87,6 @@ export interface TextStyle {
    * point the counters close and the letter turns into a blob.
    */
   weightPx: number
-
-  effects: TextEffect[]
 }
 
 
@@ -114,5 +100,4 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   color: '#000000',
   leadingPercent: 120,
   weightPx: 0,
-  effects: [],
 }

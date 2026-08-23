@@ -1,4 +1,5 @@
-import type { StrokePosition, TextAlign } from "../text-style/types";
+import type { StrokePosition } from "../effects/types";
+import type { TextAlign } from "../text-style/types";
 
 /**
  * The renderer-facing shape of the native engine. It is not an IPC surface:

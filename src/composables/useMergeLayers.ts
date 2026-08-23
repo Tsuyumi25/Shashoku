@@ -138,6 +138,7 @@ export function useMergeLayers() {
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      effects: [],
       file,
       x: frame.x,
       y: frame.y,

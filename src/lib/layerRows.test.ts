@@ -12,6 +12,7 @@ function text(id: string, visible = true): TextLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     x: 0,
     y: 0,
     tags: [],
@@ -34,6 +35,7 @@ function group(id: string, children: LayerEntry[], visible = true): GroupLayerEn
     locked: false,
     opacity: 1,
     blendMode: PASS_THROUGH,
+    effects: [],
     children,
   }
 }
@@ -47,6 +49,7 @@ function raster(id: string): RasterLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: `${id}.png`,
     x: 0,
     y: 0,

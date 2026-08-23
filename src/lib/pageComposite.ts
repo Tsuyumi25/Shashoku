@@ -117,7 +117,13 @@ function drawTextWith(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNod
   const label = node.entry
   const text = textOf(label)
   if (text.length === 0) return
-  const drawn = drawnLabel(text, label.style, { x: label.x, y: label.y }, label.rotation)
+  const drawn = drawnLabel(
+    text,
+    label.style,
+    label.effects,
+    { x: label.x, y: label.y },
+    label.rotation,
+  )
   // A family this machine lacks draws notdef boxes rather than nothing, so the
   // only way to arrive here without a bitmap is a catalogue that never
   // answered. Exporting the page short one label silently would be worse than

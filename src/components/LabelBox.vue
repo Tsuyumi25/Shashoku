@@ -60,6 +60,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
+import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
@@ -78,7 +79,7 @@ import type { TurnedLabel } from '@/stores/editorStore'
 import { samplePadding } from '@/lib/fontSampleCache'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
-import { engineStrokeFor } from '@/lib/textStyle'
+import { engineStrokeFor } from '@shared/effects/stroke'
 import { textProjection } from '@/lib/textProjection'
 import { useTextEditSurface } from '@/composables/useTextEditSurface'
 
@@ -100,6 +101,8 @@ const props = defineProps<{
   text: string
   /** The object's own complete style. */
   textStyle: TextStyle
+  /** What the node carries on top of the text — a stroke, today. */
+  effects: readonly LayerEffect[]
   /** Label anchor, in page pixels. */
   x: number
   y: number
@@ -193,7 +196,7 @@ const emit = defineEmits<{
 // Turned, because where the frame's middle sits follows the object round once
 // the position names a point other than that middle.
 const drawn = computed(() =>
-  drawnLabel(props.text, props.textStyle, { x: props.x, y: props.y }, props.rotation),
+  drawnLabel(props.text, props.textStyle, props.effects, { x: props.x, y: props.y }, props.rotation),
 )
 
 /**
@@ -284,7 +287,13 @@ function onScaleStart(pin: Point) {
 function onScale(ratio: number) {
   const fontSizePx = clamp(Math.round(scaleFromPx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
   const style = { ...props.textStyle, fontSizePx }
-  const grown = drawnLabel(props.text, style, { x: props.x, y: props.y }, props.rotation)
+  const grown = drawnLabel(
+    props.text,
+    style,
+    props.effects,
+    { x: props.x, y: props.y },
+    props.rotation,
+  )
   emit(
     'scale',
     fontSizePx,
@@ -356,7 +365,7 @@ const vertical = computed(() => props.textStyle.direction === 'vertical')
 const projection = computed(() => {
   const { sample, box } = drawn.value
   const padding =
-    sample?.padding ?? samplePadding(engineStrokeFor(props.textStyle), props.textStyle.weightPx)
+    sample?.padding ?? samplePadding(engineStrokeFor(props.effects), props.textStyle.weightPx)
   return textProjection({
     text: props.text,
     clusters: sample?.clusters ?? [],

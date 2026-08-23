@@ -107,6 +107,7 @@ function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerE
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: `${id}.png`,
     // No frame yet: a layer nothing has been written to, which is what the
     // brush most often meets and the case the frame has to grow from.
@@ -128,6 +129,7 @@ function folder(id: string, children: RasterLayerEntry[] = []): GroupLayerEntry 
     locked: false,
     opacity: 1,
     blendMode: 'pass-through',
+    effects: [],
     children,
   }
 }

@@ -72,8 +72,13 @@ const SAME_REGION = 0.5
  * on how the text is aligned.
  */
 function labelCentre(object: TextLayerEntry) {
-  return drawnLabel(textOf(object), object.style, { x: object.x, y: object.y }, object.rotation)
-    .center
+  return drawnLabel(
+    textOf(object),
+    object.style,
+    object.effects,
+    { x: object.x, y: object.y },
+    object.rotation,
+  ).center
 }
 
 /**

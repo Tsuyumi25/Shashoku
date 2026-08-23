@@ -1,4 +1,6 @@
+import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
+import { engineStrokeFor } from '@shared/effects/stroke'
 import { catalogByFace, catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
 import {
@@ -9,7 +11,6 @@ import {
   quantizeRotation,
   type Point,
 } from './labelBox'
-import { engineStrokeFor } from './textStyle'
 
 export interface LabelRaster {
   /**
@@ -64,12 +65,18 @@ function resolveFace(style: TextStyle) {
  * no second face is consulted, and the boxes say so rather than impersonating
  * the text (see ADR 0001).
  */
-function requestFor(text: string, style: TextStyle, phase: Point, rotation: number) {
+function requestFor(
+  text: string,
+  style: TextStyle,
+  effects: readonly LayerEffect[],
+  phase: Point,
+  rotation: number,
+) {
   return {
     text,
     sizePx: style.fontSizePx,
     fillColor: style.color,
-    stroke: engineStrokeFor(style),
+    stroke: engineStrokeFor(effects),
     vertical: style.direction === 'vertical',
     align: style.align,
     weightPx: style.weightPx,
@@ -82,6 +89,7 @@ function requestFor(text: string, style: TextStyle, phase: Point, rotation: numb
 export function rasterFor(
   text: string,
   style: TextStyle,
+  effects: readonly LayerEffect[],
   phase: Point = NO_PHASE,
   rotation = 0,
 ): LabelRaster {
@@ -93,7 +101,7 @@ export function rasterFor(
   // would say the wrong one.
   if (!entry && !catalogLoaded.value) return NOTHING
 
-  const req = requestFor(text, style, phase, rotation)
+  const req = requestFor(text, style, effects, phase, rotation)
 
   if (entry) {
     try {
@@ -115,6 +123,7 @@ export function rasterFor(
 function measured(
   text: string,
   style: TextStyle,
+  effects: readonly LayerEffect[],
   rotation = 0,
 ): { width: number; height: number } | null {
   if (text.length === 0) return null
@@ -122,7 +131,7 @@ function measured(
   const entry = resolveFace(style)
   if (!entry && !catalogLoaded.value) return null
 
-  const req = requestFor(text, style, NO_PHASE, rotation)
+  const req = requestFor(text, style, effects, NO_PHASE, rotation)
 
   if (entry) {
     try {
@@ -215,12 +224,13 @@ export interface DrawnLabel {
 export function drawnLabel(
   text: string,
   style: TextStyle,
+  effects: readonly LayerEffect[],
   at: Point,
   rotation = 0,
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
 
-  const upright = measured(text, style)
+  const upright = measured(text, style, effects)
   const box = labelBoxSize(style, upright)
   // The turned bitmap holds the run at its own middle, so both rectangles share
   // one centre and the frame is the same point as the ink.
@@ -229,8 +239,8 @@ export function drawnLabel(
     return { sample: null, missingFamily: null, box, center: placeLabel(middle, box, turn).center }
   }
 
-  const spun = turn === 0 ? upright : measured(text, style, turn)
+  const spun = turn === 0 ? upright : measured(text, style, effects, turn)
   const blit = spun ? { w: spun.width, h: spun.height } : box
   const { center, phase } = placeLabel(middle, blit, turn)
-  return { ...rasterFor(text, style, phase, turn), box, center }
+  return { ...rasterFor(text, style, effects, phase, turn), box, center }
 }

@@ -27,6 +27,7 @@ function page(): ProjectFile {
           locked: false,
           opacity: 1,
           blendMode: 'normal',
+          effects: [],
           x: 200,
           y: 150,
           tags: [],

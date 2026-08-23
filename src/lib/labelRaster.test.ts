@@ -5,6 +5,7 @@ import type {
   EngineMeasure,
   EngineStrokeSpec,
 } from '@shared/engine/types'
+import type { LayerEffect } from '@shared/effects/types'
 import { DEFAULT_TEXT_STYLE, type TextAlign, type TextStyle } from '@shared/text-style/types'
 import { catalog, catalogLoaded } from './fontCatalog'
 import { drawnLabel, missingFamilyLabel } from './labelRaster'
@@ -157,6 +158,9 @@ function styleWith(patch: Partial<TextStyle> = {}): TextStyle {
   return { ...DEFAULT_TEXT_STYLE, fontFamily: FAMILY, ...patch }
 }
 
+/** Nothing on top of the text: everything here is about how the text itself sets. */
+const NONE: LayerEffect[] = []
+
 /** Fresh text per call, so the sample cache never answers for a previous one. */
 let serial = 0
 function uniqueText(): string {
@@ -188,20 +192,20 @@ describe('drawnLabel', () => {
   it('hands the engine the fraction the page grid could not hold', () => {
     // Centred, where the odd 41-wide box leaves the corner on a half however
     // whole the position is.
-    const drawn = drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100.25, y: 60 })
+    const drawn = drawnLabel(uniqueText(), styleWith({ align: 'center' }), NONE, { x: 100.25, y: 60 })
 
     expect(drawn.center.x - drawn.box.w / 2).toBe(79)
     expect(calls.at(-1)?.phaseX).toBe(0.75)
   })
 
   it('asks the engine to set the text the way the style says', () => {
-    drawnLabel(uniqueText(), styleWith({ align: 'end' }), { x: 100, y: 60 })
+    drawnLabel(uniqueText(), styleWith({ align: 'end' }), NONE, { x: 100, y: 60 })
     expect(calls.at(-1)?.align).toBe('end')
   })
 
   it('asks for the same alignment when there is no face to set it with', () => {
     catalog.value = []
-    drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100, y: 60 })
+    drawnLabel(uniqueText(), styleWith({ align: 'center' }), NONE, { x: 100, y: 60 })
     expect(notdefCalls.at(-1)?.align).toBe('center')
   })
 
@@ -214,7 +218,7 @@ describe('drawnLabel', () => {
     const AT = { x: 100, y: 60 }
     const edges = (align: TextStyle['align'], text: string) => {
       catalog.value = []
-      const drawn = drawnLabel(text, styleWith({ align }), AT)
+      const drawn = drawnLabel(text, styleWith({ align }), NONE, AT)
       return { left: drawn.center.x - drawn.box.w / 2, right: drawn.center.x + drawn.box.w / 2 }
     }
 
@@ -237,7 +241,7 @@ describe('drawnLabel', () => {
     it('holds the top edge whichever way the lines are set', () => {
       const top = (align: TextStyle['align'], text: string) => {
         catalog.value = []
-        const drawn = drawnLabel(text, styleWith({ align }), AT)
+        const drawn = drawnLabel(text, styleWith({ align }), NONE, AT)
         return drawn.center.y - drawn.box.h / 2
       }
       for (const align of ['start', 'center', 'end'] as const) {
@@ -247,37 +251,37 @@ describe('drawnLabel', () => {
   })
 
   it('snaps the baseline, so nothing is asked for on the axis that stays whole', () => {
-    drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60.4 })
+    drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60.4 })
     expect(calls.at(-1)?.phaseY).toBe(0)
   })
 
   it('measures the frame before the phase, so the two cannot chase each other', () => {
-    const first = drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 })
-    const shifted = drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 })
+    const first = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 })
+    const shifted = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100.25, y: 60 })
     expect(shifted.box).toEqual(first.box)
   })
 
   it('asks once more than the cache already holds, not once per position', () => {
     const text = uniqueText()
     const style = styleWith()
-    drawnLabel(text, style, { x: 100, y: 60 })
+    drawnLabel(text, style, NONE, { x: 100, y: 60 })
     const afterFirst = calls.length
 
-    for (let i = 0; i < 40; i++) drawnLabel(text, style, { x: 100 + i / 40, y: 60 })
+    for (let i = 0; i < 40; i++) drawnLabel(text, style, NONE, { x: 100 + i / 40, y: 60 })
 
     // Four phases on the free axis, of which the first call already drew one.
     expect(calls.length - afterFirst).toBeLessThanOrEqual(3)
   })
 
   it('hands the phase to the engine in page pixels, unconverted', () => {
-    drawnLabel(uniqueText(), styleWith({ align: 'center' }), { x: 100.25, y: 60 })
+    drawnLabel(uniqueText(), styleWith({ align: 'center' }), NONE, { x: 100.25, y: 60 })
     // The odd box halves onto a quarter: 100.25 - 41/2 is 79.75, so 0.75 is
     // what is left once the corner lands on 79.
     expect(calls.at(-1)?.phaseX).toBeCloseTo(0.75, 9)
   })
 
   it('still places an empty label, which is what keeps it reachable', () => {
-    const drawn = drawnLabel('', styleWith(), { x: 100.4, y: 60.4 })
+    const drawn = drawnLabel('', styleWith(), NONE, { x: 100.4, y: 60.4 })
     expect(drawn.sample).toBeNull()
     expect(drawn.missingFamily).toBeNull()
     expect(Number.isInteger(drawn.center.x - drawn.box.w / 2)).toBe(true)
@@ -299,7 +303,7 @@ describe('drawnLabel', () => {
     ]
     drawnLabel(
       uniqueText(),
-      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }),
+      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }), NONE,
       { x: 10, y: 10 },
     )
     expect(calls.at(-1)?.postscriptName).toBe('TestFace-Bold')
@@ -308,7 +312,7 @@ describe('drawnLabel', () => {
   it('falls back to the family where the named face is absent, not to boxes', () => {
     const drawn = drawnLabel(
       uniqueText(),
-      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }),
+      styleWith({ fontFace: 'TestFace-Bold', fontStyleName: 'Bold' }), NONE,
       { x: 10, y: 10 },
     )
     expect(drawn.missingFamily).toBeNull()
@@ -317,7 +321,7 @@ describe('drawnLabel', () => {
   })
 
   it('draws boxes for a family this machine does not have, and names the family', () => {
-    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
     expect(drawn.sample).not.toBeNull()
     expect(drawn.missingFamily).toBe('Absent')
     expect(notdefCalls.length).toBeGreaterThan(0)
@@ -325,18 +329,18 @@ describe('drawnLabel', () => {
 
   it('hands the engine the text, which is what the grid is shaped by', () => {
     const text = uniqueText()
-    drawnLabel(text, styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    drawnLabel(text, styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
     expect(notdefCalls.at(-1)?.text).toBe(text)
   })
 
   it('frames one cell per character, so the frame is not a lone square', () => {
     const text = uniqueText()
-    const drawn = drawnLabel(text, styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    const drawn = drawnLabel(text, styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
     expect(drawn.box).toEqual({ w: text.length * NOTDEF_EM, h: NOTDEF_EM })
   })
 
   it('gives a second line a second row of cells', () => {
-    const drawn = drawnLabel(`${uniqueText()}\nxy`, styleWith({ fontFamily: 'Absent' }), {
+    const drawn = drawnLabel(`${uniqueText()}\nxy`, styleWith({ fontFamily: 'Absent' }), NONE, {
       x: 10,
       y: 10,
     })
@@ -347,14 +351,14 @@ describe('drawnLabel', () => {
     const text = uniqueText()
     const drawn = drawnLabel(
       text,
-      styleWith({ fontFamily: 'Absent', direction: 'vertical' }),
+      styleWith({ fontFamily: 'Absent', direction: 'vertical' }), NONE,
       { x: 10, y: 10 },
     )
     expect(drawn.box).toEqual({ w: NOTDEF_EM, h: text.length * NOTDEF_EM })
   })
 
   it('lands the grid on the page grid, as it does a run', () => {
-    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), {
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, {
       x: 100.25,
       y: 60,
     })
@@ -365,11 +369,11 @@ describe('drawnLabel', () => {
   it('tells an unchosen family apart from a family this machine lacks', () => {
     // Both draw boxes, but only one of them is the user's next move, so the
     // two cannot collapse into the same value.
-    const unchosen = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), { x: 10, y: 10 })
+    const unchosen = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), NONE, { x: 10, y: 10 })
     expect(unchosen.sample).not.toBeNull()
     expect(unchosen.missingFamily).toBe('')
 
-    const absent = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    const absent = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
     expect(absent.missingFamily).toBe('Absent')
   })
 
@@ -380,12 +384,12 @@ describe('drawnLabel', () => {
 
   it("hands the object's angle to the engine rather than turning the bitmap after", () => {
     const quarter = Math.PI / 2
-    drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, quarter)
+    drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 }, quarter)
     expect(calls.at(-1)?.rotation).toBeCloseTo(quarter, 9)
   })
 
   it('asks upright once, so the frame measures the object and not its turn', () => {
-    const drawn = drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, Math.PI / 2)
+    const drawn = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 }, Math.PI / 2)
     // BITMAP is 41 x 20; a quarter turn makes the bitmap 20 x 41, but the box
     // is what the object measures standing up.
     expect(drawn.box).toEqual({ w: BITMAP.width, h: BITMAP.height })
@@ -393,7 +397,7 @@ describe('drawnLabel', () => {
   })
 
   it('lands the turned bitmap on the grid, not the upright box', () => {
-    const drawn = drawnLabel(uniqueText(), styleWith(), { x: 100, y: 60 }, Math.PI / 2)
+    const drawn = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 }, Math.PI / 2)
     // The corner that gets blitted is the turned one, so it is that half-width
     // which has to come out whole.
     expect(Number.isInteger(drawn.center.x - BITMAP.height / 2)).toBe(true)
@@ -401,7 +405,7 @@ describe('drawnLabel', () => {
 
   it('rasterizes only the bitmap it draws; the frame is measured', () => {
     const text = uniqueText()
-    drawnLabel(text, styleWith(), { x: 100.25, y: 60 })
+    drawnLabel(text, styleWith(), NONE, { x: 100.25, y: 60 })
     // At zero the turned pass is the same question as the upright one, so one
     // measure answers both.
     expect(calls).toHaveLength(1)
@@ -409,7 +413,7 @@ describe('drawnLabel', () => {
   })
 
   it('rasterizes once even turned, where the turn used to cost two more', () => {
-    drawnLabel(uniqueText(), styleWith(), { x: 100.25, y: 60 }, Math.PI / 3)
+    drawnLabel(uniqueText(), styleWith(), NONE, { x: 100.25, y: 60 }, Math.PI / 3)
     expect(calls).toHaveLength(1)
     // Upright for the frame, turned for the blit.
     expect(measureCalls).toHaveLength(2)
@@ -426,7 +430,7 @@ describe('drawnLabel', () => {
 
     /** Which axis came back whole, which is the one that got snapped. */
     function snapped(rotation: number) {
-      drawnLabel(uniqueText(), styleWith(), ANCHOR, rotation)
+      drawnLabel(uniqueText(), styleWith(), NONE, ANCHOR, rotation)
       const call = calls.at(-1)
       return { x: call?.phaseX === 0, y: call?.phaseY === 0 }
     }
@@ -452,7 +456,7 @@ describe('drawnLabel', () => {
     // Not yet answered is not the same as absent, and a box that appeared for
     // half a second on every start would say the wrong one.
     catalogLoaded.value = false
-    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), { x: 10, y: 10 })
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
     expect(drawn.sample).toBeNull()
     expect(drawn.missingFamily).toBeNull()
     expect(notdefCalls).toHaveLength(0)

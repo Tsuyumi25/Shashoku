@@ -22,6 +22,7 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     x: 0,
     y: 0,
     tags: [],

@@ -66,7 +66,6 @@ import type { TextStyle } from '@shared/text-style/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/text-style/batch'
-import { cloneTextStyle } from '@shared/text-style/clone'
 import { sameTagSet, tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import {
@@ -149,7 +148,7 @@ watch(
       bucketObjectsOf(file.pageId, file.page.layers).map((object) => ({
         ...object,
         tags: [...object.tags],
-        style: cloneTextStyle(object.style),
+        style: { ...object.style },
       })),
     )
   },

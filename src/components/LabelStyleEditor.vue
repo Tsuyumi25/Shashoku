@@ -9,7 +9,14 @@
         其中有不在目前頁面的物件
       </p>
 
-      <StyleEditor :value="representative" :mixed="mixedFields" @patch="onStylePatch" />
+      <StyleEditor
+        :value="representative"
+        :mixed="mixedFields"
+        :effects="representativeEffects"
+        :effects-mixed="effectsMixed"
+        @patch="onStylePatch"
+        @effects="onEffects"
+      />
     </template>
 
     <p v-else class="px-0.5 text-xs text-muted-foreground">未選取標籤</p>
@@ -18,6 +25,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/text-style/batch'
@@ -41,6 +49,16 @@ const mixedFields = computed(() => {
   return TEXT_STYLE_FIELDS.filter((field) => sharedValue(styles, field).kind === 'many')
 })
 
+/** The same standing-in as `representative`, for what the node carries. */
+const representativeEffects = computed<readonly LayerEffect[]>(
+  () => targets.value[0]?.label.effects ?? [],
+)
+
+const effectsMixed = computed(() => {
+  const first = JSON.stringify(representativeEffects.value)
+  return targets.value.some(({ label }) => JSON.stringify(label.effects) !== first)
+})
+
 /**
  * A selection reaches across pages and most of it may be somewhere nobody can
  * see, so an edit about to change forty objects on six pages says so before
@@ -54,5 +72,9 @@ const scopeText = computed(() => {
 
 function onStylePatch(patch: Partial<TextStyle>) {
   editor.cmdApplyStyleToSelection(patch)
+}
+
+function onEffects(effects: LayerEffect[]) {
+  editor.cmdApplyEffectsToSelection(effects)
 }
 </script>

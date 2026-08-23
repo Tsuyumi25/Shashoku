@@ -24,7 +24,6 @@ describe('parseTextStyle', () => {
       fontFamily: 'Some Face',
       fontSizePx: 31,
       direction: 'vertical' as const,
-      effects: [{ kind: 'stroke' as const, width: 3, color: '#ffffff', position: 'outside' as const }],
     }
     expect(parseTextStyle(serializeTextStyle(style), 'style', fail)).toEqual(style)
   })

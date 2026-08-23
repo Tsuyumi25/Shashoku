@@ -13,6 +13,7 @@ import type {
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { normalizeEdges, type ReadingEdge } from './readingGraph'
 import { linesOf, textOf } from './text'
+import { parseEffects, serializeEffects } from '../effects/schema'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
@@ -105,7 +106,14 @@ function parseLayerBase(v: Record<string, unknown>, at: string, kind: string): L
   }
 
   const finalId = typeof id === 'string' && id.length > 0 ? id : generateId()
-  return { id: finalId, visible, locked, opacity: finalOpacity, blendMode: finalBlendMode }
+  return {
+    id: finalId,
+    visible,
+    locked,
+    opacity: finalOpacity,
+    blendMode: finalBlendMode,
+    effects: parseEffects(v.effects, `${at}.effects`, fail),
+  }
 }
 
 function parseName(v: Record<string, unknown>, at: string): string {
@@ -330,6 +338,7 @@ export function baseMapLayer(file: string, width: number, height: number): Raste
     locked: true,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     name: '底圖',
     file,
     x: 0,
@@ -443,6 +452,7 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
   }
   if (l.opacity !== 1) base.opacity = l.opacity
   if (l.blendMode !== defaultBlendMode(l.kind)) base.blendMode = l.blendMode
+  if (l.effects.length > 0) base.effects = serializeEffects(l.effects)
   if (l.kind === 'raster') {
     return {
       ...base,

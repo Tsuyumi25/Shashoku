@@ -1,8 +1,9 @@
+import type { LayerEffect } from '../effects/types'
 import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 10
+export const MANIFEST_SCHEMA_VERSION = 11
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -28,6 +29,20 @@ export interface LayerEntryBase {
 
   /** Concrete for the same reason. A folder's default is `PASS_THROUGH`. */
   blendMode: string
+
+  /**
+   * What this node carries on top of what it is — a stroke, today.
+   *
+   * On the base rather than on the text object, because what is added on top of
+   * a node is a property of the node: a raster layer has no style to hang one
+   * off and still has an edge to grow a band from. Concrete like the two above,
+   * empty being both the default and what the persisted form leaves out.
+   *
+   * ⚠️ Composited rather than baked. Nothing here changes the node's own
+   * pixels — turning a stroke off returns the layer byte for byte, and a text
+   * object is never rasterized into the page.
+   */
+  effects: LayerEffect[]
 }
 
 

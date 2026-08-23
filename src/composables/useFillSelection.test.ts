@@ -29,6 +29,7 @@ function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerE
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: `${id}.png`,
     x: 0,
     y: 0,
@@ -48,6 +49,7 @@ function folder(id: string, children: RasterLayerEntry[], extra: Partial<GroupLa
     locked: false,
     opacity: 1,
     blendMode: 'pass-through',
+    effects: [],
     children,
     ...extra,
   }

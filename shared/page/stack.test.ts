@@ -17,6 +17,7 @@ function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     x: 0,
     y: 0,
     tags: [],
@@ -40,6 +41,7 @@ function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerE
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: `${id}.png`,
     x: 0,
     y: 0,
@@ -63,6 +65,7 @@ function folder(
     locked: false,
     opacity: 1,
     blendMode: PASS_THROUGH,
+    effects: [],
     children,
     ...extra,
   }

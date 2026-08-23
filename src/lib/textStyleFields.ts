@@ -15,7 +15,6 @@ export const TEXT_STYLE_FIELD_NAMES: Record<keyof TextStyle, string> = {
   color: '文字色',
   leadingPercent: '行距',
   weightPx: '字粗',
-  effects: '效果',
 }
 
 /** One field's value as a person reads it, in the same words wherever it is shown. */
@@ -27,6 +26,5 @@ export function styleFieldText(style: TextStyle, field: keyof TextStyle): string
   if (field === 'leadingPercent') return `${value as number}%`
   if (field === 'direction') return value === 'vertical' ? '直排' : '橫排'
   if (field === 'align') return { start: '起', center: '中', end: '末' }[value as string] ?? ''
-  if (field === 'effects') return (value as unknown[]).length === 0 ? '無' : '描邊'
   return String(value)
 }

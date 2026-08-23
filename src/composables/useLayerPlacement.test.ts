@@ -66,6 +66,7 @@ function raster(extra: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     file: 'r.png',
     x: 10,
     y: 10,

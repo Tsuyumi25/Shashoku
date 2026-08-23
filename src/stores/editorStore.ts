@@ -23,6 +23,8 @@ import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
+import type { LayerEffect } from '@shared/effects/types'
+import { cloneEffects } from '@shared/effects/clone'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import { sourceForNewObject } from '@shared/ocr/candidates'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -635,6 +637,7 @@ export const useEditorStore = defineStore('editor', () => {
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      effects: [],
       x,
       y,
       tags: [],
@@ -643,7 +646,7 @@ export const useEditorStore = defineStore('editor', () => {
       // Nothing near enough leaves the slot unanswered rather than settled,
       // so a later run is still free to fill it.
       source: sourceForNewObject(
-        drawnLabel('', project.header.seedStyle, { x, y }, 0).center,
+        drawnLabel('', project.header.seedStyle, [], { x, y }, 0).center,
         project.readingsOfPage(currentPageId.value),
       ),
       ownSource: '',
@@ -997,6 +1000,7 @@ export const useEditorStore = defineStore('editor', () => {
       locked: false,
       opacity: 1,
       blendMode: PASS_THROUGH,
+      effects: [],
       children: [],
     }
     let path: number[] | undefined
@@ -1302,6 +1306,33 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  /**
+   * The whole list at once rather than one effect at a time. What a node
+   * carries is an ordered set — turning the stroke off is the same write as
+   * changing its width — so a patch per effect would need a key to address one
+   * by, and there is nothing to key on.
+   */
+  function cmdApplyEffectsToSelection(effects: readonly LayerEffect[]) {
+    const project = useProjectStore()
+    const targets = selectedTextObjects()
+    if (targets.length === 0) return
+    const before = targets.map(({ pageId, label }) => ({
+      pageId,
+      id: label.id,
+      effects: cloneEffects(label.effects),
+    }))
+    const after = before.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
+    const write = (states: typeof before) => {
+      for (const { pageId, id, effects: value } of states)
+        project.setLayerEffects(pageId, id, value)
+    }
+    pushCommand({
+      label: `effects ${targets.length}`,
+      do: () => write(after),
+      undo: () => write(before),
+    })
+  }
+
   /** Every text object in the chapter, which is what the statistics count. */
   function chapterBucketObjects(): BucketObject[] {
     const project = useProjectStore()
@@ -1591,6 +1622,7 @@ export const useEditorStore = defineStore('editor', () => {
     selectedTextObjects,
     batchScope,
     cmdApplyStyleToSelection,
+    cmdApplyEffectsToSelection,
     cmdToggleTagOnSelection,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,

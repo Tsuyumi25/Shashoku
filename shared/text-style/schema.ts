@@ -1,14 +1,7 @@
 
 
 
-import type {
-  StrokeEffect,
-  StrokePosition,
-  TextAlign,
-  TextDirection,
-  TextEffect,
-  TextStyle,
-} from './types'
+import type { TextAlign, TextDirection, TextStyle } from './types'
 
 type Fail = (message: string) => never
 
@@ -27,7 +20,6 @@ export const TEXT_STYLE_FIELDS = [
   'color',
   'leadingPercent',
   'weightPx',
-  'effects',
 ] as const satisfies readonly (keyof TextStyle)[]
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -44,47 +36,6 @@ function parseAlign(v: unknown, at: string, fail: Fail): TextAlign {
   fail(`${at} 必須是 'start' | 'center' | 'end'`)
 }
 
-function parseStrokePosition(v: unknown, at: string, fail: Fail): StrokePosition {
-  if (v === 'inside' || v === 'center' || v === 'outside') return v
-  fail(`${at} 必須是 'inside' | 'center' | 'outside'`)
-}
-
-function parseStrokeEffect(v: Record<string, unknown>, at: string, fail: Fail): StrokeEffect {
-  const { width, color, position } = v
-  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0)
-    fail(`${at}.width 必須是正數`)
-  if (typeof color !== 'string' || color.length === 0)
-    fail(`${at}.color 必須是非空字串`)
-  return {
-    kind: 'stroke',
-    width,
-    color,
-    position: parseStrokePosition(position, `${at}.position`, fail),
-  }
-}
-
-function parseTextEffect(v: unknown, at: string, fail: Fail): TextEffect {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { kind } = v
-  if (kind === 'stroke') return parseStrokeEffect(v, at, fail)
-  fail(`${at}.kind 未知效果類型 '${String(kind)}'`)
-}
-
-function parseEffectsArray(v: unknown, at: string, fail: Fail): TextEffect[] {
-  if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
-  return v.map((e, i) => parseTextEffect(e, `${at}[${i}]`, fail))
-}
-
-function serializeTextEffect(e: TextEffect): Record<string, unknown> {
-  if (e.kind === 'stroke') {
-    return { kind: 'stroke', width: e.width, color: e.color, position: e.position }
-  }
-  
-  
-  throw new Error(`unknown text effect kind: ${(e as { kind: string }).kind}`)
-}
-
-
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const {
@@ -97,7 +48,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     color,
     leadingPercent,
     weightPx,
-    effects,
   } = v
   // Empty is a value: no family has been chosen yet. It is stored rather than
   // written as some placeholder name because a project file identifies a font
@@ -115,8 +65,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (typeof color !== 'string' || color.length === 0) fail(`${at}.color 必須是非空字串`)
   if (typeof leadingPercent !== 'number' || !Number.isFinite(leadingPercent) || leadingPercent <= 0)
     fail(`${at}.leadingPercent 必須是正數`)
-  const parsedEffects =
-    effects === undefined ? [] : parseEffectsArray(effects, `${at}.effects`, fail)
   // Absent means the face is drawn as it was designed, which is what every
   // file written before this field existed meant.
   if (weightPx !== undefined && (typeof weightPx !== 'number' || !Number.isFinite(weightPx)))
@@ -131,7 +79,6 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     color,
     leadingPercent,
     weightPx: weightPx === undefined ? 0 : weightPx,
-    effects: parsedEffects,
   }
 }
 
@@ -147,7 +94,6 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
     color: s.color,
     leadingPercent: s.leadingPercent,
     weightPx: s.weightPx,
-    effects: s.effects.map(serializeTextEffect),
   }
 }
 

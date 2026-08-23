@@ -116,7 +116,13 @@ const drawnTexts = computed(() => {
     const entry = node.entry
     out.set(
       entry.id,
-      drawnLabel(textOf(entry), entry.style, { x: entry.x, y: entry.y }, entry.rotation),
+      drawnLabel(
+        textOf(entry),
+        entry.style,
+        entry.effects,
+        { x: entry.x, y: entry.y },
+        entry.rotation,
+      ),
     )
   }
   return out

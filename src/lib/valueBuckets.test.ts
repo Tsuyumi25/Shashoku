@@ -24,7 +24,6 @@ const ALL: (keyof TextStyle)[] = [
   'align',
   'color',
   'leadingPercent',
-  'effects',
 ]
 
 describe('groupByValue', () => {

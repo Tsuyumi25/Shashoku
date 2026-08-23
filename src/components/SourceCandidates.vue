@@ -103,7 +103,7 @@ const rows = computed(() => {
   const o = object.value
   const file = currentFile.value
   if (!o || !file) return []
-  const centre = drawnLabel(textOf(o), o.style, { x: o.x, y: o.y }, o.rotation).center
+  const centre = drawnLabel(textOf(o), o.style, o.effects, { x: o.x, y: o.y }, o.rotation).center
   return candidatesFor(o, centre, pool.value, file.page)
 })
 

@@ -12,6 +12,8 @@ import type {
   TextSource,
   TranslationCandidate,
 } from '@shared/page/types'
+import type { LayerEffect } from '@shared/effects/types'
+import { cloneEffects } from '@shared/effects/clone'
 import { absorb, type OcrArrival } from '@shared/ocr/pool'
 import { PASS_THROUGH } from '@shared/page/types'
 import {
@@ -1008,6 +1010,20 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /**
+   * Any entry, like the eye and the opacity — what a node carries on top of
+   * itself is a property of the node, and a folder wears one as readily as a
+   * layer does.
+   */
+  function setLayerEffects(pageId: string, layerId: string, effects: readonly LayerEffect[]) {
+    const file = pageById(pageId)
+    if (!file) return
+    const entry = findEntry(file.page.layers, layerId)
+    if (!entry) return
+    entry.effects = cloneEffects(effects)
+    markPageDirty(pageId)
+  }
+
   /** Every text object in the chapter, with the page each one came from. */
   function allTextObjects(): { pageId: string; label: TextLayerEntry }[] {
     const out: { pageId: string; label: TextLayerEntry }[] = []
@@ -1173,6 +1189,7 @@ export const useProjectStore = defineStore('project', () => {
     readingsOfPage,
     forgetReadings,
     setLabelStyle,
+    setLayerEffects,
     allTextObjects,
     setLayerVisible,
     setLayerLocked,

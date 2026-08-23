@@ -25,6 +25,7 @@ function label(id: string, text = ''): TextLayerEntry {
     locked: false,
     opacity: 1,
     blendMode: 'normal',
+    effects: [],
     x: 200,
     y: 150,
     tags: [],
@@ -701,6 +702,7 @@ describe('layer tree edits', () => {
       locked: false,
       opacity: 1,
       blendMode: PASS_THROUGH,
+      effects: [],
       children,
     }
   }
@@ -714,6 +716,7 @@ describe('layer tree edits', () => {
       locked: false,
       opacity: 1,
       blendMode: 'normal',
+      effects: [],
       file: `${id}.png`,
       x: 0,
       y: 0,
@@ -1132,6 +1135,7 @@ describe('deleteSelection', () => {
       locked: false,
       opacity: 1,
       blendMode: PASS_THROUGH,
+      effects: [],
       children,
     }
   }
@@ -1377,6 +1381,7 @@ describe('selectLayerBy', () => {
       locked: false,
       opacity: 1,
       blendMode: PASS_THROUGH,
+      effects: [],
       children,
     }
   }
@@ -2151,6 +2156,7 @@ describe('drawing lines between text objects', () => {
         locked: false,
         opacity: 1,
         blendMode: PASS_THROUGH,
+        effects: [],
         children: [a, b],
       },
     ]
