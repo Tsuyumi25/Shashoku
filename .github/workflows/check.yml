@@ -130,22 +130,23 @@ jobs:
       # Nix it installs free to move.
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11 # v3.22.2
 
-      # This repository's own Actions cache and nothing else — it does carry
-      # across runs, which is the point, but it is reachable from nowhere but
-      # here. Left alone, FlakeHub turns itself on wherever the token allows,
-      # which would make this an outside service with an account behind it.
-      # Publishing a closure users can pull from is the distribution question
-      # and is answered with the rest of that.
+      # A real binary cache rather than a scratch space beside the runner, which
+      # settles two things at once: what CI does not have to rebuild, and where
+      # someone installing this gets it prebuilt from. Entries are addressed by
+      # store path, so pushing one that is already there is nothing.
       #
-      # ⚠️ The pin fixes the Action and not the cache helper it fetches, which
-      # comes off that project's `main` by default. Naming a revision instead
-      # would finish the job, but the helper's newest release is a year behind
-      # the branch this Action expects, so there is nothing settled to point at
-      # — the last link stays movable, deliberately and not by oversight.
-      - uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+      # The runner-scoped cache this replaces addressed entries by a fresh
+      # random suffix each time, to overwrite without deleting — so a closure
+      # pulled in and used was pushed straight back under new keys, and 2 GiB of
+      # PyTorch was held three times over against a 10 GiB ceiling.
+      #
+      # Nothing here reads the closure it pushes: `cache.nixos.org` is excluded
+      # by default, so what lands is what this repository builds and nothing it
+      # merely depends on.
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
-          use-flakehub: false
-          diagnostic-endpoint: ""
+          name: shashoku
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       # Whether the lockfile still resolves to what the manifest asks for. The
       # Nix side consumes `uv.lock` through uv2nix and would happily build a
