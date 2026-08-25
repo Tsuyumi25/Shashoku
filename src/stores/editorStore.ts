@@ -6,6 +6,7 @@ import type {
   RasterLayerEntry,
   SourceBody,
   TextLayerEntry,
+  TranslationCandidate,
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
@@ -506,6 +507,15 @@ export const useEditorStore = defineStore('editor', () => {
      * is typed into the other half of the object.
      */
     side: TextSide
+    /**
+     * Whether the proposal being typed into was already somebody's when the
+     * caret opened.
+     *
+     * ⚠️ Taken here and nowhere later. Typing writes through and stamps as it
+     * goes, so by the time the session is committed the answer has already been
+     * overwritten by the very edit being recorded.
+     */
+    wasTheirs: boolean
   } | null>(null)
 
   /** Undefined once the label being edited has been deleted under the caret. */
@@ -526,7 +536,9 @@ export const useEditorStore = defineStore('editor', () => {
   function beginTextEdit(pageId: string, labelId: string, from: string) {
     commitTextEdit()
     if (isLayerLocked(labelId)) return
-    pendingTextEdit.value = { pageId, labelId, from, side: textSide.value }
+    const side = textSide.value
+    const wasTheirs = chosenCandidate(pageId, labelId, side)?.human === true
+    pendingTextEdit.value = { pageId, labelId, from, side, wasTheirs }
   }
 
   function commitTextEdit() {
@@ -538,7 +550,14 @@ export const useEditorStore = defineStore('editor', () => {
     pendingTextEdit.value = null
     // The label was deleted mid-edit, and the delete already captured its text.
     if (text === undefined) return
-    cmdUpdateLabelText(pending.pageId, pending.labelId, pending.side, pending.from, text)
+    cmdUpdateLabelText(
+      pending.pageId,
+      pending.labelId,
+      pending.side,
+      pending.from,
+      text,
+      pending.wasTheirs,
+    )
   }
 
   /**
@@ -1452,6 +1471,16 @@ export const useEditorStore = defineStore('editor', () => {
    * A lock that still lets the words be retyped is not protecting the thing it
    * was put on, so this refuses like every other change rather than being the
    * one exception content slips through.
+   *
+   * ⭐ The one door for typing into an object, whichever surface the caret is
+   * on. Both of them reach a translation through whichever row it is reading, so
+   * both leave the same two marks — the words, and the amulet saying somebody
+   * has taken those words as their own. It used to depend on where the hand was,
+   * which made the same sentence, from the same person, protected or not by an
+   * accident of which panel they were looking at.
+   *
+   * ⚠️ The amulet goes on at the keystroke and comes off here, so an undo hands
+   * an untouched proposal back to the model that made it.
    */
   function cmdUpdateLabelText(
     pageId: string,
@@ -1459,13 +1488,114 @@ export const useEditorStore = defineStore('editor', () => {
     side: TextSide,
     oldText: string,
     newText: string,
+    wasTheirs?: boolean,
   ) {
     if (oldText === newText || isLayerLocked(labelId)) return
     const project = useProjectStore()
+    const held = chosenCandidate(pageId, labelId, side)
+    // ⚠️ Read now only for a caller that has not written anything through yet.
+    // An editing session has, and stamped as it went, so it carries the answer
+    // from before the first keystroke.
+    const was = wasTheirs ?? held?.human === true
     pushCommand({
       label: `update-text ${labelId}`,
       do: () => project.updateLabelText(pageId, labelId, side, newText),
-      undo: () => project.updateLabelText(pageId, labelId, side, oldText),
+      undo: () => {
+        project.updateLabelText(pageId, labelId, side, oldText)
+        if (held) project.setTranslationHand(pageId, labelId, held.id, was)
+      },
+    })
+  }
+
+  /** The proposal an object is reading, when it is reading one. */
+  function chosenCandidate(
+    pageId: string,
+    labelId: string,
+    side: TextSide,
+  ): TranslationCandidate | null {
+    if (side !== 'translation') return null
+    const project = useProjectStore()
+    const body = project.labelById(pageId, labelId)?.translation
+    if (!body || body.chosen === null) return null
+    return body.candidates.find((c) => c.id === body.chosen) ?? null
+  }
+
+  /**
+   * Which line an object reads as. `null` is the lines it was typed with.
+   *
+   * ⚠️ On the stack, unlike the panel this replaces, which wrote straight
+   * through. Picking is the decision the whole list exists to make, and a Ctrl+Z
+   * that skipped past it to take back the sentence before would be undoing the
+   * wrong thing at the one moment somebody is sure what they just did.
+   */
+  function cmdPickTranslation(pageId: string, labelId: string, id: string | null) {
+    if (isLayerLocked(labelId)) return
+    const project = useProjectStore()
+    const was = project.labelById(pageId, labelId)?.translation.chosen ?? null
+    if (was === id) return
+    pushCommand({
+      label: `pick-translation ${labelId}`,
+      do: () => project.setLabelTranslation(pageId, labelId, id),
+      undo: () => project.setLabelTranslation(pageId, labelId, was),
+    })
+  }
+
+  /**
+   * A candidate somebody asked for: blank, theirs, and already being read.
+   *
+   * ⭐ Blank rather than a copy of what is showing. A copy arrives already
+   * saying something, and a row that says something nobody wrote is one somebody
+   * has to read before they can dismiss it. Picked straight away, since asking
+   * for a blank and then having to go and find it says the request meant
+   * nothing.
+   *
+   * ⚠️ The id comes from the caller so that redo brings back the same proposal
+   * rather than a twin of it — the chosen slot names it, and a fresh id would
+   * leave that slot pointing at nothing.
+   */
+  function cmdAddTranslationCandidate(pageId: string, labelId: string, id: string) {
+    if (isLayerLocked(labelId)) return
+    const project = useProjectStore()
+    const body = project.labelById(pageId, labelId)?.translation
+    if (!body) return
+    const at = body.candidates.length
+    const was = body.chosen
+    pushCommand({
+      label: `add-translation ${labelId}`,
+      do: () => {
+        project.insertTranslation(pageId, labelId, { id, lines: [''], human: true }, at)
+        project.setLabelTranslation(pageId, labelId, id)
+      },
+      undo: () => {
+        project.setLabelTranslation(pageId, labelId, was)
+        project.removeTranslation(pageId, labelId, id)
+      },
+    })
+  }
+
+  /**
+   * A candidate thrown away.
+   *
+   * ⭐ Deleting the one being read drops the object back to its own typed lines
+   * rather than to another proposal. What those lines are is the last thing
+   * anybody chose for themselves; picking the next proposal along would be the
+   * program making a choice out of the deletion, which said nothing about it.
+   */
+  function cmdRemoveTranslation(pageId: string, labelId: string, id: string) {
+    if (isLayerLocked(labelId)) return
+    const project = useProjectStore()
+    const body = project.labelById(pageId, labelId)?.translation
+    const at = body?.candidates.findIndex((c) => c.id === id) ?? -1
+    if (!body || at === -1) return
+    const was = { ...body.candidates[at], lines: [...body.candidates[at].lines] }
+    const chosen = body.chosen
+    pushCommand({
+      label: `remove-translation ${labelId}`,
+      do: () => project.removeTranslation(pageId, labelId, id),
+      undo: () => {
+        project.insertTranslation(pageId, labelId, was, at)
+        project.setLabelTranslation(pageId, labelId, chosen)
+      },
     })
   }
 
@@ -1878,6 +2008,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetOpacity,
     cmdSetBlendMode,
     cmdUpdateLabelText,
+    cmdPickTranslation,
+    cmdAddTranslationCandidate,
+    cmdRemoveTranslation,
     selectedNodes,
     selectedTextObjects,
     batchScope,

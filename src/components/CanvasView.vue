@@ -169,6 +169,8 @@
             :caret-key="object.id === textEditingId ? caretKey : 0"
             @edit-at="beginCanvasTextEdit(object.id, $event)"
             @select-text="(anchor, focus) => setTextRange(anchor, focus)"
+            @pointerenter="pointedObjectId = object.id"
+            @pointerleave="pointedObjectId = null"
             @select="onSelectObject(object.id, $event)"
             @move="moveLabelTo(object.id, $event)"
             @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -187,6 +189,18 @@
           has moved on to what it should say instead.
         -->
         <SourceCards v-if="pageReady && editor.textSide === 'source'" />
+
+        <!--
+          The translations' own lists, off the document rather than on it: what
+          a candidate is judged against is the source and the other candidates,
+          none of which is anywhere on the artwork. Only while the translation
+          is the side being worked on — under the source tool there is nothing
+          here to choose between yet.
+        -->
+        <TranslationCards
+          v-if="pageReady && editor.textSide === 'translation'"
+          :linked="linkedObjectId"
+        />
 
         <!--
           A rectangle drawn on the page, so it stands on the stage with the rest
@@ -250,6 +264,7 @@ import OcrOverlay from '@/components/OcrOverlay.vue'
 import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
 import SourceCards from '@/components/SourceCards.vue'
+import TranslationCards from '@/components/TranslationCards.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
@@ -437,6 +452,16 @@ const objects = computed(() => {
     }
   })
 })
+
+/**
+ * Which object's translation list is joined to it by a line.
+ *
+ * ⭐ Pointing at one wins over having selected one: the selection is where the
+ * work is, and the pointer is what the reader is asking about right now.
+ */
+const pointedObjectId = ref<string | null>(null)
+
+const linkedObjectId = computed(() => pointedObjectId.value ?? editor.cursorId)
 
 /**
  * The raster layers wearing a frame: every one that is drawn and can be taken

@@ -9,6 +9,7 @@ import type {
   OcrCandidatePersisted,
   RasterLayerEntry,
   TextLayerEntry,
+  TranslationCandidate,
 } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf, textOf, textOfBody } from '@shared/page/text'
@@ -1708,6 +1709,7 @@ describe('editBy', () => {
       labelId: 'b',
       from: 'b0',
       side: 'translation',
+      wasTheirs: false,
     })
   })
 
@@ -1727,6 +1729,7 @@ describe('editBy', () => {
       labelId: 'b',
       from: 'b0',
       side: 'translation',
+      wasTheirs: false,
     })
   })
 })
@@ -2600,5 +2603,149 @@ describe('a reading dropped on an object that already had one', () => {
     const { project, editor } = openOnePage([locked])
     editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
     expect(textOfBody(labelsOf(project)[0].source)).toBe('あいつ')
+  })
+})
+
+describe('the translation candidates', () => {
+  function withCandidates(...candidates: TranslationCandidate[]): TextLayerEntry {
+    const entry = label('a', '自己打的')
+    entry.translation.candidates = candidates
+    return entry
+  }
+
+  const rowsOf = (project: ReturnType<typeof useProjectStore>) =>
+    labelsOf(project)[0].translation.candidates
+  const chosenOf = (project: ReturnType<typeof useProjectStore>) =>
+    labelsOf(project)[0].translation.chosen
+
+  /**
+   * ⭐ The two doors are one door. Typing reaches whichever row the object is
+   * reading, whether the caret is in the object on the canvas or in its list, so
+   * the amulet lands either way — where it used to depend on which panel the
+   * person happened to be looking at.
+   */
+  it('takes a proposal as your own the moment it is typed into, from either door', () => {
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    project.updateLabelText(PAGE, 'a', 'translation', '我改的')
+    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我改的'], human: true })
+  })
+
+  /** Or a model could no longer withdraw words it wrote and nobody kept. */
+  it('hands an untouched proposal back to the model when the typing is undone', () => {
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    editor.beginTextEdit(PAGE, 'a', '模型的')
+    project.updateLabelText(PAGE, 'a', 'translation', '我改的')
+    editor.commitTextEdit()
+    editor.undo()
+    expect(rowsOf(project)[0].lines).toEqual(['模型的'])
+    expect(rowsOf(project)[0].human).toBeUndefined()
+  })
+
+  /** A proposal that was already somebody's stays theirs through an undo. */
+  it('leaves a proposal that was already yours marked as yours', () => {
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'h', lines: ['我寫的'], human: true }),
+    ])
+    editor.cmdPickTranslation(PAGE, 'a', 'h')
+    editor.beginTextEdit(PAGE, 'a', '我寫的')
+    project.updateLabelText(PAGE, 'a', 'translation', '再改一次')
+    editor.commitTextEdit()
+    editor.undo()
+    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我寫的'], human: true })
+  })
+
+  /**
+   * ⚠️ The decision the whole list exists to make. A Ctrl+Z that skipped past it
+   * to take back the sentence before would undo the wrong thing at the one
+   * moment somebody is sure what they just did.
+   */
+  it('takes a pick back', () => {
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    expect(chosenOf(project)).toBe('m')
+    editor.undo()
+    expect(chosenOf(project)).toBeNull()
+  })
+
+  it('has nothing to record for picking the row already being read', () => {
+    const { editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    editor.cmdPickTranslation(PAGE, 'a', null)
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('adds a candidate blank, yours, and already being read', () => {
+    const { project, editor } = openOnePage([withCandidates()])
+    editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
+    expect(rowsOf(project)).toEqual([{ id: 'fresh', lines: [''], human: true }])
+    expect(chosenOf(project)).toBe('fresh')
+  })
+
+  /**
+   * ⚠️ The same proposal and not a twin of it: the chosen slot names it by id,
+   * so a redo that minted a fresh one would leave that slot pointing at nothing.
+   */
+  it('brings the same candidate back on redo', () => {
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
+    editor.undo()
+    expect(rowsOf(project).map((c) => c.id)).toEqual(['m'])
+    expect(chosenOf(project)).toBe('m')
+    editor.redo()
+    expect(rowsOf(project).map((c) => c.id)).toEqual(['m', 'fresh'])
+    expect(chosenOf(project)).toBe('fresh')
+  })
+
+  /**
+   * ⭐ Back to its own typed lines, not on to the next proposal. Those lines are
+   * the last thing anybody chose for themselves; picking the next one along
+   * would be the program making a choice out of a deletion that said nothing
+   * about it.
+   */
+  it('drops the object back to its own lines when the proposal it was reading is thrown away', () => {
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
+    ])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    editor.cmdRemoveTranslation(PAGE, 'a', 'm')
+    expect(chosenOf(project)).toBeNull()
+    expect(textOf(labelsOf(project)[0].translation)).toBe('自己打的')
+  })
+
+  it('puts a thrown-away proposal back where it was, still being read', () => {
+    const { project, editor } = openOnePage([
+      withCandidates(
+        { id: 'first', lines: ['一'] },
+        { id: 'second', lines: ['二'] },
+        { id: 'third', lines: ['三'] },
+      ),
+    ])
+    editor.cmdPickTranslation(PAGE, 'a', 'second')
+    editor.cmdRemoveTranslation(PAGE, 'a', 'second')
+    editor.undo()
+    expect(rowsOf(project).map((c) => c.id)).toEqual(['first', 'second', 'third'])
+    expect(chosenOf(project)).toBe('second')
+  })
+
+  it('leaves the row being read alone when some other proposal is thrown away', () => {
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
+    ])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    editor.cmdRemoveTranslation(PAGE, 'a', 'n')
+    expect(chosenOf(project)).toBe('m')
+  })
+
+  it('refuses every one of them on a locked object', () => {
+    const locked = withCandidates({ id: 'm', lines: ['模型的'] })
+    locked.locked = true
+    const { project, editor } = openOnePage([locked])
+    editor.cmdPickTranslation(PAGE, 'a', 'm')
+    editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
+    editor.cmdRemoveTranslation(PAGE, 'a', 'm')
+    expect(chosenOf(project)).toBeNull()
+    expect(rowsOf(project).map((c) => c.id)).toEqual(['m'])
   })
 })

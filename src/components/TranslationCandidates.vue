@@ -44,7 +44,9 @@
                   placeholder="(未翻譯)"
                   class="cand-text cand-input"
                   :value="(element as Row).text"
-                  @input="write((element as Row).id, $event)"
+                  @focus="beginEdit((element as Row).text)"
+                  @input="write($event)"
+                  @blur="editor.commitTextEdit()"
                 />
                 <p
                   v-else
@@ -84,6 +86,7 @@ import Draggable from 'vuedraggable'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { vAutoGrow } from '@/lib/autoGrow'
+import { generateId } from '@shared/page/schema'
 
 /**
  * One row of the translation candidates.
@@ -134,14 +137,24 @@ const rows = computed<Row[]>(() => {
 
 function take(id: string | 'own') {
   if (!pageId.value || !object.value) return
-  project.setLabelTranslation(pageId.value, object.value.id, id === 'own' ? null : id)
+  editor.cmdPickTranslation(pageId.value, object.value.id, id === 'own' ? null : id)
 }
 
-function write(id: string | 'own', event: Event) {
+/**
+ * The same door as typing on the canvas: written through so the object keeps
+ * up, and one entry on the stack for the visit rather than one per keystroke.
+ * The row with a caret is always the one the object is reading, which is
+ * exactly where `updateLabelText` writes.
+ */
+function beginEdit(from: string) {
+  if (!pageId.value || !object.value) return
+  editor.beginTextEdit(pageId.value, object.value.id, from)
+}
+
+function write(event: Event) {
   if (!pageId.value || !object.value) return
   const text = (event.target as HTMLTextAreaElement).value
-  if (id === 'own') project.setLabelLines(pageId.value, object.value.id, 'translation', text)
-  else project.correctTranslation(pageId.value, object.value.id, id, text)
+  project.updateLabelText(pageId.value, object.value.id, 'translation', text)
 }
 
 /**
@@ -171,9 +184,8 @@ function onChanged(event: { moved?: { oldIndex: number; newIndex: number } }) {
 function propose() {
   const o = object.value
   if (!pageId.value || !o) return
-  const id = project.addTranslation(pageId.value, o.id, [''], 'human')
-  if (!id) return
-  project.setLabelTranslation(pageId.value, o.id, id)
+  const id = generateId()
+  editor.cmdAddTranslationCandidate(pageId.value, o.id, id)
   void nextTick(() => {
     // Into view rather than to the list's end: nearest leaves the scroll
     // where it is when the new row is already showing.

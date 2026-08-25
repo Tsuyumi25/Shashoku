@@ -15,7 +15,7 @@
     :key="card.key"
     class="source-card"
     :style="card.style"
-    @pointerdown="cards$.touch(card.key)"
+    @pointerdown.stop="cards$.touch(card.key)"
   >
     <!--
       The grip, and the whole of what moves the card: a press anywhere else is a

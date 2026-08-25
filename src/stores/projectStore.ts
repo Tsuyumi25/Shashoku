@@ -844,6 +844,11 @@ export const useProjectStore = defineStore('project', () => {
    * on the translation side the list is a view of the pool, not a copy. ⚠️ This
    * must never write into `lines` while the body is showing something else,
    * which would put the words somewhere nobody can see them.
+   *
+   * ⭐ Typing into a proposal makes it yours, here rather than in the command, so
+   * the amulet is on the words from the first keystroke. Left until the edit was
+   * finished, a save landing mid-sentence would put a person's words on disk
+   * still marked as the model's — and the model may withdraw its own.
    */
   function updateLabelText(pageId: string, labelId: string, side: TextSide, text: string) {
     const label = labelById(pageId, labelId)
@@ -853,8 +858,10 @@ export const useProjectStore = defineStore('project', () => {
       side === 'translation'
         ? label.translation.candidates.find((c) => c.id === label.translation.chosen)
         : undefined
-    if (held) held.lines = linesOf(text)
-    else body.lines = linesOf(text)
+    if (held) {
+      held.lines = linesOf(text)
+      held.human = true
+    } else body.lines = linesOf(text)
     markPageDirty(pageId)
   }
 
@@ -899,6 +906,45 @@ export const useProjectStore = defineStore('project', () => {
     label.translation.candidates.push(candidate)
     markPageDirty(pageId)
     return candidate.id
+  }
+
+  /**
+   * A candidate put back where it was, which is what undoing a deletion means.
+   *
+   * ⚠️ The index and the id both come from the caller. A proposal that came back
+   * at the end of the list would have moved without anybody moving it, and one
+   * that came back under a fresh id would be a different proposal — anything
+   * still naming the old one, the chosen slot included, would be left pointing
+   * at nothing.
+   */
+  function insertTranslation(
+    pageId: string,
+    labelId: string,
+    candidate: TranslationCandidate,
+    at: number,
+  ) {
+    const label = labelById(pageId, labelId)
+    if (!label || label.translation.candidates.some((c) => c.id === candidate.id)) return
+    const list = label.translation.candidates
+    list.splice(Math.min(Math.max(at, 0), list.length), 0, { ...candidate, lines: [...candidate.lines] })
+    markPageDirty(pageId)
+  }
+
+  /**
+   * Whose hand a proposal bears.
+   *
+   * ⭐ Stated by the caller rather than latched here. Typing into a proposal
+   * makes it yours, and undoing that typing has to make it the model's again —
+   * a flag that only ever went one way would leave a model unable to withdraw
+   * its own untouched words.
+   */
+  function setTranslationHand(pageId: string, labelId: string, id: string, human: boolean) {
+    const label = labelById(pageId, labelId)
+    const candidate = label?.translation.candidates.find((c) => c.id === id)
+    if (!candidate) return
+    if (human) candidate.human = true
+    else delete candidate.human
+    markPageDirty(pageId)
   }
 
   /**
@@ -1212,6 +1258,8 @@ export const useProjectStore = defineStore('project', () => {
     setLabelLines,
     setLabelTranslation,
     addTranslation,
+    insertTranslation,
+    setTranslationHand,
     moveTranslation,
     correctTranslation,
     removeTranslation,
