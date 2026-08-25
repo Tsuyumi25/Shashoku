@@ -10,16 +10,16 @@
  * Recomputed on every ask and never stored: move the object and it is a
  * different list.
  */
-import type { OcrCandidatePersisted, TextSource } from '../page/types'
+import type { OcrCandidatePersisted, SourceBody } from '../page/types'
 import { distanceTo, nearEnough, placesIn, type Point } from './places'
 import { claimsOf } from './vote'
 
 /**
  * One candidate for this object's source.
  *
- * The object's own written source appears here too, as the entry whose `hash`
- * is `own` — a candidate like any other, but with no confidence and no place on
- * the page, because a person wrote it.
+ * What the object already says appears here too, as the entry whose `hash` is
+ * `own` — a candidate like any other, but with no confidence and no place on
+ * the page, because those words are the object's rather than a measurement.
  */
 export interface SourceCandidate {
   hash: string | 'own'
@@ -51,11 +51,11 @@ export interface SourceCandidate {
  * stands for, and a list that dropped it would report the choice as unmade.
  */
 export function candidatesFor(
-  object: { source: TextSource; ownSource: string },
+  object: { source: SourceBody },
   centre: Point,
   pool: readonly OcrCandidatePersisted[],
 ): SourceCandidate[] {
-  const held = object.source.hash
+  const held = object.source.from ?? 'own'
 
   const here = placesIn(pool)
     .filter((place) => nearEnough(centre, place))
@@ -86,7 +86,7 @@ export function candidatesFor(
   const own = (isHeld: boolean): SourceCandidate => ({
     hash: 'own',
     source: 'own',
-    text: object.ownSource,
+    text: isHeld ? object.source.lines.join('\n') : '',
     confidence: null,
     distance: null,
     label: null,
@@ -97,13 +97,16 @@ export function candidatesFor(
   // confidence to rank against a model's, and the held one is not competing in
   // a list it has been picked out of.
   const top: SourceCandidate[] = [own(held === 'own')]
-  if (held !== null && held !== 'own') {
+  if (held !== 'own') {
     const standing = pool.find((c) => c.hash === held)
     if (standing) {
       top.push({
         hash: standing.hash,
         source: standing.source,
-        text: standing.text,
+        // The object's words, not the reading's. They started out the same and
+        // the reading is only where they were got — showing the reading here
+        // would hide a correction behind the thing it corrected.
+        text: object.source.lines.join('\n'),
         confidence: standing.confidence,
         distance: distanceTo(centre, {
           x: standing.x,

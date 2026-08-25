@@ -4,6 +4,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 function page(): ProjectFile {
   return {
@@ -21,23 +22,15 @@ function page(): ProjectFile {
       readingEdges: [],
       layers: [
         {
-          kind: 'text',
-          id: 'a',
-          visible: true,
-          locked: false,
-          opacity: 1,
-          blendMode: 'normal',
-          effects: [],
-          x: 200,
-          y: 150,
-          tags: [],
-          rotation: 0,
-          lines: ['ふむ'],
-          source: { hash: null, by: 'auto' },
-          ownSource: '',
-          translations: [],
-          translation: null,
-          style: { ...DEFAULT_TEXT_STYLE },
+          ...blankTextObject('a', DEFAULT_TEXT_STYLE),
+          translation: {
+            ...emptyBody(DEFAULT_TEXT_STYLE),
+            lines: ['ふむ'],
+            x: 200,
+            y: 150,
+            candidates: [],
+            chosen: null,
+          },
         },
       ],
     },
@@ -50,14 +43,14 @@ const textOn = (file: ProjectFile) => file.page.layers[0] as TextLayerEntry
 describe('thumbnailKey', () => {
   it('changes when the page is retyped', async () => {
     const edited = page()
-    textOn(edited).lines = ['なるほど']
+    textOn(edited).translation.lines = ['なるほど']
 
     expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
   })
 
   it('changes when an object is restyled', async () => {
     const edited = page()
-    textOn(edited).style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
+    textOn(edited).translation.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
 
     expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
   })

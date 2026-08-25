@@ -112,18 +112,19 @@ const object = computed(() => {
   return project.labelById(pageId.value, id) ?? null
 })
 
-const held = computed(() => object.value?.translation ?? 'own')
+const held = computed(() => object.value?.translation.chosen ?? 'own')
 
 const rows = computed<Row[]>(() => {
   const o = object.value
   if (!o) return []
+  const body = o.translation
   const own: Row[] =
-    o.lines.join('').length > 0 || o.translation === null
-      ? [{ id: 'own', text: o.lines.join('\n'), by: '自己打的' }]
+    body.lines.join('').length > 0 || body.chosen === null
+      ? [{ id: 'own', text: body.lines.join('\n'), by: '自己打的' }]
       : []
   return [
     ...own,
-    ...o.translations.map((c) => ({
+    ...body.candidates.map((c) => ({
       id: c.id,
       text: c.lines.join('\n'),
       by: c.human ? '你寫的' : (c.source ?? '模型'),
@@ -139,7 +140,7 @@ function take(id: string | 'own') {
 function write(id: string | 'own', event: Event) {
   if (!pageId.value || !object.value) return
   const text = (event.target as HTMLTextAreaElement).value
-  if (id === 'own') project.setLabelLines(pageId.value, object.value.id, text)
+  if (id === 'own') project.setLabelLines(pageId.value, object.value.id, 'translation', text)
   else project.correctTranslation(pageId.value, object.value.id, id, text)
 }
 

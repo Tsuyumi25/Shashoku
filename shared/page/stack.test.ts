@@ -8,26 +8,17 @@ import type {
 } from './types'
 import { PASS_THROUGH } from './types'
 import { pageStack, stackedRasterNodes, stackedTextNodes, type StackNode } from './stack'
+import { blankTextObject, emptyBody } from './schema'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [id],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: [id],
+      candidates: [],
+      chosen: null,
+    },
     ...extra,
   }
 }

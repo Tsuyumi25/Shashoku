@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { OcrCandidatePersisted, TextSource } from '../page/types'
+import type { OcrCandidatePersisted, SourceBody } from '../page/types'
+import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+import { emptyBody } from '../page/schema'
 import { candidatesFor } from './candidates'
 
 let next = 0
@@ -17,8 +19,13 @@ const read = (over: Partial<OcrCandidatePersisted> = {}): OcrCandidatePersisted 
   ...over,
 })
 
-const empty: TextSource = { hash: null, by: 'auto' }
-const object = (source: TextSource = empty, ownSource = '') => ({ source, ownSource })
+const source = (over: Partial<SourceBody> = {}): SourceBody => ({
+  ...emptyBody(DEFAULT_TEXT_STYLE),
+  by: 'auto',
+  lines: [''],
+  ...over,
+})
+const object = (over: Partial<SourceBody> = {}) => ({ source: source(over) })
 
 /** The middle of the balloon every `read()` above was taken from. */
 const INSIDE = { x: 200, y: 300 }
@@ -63,14 +70,14 @@ describe('candidatesFor', () => {
 
   it('marks the row the object stands for and stands it right after its own', () => {
     const pool = [read({ hash: 'a' }), read({ hash: 'b', source: 'baberu-ocr' })]
-    const rows = candidatesFor(object({ hash: 'b', by: 'human' }), INSIDE, pool)
+    const rows = candidatesFor(object({ from: 'b', by: 'human' }), INSIDE, pool)
     expect(rows[1]).toMatchObject({ hash: 'b', held: true })
     expect(rows.filter((r) => r.held)).toHaveLength(1)
   })
 
   it('does not offer the held row twice', () => {
     const pool = [read({ hash: 'a' }), read({ hash: 'b', source: 'baberu-ocr' })]
-    const rows = candidatesFor(object({ hash: 'b', by: 'human' }), INSIDE, pool)
+    const rows = candidatesFor(object({ from: 'b', by: 'human' }), INSIDE, pool)
     expect(rows.filter((r) => r.hash === 'b')).toHaveLength(1)
   })
 
@@ -80,12 +87,12 @@ describe('candidatesFor', () => {
    */
   it('keeps showing a held reading taken from somewhere else entirely', () => {
     const pool = [read({ hash: 'far', x: 3000, y: 3000 })]
-    const rows = candidatesFor(object({ hash: 'far', by: 'human' }), INSIDE, pool)
+    const rows = candidatesFor(object({ from: 'far', by: 'human' }), INSIDE, pool)
     expect(rows[1]).toMatchObject({ hash: 'far', held: true })
   })
 
   it('marks the own row when that is what the object stands for', () => {
-    const rows = candidatesFor(object({ hash: 'own', by: 'human' }, '自分で'), INSIDE, [read()])
+    const rows = candidatesFor(object({ by: 'human', lines: ['自分で'] }), INSIDE, [read()])
     expect(rows[0]).toMatchObject({ hash: 'own', text: '自分で', held: true })
   })
 

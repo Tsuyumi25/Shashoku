@@ -13,7 +13,7 @@
  * Nothing here writes anything. It answers two tables — who should stand for
  * what, and where an object should be created — and the caller applies them.
  */
-import type { OcrCandidatePersisted, TextSource } from '../page/types'
+import type { OcrCandidatePersisted, SourceBody } from '../page/types'
 import { distanceTo, nearEnough, placesIn, type Place, type Point } from './places'
 import { byStrength, claimsOf, type Claim } from './vote'
 
@@ -48,25 +48,43 @@ export interface Standing {
   id: string
   /** Where it visually sits, not the anchor it is stored by. */
   centre: Point
-  source: TextSource
+  source: Pick<SourceBody, 'by' | 'from'>
 }
 
-/** An object to create, and everything known about how it should look. */
-export interface Born {
-  /** The reading it stands for. */
-  hash: string
-  /** What that reading says, line breaks and all. */
+/**
+ * What a place turned out to say, and how the artwork set it.
+ *
+ * ⭐ The words and not a pointer to them. A reading is a measurement of the
+ * artwork; what an object says is the object's, and the two stop being the same
+ * fact the moment somebody corrects one of them.
+ */
+export interface Filling extends Typography {
+  /** What the winning claim says, line breaks and all. */
   text: string
-  centre: Point
-  /** Absent where the run that read this measured nothing. */
+  /** The reading those words were got from — a birth certificate, no more. */
+  from: string
+}
+
+/**
+ * How one run measured a place to be set.
+ *
+ * ⚠️ Absent, not defaulted, on a field nothing measured. A default here would
+ * let an estimate be read as an observation.
+ */
+export interface Typography {
   vertical?: boolean
   fontSizePx?: number
   leadingPercent?: number
 }
 
+/** An object to create, and everything known about how it should look. */
+export interface Born extends Filling {
+  centre: Point
+}
+
 export interface Verdict {
-  /** Object id, and the reading it should now stand for. */
-  fills: Map<string, TextSource>
+  /** Object id, and what its source should now say. */
+  fills: Map<string, Filling>
   spawns: Born[]
 }
 
@@ -82,7 +100,7 @@ export function decide(
     // one object without either side depending on the order the pool is in.
     .sort((a, b) => byStrength(a.top, b.top))
 
-  const fills = new Map<string, TextSource>()
+  const fills = new Map<string, Filling>()
   const spawns: Born[] = []
   const taken = new Set<string>()
 
@@ -98,8 +116,8 @@ export function decide(
       // ⭐ Already answered with exactly this. Reporting it anyway would put a
       // step on the undo stack and mark the page for saving, which is what
       // "running it again is free" has to mean beyond the pool not growing.
-      if (object.source.hash === top.spokesman.hash) continue
-      fills.set(object.id, { hash: top.spokesman.hash, by: 'auto' })
+      if (object.source.from === top.spokesman.hash) continue
+      fills.set(object.id, filling(top))
       continue
     }
 
@@ -113,10 +131,8 @@ export function decide(
     if (!founder) continue
 
     spawns.push({
-      hash: top.spokesman.hash,
-      text: top.text,
+      ...filling(top),
       centre: { x: place.x + place.w / 2, y: place.y + place.h / 2 },
-      ...typographyOf(top),
     })
   }
   return { fills, spawns }
@@ -151,15 +167,18 @@ function nearestFree(
 }
 
 /**
- * How the artwork set the winning claim, taken from the reading that spoke for
- * it — the measurement rides with a reading, so this is a lookup rather than a
- * decision. Absent where the run that read it measured nothing.
+ * What a winning claim comes to: its words, the reading they were got from, and
+ * how the artwork set it.
+ *
+ * The typography is taken from the reading that spoke for the claim — the
+ * measurement rides with a reading, so this is a lookup rather than a decision.
+ * Absent where the run that read it measured nothing.
  */
-function typographyOf(claim: Claim) {
+function filling(claim: Claim): Filling {
   const { vertical, fontSizePx, leadingPercent } = claim.spokesman
-  const measured: Partial<Born> = {}
-  if (vertical !== undefined) measured.vertical = vertical
-  if (fontSizePx !== undefined) measured.fontSizePx = fontSizePx
-  if (leadingPercent !== undefined) measured.leadingPercent = leadingPercent
-  return measured
+  const out: Filling = { text: claim.text, from: claim.spokesman.hash }
+  if (vertical !== undefined) out.vertical = vertical
+  if (fontSizePx !== undefined) out.fontSizePx = fontSizePx
+  if (leadingPercent !== undefined) out.leadingPercent = leadingPercent
+  return out
 }

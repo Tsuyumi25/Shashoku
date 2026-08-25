@@ -22,7 +22,7 @@ export function bucketObjectsOf(pageId: string, layers: readonly LayerEntry[]): 
     id: label.id,
     pageId,
     tags: label.tags,
-    style: label.style,
+    style: label.translation.style,
   }))
 }
 

@@ -27,5 +27,5 @@ export function planProposal(entry: TextLayerEntry | undefined, lines: string[])
   // object left standing on a few empty lines is as blank as one holding none,
   // and comparing the joined text against "" calls it written-in because the
   // newlines between them are characters.
-  return { action: 'append', fillSlot: entry.translation === null && isBlank(entry) }
+  return { action: 'append', fillSlot: entry.translation.chosen === null && isBlank(entry.translation) }
 }

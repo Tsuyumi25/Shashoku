@@ -116,15 +116,10 @@ export async function decodeLayerBitmaps(
 
 function drawTextWith(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void {
   const label = node.entry
-  const text = textOf(label)
+  const text = textOf(label.translation)
   if (text.length === 0) return
-  const drawn = drawnLabel(
-    text,
-    label.style,
-    label.effects,
-    { x: label.x, y: label.y },
-    label.rotation,
-  )
+  const body = label.translation
+  const drawn = drawnLabel(text, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
   // A family this machine lacks draws notdef boxes rather than nothing, so the
   // only way to arrive here without a bitmap is a catalogue that never
   // answered. Exporting the page short one label silently would be worse than

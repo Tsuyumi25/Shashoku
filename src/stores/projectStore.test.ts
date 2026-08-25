@@ -7,6 +7,7 @@ import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 const ROOT = '/root'
 const PAGE_ID = 'source-260809-1200'
@@ -14,23 +15,13 @@ const PAGE_DIR = `${ROOT}/shashoku/pages/${PAGE_ID}`
 
 function label(id: string): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: ['x'],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: ['x'],
+      candidates: [],
+      chosen: null,
+    },
   }
 }
 
@@ -146,8 +137,8 @@ describe('the translation pool on an object', () => {
     const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
     project.setLabelTranslation(PAGE_ID, 't1', id)
 
-    expect(textOf(project.labelById(PAGE_ID, 't1')!)).toBe('候選')
-    expect(project.labelById(PAGE_ID, 't1')!.lines).toEqual(['x'])
+    expect(textOf(project.labelById(PAGE_ID, 't1')!.translation)).toBe('候選')
+    expect(project.labelById(PAGE_ID, 't1')!.translation.lines).toEqual(['x'])
   })
 
   it('brings the typed lines back word for word when the slot is emptied', () => {
@@ -156,7 +147,7 @@ describe('the translation pool on an object', () => {
     project.setLabelTranslation(PAGE_ID, 't1', id)
     project.setLabelTranslation(PAGE_ID, 't1', null)
 
-    expect(textOf(project.labelById(PAGE_ID, 't1')!)).toBe('x')
+    expect(textOf(project.labelById(PAGE_ID, 't1')!.translation)).toBe('x')
   })
 
   /**
@@ -167,21 +158,21 @@ describe('the translation pool on an object', () => {
     const project = withLabel()
     const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
     project.setLabelTranslation(PAGE_ID, 't1', id)
-    project.updateLabelText(PAGE_ID, 't1', '改過的')
+    project.updateLabelText(PAGE_ID, 't1', 'translation', '改過的')
 
     const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translations[0].lines).toEqual(['改過的'])
-    expect(label1.lines).toEqual(['x'])
+    expect(label1.translation.candidates[0].lines).toEqual(['改過的'])
+    expect(label1.translation.lines).toEqual(['x'])
   })
 
   it('types into the object itself when the slot is empty', () => {
     const project = withLabel()
     project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')
-    project.updateLabelText(PAGE_ID, 't1', '改過的')
+    project.updateLabelText(PAGE_ID, 't1', 'translation', '改過的')
 
     const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.lines).toEqual(['改過的'])
-    expect(label1.translations[0].lines).toEqual(['候選'])
+    expect(label1.translation.lines).toEqual(['改過的'])
+    expect(label1.translation.candidates[0].lines).toEqual(['候選'])
   })
 
   it('falls back to the typed lines when what it was reading is thrown away', () => {
@@ -191,8 +182,8 @@ describe('the translation pool on an object', () => {
     project.removeTranslation(PAGE_ID, 't1', id)
 
     const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translation).toBeNull()
-    expect(textOf(label1)).toBe('x')
+    expect(label1.translation.chosen).toBeNull()
+    expect(textOf(label1.translation)).toBe('x')
   })
 
   it('reorders the pool without touching what is in the slot', () => {
@@ -203,9 +194,9 @@ describe('the translation pool on an object', () => {
     project.moveTranslation(PAGE_ID, 't1', 0, 1)
 
     const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translations.map((c) => c.lines[0])).toEqual(['二', '一'])
-    expect(label1.translation).toBe(first)
-    expect(textOf(label1)).toBe('一')
+    expect(label1.translation.candidates.map((c) => c.lines[0])).toEqual(['二', '一'])
+    expect(label1.translation.chosen).toBe(first)
+    expect(textOf(label1.translation)).toBe('一')
   })
 
   it('makes a proposal yours the moment you type over it', () => {
@@ -213,7 +204,7 @@ describe('the translation pool on an object', () => {
     const id = project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')!
     project.correctTranslation(PAGE_ID, 't1', id, '我改的')
 
-    expect(project.labelById(PAGE_ID, 't1')!.translations[0]).toMatchObject({
+    expect(project.labelById(PAGE_ID, 't1')!.translation.candidates[0]).toMatchObject({
       lines: ['我改的'],
       human: true,
     })
@@ -224,9 +215,9 @@ describe('the translation pool on an object', () => {
     project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')
     project.addTranslation(PAGE_ID, 't1', ['人的'], 'human')
 
-    const { translations } = project.labelById(PAGE_ID, 't1')!
-    expect(translations[0].human).toBeUndefined()
-    expect(translations[1].human).toBe(true)
+    const { candidates } = project.labelById(PAGE_ID, 't1')!.translation
+    expect(candidates[0].human).toBeUndefined()
+    expect(candidates[1].human).toBe(true)
   })
 })
 

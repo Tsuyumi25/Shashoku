@@ -226,7 +226,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked, textObjects } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { textOf } from '@shared/page/text'
+import { bodyOnSide, textOnSide } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -386,21 +386,24 @@ const objects = computed(() => {
   const entries = connecting.value
     ? textObjects(file.page.layers)
     : stackedTextNodes(stack.value).map((node) => node.entry)
-  return entries.map((label) => ({
+  return entries.map((label) => {
+    const body = bodyOnSide(label, editor.textSide)
+    return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
-    text: textOf(label),
-    x: label.x,
-    y: label.y,
-    rotation: label.rotation,
+    text: textOnSide(label, editor.textSide),
+    x: body.x,
+    y: body.y,
+    rotation: body.rotation,
     accent: accentOf(label.tags),
-    style: previewedStyle(label.id, label.style),
+    style: previewedStyle(label.id, body.style),
     effects: label.effects,
     tags: tagsInRegistryOrder(label.tags, project.header.tags).map((name) => ({
       name,
       color: tagColor(name, project.header.tags),
     })),
-  }))
+    }
+  })
 })
 
 /**
@@ -493,12 +496,12 @@ onMounted(() => {
  */
 function moveLabelTo(labelId: string, to: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
-  project.moveLabel(editor.currentPageId, labelId, to.x, to.y)
+  project.moveLabel(editor.currentPageId, labelId, editor.textSide, to.x, to.y)
 }
 
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId) return
-  editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
+  editor.cmdMoveLabel(editor.currentPageId, labelId, editor.textSide, from, to)
 }
 
 /**
@@ -546,7 +549,8 @@ function beginCanvasTextEdit(labelId: string, index: number) {
 let scaledFrom: ScaledLabel | null = null
 
 function scaledState(label: TextLayerEntry): ScaledLabel {
-  return { style: { ...label.style }, x: label.x, y: label.y }
+  const body = bodyOnSide(label, editor.textSide)
+  return { style: { ...body.style }, x: body.x, y: body.y }
 }
 
 function beginLabelScale(labelId: string) {
@@ -562,27 +566,34 @@ function beginLabelScale(labelId: string) {
 function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentPageId || editor.isLayerLocked(labelId)) return
-  project.setLabelStyle(editor.currentPageId, labelId, { ...label.style, fontSizePx })
-  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
+  const style = { ...bodyOnSide(label, editor.textSide).style, fontSizePx }
+  project.setLabelStyle(editor.currentPageId, labelId, editor.textSide, style)
+  project.moveLabel(editor.currentPageId, labelId, editor.textSide, at.x, at.y)
 }
 
 function commitLabelScale(labelId: string) {
   const label = labelById(labelId)
   if (!editor.currentPageId || !scaledFrom || !label) return
-  editor.cmdScaleLabel(editor.currentPageId, labelId, scaledFrom, scaledState(label))
+  editor.cmdScaleLabel(
+    editor.currentPageId,
+    labelId,
+    editor.textSide,
+    scaledFrom,
+    scaledState(label),
+  )
   scaledFrom = null
 }
 
 /** Both together, for the same reason a corner drag writes both. */
 function rotateLabelTo(labelId: string, radians: number, at: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
-  project.rotateLabel(editor.currentPageId, labelId, radians)
-  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
+  project.rotateLabel(editor.currentPageId, labelId, editor.textSide, radians)
+  project.moveLabel(editor.currentPageId, labelId, editor.textSide, at.x, at.y)
 }
 
 function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) {
   if (!editor.currentPageId) return
-  editor.cmdRotateLabel(editor.currentPageId, labelId, from, to)
+  editor.cmdRotateLabel(editor.currentPageId, labelId, editor.textSide, from, to)
 }
 
 /**
@@ -1526,6 +1537,8 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool('brush')
   } else if (key === 'e') {
     editor.setTool('eraser')
+  } else if (key === 's' && e.shiftKey) {
+    editor.setTextSide(editor.textSide === 'source' ? 'translation' : 'source')
   } else if (key === 'q') {
     selection.toggleQuickMask()
   } else if (e.key === '[' || e.key === ']') {

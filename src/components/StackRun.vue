@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextLayerEntry } from '@shared/page/types'
-import { textOf } from '@shared/page/text'
+import { bodyOnSide, textOnSide } from '@shared/page/text'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -14,6 +14,7 @@ import { layerWithEffects, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
+import { useEditorStore } from '@/stores/editorStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
@@ -69,6 +70,11 @@ const props = defineProps<{
 const dpr = window.devicePixelRatio || 1
 
 const raster = useRasterStore()
+/**
+ * ⚠️ Which body is painted is the interface's question, not the page's — the
+ * compositor answers it differently and always draws the translation.
+ */
+const editor = useEditorStore()
 const stroke = useStrokeOverlayStore()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
@@ -153,14 +159,15 @@ const drawnTexts = computed(() => {
   for (const node of props.nodes) {
     if (node.kind !== 'text') continue
     const entry = node.entry
+    const body = bodyOnSide(entry, editor.textSide)
     out.set(
       entry.id,
       drawnLabel(
-        textOf(entry),
-        entry.style,
+        textOnSide(entry, editor.textSide),
+        body.style,
         entry.effects,
-        { x: entry.x, y: entry.y },
-        entry.rotation,
+        { x: body.x, y: body.y },
+        body.rotation,
       ),
     )
   }
@@ -263,7 +270,7 @@ watch(
       .map((node) =>
         node.kind === 'raster'
           ? `${node.entry.x},${node.entry.y},${node.entry.w},${node.entry.h},${node.opacity}`
-          : `t${node.entry.id},${node.entry.rotation},${node.opacity}`,
+          : `t${node.entry.id},${bodyOnSide(node.entry, editor.textSide).rotation},${node.opacity}`,
       )
       .join('|'),
   schedulePaint,

@@ -7,29 +7,14 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { blankTextObject } from '@shared/page/schema'
 
 const PAGE = 'p001.png'
 const AT = { x: 0, y: 0 }
 
 function label(id: string): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [''],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
   }
 }
 

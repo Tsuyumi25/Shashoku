@@ -3,6 +3,7 @@ import { artworkSignature } from './pageComposite'
 import { pageStack } from '@shared/page/stack'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 function raster(id: string, over: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
   return {
@@ -41,23 +42,13 @@ function folder(id: string, children: LayerEntry[], over: Partial<GroupLayerEntr
 
 function text(id: string): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: ['x'],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: ['x'],
+      candidates: [],
+      chosen: null,
+    },
   }
 }
 

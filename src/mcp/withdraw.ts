@@ -21,7 +21,7 @@ export function planWithdraw(
   source: string | undefined,
 ): WithdrawPlan {
   if (!entry) return { action: 'refuse', reason: '物件不存在' }
-  const candidate = entry.translations.find((c) => c.id === translationId)
+  const candidate = entry.translation.candidates.find((c) => c.id === translationId)
   if (!candidate) return { action: 'refuse', reason: `候選 ${translationId} 不在這個物件的抽屜裡` }
   if (candidate.human) return { action: 'refuse', reason: '這是人寫過的候選——不可撤' }
   if (!candidate.source) {
@@ -30,5 +30,5 @@ export function planWithdraw(
   if (source === undefined || candidate.source !== source) {
     return { action: 'refuse', reason: `這是 ${candidate.source} 的提案——只能撤自己署名的候選` }
   }
-  return { action: 'remove', wasChosen: entry.translation === translationId }
+  return { action: 'remove', wasChosen: entry.translation.chosen === translationId }
 }

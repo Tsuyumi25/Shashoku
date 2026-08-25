@@ -64,7 +64,7 @@ export function buildLabelRows(files: readonly ProjectFile[], query = ''): Chapt
       return label === undefined ? [] : [{ ...row, label }]
     })
     const shown =
-      needle === '' ? all : all.filter((row) => textOf(row.label).toLowerCase().includes(needle))
+      needle === '' ? all : all.filter((row) => textOf(row.label.translation).toLowerCase().includes(needle))
     // A page nothing matches on is not a page with an empty result. It is not
     // one of the places the answer is, so it is not one of the places shown.
     if (needle !== '' && shown.length === 0) continue

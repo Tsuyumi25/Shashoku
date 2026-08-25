@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { blankTextObject, emptyBody } from './schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
@@ -21,23 +22,13 @@ import {
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [id],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: [id],
+      candidates: [],
+      chosen: null,
+    },
     ...extra,
   }
 }

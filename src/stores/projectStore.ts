@@ -8,8 +8,8 @@ import type {
   GroupLayerEntry,
   LayerEntry,
   OcrCandidatePersisted,
+  SourceBody,
   TextLayerEntry,
-  TextSource,
   TranslationCandidate,
 } from '@shared/page/types'
 import type { LayerEffect } from '@shared/effects/types'
@@ -45,7 +45,7 @@ import {
   textObjectsInReadingOrder,
   type DropTarget,
 } from '@shared/page/tree'
-import { linesOf } from '@shared/page/text'
+import { bodyOnSide, linesOf, type TextSide } from '@shared/page/text'
 import {
   edgesTouching,
   hasEdge,
@@ -813,46 +813,61 @@ export const useProjectStore = defineStore('project', () => {
     return true
   }
 
-  function moveLabel(pageId: string, labelId: string, x: number, y: number) {
+  /**
+   * ⭐ Every write below names a side. A drag, a turn, a resize and a restyle
+   * all land on the body the interface is showing — where a turn and a restyle
+   * used to land on the object and so on the translation, whatever was on
+   * screen.
+   */
+  function bodyOf(pageId: string, labelId: string, side: TextSide) {
     const label = labelById(pageId, labelId)
-    if (!label) return
-    label.x = x
-    label.y = y
+    return label === undefined ? null : bodyOnSide(label, side)
+  }
+
+  function moveLabel(pageId: string, labelId: string, side: TextSide, x: number, y: number) {
+    const body = bodyOf(pageId, labelId, side)
+    if (!body) return
+    body.x = x
+    body.y = y
     markPageDirty(pageId)
   }
 
-  function rotateLabel(pageId: string, labelId: string, rotation: number) {
-    const label = labelById(pageId, labelId)
-    if (!label) return
-    label.rotation = rotation
+  function rotateLabel(pageId: string, labelId: string, side: TextSide, rotation: number) {
+    const body = bodyOf(pageId, labelId, side)
+    if (!body) return
+    body.rotation = rotation
     markPageDirty(pageId)
   }
 
   /**
-   * Typing into the object, wherever what it currently reads as lives — the
-   * list is a view of the pool, not a copy. ⚠️ This must never write into
-   * `lines` while the object is showing something else, which would put the
-   * words somewhere nobody can see them.
+   * Typing into the object, wherever what that side currently reads as lives —
+   * on the translation side the list is a view of the pool, not a copy. ⚠️ This
+   * must never write into `lines` while the body is showing something else,
+   * which would put the words somewhere nobody can see them.
    */
-  function updateLabelText(pageId: string, labelId: string, text: string) {
+  function updateLabelText(pageId: string, labelId: string, side: TextSide, text: string) {
     const label = labelById(pageId, labelId)
     if (!label) return
-    const held = label.translations.find((c) => c.id === label.translation)
+    const body = bodyOnSide(label, side)
+    const held =
+      side === 'translation'
+        ? label.translation.candidates.find((c) => c.id === label.translation.chosen)
+        : undefined
     if (held) held.lines = linesOf(text)
-    else label.lines = linesOf(text)
+    else body.lines = linesOf(text)
     markPageDirty(pageId)
   }
 
   /**
-   * The object's own lines, whatever it is reading. Separate from
-   * `updateLabelText` on purpose — that one writes wherever the object is
-   * showing from, right for the canvas and wrong for the row that exists to
-   * show these lines.
+   * The body's own lines, whatever it is reading. Separate from
+   * `updateLabelText` on purpose — that one writes wherever the body is showing
+   * from, right for the canvas and wrong for the row that exists to show these
+   * lines.
    */
-  function setLabelLines(pageId: string, labelId: string, text: string) {
-    const label = labelById(pageId, labelId)
-    if (!label) return
-    label.lines = linesOf(text)
+  function setLabelLines(pageId: string, labelId: string, side: TextSide, text: string) {
+    const body = bodyOf(pageId, labelId, side)
+    if (!body) return
+    body.lines = linesOf(text)
     markPageDirty(pageId)
   }
 
@@ -860,8 +875,8 @@ export const useProjectStore = defineStore('project', () => {
   function setLabelTranslation(pageId: string, labelId: string, id: string | null) {
     const label = labelById(pageId, labelId)
     if (!label) return
-    if (id !== null && !label.translations.some((c) => c.id === id)) return
-    label.translation = id
+    if (id !== null && !label.translation.candidates.some((c) => c.id === id)) return
+    label.translation.chosen = id
     markPageDirty(pageId)
   }
 
@@ -881,7 +896,7 @@ export const useProjectStore = defineStore('project', () => {
     const candidate: TranslationCandidate = { id: generateId(), lines }
     if (by === 'human') candidate.human = true
     else if (source) candidate.source = source
-    label.translations.push(candidate)
+    label.translation.candidates.push(candidate)
     markPageDirty(pageId)
     return candidate.id
   }
@@ -893,7 +908,7 @@ export const useProjectStore = defineStore('project', () => {
   function moveTranslation(pageId: string, labelId: string, from: number, to: number) {
     const label = labelById(pageId, labelId)
     if (!label) return
-    const list = label.translations
+    const list = label.translation.candidates
     if (from < 0 || from >= list.length || to < 0 || to >= list.length || from === to) return
     const [moved] = list.splice(from, 1)
     list.splice(to, 0, moved)
@@ -906,7 +921,7 @@ export const useProjectStore = defineStore('project', () => {
    */
   function correctTranslation(pageId: string, labelId: string, id: string, text: string) {
     const label = labelById(pageId, labelId)
-    const candidate = label?.translations.find((c) => c.id === id)
+    const candidate = label?.translation.candidates.find((c) => c.id === id)
     if (!candidate) return
     candidate.lines = linesOf(text)
     candidate.human = true
@@ -920,43 +935,26 @@ export const useProjectStore = defineStore('project', () => {
   function removeTranslation(pageId: string, labelId: string, id: string) {
     const label = labelById(pageId, labelId)
     if (!label) return
-    const at = label.translations.findIndex((c) => c.id === id)
+    const at = label.translation.candidates.findIndex((c) => c.id === id)
     if (at === -1) return
-    label.translations.splice(at, 1)
-    if (label.translation === id) label.translation = null
+    label.translation.candidates.splice(at, 1)
+    if (label.translation.chosen === id) label.translation.chosen = null
     markPageDirty(pageId)
   }
 
   /**
-   * `by` is the caller's to state and never guessed here — a default would be
-   * this function answering for whoever called it.
+   * The whole source body at once. `by` is the caller's to state and never
+   * guessed here — a default would be this function answering for whoever
+   * called it.
+   *
+   * Whole rather than field by field because what writes it is one act: a run's
+   * verdict, a candidate dragged onto the object, an undo of either. Copied on
+   * the way in, so the caller's snapshot cannot be written through later.
    */
-  function setLabelSource(pageId: string, labelId: string, source: TextSource) {
+  function setLabelSource(pageId: string, labelId: string, source: SourceBody) {
     const label = labelById(pageId, labelId)
     if (!label) return
-    label.source = source
-    markPageDirty(pageId)
-  }
-
-  /** The source a person wrote out for an object themselves. */
-  function setLabelOwnSource(pageId: string, labelId: string, text: string) {
-    const label = labelById(pageId, labelId)
-    if (!label) return
-    label.ownSource = text
-    markPageDirty(pageId)
-  }
-
-  /**
-   * A reading is about the artwork, so a correction lands once in the shared
-   * pool and every object standing on it sees it. The identity is untouched,
-   * which is what keeps the next run of the same model from taking the
-   * correction back.
-   */
-  function correctReading(pageId: string, hash: string, text: string) {
-    const file = pageById(pageId)
-    const reading = file?.ocr.candidates.find((c) => c.hash === hash)
-    if (!reading) return
-    reading.text = text
+    label.source = { ...source, lines: [...source.lines], style: { ...source.style } }
     markPageDirty(pageId)
   }
 
@@ -981,17 +979,22 @@ export const useProjectStore = defineStore('project', () => {
   /**
    * For working on the recognizers rather than on a book: changing detection
    * or cropping changes every identity, so old readings never meet new ones
-   * and the pool only ever grows. Slots are released to `auto` — one still
-   * marked human would sit out the next run and look like the run missed it —
-   * except `own`, which was never a reading.
+   * and the pool only ever grows.
+   *
+   * The words an object was given stay: they are the object's, and throwing
+   * them away would be this button reaching past the pool it exists to clear.
+   * What goes is the birth certificate — the reading it names is gone — and
+   * with it the hand, since a source still marked human would sit out the next
+   * run and look like the run had missed it.
    */
   function forgetReadings(pageId: string) {
     const file = pageById(pageId)
     if (!file) return
     file.ocr.candidates = []
     for (const label of labelsOf(pageId)) {
-      if (label.source.hash === null || label.source.hash === 'own') continue
-      label.source = { hash: null, by: 'auto' }
+      if (label.source.from === undefined) continue
+      delete label.source.from
+      label.source.by = 'auto'
     }
     markPageDirty(pageId)
   }
@@ -1003,10 +1006,10 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
-  function setLabelStyle(pageId: string, labelId: string, style: TextStyle) {
-    const label = labelById(pageId, labelId)
-    if (!label) return
-    label.style = { ...style }
+  function setLabelStyle(pageId: string, labelId: string, side: TextSide, style: TextStyle) {
+    const body = bodyOf(pageId, labelId, side)
+    if (!body) return
+    body.style = { ...style }
     markPageDirty(pageId)
   }
 
@@ -1177,14 +1180,12 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelText,
     setLabelTags,
     setLabelSource,
-    setLabelOwnSource,
     setLabelLines,
     setLabelTranslation,
     addTranslation,
     moveTranslation,
     correctTranslation,
     removeTranslation,
-    correctReading,
     absorbReadings,
     readingsOfPage,
     forgetReadings,

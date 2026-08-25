@@ -6,8 +6,10 @@ import type {
   OcrCandidatePersisted,
   OcrJson,
   RasterLayerEntry,
+  SourceBody,
+  TextBody,
   TextLayerEntry,
-  TextSource,
+  TranslationBody,
   TranslationCandidate,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
@@ -15,6 +17,7 @@ import { normalizeEdges, type ReadingEdge } from './readingGraph'
 import { linesOf, textOf } from './text'
 import { parseEffects, serializeEffects } from '../effects/schema'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
+import type { TextStyle } from '../text-style/types'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
 
@@ -165,12 +168,22 @@ function parseTags(v: unknown, at: string): string[] {
 
 function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry {
   const base = parseLayerBase(v, at, 'text')
-  const { x, y, lines } = v
+  return {
+    kind: 'text',
+    ...base,
+    tags: parseTags(v.tags, `${at}.tags`),
+    source: parseSourceBody(v.source, `${at}.source`),
+    translation: parseTranslationBody(v.translation, `${at}.translation`),
+  }
+}
+
+function parseTextBody(v: unknown, at: string): { body: TextBody; raw: Record<string, unknown> } {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  const { x, y } = v
   // Deliberately not integer-checked, unlike a raster layer's frame: what lands
   // on whole pixels is the rasterizer's output, not this.
   if (typeof x !== 'number' || !Number.isFinite(x)) fail(`${at}.x 必須是數字(頁面像素)`)
   if (typeof y !== 'number' || !Number.isFinite(y)) fail(`${at}.y 必須是數字(頁面像素)`)
-  const parsedLines = parseLines(lines, `${at}.lines`)
 
   let rotation = 0
   if (v.rotation !== undefined) {
@@ -179,21 +192,42 @@ function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry 
     rotation = v.rotation
   }
 
-  const translations = parseTranslations(v.translations, `${at}.translations`)
-
   return {
-    kind: 'text',
-    ...base,
-    x,
-    y,
-    tags: parseTags(v.tags, `${at}.tags`),
-    rotation,
-    lines: parsedLines,
-    source: parseTextSource(v.source, `${at}.source`),
-    ownSource: parseOwnSource(v.ownSource, `${at}.ownSource`),
-    translations,
-    translation: parseTranslationSlot(v.translation, translations, `${at}.translation`),
-    style: parseTextStyle(v.style, `${at}.style`, fail),
+    raw: v,
+    body: {
+      lines: parseLines(v.lines, `${at}.lines`),
+      x,
+      y,
+      rotation,
+      style: parseTextStyle(v.style, `${at}.style`, fail),
+    },
+  }
+}
+
+/**
+ * A source held by nobody is what a fresh object has, so an absent `by` opens
+ * as `auto` — not `human`, or every object on a page written by hand would
+ * start settled and out of reach of the first run.
+ */
+function parseSourceBody(v: unknown, at: string): SourceBody {
+  const { body, raw } = parseTextBody(v, at)
+  const { by, from } = raw
+  if (by !== undefined && by !== 'auto' && by !== 'human') fail(`${at}.by 必須是 auto 或 human`)
+  const source: SourceBody = { ...body, by: by === 'human' ? 'human' : 'auto' }
+  // A birth certificate naming a reading this page no longer holds is kept
+  // rather than dropped: it decides nothing, and the day the reading comes back
+  // — an undone delete, a reopened project — it means what it always meant.
+  if (typeof from === 'string' && from.length > 0) source.from = from
+  return source
+}
+
+function parseTranslationBody(v: unknown, at: string): TranslationBody {
+  const { body, raw } = parseTextBody(v, at)
+  const candidates = parseTranslations(raw.candidates, `${at}.candidates`)
+  return {
+    ...body,
+    candidates,
+    chosen: parseTranslationSlot(raw.chosen, candidates, `${at}.chosen`),
   }
 }
 
@@ -242,27 +276,6 @@ function parseTranslationSlot(
   if (v === undefined || v === null) return null
   if (typeof v !== 'string' || v.length === 0) fail(`${at} 必須是非空字串或 null`)
   return pool.some((c) => c.id === v) ? v : null
-}
-
-/**
- * A page written before objects had a source opens with an empty slot held by
- * nobody — not `human`, or every object on it would start settled and out of
- * reach of the first run.
- */
-function parseTextSource(v: unknown, at: string): TextSource {
-  if (v === undefined) return { hash: null, by: 'auto' }
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { hash, by } = v
-  if (hash !== null && hash !== 'own' && (typeof hash !== 'string' || hash.length === 0))
-    fail(`${at}.hash 必須是非空字串、'own' 或 null`)
-  if (by !== 'auto' && by !== 'human') fail(`${at}.by 必須是 auto 或 human`)
-  return { hash: hash as string | 'own' | null, by }
-}
-
-function parseOwnSource(v: unknown, at: string): string {
-  if (v === undefined) return ''
-  if (typeof v !== 'string') fail(`${at} 必須是字串`)
-  return v
 }
 
 function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
@@ -346,6 +359,39 @@ export function baseMapLayer(file: string, width: number, height: number): Raste
     w: width,
     h: height,
     alphaLocked: false,
+  }
+}
+
+/** A body with nothing typed into it, set the way the caller asks. */
+export function emptyBody(style: TextStyle): TextBody {
+  return { lines: [''], x: 0, y: 0, rotation: 0, style: { ...style } }
+}
+
+/**
+ * A text object with nothing in either body.
+ *
+ * ⭐ Unanswered on the source side, and left that way. Which reading an object
+ * stands for is settled once for the whole page, by weighing every reading
+ * against every object at once — an object that grabbed the nearest reading as
+ * it was drawn would be answering a question the page is about to answer
+ * properly, and would have to be overruled to fix it.
+ *
+ * No tags at all, so a run of them can be placed first and both typed and
+ * classified later. Deliberately not inheriting whatever was last selected: a
+ * tag put on by the tool rather than by the user is a tag nobody checked.
+ */
+export function blankTextObject(id: string, style: TextStyle): TextLayerEntry {
+  return {
+    kind: 'text',
+    id,
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    effects: [],
+    tags: [],
+    source: { ...emptyBody(style), by: 'auto' },
+    translation: { ...emptyBody(style), candidates: [], chosen: null },
   }
 }
 
@@ -468,21 +514,26 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
   if (l.kind === 'group') {
     return { ...base, name: l.name, children: l.children.map(serializeLayerEntry) }
   }
-  const out: Record<string, unknown> = {
-    ...base,
-    x: l.x,
-    y: l.y,
-    lines: l.lines,
-  }
+  const out: Record<string, unknown> = { ...base }
   if (l.tags.length > 0) out.tags = normalizeTagSet(l.tags)
-  if (l.rotation) out.rotation = l.rotation
-  // An empty slot held by nobody is what a fresh object has, so leaving it out
-  // keeps a page of untouched objects from carrying a line of nothing on each.
-  if (l.source.hash !== null || l.source.by !== 'auto') out.source = l.source
-  if (l.ownSource.length > 0) out.ownSource = l.ownSource
-  if (l.translations.length > 0) out.translations = l.translations
-  if (l.translation !== null) out.translation = l.translation
-  out.style = serializeTextStyle(l.style)
+
+  const source = serializeBody(l.source)
+  if (l.source.by !== 'auto') source.by = l.source.by
+  if (l.source.from !== undefined) source.from = l.source.from
+  out.source = source
+
+  const translation = serializeBody(l.translation)
+  if (l.translation.candidates.length > 0) translation.candidates = l.translation.candidates
+  if (l.translation.chosen !== null) translation.chosen = l.translation.chosen
+  out.translation = translation
+
+  return out
+}
+
+function serializeBody(body: TextBody): Record<string, unknown> {
+  const out: Record<string, unknown> = { x: body.x, y: body.y, lines: body.lines }
+  if (body.rotation) out.rotation = body.rotation
+  out.style = serializeTextStyle(body.style)
   return out
 }
 
@@ -490,13 +541,14 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
  * The drawn part of a page, on its own — what a thumbnail's identity is made
  * of.
  *
- * A text object's tags and everything about its source go: they move no pixel,
- * and keeping them would throw away every thumbnail in the chapter for a pass
- * that changed nothing anybody can see.
+ * A text object's tags and its whole source body go: they move no pixel — what
+ * a page composites is the translation — and keeping them would throw away
+ * every thumbnail in the chapter for a pass that changed nothing anybody can
+ * see.
  *
- * Translations collapse to the resolved text: the one in the slot is on the
- * artwork, the rest are proposals nobody can see — two objects reading the
- * same way are the same picture.
+ * The translation's candidates collapse to the resolved text: the one in the
+ * slot is on the artwork, the rest are proposals nobody can see — two objects
+ * reading the same way are the same picture.
  */
 export function serializeLayers(layers: readonly LayerEntry[]): string {
   const drawn = (entry: LayerEntry): Record<string, unknown> => {
@@ -504,10 +556,10 @@ export function serializeLayers(layers: readonly LayerEntry[]): string {
     if (entry.kind === 'text') {
       delete out.tags
       delete out.source
-      delete out.ownSource
-      delete out.translations
-      delete out.translation
-      out.lines = linesOf(textOf(entry))
+      const translation = out.translation as Record<string, unknown>
+      delete translation.candidates
+      delete translation.chosen
+      translation.lines = linesOf(textOf(entry.translation))
     } else if (entry.kind === 'group') {
       out.children = entry.children.map(drawn)
     }

@@ -73,8 +73,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { candidatesFor } from '@shared/ocr/candidates'
+import type { SourceBody } from '@shared/page/types'
+import { linesOf } from '@shared/page/text'
 import { detectorOf } from '@shared/ocr/types'
-import { textOf } from '@shared/page/text'
+import { textOfBody } from '@shared/page/text'
 import { drawnLabel } from '@/lib/labelRaster'
 import { useEditorStore } from '@/stores/editorStore'
 import { useOcrStore } from '@/stores/ocrStore'
@@ -98,7 +100,14 @@ const pool = computed(() => (pageId.value ? project.readingsOfPage(pageId.value)
 const rows = computed(() => {
   const o = object.value
   if (!o) return []
-  const centre = drawnLabel(textOf(o), o.style, o.effects, { x: o.x, y: o.y }, o.rotation).center
+  const body = o.source
+  const centre = drawnLabel(
+    textOfBody(body),
+    body.style,
+    o.effects,
+    { x: body.x, y: body.y },
+    body.rotation,
+  ).center
   return candidatesFor(o, centre, pool.value)
 })
 
@@ -142,35 +151,44 @@ watch(object, () => {
   swapping.value = false
 })
 
+/**
+ * Taking a row copies its words onto the object. The reading stays exactly as
+ * the recognizer left it — it is a measurement of the artwork, and what this
+ * object says from here on is the object's.
+ */
 function take(hash: string) {
-  if (!pageId.value || !object.value) return
-  if (object.value.source.hash === hash) return
+  const o = object.value
+  if (!pageId.value || !o) return
+  if ((o.source.from ?? 'own') === hash) return
   swapping.value = true
-  project.setLabelSource(pageId.value, object.value.id, { hash, by: 'human' })
-  // Taking the own row is also asking to write it, since there is no other
-  // way to make one.
+  const source: SourceBody = { ...o.source, by: 'human' }
   if (hash === 'own') {
+    delete source.from
+    project.setLabelSource(pageId.value, o.id, source)
+    // Taking the own row is also asking to write it, since there is no other
+    // way to make one.
     void nextTick(() => {
       document.querySelector<HTMLTextAreaElement>('.cand-on .cand-input')?.focus()
     })
+    return
   }
+  const reading = pool.value.find((c) => c.hash === hash)
+  if (!reading) return
+  project.setLabelSource(pageId.value, o.id, { ...source, from: hash, lines: linesOf(reading.text) })
 }
 
 /**
- * Editing what is picked is also answering for the slot: left `auto`, a later
- * run could walk the object off the very words someone just typed. Nobody
- * corrects a sentence they are willing to have replaced.
+ * Editing what is picked is also answering for it: left `auto`, a later run
+ * could walk the object off the very words someone just typed. Nobody corrects
+ * a sentence they are willing to have replaced.
  */
-function write(hash: string, event: Event) {
-  if (!pageId.value || !object.value) return
+function write(_hash: string, event: Event) {
+  const o = object.value
+  if (!pageId.value || !o) return
   const text = (event.target as HTMLTextAreaElement).value
-  if (hash === 'own') {
-    project.setLabelOwnSource(pageId.value, object.value.id, text)
-    return
-  }
-  project.correctReading(pageId.value, hash, text)
-  if (object.value.source.by !== 'human') {
-    project.setLabelSource(pageId.value, object.value.id, { hash, by: 'human' })
+  project.setLabelLines(pageId.value, o.id, 'source', text)
+  if (o.source.by !== 'human') {
+    project.setLabelSource(pageId.value, o.id, { ...o.source, by: 'human' })
   }
 }
 </script>

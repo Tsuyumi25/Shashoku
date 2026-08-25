@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+import { emptyBody } from './schema'
 import { isBlank, linesFor, textOf } from './text'
 
-type Entry = Parameters<typeof linesFor>[0]
+type Body = Parameters<typeof linesFor>[0]
 
-function entry(over: Partial<Entry> = {}): Entry {
-  return { lines: [''], translations: [], translation: null, ...over }
+function entry(over: Partial<Body> = {}): Body {
+  return {
+    ...emptyBody(DEFAULT_TEXT_STYLE),
+    candidates: [],
+    chosen: null,
+    ...over,
+  }
 }
 
 const CANDIDATE = { id: 'c1', lines: ['候選一行'] }
@@ -15,13 +22,13 @@ describe('linesFor', () => {
   })
 
   it('reads the chosen candidate without touching the own lines', () => {
-    const e = entry({ lines: [''], translations: [CANDIDATE], translation: 'c1' })
+    const e = entry({ lines: [''], candidates: [CANDIDATE], chosen: 'c1' })
     expect(linesFor(e)).toEqual(['候選一行'])
     expect(e.lines).toEqual([''])
   })
 
   it('falls back to the own lines when the slot names a candidate the pool lost', () => {
-    expect(linesFor(entry({ lines: ['留著'], translation: 'gone' }))).toEqual(['留著'])
+    expect(linesFor(entry({ lines: ['留著'], chosen: 'gone' }))).toEqual(['留著'])
   })
 })
 
@@ -31,7 +38,7 @@ describe('textOf', () => {
   })
 
   it('reads the chosen candidate', () => {
-    expect(textOf(entry({ translations: [CANDIDATE], translation: 'c1' }))).toBe('候選一行')
+    expect(textOf(entry({ candidates: [CANDIDATE], chosen: 'c1' }))).toBe('候選一行')
   })
 })
 
@@ -50,13 +57,13 @@ describe('isBlank', () => {
    * own lines are still empty, and every display has to read it as translated.
    */
   it('is false when only the chosen candidate has text', () => {
-    expect(isBlank(entry({ lines: [''], translations: [CANDIDATE], translation: 'c1' }))).toBe(
+    expect(isBlank(entry({ lines: [''], candidates: [CANDIDATE], chosen: 'c1' }))).toBe(
       false,
     )
   })
 
   it('is true when the chosen candidate is itself empty', () => {
     const empty = { id: 'c2', lines: [''] }
-    expect(isBlank(entry({ lines: ['有字'], translations: [empty], translation: 'c2' }))).toBe(true)
+    expect(isBlank(entry({ lines: ['有字'], candidates: [empty], chosen: 'c2' }))).toBe(true)
   })
 })

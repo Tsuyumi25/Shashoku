@@ -6,6 +6,7 @@ import type {
   OcrCandidatePersisted,
   OcrJson,
   TextLayerEntry,
+  TranslationBody,
 } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { ProjectFile } from '@/types/project'
@@ -13,28 +14,18 @@ import { collectTexts } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
 import { renderProposeResult, renderTexts, renderWithdrawResult } from '@shared/mcp/render'
+import { blankTextObject } from '@shared/page/schema'
 
-function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
-    ...extra,
-  }
+function text(id: string, extra: Partial<TranslationBody> = {}): TextLayerEntry {
+  const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
+  entry.translation = { ...entry.translation, lines: [], ...extra }
+  return entry
+}
+
+function sourced(id: string, lines: string[]): TextLayerEntry {
+  const entry = text(id)
+  entry.source.lines = lines
+  return entry
 }
 
 function reading(hash: string, textValue: string): OcrCandidatePersisted {
@@ -74,13 +65,13 @@ function file(
 }
 
 describe('collectTexts', () => {
-  it('resolves the source through the reading pool and the translation through the slot', () => {
+  it('answers the object own source, and the translation through the slot', () => {
     const entry = text('a', {
-      source: { hash: 'h1', by: 'auto' },
       lines: ['typed'],
-      translations: [{ id: 't1', lines: ['from slot'] }],
-      translation: 't1',
+      candidates: [{ id: 't1', lines: ['from slot'] }],
+      chosen: 't1',
     })
+    entry.source.lines = ['何言ってんの']
     const pages = collectTexts([file('001', [entry], ['a'], [reading('h1', '何言ってんの')])])
     expect(pages).toEqual([
       {
@@ -98,20 +89,22 @@ describe('collectTexts', () => {
     ])
   })
 
-  it('answers own written source, and falls back to typed lines with no slot', () => {
-    const entry = text('a', {
-      source: { hash: 'own', by: 'human' },
-      ownSource: 'ザワザワ',
-      lines: ['沙沙'],
-    })
+  it('falls back to typed lines with no slot filled', () => {
+    const entry = sourced('a', ['ザワザワ'])
+    entry.translation.lines = ['沙沙']
     const [page] = collectTexts([file('001', [entry], ['a'])])
     expect(page.objects).toEqual([
       { id: 'a', source: 'ザワザワ', translation: '沙沙', candidates: [] },
     ])
   })
 
-  it('reports nothing rather than something for an empty slot and a dangling hash', () => {
-    const entry = text('a', { source: { hash: 'gone', by: 'auto' } })
+  /**
+   * A birth certificate naming a reading the pool has lost decides nothing:
+   * the words are the object's own, and here it has none.
+   */
+  it('reports nothing rather than something for an object that says nothing', () => {
+    const entry = text('a')
+    entry.source.from = 'gone'
     const [page] = collectTexts([file('001', [entry], ['a'])])
     expect(page.objects).toEqual([{ id: 'a', source: null, translation: '', candidates: [] }])
   })
@@ -181,8 +174,8 @@ describe('planProposal', () => {
 
   it('appends without touching a settled slot', () => {
     const entry = text('a', {
-      translations: [{ id: 't1', lines: ['已選'] }],
-      translation: 't1',
+      candidates: [{ id: 't1', lines: ['已選'] }],
+      chosen: 't1',
     })
     expect(planProposal(entry, ['新譯'])).toEqual({ action: 'append', fillSlot: false })
   })
@@ -197,9 +190,9 @@ describe('planProposal', () => {
 
 describe('planWithdraw', () => {
   const CLIENT = 'claude-code 2.1.219'
-  const drawer = (extra: Partial<TextLayerEntry> = {}) =>
+  const drawer = (extra: Partial<TranslationBody> = {}) =>
     text('a', {
-      translations: [
+      candidates: [
         { id: 'mine', lines: ['本 client 提的'], source: CLIENT },
         { id: 'theirs', lines: ['別的 client 提的'], source: 'codex 1.0' },
         { id: 'yours', lines: ['人寫的'], human: true },
@@ -213,7 +206,7 @@ describe('planWithdraw', () => {
   })
 
   it('removes even the chosen one, saying the slot will clear', () => {
-    expect(planWithdraw(drawer({ translation: 'mine' }), 'mine', CLIENT)).toEqual({
+    expect(planWithdraw(drawer({ chosen: 'mine' }), 'mine', CLIENT)).toEqual({
       action: 'remove',
       wasChosen: true,
     })

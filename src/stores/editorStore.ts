@@ -4,15 +4,15 @@ import type {
   GroupLayerEntry,
   LayerEntry,
   RasterLayerEntry,
+  SourceBody,
   TextLayerEntry,
-  TextSource,
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { screenToPagePx } from '@/lib/coords'
-import { generateId as generateLabelId } from '@shared/page/schema'
-import { textOf } from '@shared/page/text'
+import { blankTextObject, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
+import { bodyOnSide, linesOf, textOnSide, type TextSide } from '@shared/page/text'
 import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
@@ -28,7 +28,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
-import type { Verdict } from '@shared/ocr/decide'
+import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 
 export interface Command {
@@ -145,6 +145,27 @@ const MASK_BRUSH_MODES = {
 
 export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {
   return tool in MASK_BRUSH_MODES ? MASK_BRUSH_MODES[tool as keyof typeof MASK_BRUSH_MODES] : null
+}
+
+
+/**
+ * A style set the way one run measured the artwork, over whatever it is being
+ * laid on. A field the run did not measure keeps the value underneath — absent
+ * means nothing was measured, and filling it in with a guess would let an
+ * estimate be read as an observation.
+ */
+function measuredStyle(base: TextStyle, measured: Typography): TextStyle {
+  return {
+    ...base,
+    direction:
+      measured.vertical === undefined
+        ? base.direction
+        : measured.vertical
+          ? 'vertical'
+          : 'horizontal',
+    fontSizePx: measured.fontSizePx ?? base.fontSizePx,
+    leadingPercent: measured.leadingPercent ?? base.leadingPercent,
+  }
 }
 
 
@@ -295,6 +316,25 @@ export const useEditorStore = defineStore('editor', () => {
   const collapsedLayerIds = ref<Set<string>>(new Set())
 
   const tool = ref<CanvasTool>('select')
+
+  /**
+   * Which of an object's two bodies everything is working on.
+   *
+   * ⭐ A mode and not a tool. Which half of an object is being worked on is
+   * orthogonal to what the pointer does, so placing, moving, connecting and
+   * selecting all go on working while it is up; a tool slot would have made
+   * "work on the source" and "move things" mutually exclusive, which is two
+   * unrelated questions sharing one answer.
+   */
+  const textSide = ref<TextSide>('translation')
+
+  function setTextSide(side: TextSide) {
+    // The session below remembers the side it opened on, but a caret left in a
+    // box while the mode flips would go on writing into a body nothing on
+    // screen is showing any more.
+    commitTextEdit()
+    textSide.value = side
+  }
 
   /**
    * The colour the eyedropper puts away. Nothing reads it yet — it is here so
@@ -455,7 +495,17 @@ export const useEditorStore = defineStore('editor', () => {
    * visited reads as "you edited this line", where a time window would let
    * typing speed decide how much an undo takes back.
    */
-  const pendingTextEdit = ref<{ pageId: string; labelId: string; from: string } | null>(null)
+  const pendingTextEdit = ref<{
+    pageId: string
+    labelId: string
+    from: string
+    /**
+     * ⭐ The session's own, read back from here rather than from the mode.
+     * Toggling which side is shown mid-sentence must not send the rest of what
+     * is typed into the other half of the object.
+     */
+    side: TextSide
+  } | null>(null)
 
   /** Undefined once the label being edited has been deleted under the caret. */
   function textOfPending(): string | undefined {
@@ -463,7 +513,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!pending) return undefined
     const project = useProjectStore()
     const label = project.labelById(pending.pageId, pending.labelId)
-    return label === undefined ? undefined : textOf(label)
+    return label === undefined ? undefined : textOnSide(label, pending.side)
   }
 
   /**
@@ -475,7 +525,7 @@ export const useEditorStore = defineStore('editor', () => {
   function beginTextEdit(pageId: string, labelId: string, from: string) {
     commitTextEdit()
     if (isLayerLocked(labelId)) return
-    pendingTextEdit.value = { pageId, labelId, from }
+    pendingTextEdit.value = { pageId, labelId, from, side: textSide.value }
   }
 
   function commitTextEdit() {
@@ -487,7 +537,7 @@ export const useEditorStore = defineStore('editor', () => {
     pendingTextEdit.value = null
     // The label was deleted mid-edit, and the delete already captured its text.
     if (text === undefined) return
-    cmdUpdateLabelText(pending.pageId, pending.labelId, pending.from, text)
+    cmdUpdateLabelText(pending.pageId, pending.labelId, pending.side, pending.from, text)
   }
 
   /**
@@ -506,7 +556,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (page === null || id === null) return
     const label = useProjectStore().labelById(page, id)
     if (!label) return
-    beginTextEdit(page, id, textOf(label))
+    beginTextEdit(page, id, textOnSide(label, textSide.value))
   }
 
   /**
@@ -622,40 +672,20 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A new label is empty and carries no tags at all, so a run of them can be
-   * placed first and both typed and classified later.
-   *
-   * Deliberately not inheriting whatever was last selected: a tag put on by the
-   * tool rather than by the user is a tag nobody checked, and the batch
-   * operations exist precisely so that tagging afterwards is cheap.
+   * A new label is empty on both sides. It is placed where the pointer asked on
+   * the side being worked on, and at the same place on the other — nothing has
+   * been measured about either, so starting them apart would be inventing a
+   * difference.
    */
   function addLabelAt(x: number, y: number) {
     const project = useProjectStore()
     if (!currentPageId.value) return
-    cmdAddLabel(currentPageId.value, {
-      kind: 'text',
-      id: generateLabelId(),
-      visible: true,
-      locked: false,
-      opacity: 1,
-      blendMode: 'normal',
-      effects: [],
-      x,
-      y,
-      tags: [],
-      rotation: 0,
-      lines: [''],
-      // ⭐ Unanswered, and left that way. Which reading an object stands for is
-      // settled once for the whole page, by weighing every reading against
-      // every object at once — an object that grabbed the nearest reading as it
-      // was drawn would be answering a question the page is about to answer
-      // properly, and would have to be overruled to fix it.
-      source: { hash: null, by: 'auto' },
-      ownSource: '',
-      translations: [],
-      translation: null,
-      style: { ...project.header.seedStyle },
-    })
+    const label = blankTextObject(generateLabelId(), project.header.seedStyle)
+    label.source.x = x
+    label.source.y = y
+    label.translation.x = x
+    label.translation.y = y
+    cmdAddLabel(currentPageId.value, label)
   }
 
   /**
@@ -673,47 +703,37 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     if (verdict.fills.size === 0 && verdict.spawns.length === 0) return
 
-    const before = new Map<string, TextSource>()
-    for (const id of verdict.fills.keys()) {
+    const seed = project.header.seedStyle
+
+    const before = new Map<string, SourceBody>()
+    const after = new Map<string, SourceBody>()
+    for (const [id, filling] of verdict.fills) {
       const label = project.labelById(pageId, id)
-      if (label) before.set(id, label.source)
+      if (!label) continue
+      before.set(id, label.source)
+      after.set(id, {
+        ...label.source,
+        lines: linesOf(filling.text),
+        from: filling.from,
+        // ⚠️ Only the type, never the position. The object already stands where
+        // it stands, and this is a correction to what it says.
+        style: measuredStyle(label.source.style, filling),
+      })
     }
 
-    const seed = project.header.seedStyle
     const born = verdict.spawns.map((spawn) => {
-      const style: TextStyle = {
-        ...seed,
-        direction: spawn.vertical === undefined
-          ? seed.direction
-          : spawn.vertical
-            ? 'vertical'
-            : 'horizontal',
-        fontSizePx: spawn.fontSizePx ?? seed.fontSizePx,
-        leadingPercent: spawn.leadingPercent ?? seed.leadingPercent,
-      }
+      const style = measuredStyle(seed, spawn)
+      const label = blankTextObject(generateLabelId(), style)
+      label.source = { ...emptyBody(style), by: 'auto', lines: linesOf(spawn.text), from: spawn.from }
       // Placed by where the reading was, which is the middle of the balloon —
       // so the anchor is worked back from that rather than written to it, since
       // which corner the anchor names depends on how the text is aligned.
       const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
-      const label: TextLayerEntry = {
-        kind: 'text',
-        id: generateLabelId(),
-        visible: true,
-        locked: false,
-        opacity: 1,
-        blendMode: 'normal',
-        effects: [],
-        x: spawn.centre.x - empty.center.x,
-        y: spawn.centre.y - empty.center.y,
-        tags: [],
-        rotation: 0,
-        lines: [''],
-        source: { hash: spawn.hash, by: 'auto' },
-        ownSource: '',
-        translations: [],
-        translation: null,
-        style,
-      }
+      const anchor = { x: spawn.centre.x - empty.center.x, y: spawn.centre.y - empty.center.y }
+      label.source.x = anchor.x
+      label.source.y = anchor.y
+      label.translation.x = anchor.x
+      label.translation.y = anchor.y
       return label
     })
 
@@ -721,7 +741,7 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand({
       label: `recognize ${pageId}`,
       do: () => {
-        for (const [id, source] of verdict.fills) project.setLabelSource(pageId, id, source)
+        for (const [id, source] of after) project.setLabelSource(pageId, id, source)
         for (const label of born) project.addLabel(pageId, label, places.get(label.id))
       },
       undo: () => {
@@ -945,6 +965,7 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdMoveLabel(
     pageId: string,
     labelId: string,
+    side: TextSide,
     oldPos: { x: number; y: number },
     newPos: { x: number; y: number },
   ) {
@@ -953,8 +974,8 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `move-label ${labelId}`,
-        do: () => project.moveLabel(pageId, labelId, newPos.x, newPos.y),
-        undo: () => project.moveLabel(pageId, labelId, oldPos.x, oldPos.y),
+        do: () => project.moveLabel(pageId, labelId, side, newPos.x, newPos.y),
+        undo: () => project.moveLabel(pageId, labelId, side, oldPos.x, oldPos.y),
       },
       { alreadyApplied: true },
     )
@@ -994,14 +1015,15 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdRotateLabel(
     pageId: string,
     labelId: string,
+    side: TextSide,
     from: TurnedLabel,
     to: TurnedLabel,
   ) {
     if (JSON.stringify(from) === JSON.stringify(to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: TurnedLabel) => {
-      project.rotateLabel(pageId, labelId, state.rotation)
-      project.moveLabel(pageId, labelId, state.x, state.y)
+      project.rotateLabel(pageId, labelId, side, state.rotation)
+      project.moveLabel(pageId, labelId, side, state.x, state.y)
     }
     pushCommand(
       {
@@ -1027,6 +1049,7 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdScaleLabel(
     pageId: string,
     labelId: string,
+    side: TextSide,
     from: ScaledLabel,
     to: ScaledLabel,
   ) {
@@ -1034,8 +1057,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
-      project.setLabelStyle(pageId, labelId, state.style)
-      project.moveLabel(pageId, labelId, state.x, state.y)
+      project.setLabelStyle(pageId, labelId, side, state.style)
+      project.moveLabel(pageId, labelId, side, state.x, state.y)
     }
     pushCommand(
       {
@@ -1304,13 +1327,19 @@ export const useEditorStore = defineStore('editor', () => {
    * was put on, so this refuses like every other change rather than being the
    * one exception content slips through.
    */
-  function cmdUpdateLabelText(pageId: string, labelId: string, oldText: string, newText: string) {
+  function cmdUpdateLabelText(
+    pageId: string,
+    labelId: string,
+    side: TextSide,
+    oldText: string,
+    newText: string,
+  ) {
     if (oldText === newText || isLayerLocked(labelId)) return
     const project = useProjectStore()
     pushCommand({
       label: `update-text ${labelId}`,
-      do: () => project.updateLabelText(pageId, labelId, newText),
-      undo: () => project.updateLabelText(pageId, labelId, oldText),
+      do: () => project.updateLabelText(pageId, labelId, side, newText),
+      undo: () => project.updateLabelText(pageId, labelId, side, oldText),
     })
   }
 
@@ -1385,14 +1414,15 @@ export const useEditorStore = defineStore('editor', () => {
   ) {
     const project = useProjectStore()
     if (targets.length === 0 || Object.keys(patch).length === 0) return
+    const side = textSide.value
     const before = targets.map(({ pageId, entry }) => ({
       pageId,
       id: entry.id,
-      style: { ...entry.style },
+      style: { ...bodyOnSide(entry, side).style },
     }))
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const write = (states: typeof before) => {
-      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
+      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, side, style)
     }
     pushCommand({
       label: `style ${targets.length}`,
@@ -1466,7 +1496,7 @@ export const useEditorStore = defineStore('editor', () => {
       pageId,
       id: entry.id,
       tags: [...entry.tags],
-      style: { ...entry.style },
+      style: { ...entry.translation.style },
     }))
     const sample = chapterBucketObjects()
     const { tags: registry, seedStyle } = project.header
@@ -1478,7 +1508,7 @@ export const useEditorStore = defineStore('editor', () => {
     const write = (states: typeof before) => {
       for (const { pageId, id, tags, style } of states) {
         project.setLabelTags(pageId, id, tags)
-        project.setLabelStyle(pageId, id, style)
+        project.setLabelStyle(pageId, id, 'translation', style)
       }
     }
     pushCommand({
@@ -1663,6 +1693,8 @@ export const useEditorStore = defineStore('editor', () => {
     labelQuery,
     tool,
     setTool,
+    textSide,
+    setTextSide,
     foreground,
     fontSize,
     adjustFontSize,

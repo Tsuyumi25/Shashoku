@@ -6,24 +6,44 @@ import {
   serializeLayers,
   serializeManifest,
   serializeOcr,
+  blankTextObject,
 } from './schema'
-import type { ManifestJson, OcrJson, RasterLayerEntry, TextLayerEntry } from './types'
+import type {
+  ManifestJson,
+  OcrJson,
+  RasterLayerEntry,
+  TextLayerEntry,
+  TranslationBody,
+} from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+
+/** One body, as it is written to disk. */
+const body = (over: Record<string, unknown> = {}) => ({
+  x: 512,
+  y: 300,
+  lines: ['hi'],
+  style: DEFAULT_TEXT_STYLE,
+  ...over,
+})
 
 const UPRIGHT = {
   kind: 'text',
   id: 'a',
   visible: true,
   locked: false,
-  x: 512,
-  y: 300,
   tags: [],
-  lines: ['hi'],
-  source: { hash: null, by: 'auto' },
-  ownSource: '',
-  style: DEFAULT_TEXT_STYLE,
+  source: body(),
+  translation: body(),
 }
+
+/** `UPRIGHT` with one body written differently, for a test about that body. */
+const withTranslation = (over: Record<string, unknown>) => ({
+  ...UPRIGHT,
+  translation: body(over),
+})
+
+const withSource = (over: Record<string, unknown>) => ({ ...UPRIGHT, source: body(over) })
 
 const PATCH = {
   kind: 'raster',
@@ -67,17 +87,11 @@ function manifestWith(entry: TextLayerEntry): ManifestJson {
 const firstText = (m: ManifestJson): TextLayerEntry => m.layers[0] as TextLayerEntry
 
 /** `UPRIGHT` as the parser hands it back, for the tests that write one out. */
-function textEntry(extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    ...(UPRIGHT as unknown as TextLayerEntry),
-    rotation: 0,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    translations: [],
-    translation: null,
-    ...extra,
-  }
+function textEntry(extra: Partial<TranslationBody> = {}, over: Partial<TextLayerEntry> = {}): TextLayerEntry {
+  const entry = blankTextObject('a', DEFAULT_TEXT_STYLE)
+  entry.source = { ...entry.source, x: 512, y: 300, lines: ['hi'] }
+  entry.translation = { ...entry.translation, x: 512, y: 300, lines: ['hi'], ...extra }
+  return { ...entry, ...over }
 }
 
 describe('the translation candidates', () => {
@@ -88,45 +102,45 @@ describe('the translation candidates', () => {
 
   it('reads a page written before objects had translations as having none', () => {
     const parsed = firstText(parseManifest(raw(UPRIGHT)))
-    expect(parsed.translations).toEqual([])
-    expect(parsed.translation).toBeNull()
+    expect(parsed.translation.candidates).toEqual([])
+    expect(parsed.translation.chosen).toBeNull()
   })
 
   it('round trips the pool and the slot', () => {
-    const entry = textEntry({ translations: two, translation: 't2' })
+    const entry = textEntry({ candidates: two, chosen: 't2' })
     expect(parseManifest(serializeManifest(manifestWith(entry)))).toEqual(manifestWith(entry))
   })
 
   it('writes neither key for an object nobody has translated', () => {
     const out = JSON.parse(serializeManifest(manifestWith(textEntry())))
-    expect(out.layers[0]).not.toHaveProperty('translations')
-    expect(out.layers[0]).not.toHaveProperty('translation')
+    expect(out.layers[0].translation).not.toHaveProperty('candidates')
+    expect(out.layers[0].translation).not.toHaveProperty('chosen')
   })
 
   it('opens a slot naming a candidate that is not there as empty', () => {
     const parsed = firstText(
-      parseManifest(raw({ ...UPRIGHT, translations: two, translation: 'gone' })),
+      parseManifest(raw(withTranslation({ candidates: two, chosen: 'gone' }))),
     )
-    expect(parsed.translation).toBeNull()
-    expect(parsed.lines).toEqual(['hi'])
+    expect(parsed.translation.chosen).toBeNull()
+    expect(parsed.translation.lines).toEqual(['hi'])
   })
 
   it('refuses two candidates answering to one id', () => {
     const same = [two[0], { id: 't1', lines: ['別的'] }]
-    expect(() => parseManifest(raw({ ...UPRIGHT, translations: same }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ candidates: same })))).toThrow(PageParseError)
   })
 
   it('refuses a line with a newline inside it, as on the object itself', () => {
     const bad = [{ id: 't1', lines: ['a\nb'] }]
-    expect(() => parseManifest(raw({ ...UPRIGHT, translations: bad }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ candidates: bad })))).toThrow(PageParseError)
   })
 
   it('round trips who proposed a candidate, and refuses an empty name', () => {
     const signed = [{ id: 't1', lines: ['妳終於來了'], source: 'claude-code 2.1.219' }]
-    const entry = textEntry({ translations: signed })
+    const entry = textEntry({ candidates: signed })
     expect(parseManifest(serializeManifest(manifestWith(entry)))).toEqual(manifestWith(entry))
     const blank = [{ id: 't1', lines: ['妳終於來了'], source: '' }]
-    expect(() => parseManifest(raw({ ...UPRIGHT, translations: blank }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ candidates: blank })))).toThrow(PageParseError)
   })
 
   /**
@@ -135,53 +149,55 @@ describe('the translation candidates', () => {
    * away over it is a page of compositing paid for nothing.
    */
   it('identifies the drawn page by what the slot resolves to', () => {
-    const held = textEntry({ translations: two, translation: 't1' })
+    const held = textEntry({ candidates: two, chosen: 't1' })
     const typed = textEntry({ lines: two[0].lines })
     expect(serializeLayers([held])).toBe(serializeLayers([typed]))
   })
 
   it('tells apart two objects reading differently out of one pool', () => {
-    const first = textEntry({ translations: two, translation: 't1' })
-    const second = textEntry({ translations: two, translation: 't2' })
+    const first = textEntry({ candidates: two, chosen: 't1' })
+    const second = textEntry({ candidates: two, chosen: 't2' })
     expect(serializeLayers([first])).not.toBe(serializeLayers([second]))
   })
 })
 
 describe('text object rotation', () => {
   it('reads a page written before objects could be turned as upright', () => {
-    expect(firstText(parseManifest(raw(UPRIGHT))).rotation).toBe(0)
+    expect(firstText(parseManifest(raw(UPRIGHT))).translation.rotation).toBe(0)
   })
 
   it('carries a turn through', () => {
-    const parsed = parseManifest(raw({ ...UPRIGHT, rotation: -0.7853981633974483 }))
-    expect(firstText(parsed).rotation).toBeCloseTo(-Math.PI / 4, 12)
+    const parsed = parseManifest(raw(withTranslation({ rotation: -0.7853981633974483 })))
+    expect(firstText(parsed).translation.rotation).toBeCloseTo(-Math.PI / 4, 12)
   })
 
   it('refuses a turn that is not a number', () => {
-    expect(() => parseManifest(raw({ ...UPRIGHT, rotation: '45deg' }))).toThrow(PageParseError)
-    expect(() => parseManifest(raw({ ...UPRIGHT, rotation: Number.NaN }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ rotation: '45deg' })))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ rotation: Number.NaN })))).toThrow(
+      PageParseError,
+    )
   })
 
   it('leaves upright objects out of the file rather than writing a zero on each', () => {
     const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out).layers[0]).not.toHaveProperty('rotation')
+    expect(JSON.parse(out).layers[0].translation).not.toHaveProperty('rotation')
   })
 
   it('round trips a turned object', () => {
     const out = serializeManifest(manifestWith(textEntry({ rotation: 1.25 })))
-    expect(firstText(parseManifest(out)).rotation).toBe(1.25)
+    expect(firstText(parseManifest(out)).translation.rotation).toBe(1.25)
   })
 })
 
 describe('a text object stands where it was put', () => {
   it('keeps a position between two pixels, which is what a rasterizer resolves', () => {
-    const parsed = firstText(parseManifest(raw({ ...UPRIGHT, x: 512.37, y: 300.5 })))
-    expect([parsed.x, parsed.y]).toEqual([512.37, 300.5])
+    const parsed = firstText(parseManifest(raw(withTranslation({ x: 512.37, y: 300.5 }))))
+    expect([parsed.translation.x, parsed.translation.y]).toEqual([512.37, 300.5])
   })
 
   it('refuses a position that is not a number', () => {
-    expect(() => parseManifest(raw({ ...UPRIGHT, x: '512' }))).toThrow(PageParseError)
-    expect(() => parseManifest(raw({ ...UPRIGHT, y: Number.POSITIVE_INFINITY }))).toThrow(
+    expect(() => parseManifest(raw(withTranslation({ x: '512' })))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ y: Number.POSITIVE_INFINITY })))).toThrow(
       PageParseError,
     )
   })
@@ -296,7 +312,7 @@ describe('opacity and blend mode', () => {
   })
 
   it('round trips a faded object', () => {
-    const faded = textEntry({ opacity: 0.4, blendMode: 'multiply' })
+    const faded = textEntry({}, { opacity: 0.4, blendMode: 'multiply' })
     const parsed = firstEntry(parseManifest(serializeManifest(manifestWith(faded))))
     expect(parsed.opacity).toBe(0.4)
     expect(parsed.blendMode).toBe('multiply')
@@ -391,7 +407,7 @@ describe('parseManifest', () => {
           effects: [],
           children: [
             textEntry(),
-            textEntry({ id: 'b', lines: ['ゴゴゴ'] }),
+            textEntry({ lines: ['ゴゴゴ'] }, { id: 'b' }),
           ],
         },
       ],
@@ -463,15 +479,15 @@ describe('parseManifest', () => {
   })
 
   it('round trips an object carrying tags and a style of its own', () => {
-    const marked = textEntry({
-      tags: ['心聲', '框内'],
-      style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 },
-    })
+    const marked = textEntry(
+      { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 } },
+      { tags: ['心聲', '框内'] },
+    )
     expect(parseManifest(serializeManifest(manifestWith(marked)))).toEqual(manifestWith(marked))
   })
 
   it('refuses a line with a newline inside it, since lines are the breaks', () => {
-    expect(() => parseManifest(raw({ ...UPRIGHT, lines: ['a\nb'] }))).toThrow(PageParseError)
+    expect(() => parseManifest(raw(withTranslation({ lines: ['a\nb'] })))).toThrow(PageParseError)
   })
 
   // Structure is this layer's whole job: a page whose order has drifted still
@@ -644,7 +660,7 @@ describe("a page's readings", () => {
 })
 
 describe("a text object's source", () => {
-  const withSource = (source: unknown, ownSource?: string) =>
+  const pageWith = (source: Record<string, unknown>) =>
     JSON.stringify({
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 0,
@@ -652,58 +668,60 @@ describe("a text object's source", () => {
       width: 1200,
       height: 1700,
       readingOrder: ['a'],
-      layers: [{ ...UPRIGHT, source, ...(ownSource === undefined ? {} : { ownSource }) }],
+      layers: [withSource(source)],
     })
 
-  const only = (raw: string) => parseManifest(raw).layers[0] as TextLayerEntry
+  const only = (rawPage: string) => parseManifest(rawPage).layers[0] as TextLayerEntry
 
   /**
-   * A page written before objects had a source opens with an empty one held by
-   * nobody — not by a person. Starting it settled would put every object on
-   * every old page out of reach of the first run that could have filled it.
+   * A source written by nobody is what a fresh object has. Starting it settled
+   * would put every object on every page out of reach of the first run that
+   * could have filled it.
    */
-  it('opens a page written before objects had a source', () => {
-    const older = JSON.parse(withSource(undefined))
-    delete older.layers[0].source
-    const object = only(JSON.stringify(older))
-    expect(object.source).toEqual({ hash: null, by: 'auto' })
-    expect(object.ownSource).toBe('')
+  it('opens a source with no hand on it as held by nobody', () => {
+    expect(only(pageWith({})).source.by).toBe('auto')
+    expect(only(pageWith({})).source.from).toBeUndefined()
   })
 
-  it('carries a reading and who put it there through', () => {
-    expect(only(withSource({ hash: '9f2a1c0b7e4d5a63', by: 'human' })).source).toEqual({
-      hash: '9f2a1c0b7e4d5a63',
-      by: 'human',
-    })
+  it('carries the words, the hand and the birth certificate through', () => {
+    const object = only(pageWith({ lines: ['妖精っ'], by: 'human', from: '9f2a1c0b7e4d5a63' }))
+    expect(object.source.lines).toEqual(['妖精っ'])
+    expect(object.source.by).toBe('human')
+    expect(object.source.from).toBe('9f2a1c0b7e4d5a63')
   })
 
-  /** A slot settled on nothing is a real state, and it is not the same state. */
-  it('tells a slot nobody has touched from one somebody emptied', () => {
-    expect(only(withSource({ hash: null, by: 'human' })).source.by).toBe('human')
-  })
-
-  it('carries a source someone wrote out themselves', () => {
-    expect(only(withSource({ hash: 'own', by: 'human' }, '妖精っ')).ownSource).toBe('妖精っ')
+  /** A source settled on nothing is a real state, and it is not the same state. */
+  it('tells a source nobody has touched from one somebody emptied', () => {
+    expect(only(pageWith({ lines: [''], by: 'human' })).source.by).toBe('human')
   })
 
   it('refuses a hand nobody could have', () => {
-    expect(() => only(withSource({ hash: null, by: 'model' }))).toThrow(PageParseError)
+    expect(() => only(pageWith({ by: 'model' }))).toThrow(PageParseError)
   })
 
-  it('refuses a reading named by an empty string', () => {
-    expect(() => only(withSource({ hash: '', by: 'auto' }))).toThrow(PageParseError)
+  /**
+   * ⭐ The two bodies come back whole, each with its own words, position, angle
+   * and style — which is the whole of what makes them the same kind of thing.
+   */
+  it('round trips both bodies, each set its own way', () => {
+    const entry = textEntry({ rotation: 0.4, style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 } })
+    entry.source = {
+      ...entry.source,
+      lines: ['ふん', 'そうかい'],
+      x: 20,
+      y: 30,
+      rotation: -1.1,
+      style: { ...DEFAULT_TEXT_STYLE, direction: 'vertical', fontSizePx: 18 },
+      by: 'human',
+      from: 'abc123',
+    }
+    expect(parseManifest(serializeManifest(manifestWith(entry)))).toEqual(manifestWith(entry))
   })
 
-  it('leaves an untouched slot out of the file rather than writing it on each', () => {
-    const page = parseManifest(withSource({ hash: null, by: 'auto' }))
-    const written = JSON.parse(serializeManifest(page))
-    expect(written.layers[0]).not.toHaveProperty('source')
-    expect(written.layers[0]).not.toHaveProperty('ownSource')
-  })
-
-  it('round trips a settled slot', () => {
-    const page = parseManifest(withSource({ hash: 'abc123', by: 'human' }, '妖精っ'))
-    expect(parseManifest(serializeManifest(page))).toEqual(page)
+  it('leaves an untouched hand and an absent certificate out of the file', () => {
+    const written = JSON.parse(serializeManifest(manifestWith(textEntry())))
+    expect(written.layers[0].source).not.toHaveProperty('by')
+    expect(written.layers[0].source).not.toHaveProperty('from')
   })
 
   /**
@@ -711,10 +729,9 @@ describe("a text object's source", () => {
    * value a thumbnail is keyed on — the same reason tags do not.
    */
   it('keeps the source out of what a thumbnail is identified by', () => {
-    const bare = serializeLayers(parseManifest(withSource({ hash: null, by: 'auto' })).layers)
-    const sourced = serializeLayers(
-      parseManifest(withSource({ hash: 'abc123', by: 'human' }, '妖精っ')).layers,
-    )
-    expect(bare).toBe(sourced)
+    const bare = textEntry()
+    const sourced = textEntry()
+    sourced.source = { ...sourced.source, lines: ['妖精っ'], by: 'human', from: 'abc123' }
+    expect(serializeLayers([bare])).toBe(serializeLayers([sourced]))
   })
 })

@@ -3,26 +3,18 @@ import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } fr
 import { PASS_THROUGH } from '@shared/page/types'
 import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 function text(id: string, visible = true): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [id],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    visible: visible,
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: [id],
+      candidates: [],
+      chosen: null,
+    },
   }
 }
 

@@ -7,31 +7,16 @@ import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
+import type { TranslationBody } from '@shared/page/types'
+import { blankTextObject } from '@shared/page/schema'
 
 const PAGE_ID = 'p1'
 const CLIENT = 'claude-code 2.1.219'
 
-function label(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
-    ...extra,
-  }
+function label(id: string, extra: Partial<TranslationBody> = {}): TextLayerEntry {
+  const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
+  entry.translation = { ...entry.translation, lines: [], ...extra }
+  return entry
 }
 
 function openWith(project: ReturnType<typeof useProjectStore>, entry: TextLayerEntry) {
@@ -68,11 +53,11 @@ describe('replaying the field sequence', () => {
     openWith(
       project,
       label('obj', {
-        translations: [
+        candidates: [
           { id: 'h-test', lines: ['測試'], human: true },
           { id: 'h-empty', lines: [''], human: true },
         ],
-        translation: 'h-test',
+        chosen: 'h-test',
       }),
     )
     const typos = ['靳自己', '召喛A', '召喛B'].map((t) => propose(project, 'obj', [t]))
@@ -80,8 +65,8 @@ describe('replaying the field sequence', () => {
     typos.forEach((id) => withdraw(project, 'obj', id))
 
     const entry = project.labelById(PAGE_ID, 'obj')!
-    expect(entry.translation).toBe('h-test')
-    expect(entry.translations.map((c) => c.lines[0])).toEqual([
+    expect(entry.translation.chosen).toBe('h-test')
+    expect(entry.translation.candidates.map((c) => c.lines[0])).toEqual([
       '測試',
       '',
       '靠自己',
@@ -96,7 +81,7 @@ describe('replaying the field sequence', () => {
     const first = propose(project, 'obj', ['靳自己'])
     propose(project, 'obj', ['靠自己'])
     withdraw(project, 'obj', first)
-    expect(project.labelById(PAGE_ID, 'obj')!.translation).toBeNull()
+    expect(project.labelById(PAGE_ID, 'obj')!.translation.chosen).toBeNull()
   })
 
   it('does fill the slot exactly once when the object reads as nothing', () => {
@@ -104,7 +89,7 @@ describe('replaying the field sequence', () => {
     openWith(project, label('obj'))
     const a = propose(project, 'obj', ['甲'])
     propose(project, 'obj', ['乙'])
-    expect(project.labelById(PAGE_ID, 'obj')!.translation).toBe(a)
+    expect(project.labelById(PAGE_ID, 'obj')!.translation.chosen).toBe(a)
   })
 
   it('withdrawing the chosen own candidate falls the object back to its lines', () => {
@@ -114,14 +99,14 @@ describe('replaying the field sequence', () => {
     project.setLabelTranslation(PAGE_ID, 'obj', a)
     withdraw(project, 'obj', a)
     const entry = project.labelById(PAGE_ID, 'obj')!
-    expect(entry.translation).toBeNull()
-    expect(entry.lines).toEqual(['自己打的'])
+    expect(entry.translation.chosen).toBeNull()
+    expect(entry.translation.lines).toEqual(['自己打的'])
   })
 
   it('drawer mutations reach a computed watcher without reselecting', () => {
     const project = useProjectStore()
-    openWith(project, label('obj', { translations: [{ id: 'm1', lines: ['甲'], source: CLIENT }] }))
-    const rows = computed(() => project.labelById(PAGE_ID, 'obj')!.translations.map((c) => c.id))
+    openWith(project, label('obj', { candidates: [{ id: 'm1', lines: ['甲'], source: CLIENT }] }))
+    const rows = computed(() => project.labelById(PAGE_ID, 'obj')!.translation.candidates.map((c) => c.id))
     expect(rows.value).toEqual(['m1'])
     project.removeTranslation(PAGE_ID, 'obj', 'm1')
     expect(rows.value).toEqual([])

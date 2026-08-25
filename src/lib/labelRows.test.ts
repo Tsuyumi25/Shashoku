@@ -5,26 +5,17 @@ import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { buildLabelRows, chapterStops, dropAt, type LabelRow } from '@/lib/labelRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 function text(id: string): TextLayerEntry {
   return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [id],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: [id],
+      candidates: [],
+      chosen: null,
+    },
   }
 }
 
@@ -197,7 +188,11 @@ describe('buildLabelRows filtered', () => {
         height: 1700,
         readingOrder: ids,
         readingEdges: [],
-        layers: ids.map((id) => ({ ...text(id), lines: lines[id] })),
+        layers: ids.map((id) => {
+          const entry = text(id)
+          entry.translation.lines = lines[id]
+          return entry
+        }),
       },
     }
   }
@@ -246,6 +241,20 @@ describe('buildLabelRows filtered', () => {
   it('looks across the lines of one object, not only the first', () => {
     const rows = buildLabelRows([withText('001.png', { a: ['one', 'two'] })], 'two')
     expect(rows.filter((r) => r.kind === 'label')).toHaveLength(1)
+  })
+
+  /**
+   * 🐛 The state MCP leaves behind when it fills the slot of a blank object:
+   * the body's own lines are still empty and what it reads as lives in the
+   * slot. A search reading `lines` straight would find nothing while the canvas
+   * shows the words.
+   */
+  it('finds an object through the candidate it is reading', () => {
+    const page = withText('001.png', { a: [''] })
+    const entry = page.page.layers[0] as TextLayerEntry
+    entry.translation.candidates = [{ id: 'c1', lines: ['そうだね'] }]
+    entry.translation.chosen = 'c1'
+    expect(buildLabelRows([page], 'そう').filter((r) => r.kind === 'label')).toHaveLength(1)
   })
 })
 

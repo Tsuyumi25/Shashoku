@@ -4,9 +4,11 @@ import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { sameTagSet, tagsInRegistryOrder } from '@shared/tags/set'
+import { bodyOnSide } from '@shared/page/text'
 import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import { recommendStyle, type StyleCandidate } from '@/lib/styleRecommendation'
 import type { AppearanceTarget } from '@/lib/appearance'
+import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -48,8 +50,11 @@ export function useStyleRecommendations(
   targets: Ref<readonly AppearanceTarget<TextLayerEntry>[]>,
 ): { tagState: ComputedRef<TagState>; suggestions: ComputedRef<StyleSuggestionSet | null> } {
   const project = useProjectStore()
+  const editor = useEditorStore()
 
-  const styles = computed(() => targets.value.map((t) => t.entry.style))
+  const styles = computed(() =>
+    targets.value.map((t) => bodyOnSide(t.entry, editor.textSide).style),
+  )
 
   const tagState = computed<TagState>(() => {
     const first = targets.value[0]

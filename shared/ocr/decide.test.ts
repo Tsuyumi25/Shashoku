@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { OcrCandidatePersisted, TextSource } from '../page/types'
+import type { OcrCandidatePersisted } from '../page/types'
 import { decide, type Standing } from './decide'
 
 let next = 0
@@ -26,7 +26,7 @@ const agreed = (over: Partial<OcrCandidatePersisted> = {}) =>
 const object = (over: Partial<Standing> = {}): Standing => ({
   id: 'o1',
   centre: { x: 200, y: 300 },
-  source: { hash: null, by: 'auto' } as TextSource,
+  source: { by: 'auto' },
   ...over,
 })
 
@@ -40,8 +40,8 @@ describe('decide', () => {
   it('fills the object standing in a place the readers agreed on', () => {
     const pool = agreed()
     const verdict = decide([object()], pool)
-    expect(verdict.fills.get('o1')?.by).toBe('auto')
-    expect(pool.map((r) => r.hash)).toContain(verdict.fills.get('o1')?.hash)
+    expect(verdict.fills.get('o1')?.text).toBe('ふん')
+    expect(pool.map((r) => r.hash)).toContain(verdict.fills.get('o1')?.from)
   })
 
   it('creates nothing where an object already stands', () => {
@@ -50,12 +50,12 @@ describe('decide', () => {
 
   /** Whether that object has answered yet is beside the point — it is there. */
   it('creates nothing where an unanswered object stands', () => {
-    const standing = object({ source: { hash: null, by: 'human' } })
+    const standing = object({ source: { by: 'human' } })
     expect(decide([standing], agreed()).spawns).toEqual([])
   })
 
   it('leaves an object a person answered for exactly as it is', () => {
-    const standing = object({ source: { hash: 'chosen', by: 'human' } })
+    const standing = object({ source: { from: 'chosen', by: 'human' } })
     expect(decide([standing], agreed()).fills.size).toBe(0)
   })
 
@@ -127,7 +127,7 @@ describe('decide', () => {
     const contested = object({ centre: { x: 330, y: 200 } })
 
     const verdict = decide([contested], [...strong, ...weak])
-    expect(strong.map((r) => r.hash)).toContain(verdict.fills.get('o1')?.hash)
+    expect(strong.map((r) => r.hash)).toContain(verdict.fills.get('o1')?.from)
     // The place that lost the object is now a place with no object, so it is
     // free to create one of its own.
     expect(verdict.spawns.map((s) => s.text)).toEqual(['よわい'])
@@ -177,7 +177,7 @@ describe('decide', () => {
   it('reports nothing for an object already standing on the answer', () => {
     const pool = agreed()
     const settled = decide([object()], pool).fills.get('o1')
-    expect(decide([object({ source: settled! })], pool).fills.size).toBe(0)
+    expect(decide([object({ source: { by: 'auto', from: settled!.from } })], pool).fills.size).toBe(0)
   })
 
   it('carries the winner’s line breaks onto the object it creates', () => {

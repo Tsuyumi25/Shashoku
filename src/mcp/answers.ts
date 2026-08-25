@@ -10,7 +10,7 @@ import type {
   WriteResult,
 } from '@shared/mcp/types'
 import { useProjectStore } from '@/stores/projectStore'
-import { collectTexts, readingsOf, textsOfEntry } from './collect'
+import { collectTexts, textsOfEntry } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
 
@@ -35,14 +35,13 @@ function statesOf(
 ): TextObjectTexts[] {
   const file = project.pageById(pageId)
   if (!file) return []
-  const readings = readingsOf(file)
   const seen = new Set<string>()
   const out: TextObjectTexts[] = []
   for (const id of objectIds) {
     if (seen.has(id)) continue
     seen.add(id)
     const entry = project.labelById(pageId, id)
-    if (entry) out.push(textsOfEntry(entry, readings))
+    if (entry) out.push(textsOfEntry(entry))
   }
   return out
 }
@@ -90,7 +89,7 @@ async function chooseTranslation(params: ChooseParams): Promise<WriteResult<Choo
   const outcomes: ChooseOutcome[] = params.items.map(({ objectId, translationId }) => {
     const entry = project.labelById(params.pageId, objectId)
     if (!entry) return { objectId, translationId, ok: false, reason: '物件不存在' }
-    if (!entry.translations.some((c) => c.id === translationId)) {
+    if (!entry.translation.candidates.some((c) => c.id === translationId)) {
       return { objectId, translationId, ok: false, reason: '候選不在這個物件的抽屜裡' }
     }
     project.setLabelTranslation(params.pageId, objectId, translationId)

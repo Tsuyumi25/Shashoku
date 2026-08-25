@@ -3,6 +3,7 @@ import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { StackNode } from '@shared/page/stack'
 import { stackSegments } from '@/lib/stackSegments'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { blankTextObject, emptyBody } from '@shared/page/schema'
 
 function raster(id: string, blendMode = 'normal', opacity = 1): StackNode {
   const entry: RasterLayerEntry = {
@@ -26,23 +27,15 @@ function raster(id: string, blendMode = 'normal', opacity = 1): StackNode {
 
 function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
   const entry: TextLayerEntry = {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity,
-    blendMode,
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [id],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
+    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    opacity: opacity,
+    blendMode: blendMode,
+    translation: {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: [id],
+      candidates: [],
+      chosen: null,
+    },
   }
   return { kind: 'text', entry, opacity, blendMode }
 }

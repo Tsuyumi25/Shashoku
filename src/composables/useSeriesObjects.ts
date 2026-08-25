@@ -38,7 +38,7 @@ export function useSeriesObjects() {
           id: label.id,
           pageId: `${folderName(rootPath)}/${page.pageId}`,
           tags: label.tags,
-          style: label.style,
+          style: label.translation.style,
         })
       }
     }

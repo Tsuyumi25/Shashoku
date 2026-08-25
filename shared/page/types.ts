@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 11
+export const MANIFEST_SCHEMA_VERSION = 12
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -71,6 +71,116 @@ export interface RasterLayerEntry extends LayerEntryBase {
 
 
 /**
+ * One body of text an object carries — what the artwork says, or what it will
+ * say — and everything about how that body sits on the page.
+ *
+ * ⭐ Neither side is the object. The object is the thing on the page; these are
+ * the two things it says, and they are the same kind of thing. What used to be
+ * the object's own position, angle and style belonged to the translation alone,
+ * which made the source a lesser field of it — able to hold words and nothing
+ * else, borrowing typesetting decisions made about a different sentence.
+ *
+ * A third body, in a third language, would be another one of these. Nothing
+ * here is keyed by language yet, because two is what there is.
+ */
+export interface TextBody {
+  /** One entry per line; an embedded newline is refused at parse. */
+  lines: string[]
+
+  /**
+   * Where this body stands on the page, in page pixels, and free to fall
+   * between two of them.
+   *
+   * A raster layer's frame is whole pixels because its content *is* cells and
+   * there is nothing else it could be. Typeset text is not: the pixels a reader
+   * sees are a rasterization of outlines, so a whole number here would be a
+   * property of that output written back onto the input, losing both the
+   * precision and the fact that anything was lost.
+   *
+   * Which point of the frame this names is not stored: it follows from the
+   * style's alignment, since a block with no frame of its own has nothing
+   * between the edge its lines are aligned to and the edge of the block itself.
+   */
+  x: number
+  y: number
+
+  /**
+   * This body's own turn on the page, in radians, clockwise. Concrete here
+   * where the persisted form leaves it out at zero, so nothing downstream has
+   * to keep asking whether an absent turn means upright.
+   *
+   * Its own, like its position: the angle a sentence was written on the artwork
+   * is a measurement, and the angle a translation is set at is a decision.
+   */
+  rotation: number
+
+  /**
+   * The whole style, held by value — no group to inherit from and no override
+   * layered on top. Two bodies that look alike are two bodies that hold the
+   * same nine fields, and nothing changes what one of them looks like except
+   * writing to it.
+   *
+   * The cost is that making a hundred objects agree means writing to a hundred
+   * of them. That is what the batch operations are for, and it is paid on
+   * purpose: it buys back the case a shared style cannot express, where one
+   * object needs to leave the group it belongs to without leaving what it means.
+   */
+  style: TextStyle
+}
+
+
+export type SourceHand = 'auto' | 'human'
+
+/**
+ * What the artwork says here, in this object's own words.
+ *
+ * ⚠️ The only body the recognizers reach, and the whole of what is still
+ * special about it. Everything else it can do, the translation can do too.
+ */
+export interface SourceBody extends TextBody {
+  /**
+   * ⚠️ What keeps a rerun from overruling a person. An automatic pass may only
+   * write where this is `auto`; where it is `human` the source is settled,
+   * including when it is settled on nothing.
+   */
+  by: SourceHand
+
+  /**
+   * Which reading in this page's `ocr.json` these words came from, when they
+   * came from one.
+   *
+   * ⭐ A birth certificate and nothing more. The words above are the text —
+   * this only says where they were got, so a reading that has since gone
+   * leaves the object saying exactly what it said.
+   *
+   * ⭐ And the edge hangs here, on the many side, so that deleting an object,
+   * undoing that delete, correcting the words by hand and a rerun finding
+   * something new all come out right with no code to keep any of it in step.
+   * See `shared/ocr/offer.ts`.
+   */
+  from?: string
+}
+
+/** What the object will say, with the other ways it could have said it. */
+export interface TranslationBody extends TextBody {
+  /**
+   * Held by the body rather than by the page: a translation is written for one
+   * object, unlike a reading, which was found on the artwork before anybody
+   * knew whose it was.
+   */
+  candidates: TranslationCandidate[]
+
+  /**
+   * Which of them this body reads as, or null for its own `lines`.
+   *
+   * ⭐ A pointer and not a copy: what was there before is still in the pool,
+   * and `lines` — what somebody typed themselves — is never overwritten by
+   * picking a candidate.
+   */
+  chosen: string | null
+}
+
+/**
  * A text object, whole — the manifest holds it rather than pointing at a copy
  * of it elsewhere, so creating or deleting one is a single atomic write and an
  * orphan cannot exist.
@@ -81,24 +191,6 @@ export interface RasterLayerEntry extends LayerEntryBase {
  */
 export interface TextLayerEntry extends LayerEntryBase {
   kind: 'text'
-
-  /**
-   * Where the object stands on the page, in page pixels, and free to fall
-   * between two of them.
-   *
-   * A raster layer's frame is whole pixels because its content *is* cells and
-   * there is nothing else it could be. Typeset text is not: the pixels a reader
-   * sees are a rasterization of outlines, so a whole number here would be a
-   * property of that output written back onto the input, losing both the
-   * precision and the fact that anything was lost.
-   *
-   * Which point of the object's frame this names is not stored: it follows from
-   * the style's alignment, since a block with no frame of its own has nothing
-   * between the edge its lines are aligned to and the edge of the block itself.
-   */
-  x: number
-
-  y: number
 
   /**
    * What this object is, semantically — 框内, 心聲, 角色/ゆみ. A set, not a
@@ -112,75 +204,15 @@ export interface TextLayerEntry extends LayerEntryBase {
    * A facet — the `角色/` in `角色/ゆみ` — is a convention inside the string,
    * with nothing in the schema to hold it. How finely to cut the vocabulary is
    * a translation decision, and the file format has no business making it.
+   *
+   * On the object rather than on either body: what a balloon means is one fact
+   * about the balloon, not two facts that could disagree.
    */
   tags: string[]
 
-  /**
-   * The object's own turn on the page, in radians, clockwise. Concrete here
-   * where the persisted form leaves it out at zero, so nothing downstream has
-   * to keep asking whether an absent turn means upright.
-   */
-  rotation: number
+  source: SourceBody
 
-  /** One entry per line; an embedded newline is refused at parse. */
-  lines: string[]
-
-  /**
-   * Which reading this object stands for, and who decided that.
-   *
-   * ⚠️ `by` is what keeps a rerun from overruling a person. An automatic pass
-   * may only write where `by` is `auto`; where it is `human` the slot is
-   * settled, including when it is settled on nothing.
-   */
-  source: TextSource
-
-  /**
-   * A source someone wrote out themselves, for when no reading says what the
-   * artwork says. Never filled by anything automatic; empty is its ordinary
-   * state and stays legal for ever.
-   */
-  ownSource: string
-
-  /**
-   * Held by the object rather than by the page: a translation is written for
-   * one object, unlike a reading, which was found on the artwork before
-   * anybody knew whose it was.
-   */
-  translations: TranslationCandidate[]
-
-  /**
-   * Which of them this object reads as, or null for the lines above.
-   *
-   * ⭐ A pointer and not a copy: what was there before is still in the pool,
-   * and `lines` — what somebody typed themselves — is never overwritten by
-   * picking a candidate.
-   */
-  translation: string | null
-
-  /**
-   * The whole style, held by value — no group to inherit from and no override
-   * layered on top. Two objects that look alike are two objects that hold the
-   * same seven fields, and nothing changes what one of them looks like except
-   * writing to it.
-   *
-   * The cost is that making a hundred objects agree means writing to a hundred
-   * objects. That is what the batch operations are for, and it is paid on
-   * purpose: it buys back the case a shared style cannot express, where an
-   * object needs to leave the group it belongs to without leaving what it means.
-   */
-  style: TextStyle
-}
-
-
-export type SourceHand = 'auto' | 'human'
-
-export interface TextSource {
-  /**
-   * A reading in this page's `ocr.json`, `own` for the object's own written
-   * source, or null for a slot standing empty.
-   */
-  hash: string | 'own' | null
-  by: SourceHand
+  translation: TranslationBody
 }
 
 /**

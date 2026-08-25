@@ -12,31 +12,16 @@ import type {
   WriteResult,
 } from '@shared/mcp/types'
 import { answer } from './answers'
+import type { TranslationBody } from '@shared/page/types'
+import { blankTextObject } from '@shared/page/schema'
 
 const PAGE_ID = 'p1'
 const CLIENT = 'claude-code 2.1.219'
 
-function label(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-    x: 0,
-    y: 0,
-    tags: [],
-    rotation: 0,
-    lines: [],
-    source: { hash: null, by: 'auto' },
-    ownSource: '',
-    translations: [],
-    translation: null,
-    style: { ...DEFAULT_TEXT_STYLE },
-    ...extra,
-  }
+function label(id: string, extra: Partial<TranslationBody> = {}): TextLayerEntry {
+  const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
+  entry.translation = { ...entry.translation, lines: [], ...extra }
+  return entry
 }
 
 function openWith(
@@ -118,11 +103,11 @@ describe('answer — the orchestration the bridge drives', () => {
     const project = useProjectStore()
     openWith(project, [
       label('a', {
-        translations: [
+        candidates: [
           { id: 't1', lines: ['甲'] },
           { id: 't2', lines: ['乙'] },
         ],
-        translation: 't1',
+        chosen: 't1',
       }),
     ])
     const result = (await answer({
@@ -146,8 +131,8 @@ describe('answer — the orchestration the bridge drives', () => {
     openWith(project, [
       label('a', {
         lines: ['自己的字'],
-        translations: [{ id: 'mine', lines: ['本 client 提的'], source: CLIENT }],
-        translation: 'mine',
+        candidates: [{ id: 'mine', lines: ['本 client 提的'], source: CLIENT }],
+        chosen: 'mine',
       }),
     ])
     const result = (await answer({

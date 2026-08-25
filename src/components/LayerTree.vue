@@ -209,7 +209,8 @@ const collapsed = computed(() => editor.collapsedLayerIds)
  */
 function missingFamilyOf(entry: LayerEntry): string | null {
   if (entry.kind !== 'text') return null
-  return familyIsMissing(entry.style.fontFamily) ? entry.style.fontFamily : null
+  const { fontFamily } = entry.translation.style
+  return familyIsMissing(fontFamily) ? fontFamily : null
 }
 
 const rows = computed(() =>
@@ -363,7 +364,7 @@ function iconFor(entry: LayerEntry) {
 }
 
 function isUntitled(entry: LayerEntry): boolean {
-  return entry.kind === 'text' && isBlank(entry)
+  return entry.kind === 'text' && isBlank(entry.translation)
 }
 
 /**
@@ -373,6 +374,6 @@ function isUntitled(entry: LayerEntry): boolean {
  */
 function nameFor(entry: LayerEntry): string {
   if (entry.kind !== 'text') return entry.name
-  return linesFor(entry).find((line) => line.length > 0) ?? '(未翻譯)'
+  return linesFor(entry.translation).find((line) => line.length > 0) ?? '(未翻譯)'
 }
 </script>

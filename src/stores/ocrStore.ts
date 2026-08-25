@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { OcrModel, OcrPageResult, OcrProgress, OcrRegion } from '@shared/ocr/types'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
-import { textOf } from '@shared/page/text'
+import { textOfBody } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { settleBreaks } from '@shared/ocr/breaks'
 import { decide } from '@shared/ocr/decide'
@@ -70,16 +70,22 @@ const STATION_NAMES: Record<string, string> = {
 }
 
 /**
- * Where the object visually sits, not the stored anchor, whose corner depends
- * on how the text is aligned.
+ * Where the object's source visually sits, not the stored anchor, whose corner
+ * depends on how the text is aligned.
+ *
+ * ⭐ The source and not the translation. A reading is a measurement of the
+ * artwork, so what it has to be matched against is the body that stands for the
+ * artwork — a translation carried off to the margin for the sake of the page
+ * has not moved the balloon it was read out of.
  */
 function labelCentre(object: TextLayerEntry) {
+  const body = object.source
   return drawnLabel(
-    textOf(object),
-    object.style,
+    textOfBody(body),
+    body.style,
     object.effects,
-    { x: object.x, y: object.y },
-    object.rotation,
+    { x: body.x, y: body.y },
+    body.rotation,
   ).center
 }
 
