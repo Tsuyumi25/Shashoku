@@ -6,15 +6,17 @@ import type { ProjectFile } from '@/types/project'
 import type {
   GroupLayerEntry,
   LayerEntry,
+  OcrCandidatePersisted,
   RasterLayerEntry,
   TextLayerEntry,
 } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
-import { linesOf, textOf } from '@shared/page/text'
+import { linesOf, textOf, textOfBody } from '@shared/page/text'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { offeredReadings } from '@shared/ocr/offer'
 
 const PAGE = 'p001.png'
 
@@ -2500,5 +2502,103 @@ describe('reordering the chapter', () => {
     const { project, editor } = openPages(['a', 'b'])
     editor.cmdMovePage('b', 0)
     expect(project.metaDirty).toBe(true)
+  })
+})
+
+describe('a reading dropped on an object that already had one', () => {
+  const reading = (hash: string, text: string): OcrCandidatePersisted => ({
+    hash,
+    source: 'manga-ocr',
+    text,
+    original: text,
+    x: 100,
+    y: 100,
+    w: 200,
+    h: 400,
+    confidence: 0.99,
+    label: 'text_bubble',
+  })
+
+  function standingOn(hash: string, text: string): TextLayerEntry {
+    const entry = label('a')
+    entry.source = {
+      ...emptyBody(DEFAULT_TEXT_STYLE),
+      lines: linesOf(text),
+      x: 300,
+      y: 420,
+      rotation: 0.4,
+      by: 'auto',
+      from: hash,
+    }
+    return entry
+  }
+
+  const offering = (
+    project: ReturnType<typeof useProjectStore>,
+    pool: readonly OcrCandidatePersisted[],
+  ): string[] => offeredReadings(pool, project.labelsOf(PAGE)).map((r) => r.hash)
+
+  it('says what the new reading says, and stops saying what the old one did', () => {
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
+    expect(textOfBody(labelsOf(project)[0].source)).toBe('おいつ')
+  })
+
+  /**
+   * ⭐ The whole of the bookkeeping, and there is none: the edge hangs on the
+   * object, so pointing it somewhere else hands the old reading back by itself.
+   */
+  it('hands the reading it was standing on back to the page, and takes up the new one', () => {
+    const pool = [reading('was', 'あいつ'), reading('now', 'おいつ')]
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    expect(offering(project, pool)).toEqual(['now'])
+    editor.cmdReplaceLabelSource(PAGE, 'a', pool[1])
+    expect(offering(project, pool)).toEqual(['was'])
+  })
+
+  /**
+   * Picking this reading over the one the run chose is the judgement a rerun
+   * must not quietly undo — so the fence records who settled it, not who typed
+   * the characters.
+   */
+  it('stamps the object as settled by hand', () => {
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
+    expect(labelsOf(project)[0].source.by).toBe('human')
+  })
+
+  /** What a drop on an object says is "the contents are wrong", and no more. */
+  it('leaves the object standing exactly where it was, set as it was', () => {
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    const before = labelsOf(project)[0].source
+    const was = { x: before.x, y: before.y, rotation: before.rotation, style: before.style }
+    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
+    const after = labelsOf(project)[0].source
+    expect({ x: after.x, y: after.y, rotation: after.rotation, style: after.style }).toEqual(was)
+  })
+
+  it('takes the replacement back, words and fence together', () => {
+    const pool = [reading('was', 'あいつ'), reading('now', 'おいつ')]
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, 'a', pool[1])
+    editor.undo()
+    expect(textOfBody(labelsOf(project)[0].source)).toBe('あいつ')
+    expect(labelsOf(project)[0].source.by).toBe('auto')
+    expect(offering(project, pool)).toEqual(['now'])
+  })
+
+  it('has nothing to record for a drop of the reading already standing there', () => {
+    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, 'a', reading('was', 'あいつ'))
+    expect(editor.canUndo).toBe(false)
+    expect(labelsOf(project)[0].source.by).toBe('auto')
+  })
+
+  it('refuses an object somebody has locked', () => {
+    const locked = standingOn('was', 'あいつ')
+    locked.locked = true
+    const { project, editor } = openOnePage([locked])
+    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
+    expect(textOfBody(labelsOf(project)[0].source)).toBe('あいつ')
   })
 })

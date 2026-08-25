@@ -802,6 +802,49 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * A reading dropped on an object that already had one: what it says changes,
+   * and nothing else about it does.
+   *
+   * ⭐ Only the words. That object is already standing where it belongs, set the
+   * way the artwork was measured — what somebody is saying by dropping on it is
+   * "the contents are wrong", never "the position is". Moving it would answer a
+   * question they did not ask, and lose a placement they may have made by hand.
+   *
+   * ⭐ Stamped `human` although the words came out of a recognizer. The fence
+   * records who settled the matter rather than who typed it, and picking this
+   * reading over the one the run chose is exactly the judgement a later rerun
+   * must not quietly undo.
+   *
+   * The reading that was standing here needs no attention: nothing points at it
+   * once `from` names another, and being pointed at is the whole of what kept it
+   * off the page.
+   */
+  function cmdReplaceLabelSource(
+    pageId: string,
+    labelId: string,
+    reading: { hash: string; text: string },
+  ) {
+    if (isLayerLocked(labelId)) return
+    const project = useProjectStore()
+    const entry = project.entryById(labelId)
+    if (entry?.kind !== 'text') return
+    const was = entry.source
+    const before: SourceBody = { ...was, lines: [...was.lines], style: { ...was.style } }
+    if (before.from === reading.hash) return
+    const after: SourceBody = {
+      ...before,
+      lines: linesOf(reading.text),
+      by: 'human',
+      from: reading.hash,
+    }
+    pushCommand({
+      label: `replace-source ${labelId}`,
+      do: () => project.setLabelSource(pageId, labelId, after),
+      undo: () => project.setLabelSource(pageId, labelId, before),
+    })
+  }
+
+  /**
    * An object made where a reading was dropped, standing on that reading.
    *
    * ⭐ Set the way the artwork was measured *where it landed*, not where it was
@@ -1816,6 +1859,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyVerdict,
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
+    cmdReplaceLabelSource,
     cmdMoveCard,
     cmdDuplicateLabel,
     cmdMoveLabel,

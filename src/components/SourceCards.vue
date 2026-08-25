@@ -92,11 +92,29 @@
   </div>
 
   <!--
+    Every object, outlined while the hand is carrying something.
+
+    ⭐ Up only during a drag, and it is what makes replacing possible at all:
+    what a hand needs told before it lets go is that this thing can be landed
+    on. Without it a drop on an object read as a drop on the balloon, and put a
+    second object on top of the first — which looks like a replacement and is a
+    duplicate.
+  -->
+  <template v-if="carrying">
+    <div
+      v-for="hit in droppableObjects"
+      :key="hit.id"
+      class="source-object"
+      :style="frameStyle(hit.box)"
+    />
+  </template>
+
+  <!--
     What a drop would land on, lit while the hand is carrying something. The
     highlight and the drop are the same answer read twice, so what lights up is
     what will be written.
   -->
-  <div v-if="target" class="source-target" :style="targetStyle" />
+  <div v-if="target" class="source-target" :style="frameStyle(target.box)" />
 
   <!-- And what the hand is carrying, following it. -->
   <div v-if="carrying" class="source-ghost" :style="ghostStyle">
@@ -111,10 +129,12 @@ import type { Box, Place } from '@shared/ocr/places'
 import { placesIn } from '@shared/ocr/places'
 import { answeredBy, offeredReadings } from '@shared/ocr/offer'
 import { claimsOf } from '@shared/ocr/vote'
-import { textObjects } from '@shared/page/tree'
+import { isLocked, textObjects } from '@shared/page/tree'
+import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { textOfBody } from '@shared/page/text'
 import { screenToContentPx } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { obbHoldsPoint, type Obb } from '@/lib/selection/obb'
 import {
   asideKeyOf,
   cardSize,
@@ -155,13 +175,18 @@ const objects = computed(() => (file.value ? textObjects(file.value.page.layers)
 const basePx = computed(() => (file.value ? typeSizeFor(file.value.page) : 12))
 
 /**
- * Where each object's source stands, which is what a card must not cover.
+ * Every object as it is drawn, in drawing order — what a card must not cover,
+ * and what a carried reading can be dropped on.
  *
- * The source and not the translation: a card is evidence about the artwork, and
- * so is the body that stands for the artwork.
+ * ⚠️ Read off the stack rather than the tree, so an object inside a folder that
+ * is switched off is neither. A frame lit around something invisible would be a
+ * target aimed at by guesswork, and a list is not covering what is not there.
+ *
+ * The source body, which here is simply the drawn one: these cards only stand
+ * while the source is the side being worked on.
  */
-const objectBoxes = computed<Box[]>(() =>
-  objects.value.map((entry) => {
+const objectTargets = computed(() =>
+  stackedTextNodes(pageStack(file.value?.page.layers ?? [])).map(({ entry }) => {
     const body = entry.source
     const drawn = drawnLabel(
       textOfBody(body),
@@ -171,12 +196,30 @@ const objectBoxes = computed<Box[]>(() =>
       body.rotation,
     )
     return {
-      x: drawn.center.x - drawn.box.w / 2,
-      y: drawn.center.y - drawn.box.h / 2,
-      w: drawn.box.w,
-      h: drawn.box.h,
+      id: entry.id,
+      locked: isLocked(file.value?.page.layers ?? [], entry.id),
+      box: { center: drawn.center, w: drawn.box.w, h: drawn.box.h, rotation: body.rotation },
     }
   }),
+)
+
+/**
+ * The ones a drop can be landed on.
+ *
+ * ⚠️ A locked object is not among them, and so is never outlined either. An
+ * outline is a promise that letting go here writes something, and locking is
+ * exactly the statement that it will not.
+ */
+const droppableObjects = computed(() => objectTargets.value.filter((t) => !t.locked))
+
+/** The same frames as upright bounds, which is all the placement needs. */
+const objectBoxes = computed<Box[]>(() =>
+  objectTargets.value.map(({ box }) => ({
+    x: box.center.x - box.w / 2,
+    y: box.center.y - box.h / 2,
+    w: box.w,
+    h: box.h,
+  })),
 )
 
 const offeredHashes = computed(
@@ -448,26 +491,53 @@ const carrying = ref<{ reading: OcrCandidatePersisted; at: { x: number; y: numbe
 let pressed: { reading: OcrCandidatePersisted; from: { x: number; y: number } } | null = null
 
 /**
- * What a drop would land on: the place under the pointer, unless the pointer is
- * over a card, which is a region a drag can be thought better of in.
+ * What a drop would land on, and what it would mean there.
+ *
+ * ⭐ The object wins where both are under the pointer. It is the more particular
+ * of the two answers — a balloon is a region, an object is a sentence somebody
+ * already put there — and it is the one visibly lit while the hand is over it,
+ * so what happens is what was aimed at.
+ *
+ * ⚠️ A card beats either, and lands nothing. That is the region a drag is
+ * thought better of in, which is what makes picking a row up safe to try.
  */
-const target = computed<Place | null>(() => {
+type Landing =
+  | { kind: 'object'; id: string; box: Obb }
+  | { kind: 'place'; place: Place; box: Obb }
+
+const target = computed<Landing | null>(() => {
   const held = carrying.value
   if (!held) return null
   if (cardBoxes.value.some((box) => holds(box, held.at))) return null
-  return placesIn(pool.value).find((place) => holds(place, held.at)) ?? null
+  // Backwards, so the object drawn over the others is the one taken — the same
+  // rule the canvas picks an object by.
+  for (let i = droppableObjects.value.length - 1; i >= 0; i -= 1) {
+    const hit = droppableObjects.value[i]
+    if (obbHoldsPoint(hit.box, held.at)) return { kind: 'object', id: hit.id, box: hit.box }
+  }
+  const place = placesIn(pool.value).find((p) => holds(p, held.at))
+  return place ? { kind: 'place', place, box: uprightBox(place) } : null
 })
 
-const targetStyle = computed(() => {
-  const box = target.value
-  if (!box) return {}
+function uprightBox(box: Box): Obb {
   return {
-    left: `${box.x}px`,
-    top: `${box.y}px`,
+    center: { x: box.x + box.w / 2, y: box.y + box.h / 2 },
+    w: box.w,
+    h: box.h,
+    rotation: 0,
+  }
+}
+
+/** A frame drawn where its box stands, turned the way its box is turned. */
+function frameStyle(box: Obb): Record<string, string> {
+  return {
+    left: `${box.center.x - box.w / 2}px`,
+    top: `${box.center.y - box.h / 2}px`,
     width: `${box.w}px`,
     height: `${box.h}px`,
+    transform: `rotate(${box.rotation}rad)`,
   }
-})
+}
 
 const ghostStyle = computed(() => {
   const held = carrying.value
@@ -515,6 +585,10 @@ function onRowCancel(e: PointerEvent) {
 /**
  * What a drop means, decided by where it landed.
  *
+ * ⭐ On an object, the words change and nothing else does — that object is
+ * already standing where it belongs, set the way the artwork was measured, so
+ * what a drop on it says is "the contents are wrong", never "the position is".
+ *
  * ⭐ The type comes from the place it was dropped on, not from the place the
  * words were read off. Somebody dropping a row onto a balloon is saying "this
  * sentence belongs here", and how *that* balloon is set is a fact about it —
@@ -531,15 +605,19 @@ function onRowCancel(e: PointerEvent) {
 function drop(
   reading: OcrCandidatePersisted,
   at: { x: number; y: number },
-  landing: Place | null,
+  landing: Landing | null,
 ) {
   const pageId = editor.currentPageId
   const page = file.value?.page
   if (pageId === null || !page) return
+  if (landing?.kind === 'object') {
+    editor.cmdReplaceLabelSource(pageId, landing.id, reading)
+    return
+  }
   // A drag that ended in the gutter is a drag somebody thought better of.
   // Refusing beats creating an object where nothing can be seen.
   if (at.x < 0 || at.y < 0 || at.x > page.width || at.y > page.height) return
-  const measured = landing ? claimsOf(landing.readings)[0]?.spokesman : undefined
+  const measured = landing ? claimsOf(landing.place.readings)[0]?.spokesman : undefined
   editor.cmdAddLabelFromReading(pageId, at, reading, {
     vertical: (measured ?? reading).vertical,
     fontSizePx: (measured ?? reading).fontSizePx,
@@ -708,6 +786,16 @@ function setAside(plan: CardPlan) {
   color: var(--muted-foreground);
   cursor: default;
   text-align: center;
+}
+
+/* Every object that can be landed on. Outlined and not filled: these are up all
+   at once and the artwork under them still has to be read, so they say "here"
+   without saying "this one". */
+.source-object {
+  position: absolute;
+  z-index: 9997;
+  border: calc(1px * var(--px)) dashed color-mix(in oklch, var(--primary) 55%, transparent);
+  pointer-events: none;
 }
 
 /* What a drop would land on. Filled as well as outlined: it has to be findable
