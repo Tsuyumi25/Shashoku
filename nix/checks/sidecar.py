@@ -22,6 +22,7 @@ import shashoku_ocr  # noqa: F401
 from shashoku_ocr.registry import MODELS
 from shapely.geometry import Polygon
 from fugashi import Tagger
+from safetensors.torch import load, save
 
 assert cv2.resize(np.zeros((8, 8, 3), np.uint8), (4, 4)).shape == (4, 4, 3)
 assert Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]).area == 4.0
@@ -29,10 +30,12 @@ assert torchvision.ops.nms(
     torch.tensor([[0.0, 0.0, 1.0, 1.0]]), torch.tensor([0.9]), 0.5
 ).tolist() == [0]
 assert [w.surface for w in Tagger()("日本語")] == ["日本", "語"]
+assert load(save({"a": torch.tensor([1.0])}))["a"].tolist() == [1.0]
 assert set(MODELS) == {
     "anime-lama",
     "baberu",
     "bubble",
+    "fontdet",
     "hayai",
     "layout",
     "mangaocr",
