@@ -118,6 +118,61 @@ describe('claimsOf', () => {
   })
 
   /**
+   * ⭐ The reason grouping is not equality. Two readers over one balloon differ
+   * by a character constantly, and as two claims that is a false signal of
+   * uncertainty arriving exactly where the count decides whether to create.
+   */
+  it('counts two long readings one character apart as one claim with two votes', () => {
+    const [claim, ...rest] = claimsOf([
+      read({ source: 'manga-ocr', text: 'ふんっ湯気で見間違えたんじゃないの' }),
+      read({ source: 'baberu-ocr', text: 'ふんつ湯気で見間違えたんじゃないの' }),
+    ])
+    expect(claim.votes).toBe(2)
+    expect(rest).toEqual([])
+  })
+
+  it('keeps two short readings one character apart as two claims', () => {
+    expect(
+      claimsOf([
+        read({ source: 'manga-ocr', text: 'ドン' }),
+        read({ source: 'baberu-ocr', text: 'トン' }),
+      ]),
+    ).toHaveLength(2)
+  })
+
+  /**
+   * ⚠️ One claim is not two readers endorsing one spelling. What the claim says
+   * has to be something one of them actually wrote.
+   */
+  it('speaks with a spelling from inside the group, never a blend of them', () => {
+    const said = ['ふんっ湯気で見間違えたんじゃないの', 'ふんつ湯気で見間違えたんじゃないの']
+    const [claim] = claimsOf([
+      read({ source: 'manga-ocr', text: said[0], confidence: 0.8 }),
+      read({ source: 'baberu-ocr', text: said[1], confidence: 0.9 }),
+    ])
+    expect(said).toContain(claim.text)
+  })
+
+  it('lets the surest reading of a near group speak for it', () => {
+    const [claim] = claimsOf([
+      read({ source: 'manga-ocr', text: 'ふんっ湯気で見間違えたんじゃないの', confidence: 0.8 }),
+      read({ source: 'baberu-ocr', text: 'ふんつ湯気で見間違えたんじゃないの', confidence: 0.95 }),
+    ])
+    expect(claim.text).toBe('ふんつ湯気で見間違えたんじゃないの')
+  })
+
+  it('groups four readers each a character out into one claim of four', () => {
+    const [claim, ...rest] = claimsOf([
+      read({ source: 'manga-ocr', text: 'ふんっ湯気で見間違えたんじゃないの' }),
+      read({ source: 'baberu-ocr', text: 'ふんつ湯気で見間違えたんじゃないの' }),
+      read({ source: 'hayai-ocr-v2', text: 'ふんっ湯気で見間違えたんじゃないのっ' }),
+      read({ source: 'ppocr-v6', text: 'ふんっ湯気で見間違えたんしゃないの' }),
+    ])
+    expect(claim.votes).toBe(4)
+    expect(rest).toEqual([])
+  })
+
+  /**
    * ⭐ Two readers can agree on the characters, the breaks and the confidence.
    * Which of them speaks for the claim then decides which reading an object
    * comes to stand for, and it must not be settled by who finished first.

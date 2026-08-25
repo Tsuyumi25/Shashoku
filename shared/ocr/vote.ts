@@ -7,11 +7,15 @@
  * reading was surest is a third thing again, and is what the transplant and the
  * confidence gates reach for.
  *
- * ⚠️ Keeping them apart is not tidiness. Two readings counting as one claim is
- * emphatically not two readers endorsing either one's spelling — folding them
- * would put two names behind a string nobody wrote.
+ * ⚠️ Keeping them apart is not tidiness, and it is what makes grouping by
+ * similarity safe. Two readings counting as one claim is emphatically not two
+ * readers endorsing either one's spelling — the group settles how many agreed,
+ * and what they agreed on is decided inside it, from a spelling somebody
+ * actually wrote. Folded together they would put two names behind a string
+ * nobody said.
  */
 import type { OcrCandidatePersisted } from '../page/types'
+import { sameClaim } from './similar'
 
 export interface Claim {
   /** How many distinct readers said this. */
@@ -42,14 +46,19 @@ export interface Claim {
  * is being agreed on is what the artwork *says*, which a break is not part of.
  */
 export function claimsOf(readings: readonly OcrCandidatePersisted[]): Claim[] {
-  const groups = new Map<string, OcrCandidatePersisted[]>()
-  for (const reading of readings) {
-    const key = flatten(reading.text)
-    const standing = groups.get(key)
-    if (standing) standing.push(reading)
-    else groups.set(key, [reading])
+  // ⭐ Grouped by similarity rather than by equality, which is not an
+  // equivalence relation and so cannot be a map key. Each reading joins the
+  // first group it is near, taken surest first — so the group forms around the
+  // reading most worth being near, and the answer does not move with the order
+  // the pool happens to be in.
+  const groups: OcrCandidatePersisted[][] = []
+  for (const reading of [...readings].sort(bySpelling)) {
+    const said = flatten(reading.text)
+    const home = groups.find((group) => sameClaim(flatten(group[0].text), said))
+    if (home) home.push(reading)
+    else groups.push([reading])
   }
-  return [...groups.values()].map(claimOf).sort(byStrength)
+  return groups.map(claimOf).sort(byStrength)
 }
 
 function claimOf(readings: OcrCandidatePersisted[]): Claim {
