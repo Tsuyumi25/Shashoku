@@ -95,6 +95,10 @@ export function decide(
       // answered "nothing". Nothing automatic writes over that.
       if (object.source.by === 'human') continue
       if (top.confidence < FILL_FLOOR) continue
+      // ⭐ Already answered with exactly this. Reporting it anyway would put a
+      // step on the undo stack and mark the page for saving, which is what
+      // "running it again is free" has to mean beyond the pool not growing.
+      if (object.source.hash === top.spokesman.hash) continue
       fills.set(object.id, { hash: top.spokesman.hash, by: 'auto' })
       continue
     }

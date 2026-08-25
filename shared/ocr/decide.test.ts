@@ -170,6 +170,16 @@ describe('decide', () => {
     expect(decide([object()], pool).fills.size).toBe(1)
   })
 
+  /**
+   * ⭐ What "running it again is free" has to mean beyond the pool not growing:
+   * no step on the undo stack and no page marked for saving.
+   */
+  it('reports nothing for an object already standing on the answer', () => {
+    const pool = agreed()
+    const settled = decide([object()], pool).fills.get('o1')
+    expect(decide([object({ source: settled! })], pool).fills.size).toBe(0)
+  })
+
   it('carries the winner’s line breaks onto the object it creates', () => {
     const [born] = decide([], agreed({ text: 'ふん\nそうかい' })).spawns
     expect(born.text).toBe('ふん\nそうかい')
