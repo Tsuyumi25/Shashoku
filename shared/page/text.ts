@@ -28,6 +28,16 @@ export function linesFor(
   return entry.translations.find((c) => c.id === entry.translation)?.lines ?? entry.lines
 }
 
+/**
+ * Whether the object reads as nothing at all — which is not the same as having
+ * typed nothing into it. An object whose own lines are empty but whose slot
+ * holds a candidate with text is translated, and every display saying otherwise
+ * is reading past the resolution above.
+ */
+export function isBlank(entry: Pick<TextLayerEntry, 'lines' | 'translations' | 'translation'>): boolean {
+  return linesFor(entry).every((line) => line.length === 0)
+}
+
 export function linesOf(text: string): string[] {
   return text.split('\n')
 }

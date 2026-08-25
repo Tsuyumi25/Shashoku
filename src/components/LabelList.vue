@@ -219,7 +219,7 @@
                 <span
                   v-if="!isEditing(element as LabelRow) || pinned"
                   class="text-sm leading-snug whitespace-pre-wrap"
-                  :class="isBlank(element as LabelRow) && 'text-muted-foreground/50'"
+                  :class="isBlank((element as LabelRow).label) && 'text-muted-foreground/50'"
                 >{{ preview(element as LabelRow) }}</span>
 
                 <div
@@ -252,7 +252,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
-import { textOf } from '@shared/page/text'
+import { isBlank, textOf } from '@shared/page/text'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   buildLabelRows,
@@ -389,12 +389,8 @@ function isEditing(row: LabelRow): boolean {
   return pending?.pageId === row.pageId && pending?.labelId === row.label.id
 }
 
-function isBlank(row: LabelRow): boolean {
-  return row.label.lines.every((line) => line.length === 0)
-}
-
 function preview(row: LabelRow): string {
-  return isBlank(row) ? '(未翻譯)' : textOf(row.label)
+  return isBlank(row.label) ? '(未翻譯)' : textOf(row.label)
 }
 
 function sourceOf(row: LabelRow): string | null {

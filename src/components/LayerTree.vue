@@ -177,6 +177,7 @@ import {
 } from '@lucide/vue'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
+import { isBlank, linesFor } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
@@ -362,7 +363,7 @@ function iconFor(entry: LayerEntry) {
 }
 
 function isUntitled(entry: LayerEntry): boolean {
-  return entry.kind === 'text' && entry.lines.every((line) => line.length === 0)
+  return entry.kind === 'text' && isBlank(entry)
 }
 
 /**
@@ -372,6 +373,6 @@ function isUntitled(entry: LayerEntry): boolean {
  */
 function nameFor(entry: LayerEntry): string {
   if (entry.kind !== 'text') return entry.name
-  return entry.lines.find((line) => line.length > 0) ?? '(未翻譯)'
+  return linesFor(entry).find((line) => line.length > 0) ?? '(未翻譯)'
 }
 </script>
