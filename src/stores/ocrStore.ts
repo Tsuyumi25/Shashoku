@@ -4,6 +4,7 @@ import type { OcrModel, OcrPageResult, OcrProgress } from '@shared/ocr/types'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
+import { settleBreaks } from '@shared/ocr/breaks'
 import { decide } from '@shared/ocr/decide'
 import { fold } from '@shared/ocr/clean'
 import type { OcrArrival } from '@shared/ocr/pool'
@@ -263,23 +264,32 @@ export const useOcrStore = defineStore('ocr', () => {
 /**
  * What a trip found, in the shape the pool takes.
  *
+ * ⭐ The line breaks are settled here, before anything has an identity, and
+ * region by region. That is what keeps a rerun free: a reading's text is fixed
+ * by the trip that produced it, so the same page read again produces the same
+ * identities and the pool does not move. Settling them later would mean
+ * rewriting readings that are already in the pool, which is exactly what nothing
+ * automatic is allowed to do.
+ *
  * ⚠️ A reading from a reader this side has no name for is dropped rather than
  * stored under the engine's name: the name is the identity, and one invented
  * here would be one a later version could not recognize as already present.
  */
 export function arrivalsOf(found: OcrPageResult): OcrArrival[] {
-  const arrivals: OcrArrival[] = []
+  const byRegion = new Map<number, OcrArrival[]>()
+
   for (const reading of found.readings) {
     const route = ROUTE_OF[reading.model]
     const region = found.regions[reading.region]
     if (!route || !region) continue
 
-    // The reader's own line breaks are part of what it says the artwork says,
-    // so they travel inside the text rather than beside it.
+    // A reader's own line breaks are part of what it says the artwork says, so
+    // they travel inside the text rather than beside it.
     const text = fold(reading.lines.length > 1 ? reading.lines.join('\n') : reading.text)
     if (!text) continue
 
-    arrivals.push({
+    const at = byRegion.get(reading.region) ?? []
+    at.push({
       source: route,
       text,
       x: region.x,
@@ -292,8 +302,10 @@ export function arrivalsOf(found: OcrPageResult): OcrArrival[] {
       fontSizePx: region.fontSizePx,
       leadingPercent: region.leadingPercent,
     })
+    byRegion.set(reading.region, at)
   }
-  return arrivals
+
+  return [...byRegion.values()].flatMap((readings) => settleBreaks(readings))
 }
 
 /**
