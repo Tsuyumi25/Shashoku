@@ -134,6 +134,7 @@ import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { textOfBody } from '@shared/page/text'
 import { screenToContentPx } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { sourceLook } from '@/lib/sourceLook'
 import { obbHoldsPoint, type Obb } from '@/lib/selection/obb'
 import {
   asideKeyOf,
@@ -188,10 +189,13 @@ const basePx = computed(() => (file.value ? typeSizeFor(file.value.page) : 12))
 const objectTargets = computed(() =>
   stackedTextNodes(pageStack(file.value?.page.layers ?? [])).map(({ entry }) => {
     const body = entry.source
+    // The reference treatment the canvas draws these with, halo included: the
+    // frame a drop lands on has to be the frame a reader can see.
+    const look = sourceLook(body.style)
     const drawn = drawnLabel(
       textOfBody(body),
-      body.style,
-      entry.effects,
+      look.style,
+      look.effects,
       { x: body.x, y: body.y },
       body.rotation,
     )

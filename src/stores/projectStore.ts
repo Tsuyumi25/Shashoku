@@ -865,19 +865,6 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
-  /**
-   * The body's own lines, whatever it is reading. Separate from
-   * `updateLabelText` on purpose — that one writes wherever the body is showing
-   * from, right for the canvas and wrong for the row that exists to show these
-   * lines.
-   */
-  function setLabelLines(pageId: string, labelId: string, side: TextSide, text: string) {
-    const body = bodyOf(pageId, labelId, side)
-    if (!body) return
-    body.lines = linesOf(text)
-    markPageDirty(pageId)
-  }
-
   /** Null reads as the lines somebody typed themselves. */
   function setLabelTranslation(pageId: string, labelId: string, id: string | null) {
     const label = labelById(pageId, labelId)
@@ -944,33 +931,6 @@ export const useProjectStore = defineStore('project', () => {
     if (!candidate) return
     if (human) candidate.human = true
     else delete candidate.human
-    markPageDirty(pageId)
-  }
-
-  /**
-   * The order is the object's, not a view's: assigned candidates have no
-   * distance to sort by, so an arrangement made by hand is the whole ranking.
-   */
-  function moveTranslation(pageId: string, labelId: string, from: number, to: number) {
-    const label = labelById(pageId, labelId)
-    if (!label) return
-    const list = label.translation.candidates
-    if (from < 0 || from >= list.length || to < 0 || to >= list.length || from === to) return
-    const [moved] = list.splice(from, 1)
-    list.splice(to, 0, moved)
-    markPageDirty(pageId)
-  }
-
-  /**
-   * Typing over a proposal makes it yours: a retyped sentence is no longer
-   * what the model said, and the mark keeps a later pass off it.
-   */
-  function correctTranslation(pageId: string, labelId: string, id: string, text: string) {
-    const label = labelById(pageId, labelId)
-    const candidate = label?.translation.candidates.find((c) => c.id === id)
-    if (!candidate) return
-    candidate.lines = linesOf(text)
-    candidate.human = true
     markPageDirty(pageId)
   }
 
@@ -1255,13 +1215,10 @@ export const useProjectStore = defineStore('project', () => {
     updateLabelText,
     setLabelTags,
     setLabelSource,
-    setLabelLines,
     setLabelTranslation,
     addTranslation,
     insertTranslation,
     setTranslationHand,
-    moveTranslation,
-    correctTranslation,
     removeTranslation,
     absorbReadings,
     setReadingsAside,

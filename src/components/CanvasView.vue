@@ -292,6 +292,7 @@ import {
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
@@ -433,8 +434,14 @@ const objects = computed(() => {
   const entries = connecting.value
     ? textObjects(file.page.layers)
     : stackedTextNodes(stack.value).map((node) => node.entry)
+  // Every source drawn the same way, over a halo — a reference treatment for
+  // reading them against un-lettered artwork, and the canvas's alone.
+  const reference = editor.textSide === 'source'
   return entries.map((label) => {
     const body = bodyOnSide(label, editor.textSide)
+    const look = reference
+      ? sourceLook(body.style)
+      : { style: previewedStyle(label.id, body.style), effects: label.effects }
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
@@ -443,8 +450,8 @@ const objects = computed(() => {
     y: body.y,
     rotation: body.rotation,
     accent: accentOf(label.tags),
-    style: previewedStyle(label.id, body.style),
-    effects: label.effects,
+    style: look.style,
+    effects: look.effects,
     tags: tagsInRegistryOrder(label.tags, project.header.tags).map((name) => ({
       name,
       color: tagColor(name, project.header.tags),

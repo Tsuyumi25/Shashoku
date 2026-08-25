@@ -186,23 +186,16 @@ describe('the translation pool on an object', () => {
     expect(textOf(label1.translation)).toBe('x')
   })
 
-  it('reorders the pool without touching what is in the slot', () => {
-    const project = withLabel()
-    const first = project.addTranslation(PAGE_ID, 't1', ['一'], 'model')!
-    project.addTranslation(PAGE_ID, 't1', ['二'], 'model')
-    project.setLabelTranslation(PAGE_ID, 't1', first)
-    project.moveTranslation(PAGE_ID, 't1', 0, 1)
-
-    const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translation.candidates.map((c) => c.lines[0])).toEqual(['二', '一'])
-    expect(label1.translation.chosen).toBe(first)
-    expect(textOf(label1.translation)).toBe('一')
-  })
-
+  /**
+   * ⭐ Typing reaches whichever row the object is reading, so one write covers
+   * both surfaces a person can have a caret on — and leaves the same mark from
+   * either.
+   */
   it('makes a proposal yours the moment you type over it', () => {
     const project = withLabel()
     const id = project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')!
-    project.correctTranslation(PAGE_ID, 't1', id, '我改的')
+    project.setLabelTranslation(PAGE_ID, 't1', id)
+    project.updateLabelText(PAGE_ID, 't1', 'translation', '我改的')
 
     expect(project.labelById(PAGE_ID, 't1')!.translation.candidates[0]).toMatchObject({
       lines: ['我改的'],

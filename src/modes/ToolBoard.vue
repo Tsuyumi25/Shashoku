@@ -1,70 +1,46 @@
 <template>
   <!--
-    Actions that produce something, and what they produce. Nothing here is
-    armed by being pressed, which is what keeps all of it out of the rail.
+    The tools that belong to no one place: recognizing, retouching, tagging.
+    Nothing here is armed by being pressed, which is what keeps all of it out of
+    the rail.
 
-    The recognizers stand directly above the source list they fill: that
-    pairing is the one order in this column that has to hold, since pressing a
-    button whose answer lands out of sight reads as nothing happening.
+    ⭐ Not a splitter any more. Two lists whose contents nobody could predict the
+    height of used to be here, and the only way to reconcile them was to hand a
+    reader the job of deciding which of them ate the column today — the divider
+    was that problem's own confession. With the lists standing on the canvas,
+    what is left has a height of its own again.
   -->
   <div class="flex min-h-0 flex-1 flex-col">
     <RecognizerBar />
     <RetouchProbe />
 
-    <SplitterGroup
-      direction="vertical"
-      class="min-h-0 flex-1"
-      auto-save-id="board:panes"
-      :storage="preferences.panelStorage"
-    >
-      <SplitterPanel :order="1" :default-size="30" :min-size="12" class="flex min-h-0 flex-col">
-        <div class="board-head border-t border-border">
-          <span class="text-xs font-medium text-muted-foreground">標記</span>
-          <button
-            type="button"
-            class="board-action"
-            title="新增標記"
-            :disabled="!project.isOpen"
-            @click="onAddTag"
-          >
-            <Plus :size="14" />
-          </button>
-        </div>
-        <TagList class="min-h-0 flex-1" />
-      </SplitterPanel>
-
-      <ResizeHandle vertical />
-
-      <SplitterPanel :order="2" :default-size="45" :min-size="15" class="flex min-h-0 flex-col">
-        <SourceCandidates />
-      </SplitterPanel>
-
-      <ResizeHandle vertical />
-
-      <SplitterPanel :order="3" :default-size="25" :min-size="10" class="flex min-h-0 flex-col">
-        <TranslationCandidates />
-      </SplitterPanel>
-    </SplitterGroup>
+    <div class="board-head border-t border-border">
+      <span class="text-xs font-medium text-muted-foreground">標記</span>
+      <button
+        type="button"
+        class="board-action"
+        title="新增標記"
+        :disabled="!project.isOpen"
+        @click="onAddTag"
+      >
+        <Plus :size="14" />
+      </button>
+    </div>
+    <TagList class="min-h-0 flex-1" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { Plus } from '@lucide/vue'
-import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import RecognizerBar from '@/components/RecognizerBar.vue'
-import ResizeHandle from '@/components/ResizeHandle.vue'
 import RetouchProbe from '@/components/RetouchProbe.vue'
-import SourceCandidates from '@/components/SourceCandidates.vue'
 import TagList from '@/components/TagList.vue'
-import TranslationCandidates from '@/components/TranslationCandidates.vue'
 import { useEditorStore } from '@/stores/editorStore'
-import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { nextAutoName } from '@/lib/autoName'
 
 const project = useProjectStore()
 const editor = useEditorStore()
-const preferences = usePreferencesStore()
 
 function onAddTag() {
   const taken = new Set(project.header.tags.map((t) => t.name))
