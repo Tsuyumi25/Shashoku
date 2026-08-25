@@ -490,6 +490,10 @@ function onEdit(row: LabelRow) {
  */
 function onRowKey(row: LabelRow, e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey || e.altKey) return
+  // The box is a descendant of the row, so every key typed into it bubbles
+  // through here on its way out. Enter would be taken for "open the editor" and
+  // never reach the text as a newline; `i` would never be typed at all.
+  if (ownsKeyboard(document.activeElement)) return
   if (e.key !== 'Enter' && e.key !== 'i') return
   // Opening the input layer is a single-object act. Rather than quietly
   // throwing away a selection someone built on purpose, it declines.
