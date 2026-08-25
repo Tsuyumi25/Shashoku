@@ -1,4 +1,4 @@
-import { textOf } from '@shared/page/text'
+import { isBlank } from '@shared/page/text'
 import type { TextLayerEntry } from '@shared/page/types'
 
 export type ProposalPlan =
@@ -23,5 +23,9 @@ export function planProposal(entry: TextLayerEntry | undefined, lines: string[])
   if (lines.every((l) => l.trim() === '')) {
     return { action: 'refuse', reason: '每一行都是空白——沒有內容可收' }
   }
-  return { action: 'append', fillSlot: entry.translation === null && textOf(entry) === '' }
+  // ⚠️ Reads as nothing, which is not the same as holding no characters. An
+  // object left standing on a few empty lines is as blank as one holding none,
+  // and comparing the joined text against "" calls it written-in because the
+  // newlines between them are characters.
+  return { action: 'append', fillSlot: entry.translation === null && isBlank(entry) }
 }
