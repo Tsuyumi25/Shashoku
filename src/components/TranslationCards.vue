@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watchEffect } from 'vue'
+import { computed, ref, watchEffect, watchPostEffect } from 'vue'
 import type { Box } from '@shared/ocr/places'
 import type { TextLayerEntry } from '@shared/page/types'
 import { textObjects } from '@shared/page/tree'
@@ -350,16 +350,39 @@ function propose(objectId: string) {
   const pageId = editor.currentPageId
   if (pageId === null) return
   editor.cmdAddTranslationCandidate(pageId, objectId, generateId())
-  // Into the blank it just made, so asking for one does not then mean finding
-  // it. ⚠️ `preventScroll`, or the browser hunts for a scroll container to
-  // reveal the field in and finds the canvas's own overlay.
-  void nextTick(() => {
-    const card = document.querySelector(`[data-object="${CSS.escape(objectId)}"]`)
-    card?.querySelector<HTMLTextAreaElement>('.trans-row-on .trans-input')?.focus({
-      preventScroll: true,
-    })
-  })
 }
+
+/**
+ * The caret follows a blank proposal to wherever one appears.
+ *
+ * ⭐ A rule about the state rather than a step in the button that made it, so
+ * the footer here and the right-click on the object both land the same way —
+ * asking for a blank and then having to go and find it says the request meant
+ * nothing, and the right-click is the one that has no card to look at yet.
+ *
+ * "Chosen, not the object's own, and empty" is only ever the blank somebody has
+ * just asked for: creating one picks it, and nothing else on a card is empty.
+ *
+ * ⚠️ Post-flush, so the card is in the document, and remembered in a plain
+ * variable — read from a render effect it would subscribe the render to itself.
+ * ⚠️ `preventScroll`, or the browser hunts for a scroll container to reveal the
+ * field in and finds the canvas's own overlay lying at the size of the canvas.
+ */
+let caretIn: string | null = null
+
+watchPostEffect(() => {
+  for (const card of drawn.value) {
+    const row = card.rows.find((r) => r.id === card.chosen)
+    if (!row || row.id === OWN || row.text !== '') continue
+    const at = `${card.key}:${row.id}`
+    if (caretIn === at) continue
+    caretIn = at
+    document
+      .querySelector(`[data-object="${CSS.escape(card.objectId)}"]`)
+      ?.querySelector<HTMLTextAreaElement>('.trans-row-on .trans-input')
+      ?.focus({ preventScroll: true })
+  }
+})
 
 // ── Moving a card by its grip ──────────────────────────────────────────────
 
