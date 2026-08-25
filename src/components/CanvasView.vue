@@ -52,7 +52,7 @@
         The boxes of whichever routes are switched on. Under the pointed mark
         above so that the one being pointed at still reads as the one.
       -->
-      <OcrBoxes v-if="ocrBoxes.length" :boxes="ocrBoxes" :routes="OCR_ROUTES" :view="view" />
+      <OcrBoxes v-if="ocrBoxes.length" :boxes="ocrBoxes" :view="view" />
 
       <!--
         The lines, under the frames rather than over them: a frame is what says
@@ -270,7 +270,7 @@ import {
   type TurnedLabel,
 } from '@/stores/editorStore'
 import { useConnectStore } from '@/stores/connectStore'
-import { OCR_ROUTES, useOcrStore } from '@/stores/ocrStore'
+import { useOcrStore } from '@/stores/ocrStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
@@ -316,9 +316,23 @@ const layerBitmaps = useLayerBitmaps(
 
 const placement = useLayerPlacement(layerBitmaps)
 
+/**
+ * Every region the last trip read, drawn once.
+ *
+ * Once, because four readers now share one set of regions: four readings of a
+ * balloon carry the same box, and drawing it four times is the same rectangle
+ * four deep rather than four measurements.
+ */
 const ocrBoxes = computed(() => {
-  if (!editor.currentPageId || ocr.shown.size === 0) return []
-  return project.readingsOfPage(editor.currentPageId).filter((c) => ocr.shown.has(c.source))
+  const pageId = editor.currentPageId
+  if (!pageId || !ocr.showing(pageId)) return []
+  const seen = new Set<string>()
+  return project.readingsOfPage(pageId).filter((c) => {
+    const at = `${c.x},${c.y},${c.w},${c.h}`
+    if (seen.has(at)) return false
+    seen.add(at)
+    return true
+  })
 })
 
 const ocrPointedBox = computed(() => {

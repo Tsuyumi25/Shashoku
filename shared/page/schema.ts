@@ -536,6 +536,7 @@ function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
   const at = `candidates[${i}]`
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { hash, source, text, original, x, y, w, h, confidence, label } = v
+  const { vertical, fontSizePx, leadingPercent } = v
 
   // Free-form on purpose — an unknown source is still a reading someone can
   // use — but never empty: no identity means unrecognizable on a rerun, and
@@ -555,7 +556,7 @@ function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
   const height = finite(h, 'h')
   if (width < 0 || height < 0) fail(`${at} 的 w 和 h 必須 ≥ 0`)
 
-  return {
+  const candidate: OcrCandidatePersisted = {
     hash: named(hash, 'hash'),
     source: named(source, 'source'),
     text,
@@ -567,6 +568,17 @@ function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
     confidence: finite(confidence, 'confidence'),
     label: named(label, 'label'),
   }
+
+  // Absent stays absent rather than becoming a default: a reading made before
+  // anything measured the type has no measurement, and saying otherwise would
+  // let a guess be read as an observation. A value that is there but is not a
+  // number is dropped for the same reason.
+  if (typeof vertical === 'boolean') candidate.vertical = vertical
+  if (typeof fontSizePx === 'number' && Number.isFinite(fontSizePx) && fontSizePx > 0)
+    candidate.fontSizePx = fontSizePx
+  if (typeof leadingPercent === 'number' && Number.isFinite(leadingPercent) && leadingPercent > 0)
+    candidate.leadingPercent = leadingPercent
+  return candidate
 }
 
 export function defaultOcr(width: number, height: number): OcrJson {

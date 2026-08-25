@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { app, BrowserWindow } from "electron";
 import { CHANNELS } from "@shared/ipc/channels";
-import type { OcrModel, OcrStatus } from "@shared/ocr/types";
+import type { OcrModel, OcrPageResult, OcrProgress, OcrStatus } from "@shared/ocr/types";
 
 /**
  * The Python models, as a process the main process owns.
@@ -29,8 +29,14 @@ import type { OcrModel, OcrStatus } from "@shared/ocr/types";
 /** The retoucher, which is not one of the OCR models and is not chosen between. */
 const INPAINT_MODEL = "anime-lama";
 
-/** Long enough for a page of crops, short enough that a hung engine is not forever. */
-const REQUEST_TIMEOUT_MS = 180_000;
+/**
+ * How long a request may go without a word before it is treated as hung.
+ *
+ * ⚠️ Silence rather than elapsed time, which is what makes it survive a whole
+ * page's trip: that is four readers over a page of regions and can run past any
+ * honest total, but it never goes this long without reaching a station.
+ */
+const REQUEST_SILENCE_MS = 180_000;
 
 /** How long a well-mannered goodbye is given before the signal. */
 const SHUTDOWN_GRACE_MS = 2_000;
@@ -39,6 +45,8 @@ interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  /** Restarts the silence timer. Called every time the request says anything. */
+  heard: () => void;
 }
 
 function launchSpec(): { interpreter: string; cwd?: string } {
@@ -91,8 +99,12 @@ class OcrSidecar {
   private loading = new Map<string, Promise<void>>();
 
   private announce(status: OcrStatus) {
+    this.broadcast(CHANNELS.ocrStatus, status);
+  }
+
+  private broadcast(channel: string, payload: unknown) {
     for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send(CHANNELS.ocrStatus, status);
+      if (!window.isDestroyed()) window.webContents.send(channel, payload);
     }
   }
 
@@ -130,7 +142,14 @@ class OcrSidecar {
       this.child = child;
 
       createInterface({ input: child.stdout }).on("line", (line) => {
-        let message: { id?: number; ok?: boolean; result?: unknown; error?: string };
+        let message: {
+          id?: number;
+          ok?: boolean;
+          result?: unknown;
+          error?: string;
+          station?: string;
+          stations?: string[];
+        };
         try {
           message = JSON.parse(line);
         } catch {
@@ -139,6 +158,19 @@ class OcrSidecar {
         if (message.id === undefined) return;
         const waiter = this.pending.get(message.id);
         if (!waiter) return;
+
+        // An interim word carries a station and no verdict. It is what the
+        // request is still alive, so it buys the request more time and is
+        // passed on rather than settling anything.
+        if (message.station !== undefined) {
+          waiter.heard();
+          this.broadcast(CHANNELS.ocrProgress, {
+            station: message.station,
+            stations: message.stations ?? [],
+          } satisfies OcrProgress);
+          return;
+        }
+
         this.pending.delete(message.id);
         clearTimeout(waiter.timer);
         if (message.ok) waiter.resolve(message.result);
@@ -177,57 +209,41 @@ class OcrSidecar {
 
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const giveUp = () => {
         if (this.pending.delete(id)) reject(new Error(`the OCR engine did not answer: ${op}`));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      };
+      const waiter: Pending = {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timer: setTimeout(giveUp, REQUEST_SILENCE_MS),
+        heard: () => {
+          clearTimeout(waiter.timer);
+          waiter.timer = setTimeout(giveUp, REQUEST_SILENCE_MS);
+        },
+      };
+      this.pending.set(id, waiter);
       child.stdin.write(`${JSON.stringify({ id, op, ...body })}\n`);
-    });
-  }
-
-  /**
-   * Makes sure a model's weights are in memory, once.
-   *
-   * Reaching for a page is the decision to pay for the model that reads it, so
-   * this happens on first use rather than at startup — but only on use, and
-   * never as a guess about what might be wanted next.
-   */
-  private ensureLoaded(model: OcrModel): Promise<void> {
-    return this.loadOnce(model, {
-      began: () => this.announce({ state: "loading", model }),
-      done: () => this.announce({ state: "ready", model }),
-      failed: (problem) => this.announce({ state: "error", model, detail: String(problem) }),
     });
   }
 
   /**
    * The load itself, once per model however many callers ask at once.
    *
-   * Separate from the announcements because those speak `OcrStatus`, which the
-   * retoucher is not: it has no place in a list of readers and detectors, and
-   * saying so would put it there.
+   * Only the retoucher comes through here now. The readers and detectors are
+   * loaded by the trip on the far side, which is the only thing that knows what
+   * comes next and so the only thing that can hold one set of weights at a time.
    */
-  private loadOnce(
-    model: string,
-    say: { began(): void; done(): void; failed(problem: unknown): void } = {
-      began: () => {},
-      done: () => {},
-      failed: () => {},
-    },
-  ): Promise<void> {
+  private loadOnce(model: string): Promise<void> {
     const already = this.loading.get(model);
     if (already) return already;
 
     const attempt = (async () => {
-      say.began();
       try {
         await this.request<{ elapsedMs: number }>("load", { model });
-        say.done();
       } catch (problem) {
         // Dropped so the next attempt really tries again rather than replaying
         // a stored failure.
         this.loading.delete(model);
-        say.failed(problem);
         throw problem;
       }
     })();
@@ -241,24 +257,9 @@ class OcrSidecar {
     >("models");
   }
 
-  async detect(model: OcrModel, imagePath: string, minScore?: number) {
-    await this.ensureLoaded(model);
-    const { boxes } = await this.request<{ boxes: unknown[] }>("detect", {
-      model,
-      image: imagePath,
-      minScore,
-    });
-    return boxes;
-  }
-
-  async read(model: OcrModel, imagePath: string, crops: unknown[]) {
-    await this.ensureLoaded(model);
-    const { lines } = await this.request<{ lines: unknown[] }>("read", {
-      model,
-      image: imagePath,
-      boxes: crops,
-    });
-    return lines;
+  /** One page, read by everything, in one trip. */
+  async readPage(imagePath: string, onomatopoeia: boolean) {
+    return this.request<OcrPageResult>("readPage", { image: imagePath, onomatopoeia });
   }
 
   /**

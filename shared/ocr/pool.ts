@@ -7,9 +7,16 @@ import { ocrIdentity, type OcrBirth } from './identity'
  * `label` is carried but takes no part in the identity: it describes the region
  * the reading came out of rather than the reading, and two arrivals that agree
  * on everything else are the same reading whatever the region was called.
+ *
+ * ⚠️ Nor does the typography, and for a sharper reason. Those three come off a
+ * regression head, which will answer a hair differently on the next run — in
+ * the identity they would make every rerun add the entire page a second time.
  */
 export interface OcrArrival extends OcrBirth {
   label: string
+  vertical?: boolean
+  fontSizePx?: number
+  leadingPercent?: number
 }
 
 export interface Absorbed {
@@ -48,7 +55,7 @@ export function absorb(
     if (known.has(hash)) continue
     known.add(hash)
     born.push(hash)
-    candidates.push({
+    const entry: OcrCandidatePersisted = {
       hash,
       source: arrival.source,
       text: arrival.text,
@@ -59,7 +66,11 @@ export function absorb(
       h: arrival.height,
       confidence: arrival.confidence,
       label: arrival.label,
-    })
+    }
+    if (arrival.vertical !== undefined) entry.vertical = arrival.vertical
+    if (arrival.fontSizePx !== undefined) entry.fontSizePx = arrival.fontSizePx
+    if (arrival.leadingPercent !== undefined) entry.leadingPercent = arrival.leadingPercent
+    candidates.push(entry)
   }
   return { candidates, born }
 }

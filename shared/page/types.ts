@@ -292,7 +292,14 @@ export interface OcrCandidatePersisted {
    */
   source: string
 
-  /** What it says now, which anyone may correct. */
+  /**
+   * What it says now, which anyone may correct.
+   *
+   * Line breaks belong in here. Two of the four readers can say where the
+   * artwork broke a sentence, and where it broke is as much a part of what is
+   * written as a character is — an object made from this reading should look
+   * like the balloon it was read out of without anybody rewrapping it.
+   */
   text: string
 
   /**
@@ -326,6 +333,25 @@ export interface OcrCandidatePersisted {
    * Unconstrained for the same reason `source` is.
    */
   label: string
+
+  /**
+   * How the region this was read from was set, as one run measured it.
+   *
+   * ⭐ On the reading rather than on a text object, so one measurement can
+   * furnish more than one body — the day a page carries a second language, both
+   * of them are set the way this balloon is set.
+   *
+   * ⚠️ Absent, not defaulted, on a reading made before anything measured this.
+   * A default here would be this file answering a question nobody asked it.
+   *
+   * ⚠️ And deliberately no part of the identity: the head that produces these
+   * is a regression and will answer a hair differently next time, so folding
+   * them into the identity would make every rerun add the whole page again.
+   */
+  vertical?: boolean
+  fontSizePx?: number
+  /** Baseline to baseline, as a percentage of the type size. */
+  leadingPercent?: number
 }
 
 export interface OcrJson {

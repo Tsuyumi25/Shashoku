@@ -65,4 +65,47 @@ describe('absorb', () => {
     const second = absorb(first.candidates, [arrival({ text: 'c' })])
     expect(second.candidates.slice(0, 2)).toEqual(first.candidates)
   })
+
+  it('carries the typography the run measured', () => {
+    const { candidates } = absorb(
+      [],
+      [arrival({ vertical: true, fontSizePx: 42.5, leadingPercent: 118 })],
+    )
+    expect(candidates[0]).toMatchObject({
+      vertical: true,
+      fontSizePx: 42.5,
+      leadingPercent: 118,
+    })
+  })
+
+  it('leaves the typography off a reading nothing measured', () => {
+    const { candidates } = absorb([], [arrival()])
+    expect(candidates[0]).not.toHaveProperty('vertical')
+    expect(candidates[0]).not.toHaveProperty('fontSizePx')
+    expect(candidates[0]).not.toHaveProperty('leadingPercent')
+  })
+
+  /**
+   * ⭐ The regression head answers a hair differently every run. In the identity
+   * that would make a second pass over one page add the whole page again.
+   */
+  it('gives one identity to two runs that measured the type differently', () => {
+    const first = absorb([], [arrival({ vertical: true, fontSizePx: 42.5 })])
+    const second = absorb(first.candidates, [arrival({ vertical: true, fontSizePx: 42.6 })])
+    expect(second.born).toEqual([])
+    expect(second.candidates).toHaveLength(1)
+    expect(second.candidates[0].fontSizePx).toBe(42.5)
+  })
+
+  it('keeps the line breaks a reader found, as part of what is written', () => {
+    const { candidates } = absorb([], [arrival({ text: 'ふん！\n湯気で' })])
+    expect(candidates[0].text).toBe('ふん！\n湯気で')
+  })
+
+  /** Where the artwork broke is part of what it says, so it parts two readings. */
+  it('gives two identities to the same characters broken two ways', () => {
+    const flat = absorb([], [arrival({ text: 'ふんそうかい' })])
+    const broken = absorb(flat.candidates, [arrival({ text: 'ふん\nそうかい' })])
+    expect(broken.candidates).toHaveLength(2)
+  })
 })

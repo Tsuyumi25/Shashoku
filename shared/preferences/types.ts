@@ -46,23 +46,16 @@ export const MIN_UNDO_PIXEL_BYTES = 16 * 1024 * 1024;
 export type OcrDevice = "cpu" | "gpu";
 
 /**
- * Held per model rather than once for all of them: these are not preferences
- * about OCR, they are facts about each model that a reader is allowed to
+ * Held per model rather than once for all of them: this is not a preference
+ * about OCR, it is a fact about each model that a reader is allowed to
  * disagree with.
  */
 export function defaultOcrPreference(): OcrModelPreference {
-  return { device: "cpu", onomatopoeia: false };
+  return { device: "cpu" };
 }
 
 export interface OcrModelPreference {
   device: OcrDevice;
-  /**
-   * Whether this model is offered the regions a layout head calls
-   * onomatopoeia — the drawn effects outside the balloons. Off for a model
-   * that answers rubbish on them: an unreadable line is one more candidate to
-   * rule out by hand on every object near it.
-   */
-  onomatopoeia: boolean;
 }
 
 export interface Preferences {
@@ -125,6 +118,16 @@ export interface Preferences {
    * not have to be edited every time one is added.
    */
   ocr: Record<string, OcrModelPreference>;
+  /**
+   * Whether the hand-drawn sound effects take part in reading a page at all.
+   *
+   * ⭐ One switch for the whole group rather than one per model. Which reader is
+   * any good at them was measured and is not a preference; whether a chapter of
+   * nothing but effects is worth reading is a judgement, and making it once has
+   * to be enough — on a page like that, per-model switches are the same decision
+   * taken four times.
+   */
+  ocrOnomatopoeia: boolean;
 }
 
 /**
@@ -151,5 +154,6 @@ export function defaultPreferences(): Preferences {
     undoPixelSteps: 10,
     undoPixelBytes: 512 * 1024 * 1024,
     ocr: {},
+    ocrOnomatopoeia: true,
   };
 }

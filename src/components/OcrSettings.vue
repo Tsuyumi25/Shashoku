@@ -3,10 +3,28 @@
     <h3 class="mb-3 text-sm font-medium">文字辨識</h3>
 
     <!--
-      One row per model, and the row is the model: the device it runs on and
-      what it is allowed to read are both facts about that model, so a reader
-      changing one is looking at the other while they do it.
+      ⭐ One switch for the whole group, above the models rather than inside one
+      of them. Which reader is any good at hand-drawn effects was measured and
+      is not offered; whether a chapter of nothing but effects is worth reading
+      is a judgement, and it should only have to be made once.
     -->
+    <label class="mb-3 flex cursor-pointer items-start gap-2 text-xs">
+      <input
+        type="checkbox"
+        class="mt-0.5"
+        :checked="ocr.onomatopoeia()"
+        @change="ocr.setOnomatopoeia(($event.target as HTMLInputElement).checked)"
+      />
+      <span>
+        辨識手繪擬聲詞
+        <span class="block text-muted-foreground">
+          <code>{{ LAYOUT_REPO }}</code> 標成 <code>onomatopoeia</code> 的區域。
+          只交給讀得動它的辨識器,其餘三個不會在上面作答。
+        </span>
+      </span>
+    </label>
+
+    <!-- One row per model: which device it runs on is a fact about that model. -->
     <div class="space-y-2">
       <section v-for="model in MODELS" :key="model.route" class="rounded border border-border p-3">
         <div class="flex items-center justify-between gap-3">
@@ -32,27 +50,6 @@
           </div>
         </div>
 
-        <!--
-          Only where it is a real question. The other three read nothing worth
-          keeping off the artwork, so the row simply does not carry the switch
-          — a control whose every setting is wrong reads as one the reader has
-          not found the right value for yet.
-        -->
-        <label
-          v-if="ocr.readsDrawn(model.route)"
-          class="mt-2.5 flex cursor-pointer items-center gap-2 text-xs"
-        >
-          <input
-            type="checkbox"
-            :checked="ocr.settingsFor(model.route).onomatopoeia"
-            @change="
-              ocr.configure(model.route, {
-                onomatopoeia: ($event.target as HTMLInputElement).checked,
-              })
-            "
-          />
-          <span>使用 <code>{{ LAYOUT_REPO }}</code> 產生的 <code>onomatopoeia</code> 偵測框</span>
-        </label>
       </section>
     </div>
   </div>

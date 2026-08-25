@@ -14,6 +14,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import IO, Any
 
+from .page import STATIONS, read_page
 from .registry import Registry
 
 # Enough to let the three models run at once with a page's worth of crops in
@@ -38,6 +39,14 @@ class Server:
         with self.writing:
             self.out.write(line + "\n")
             self.out.flush()
+
+    def progress(self, request_id: Any, station: str) -> None:
+        """Where a long request has got to.
+
+        Carries the request's own id and no `ok`, so a caller pairing answers
+        by id can tell an interim word from the reply it is waiting for.
+        """
+        self.reply({"id": request_id, "station": station, "stations": list(STATIONS)})
 
     def handle(self, request: dict[str, Any]) -> None:
         request_id = request.get("id")
@@ -71,6 +80,14 @@ class Server:
         if op == "read":
             model = self.registry.get(request["model"])
             return {"lines": model.read(request["image"], request["boxes"])}
+
+        if op == "readPage":
+            return read_page(
+                self.registry,
+                request["image"],
+                bool(request.get("onomatopoeia", True)),
+                lambda station: self.progress(request.get("id"), station),
+            )
 
         if op == "inpaint":
             model = self.registry.get(request["model"])

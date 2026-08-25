@@ -30,6 +30,7 @@ MODELS: dict[str, tuple[str, str]] = {
     "baberu": ("shashoku_ocr.models.baberu", "BaberuReader"),
     "hayai": ("shashoku_ocr.models.hayai", "HayaiReader"),
     "ppocr": ("shashoku_ocr.models.ppocr", "PpOcrReader"),
+    "fontdet": ("shashoku_ocr.models.fontdet", "FontDetector"),
     "anime-lama": ("shashoku_ocr.models.lama", "AnimeLaMa"),
 }
 

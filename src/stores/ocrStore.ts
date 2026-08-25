@@ -1,10 +1,11 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { OcrBox, OcrCrop, OcrRecognition } from '@shared/ocr/types'
+import type { OcrModel, OcrPageResult, OcrProgress } from '@shared/ocr/types'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
 import { settleReadings } from '@shared/ocr/candidates'
+import { fold } from '@shared/ocr/clean'
 import type { OcrArrival } from '@shared/ocr/pool'
 import type { OcrModelPreference } from '@shared/preferences/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -12,8 +13,8 @@ import { useProjectStore } from '@/stores/projectStore'
 import { drawnLabel } from '@/lib/labelRaster'
 
 /**
- * Part of a reading's identity: rewording one turns every reading it made
- * into a stranger the next run would add all over again.
+ * Part of a reading's identity: rewording one turns every reading it made into
+ * a stranger the next run would add all over again.
  */
 const MANGA_OCR = 'manga-ocr'
 const PP_OCR = 'ppocr-v6'
@@ -29,43 +30,32 @@ export const OCR_ROUTES = [MANGA_OCR, PP_OCR, BABERU_OCR, HAYAI_OCR] as const
 export type OcrRoute = (typeof OCR_ROUTES)[number]
 
 /**
- * The key is what a reading is stored under and can never be reworded; the
- * value is what the engine calls a model and is free to move. PP-OCR is
- * absent: it reads one column at a time and finds its own, a differently
- * shaped route rather than the same route with other weights.
+ * What the engine calls a reader, and what a reading made by it is stored
+ * under. ⚠️ The right-hand side can never be reworded; the left-hand side is
+ * the engine's and is free to move.
  */
-type OcrReader = 'mangaocr' | 'baberu' | 'hayai'
-
-const REGION_READERS: Record<Exclude<OcrRoute, typeof PP_OCR>, OcrReader> = {
-  [MANGA_OCR]: 'mangaocr',
-  [BABERU_OCR]: 'baberu',
-  [HAYAI_OCR]: 'hayai',
+const ROUTE_OF: Partial<Record<OcrModel, OcrRoute>> = {
+  mangaocr: MANGA_OCR,
+  ppocr: PP_OCR,
+  baberu: BABERU_OCR,
+  hayai: HAYAI_OCR,
 }
 
 /**
- * Two detectors' vocabularies side by side: `text_bubble`/`text_free` are the
- * balloon detector's kinds, `text`/`onomatopoeia` the layout detector's.
- * `bubble` and `panel` are absent — nothing is written on a container itself.
+ * What each station of a trip is called, for saying where a long wait has got
+ * to. A station the engine names and this list does not is shown under its own
+ * name rather than dropped — a fifth reader should read as an unfamiliar stop,
+ * not as no stop at all.
  */
-const WRITING = new Set(['text_bubble', 'text_free', 'text', 'onomatopoeia'])
-
-/**
- * The one label a reader can be told to leave alone: drawn by hand over the
- * artwork, and three of the four readers answer rubbish on it.
- */
-const DRAWN = 'onomatopoeia'
-
-/**
- * ⭐ A capability, not a default: measured on the same forty-six hand-cut
- * effects, the routes absent from here answer nothing worth listing, and a
- * line nobody will ever pick is one more candidate to rule out by hand. Here
- * rather than in preferences because this is what was measured about each
- * model; that file only records where a reader has since disagreed.
- */
-const READS_DRAWN = new Set<OcrRoute>([HAYAI_OCR])
-
-/** How much two boxes have to share before they are one region seen twice. */
-const SAME_REGION = 0.5
+const STATION_NAMES: Record<string, string> = {
+  'detect-bubble': '找氣泡',
+  'detect-layout': '找版面',
+  typography: '量排版',
+  'read-ppocr': '逐欄辨識（PP-OCR）',
+  'read-mangaocr': 'manga-ocr 辨識',
+  'read-baberu': 'Baberu 辨識',
+  'read-hayai': 'Hayai 辨識',
+}
 
 /**
  * Where the object visually sits, not the stored anchor, whose corner depends
@@ -83,88 +73,70 @@ function labelCentre(object: TextLayerEntry) {
 
 /**
  * What a page's artwork was measured to hold. None of it is part of the
- * document — rerunning is free, and nothing downstream can come to depend on
- * a box a better model would have drawn elsewhere.
+ * document — rerunning is free, and nothing downstream can come to depend on a
+ * box a better model would have drawn elsewhere.
  */
 export const useOcrStore = defineStore('ocr', () => {
+  /** Which pages have a trip in flight. */
   const running = ref(new Set<string>())
   const problem = ref<string | null>(null)
 
-  function busy(route: string): boolean {
-    return running.value.has(route)
+  function busy(pageId: string): boolean {
+    return running.value.has(pageId)
   }
 
-  function mark(route: string, working: boolean) {
+  function mark(pageId: string, working: boolean) {
     const next = new Set(running.value)
-    if (working) next.add(route)
-    else next.delete(route)
+    if (working) next.add(pageId)
+    else next.delete(pageId)
     running.value = next
   }
 
   /**
-   * Every writing region proposed for a page, from every detector at once.
+   * How far the trip in flight has got. Null between trips.
    *
-   * ⭐ Which regions hold writing is a fact about the page; which model reads
-   * them is a choice made afterwards. Tying the two together kept the layout
-   * detector's findings to itself — and it is the only detector that sees
-   * hand-drawn sound effects: seven in eight against one in seven, measured
-   * over ninety-two annotated pages.
-   *
-   * Memoized as the promise, so two recognizers pressed in a row wait on one
-   * detection pass; a failed pass is forgotten, or the first bad page would
-   * stay bad all session. ⚠️ Keyed by page alone — the artwork read is the
-   * raster underneath everything, which nothing yet paints on.
+   * ⭐ Pushed from the engine rather than counted here: the order of the stations
+   * is the engine's, since it is the only thing that knows which weights it can
+   * afford to hold next. This side reports and does not decide.
    */
-  const proposals = new Map<string, Promise<OcrBox[]>>()
+  const station = ref<{ name: string; at: number; of: number } | null>(null)
 
-  /** What was measured about a route, with whatever the reader changed on top. */
-  function settingsFor(route: OcrRoute): OcrModelPreference {
-    const stored = usePreferencesStore().prefs.ocr[route]
-    // A stored `true` on a route that cannot read them is ignored: capability
-    // is measured, and a preferences file edited by hand must not be able to
-    // turn a model into one it is not.
-    return {
-      device: stored?.device ?? 'cpu',
-      onomatopoeia: READS_DRAWN.has(route) && (stored?.onomatopoeia ?? true),
+  window.ocr.onProgress((progress: OcrProgress) => {
+    const at = progress.stations.indexOf(progress.station)
+    station.value = {
+      name: STATION_NAMES[progress.station] ?? progress.station,
+      at: at === -1 ? 0 : at + 1,
+      of: progress.stations.length,
     }
-  }
+  })
 
-  /** Whether this route is one the drawn effects are worth offering to. */
-  function readsDrawn(route: OcrRoute): boolean {
-    return READS_DRAWN.has(route)
+  /** What was measured about a model, with whatever the reader changed on top. */
+  function settingsFor(route: OcrRoute): OcrModelPreference {
+    return { device: usePreferencesStore().prefs.ocr[route]?.device ?? 'cpu' }
   }
 
   /**
-   * Writes the whole entry rather than the changed field: a half entry would
-   * be merged against a default that is free to move, and a model quietly
-   * changing behaviour under a setting somebody already looked at is worse
-   * than a file that repeats itself.
+   * Writes the whole entry rather than the changed field: a half entry would be
+   * merged against a default that is free to move, and a model quietly changing
+   * behaviour under a setting somebody already looked at is worse than a file
+   * that repeats itself.
    */
   function configure(route: OcrRoute, change: Partial<OcrModelPreference>) {
     usePreferencesStore().prefs.ocr[route] = { ...settingsFor(route), ...change }
   }
 
-  function writingOf(pageId: string, path: string): Promise<OcrBox[]> {
-    const held = proposals.get(pageId)
-    if (held) return held
-    const asked = Promise.all([
-      window.ocr.detect('bubble', path),
-      window.ocr.detect('layout', path),
-    ])
-      .then(([balloons, layout]) =>
-        distinct([...balloons, ...layout].filter((b) => WRITING.has(b.label))),
-      )
-      .catch((e) => {
-        proposals.delete(pageId)
-        throw e
-      })
-    proposals.set(pageId, asked)
-    return asked
+  /** Whether the hand-drawn effects take part in a trip at all. */
+  function onomatopoeia(): boolean {
+    return usePreferencesStore().prefs.ocrOnomatopoeia
+  }
+
+  function setOnomatopoeia(on: boolean) {
+    usePreferencesStore().prefs.ocrOnomatopoeia = on
   }
 
   /**
-   * Which reading the pointer is over in the list, so the canvas can say
-   * where it was read — without it the list's order has no visible cause.
+   * Which reading the pointer is over in the list, so the canvas can say where
+   * it was read — without it the list's order has no visible cause.
    */
   const pointedAt = ref<string | null>(null)
 
@@ -173,61 +145,32 @@ export const useOcrStore = defineStore('ocr', () => {
   }
 
   /**
-   * Which routes are drawing their boxes over the artwork. A set of names
-   * rather than a flag per route, so a fifth recognizer is a name and nothing
-   * else; not part of the document, like everything else here.
+   * Whether a page's boxes are drawn over the artwork. One switch rather than
+   * one per reader: there is one trip now, so there is one set of regions.
    */
   const shown = ref(new Set<string>())
 
-  function showing(route: string): boolean {
-    return shown.value.has(route)
+  function showing(pageId: string): boolean {
+    return shown.value.has(pageId)
   }
 
-  /**
-   * On a page the route has read, pressing again only changes what is drawn:
-   * the same weights cannot answer differently for the same page, so a second
-   * run would cost the wait and buy nothing.
-   *
-   * ⚠️ `shown` outlives the page while `alreadyRead` does not. A route lit up
-   * on one page and pressed on the next must read the new page, not switch
-   * itself off — turning off is only an answer where there is something on.
-   */
-  async function toggleRoute(
-    route: OcrRoute,
-    pageId: string,
-    pageDir: string,
-    layers: readonly LayerEntry[],
-    alreadyRead: boolean,
-  ) {
+  function toggleBoxes(pageId: string) {
     const next = new Set(shown.value)
-    if (shown.value.has(route) && alreadyRead) {
-      next.delete(route)
-      shown.value = next
-      return
-    }
-    next.add(route)
+    if (next.has(pageId)) next.delete(pageId)
+    else next.add(pageId)
     shown.value = next
-    if (alreadyRead) return
-
-    if (route === PP_OCR) await readColumns(pageId, pageDir, layers)
-    else await readRegions(route, REGION_READERS[route], pageId, pageDir, layers)
   }
 
   /**
-   * ⭐ Both region readers are this function; only the weights differ. A
-   * region cut out of the page is the only thing either ever sees, which is
-   * what lets one detector's findings be read by a recognizer somebody else
-   * shipped alongside a different one. The detector's own name for the region
-   * rides along, so the list can say where a reading came out of.
+   * ⭐ One act. Every detector runs, every reader is asked, and the trip is a
+   * single call so that only one model's weights are ever resident.
+   *
+   * Pressing it a second time on the same page is free and changes nothing: the
+   * same weights over the same artwork produce the same identities, which the
+   * pool already holds.
    */
-  async function readRegions(
-    route: OcrRoute,
-    model: OcrReader,
-    pageId: string,
-    pageDir: string,
-    layers: readonly LayerEntry[],
-  ) {
-    if (busy(route)) return
+  async function readPage(pageId: string, pageDir: string, layers: readonly LayerEntry[]) {
+    if (busy(pageId)) return
     problem.value = null
 
     const artwork = baseMapFile(layers)
@@ -235,76 +178,27 @@ export const useOcrStore = defineStore('ocr', () => {
       problem.value = '這一頁底下沒有點陣圖層可以辨識'
       return
     }
-    mark(route, true)
-    try {
-      const path = `${layersDirOf(pageDir)}/${artwork}`
-      // The filter is applied to what comes back, not to the detectors, so
-      // turning the drawn effects on for one reader costs the next one nothing.
-      const found = await writingOf(pageId, path)
-      const regions = settingsFor(route).onomatopoeia
-        ? found
-        : found.filter((b) => b.label !== DRAWN)
-      const said = await window.ocr.read(model, path, regions.map(justTheBox))
 
-      settle(
-        pageId,
-        regions.flatMap((b, i) =>
-          said[i]?.text ? [{ source: route, label: b.label, ...justTheBox(b), ...said[i] }] : [],
-        ),
+    mark(pageId, true)
+    try {
+      const found = await window.ocr.readPage(
+        `${layersDirOf(pageDir)}/${artwork}`,
+        onomatopoeia(),
       )
+      settle(pageId, arrivalsOf(found))
+      shown.value = new Set(shown.value).add(pageId)
     } catch (e) {
       problem.value = e instanceof Error ? e.message : String(e)
     } finally {
-      mark(route, false)
+      station.value = null
+      mark(pageId, false)
     }
   }
 
   /**
-   * ⭐ The one route that is not the function above, because of what this
-   * recognizer is: a multilingual model reading printed type, from which a
-   * hand-drawn sound effect comes back as Chinese or as a digit. Its own
-   * detector is the filter — what it finds is what it can read, and it finds
-   * no sound effects. So the columns come from it, and the regions they are
-   * joined into come from the shared pass.
-   */
-  async function readColumns(pageId: string, pageDir: string, layers: readonly LayerEntry[]) {
-    if (busy(PP_OCR)) return
-    problem.value = null
-
-    const artwork = baseMapFile(layers)
-    if (!artwork) {
-      problem.value = '這一頁底下沒有點陣圖層可以辨識'
-      return
-    }
-    mark(PP_OCR, true)
-    try {
-      const path = `${layersDirOf(pageDir)}/${artwork}`
-      const [found, columns] = await Promise.all([
-        writingOf(pageId, path),
-        window.ocr.detect('ppocr', path),
-      ])
-      // The same switch as the region readers: leaving the drawn effects out
-      // here means no reading is assembled over them at all.
-      const regions = settingsFor(PP_OCR).onomatopoeia
-        ? found
-        : found.filter((b) => b.label !== DRAWN)
-      const spoken = await window.ocr.read('ppocr', path, columns.map(justTheBox))
-
-      settle(
-        pageId,
-        assemble(regions, columns, spoken).map((r) => ({ source: PP_OCR, ...r })),
-      )
-    } catch (e) {
-      problem.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      mark(PP_OCR, false)
-    }
-  }
-
-  /**
-   * One act, not two call sites: a reading that entered the pool without
-   * being offered to the objects waiting for it would leave the page looking
-   * as if the run had done nothing.
+   * One act, not two call sites: a reading that entered the pool without being
+   * offered to the objects waiting for it would leave the page looking as if
+   * the trip had done nothing.
    */
   function settle(pageId: string, arrivals: readonly OcrArrival[]) {
     const project = useProjectStore()
@@ -329,13 +223,11 @@ export const useOcrStore = defineStore('ocr', () => {
     for (const [id, source] of settled) project.setLabelSource(pageId, id, source)
   }
 
-
   /**
    * For working on the recognizers. Detection is forgotten too — keeping the
    * boxes would make the next press reuse the very pass being questioned.
    */
   function forget(pageId: string) {
-    proposals.delete(pageId)
     useProjectStore().forgetReadings(pageId)
     shown.value = new Set()
     problem.value = null
@@ -346,99 +238,54 @@ export const useOcrStore = defineStore('ocr', () => {
     pointAt,
     shown,
     showing,
-    toggleRoute,
+    toggleBoxes,
     running,
     busy,
+    station,
+    readPage,
     forget,
     problem,
     settingsFor,
-    readsDrawn,
     configure,
+    onomatopoeia,
+    setOnomatopoeia,
   }
 })
 
 /**
- * The regions two detectors both proposed, counted once: two rows saying the
- * same sentence is noise, not a second opinion — a second opinion is a second
- * *model*. ⚠️ The surer box wins across scores from different networks, which
- * are only roughly the same quantity; safe enough because either box would be
- * read, and the choice is between two views of the same writing.
+ * What a trip found, in the shape the pool takes.
+ *
+ * ⚠️ A reading from a reader this side has no name for is dropped rather than
+ * stored under the engine's name: the name is the identity, and one invented
+ * here would be one a later version could not recognize as already present.
  */
-function distinct(boxes: readonly OcrBox[]): OcrBox[] {
-  const kept: OcrBox[] = []
-  for (const box of [...boxes].sort((a, b) => b.score - a.score)) {
-    if (!kept.some((k) => overlap(k, box) >= SAME_REGION)) kept.push(box)
-  }
-  return kept
-}
+export function arrivalsOf(found: OcrPageResult): OcrArrival[] {
+  const arrivals: OcrArrival[] = []
+  for (const reading of found.readings) {
+    const route = ROUTE_OF[reading.model]
+    const region = found.regions[reading.region]
+    if (!route || !region) continue
 
-function overlap(a: OcrCrop, b: OcrCrop): number {
-  const wide = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
-  const tall = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
-  const both = wide * tall
-  const either = a.width * a.height + b.width * b.height - both
-  return either > 0 ? both / either : 0
-}
+    // The reader's own line breaks are part of what it says the artwork says,
+    // so they travel inside the text rather than beside it.
+    const text = fold(reading.lines.length > 1 ? reading.lines.join('\n') : reading.text)
+    if (!text) continue
 
-/**
- * A column goes to whichever region contains its centre — the middle stays
- * inside even when the detector let the ends spill over the edge, which
- * corners do not survive. Within a region the columns run right to left: a
- * fact about Japanese set vertically, which will have to become a property of
- * the document the day a second writing direction shows up. A column inside
- * no region is kept as itself, labelled `line` — on a measured page those
- * were a caption in the margin and print on the spine.
- */
-function assemble(
-  regions: readonly OcrBox[],
-  columns: readonly OcrCrop[],
-  spoken: readonly OcrRecognition[],
-): (OcrCrop & { label: string; text: string; confidence: number })[] {
-  const held: number[][] = regions.map(() => [])
-  const loose: number[] = []
-
-  columns.forEach((column, index) => {
-    if (!spoken[index]?.text) return
-    const x = column.x + column.width / 2
-    const y = column.y + column.height / 2
-    const at = regions.findIndex(
-      (b) => x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height,
-    )
-    if (at === -1) loose.push(index)
-    else held[at].push(index)
-  })
-
-  const assembled: (OcrCrop & { label: string; text: string; confidence: number })[] = []
-  regions.forEach((region, at) => {
-    const members = held[at]
-    if (members.length === 0) return
-    members.sort((a, b) => columns[b].x + columns[b].width - (columns[a].x + columns[a].width))
-    assembled.push({
+    arrivals.push({
+      source: route,
+      text,
+      x: region.x,
+      y: region.y,
+      width: region.width,
+      height: region.height,
+      confidence: reading.confidence,
       label: region.label,
-      ...justTheBox(region),
-      text: members.map((i) => spoken[i].text).join(''),
-      // The worst column, not the average: one unreadable column spoils the
-      // sentence it is part of.
-      confidence: Math.min(...members.map((i) => spoken[i].confidence)),
-    })
-  })
-  for (const index of loose) {
-    assembled.push({
-      label: 'line',
-      ...justTheBox(columns[index]),
-      text: spoken[index].text,
-      confidence: spoken[index].confidence,
+      vertical: region.vertical,
+      fontSizePx: region.fontSizePx,
+      leadingPercent: region.leadingPercent,
     })
   }
-  return assembled
-}
-
-/**
- * Copied field by field: a box that has been through the store is a Proxy,
- * which structured clone refuses.
- */
-function justTheBox(b: OcrCrop) {
-  return { x: b.x, y: b.y, width: b.width, height: b.height }
+  return arrivals
 }
 
 /**
