@@ -20,14 +20,23 @@ export interface Breakable {
   confidence: number
 }
 
-export function settleBreaks<T extends Breakable>(readings: readonly T[]): T[] {
+/**
+ * `lines` is how long each of the place's measured lines is, along the direction
+ * it is read, in the order they are read. It is what answers when no reading
+ * here found a break of its own — ⭐ dividing the characters evenly instead
+ * would be guessing at the one thing something already went and measured.
+ */
+export function settleBreaks<T extends Breakable>(
+  readings: readonly T[],
+  lines: readonly number[],
+): T[] {
   const templates = readings
     .filter((r) => linesOf(r.text).length > 1)
     // Most lines first: a reading that found three breaks saw more of the
     // artwork than one that found one. Then the surest of those.
     .sort((a, b) => {
-      const lines = linesOf(b.text).length - linesOf(a.text).length
-      return lines !== 0 ? lines : b.confidence - a.confidence
+      const count = linesOf(b.text).length - linesOf(a.text).length
+      return count !== 0 ? count : b.confidence - a.confidence
     })
 
   return readings.map((reading) => {
@@ -38,12 +47,52 @@ export function settleBreaks<T extends Breakable>(readings: readonly T[]): T[] {
     // count and confidence alone lets a model that read something else entirely
     // at this place lend its breaks to the winner, on the strength of having
     // happened to find two lines in its own rubbish.
+    //
+    // A reader that read this very sentence and knows where it broke beats a
+    // measurement of the ink, because it knows which characters went where and
+    // the measurement only knows how much room each line took.
     const template = templates.find((t) => sameClaim(flatten(t.text), said))
-    if (!template) return reading
-
-    const broken = borrow(template.text, said)
+    const broken = template ? borrow(template.text, said) : share(said, lines)
     return broken === reading.text ? reading : { ...reading, text: broken }
   })
+}
+
+/**
+ * The characters spread over the measured lines in proportion to their lengths.
+ *
+ * ⚠️ A last resort, and it says so by what it is not: nobody here knows which
+ * character went on which line, so this is the shape of the block rather than a
+ * reading of it. It is still much better than an even division — a balloon set
+ * five, five and two does not break in thirds, and that is exactly the shape a
+ * measurement can see and a character count cannot.
+ *
+ * A line that would come out empty is dropped rather than kept, for the same
+ * reason a transplant never produces one: an empty line is a claim about the
+ * artwork that nothing made.
+ */
+function share(said: string, lines: readonly number[]): string {
+  const characters = [...said]
+  if (lines.length < 2 || characters.length < 2) return said
+  const total = lines.reduce((sum, one) => sum + one, 0)
+  if (total <= 0) return said
+
+  const out: string[] = []
+  let taken = 0
+  let sofar = 0
+  lines.forEach((line, at) => {
+    sofar += line
+    // Measured from the running total rather than by rounding each line on its
+    // own, so the rounding error cannot accumulate across a tall balloon.
+    const upto =
+      at === lines.length - 1
+        ? characters.length
+        : Math.min(characters.length, Math.round((sofar / total) * characters.length))
+    if (upto > taken) {
+      out.push(characters.slice(taken, upto).join(''))
+      taken = upto
+    }
+  })
+  return out.join('\n')
 }
 
 function borrow(template: string, said: string): string {

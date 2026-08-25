@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { OcrModel, OcrPageResult, OcrProgress } from '@shared/ocr/types'
+import type { OcrModel, OcrPageResult, OcrProgress, OcrRegion } from '@shared/ocr/types'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
@@ -305,7 +305,20 @@ export function arrivalsOf(found: OcrPageResult): OcrArrival[] {
     byRegion.set(reading.region, at)
   }
 
-  return [...byRegion.values()].flatMap((readings) => settleBreaks(readings))
+  return [...byRegion].flatMap(([at, readings]) =>
+    settleBreaks(readings, lengthsOf(found.regions[at])),
+  )
+}
+
+/**
+ * How long each of a region's measured lines is, along the direction it is read.
+ *
+ * ⚠️ Spent here and never stored. These describe one measurement of the page
+ * rather than anything about a reading, and a reading carrying them would make
+ * every rerun add the whole page again.
+ */
+function lengthsOf(region: OcrRegion): number[] {
+  return region.columns.map((column) => (region.vertical ? column.height : column.width))
 }
 
 /**

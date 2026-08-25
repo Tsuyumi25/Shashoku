@@ -4,8 +4,8 @@ import { settleBreaks } from './breaks'
 const said = (text: string, confidence = 0.9) => ({ text, confidence })
 
 /** What each reading reads as afterwards, in the order it went in. */
-const after = (readings: { text: string; confidence: number }[]) =>
-  settleBreaks(readings).map((r) => r.text)
+const after = (readings: { text: string; confidence: number }[], lines: number[] = []) =>
+  settleBreaks(readings, lines).map((r) => r.text)
 
 describe('settleBreaks', () => {
   it('leaves one lonely flat reading flat', () => {
@@ -94,14 +94,77 @@ describe('settleBreaks', () => {
   })
 
   it('answers nothing for nothing', () => {
-    expect(settleBreaks([])).toEqual([])
+    expect(settleBreaks([], [])).toEqual([])
   })
 
   it('keeps everything else about a reading untouched', () => {
-    const [borrowed] = settleBreaks([
-      { text: 'あいうえ', confidence: 0.83, source: 'baberu-ocr' },
-      { text: 'あい\nうえ', confidence: 0.7, source: 'manga-ocr' },
-    ])
+    const [borrowed] = settleBreaks(
+      [
+        { text: 'あいうえ', confidence: 0.83, source: 'baberu-ocr' },
+        { text: 'あい\nうえ', confidence: 0.7, source: 'manga-ocr' },
+      ],
+      [],
+    )
     expect(borrowed).toMatchObject({ confidence: 0.83, source: 'baberu-ocr' })
+  })
+})
+
+describe('settleBreaks, against the lines the artwork was measured to have', () => {
+  /**
+   * ⭐ Nobody at this place found a break, but something went and measured where
+   * the lines are. Dividing the characters evenly would be guessing at the very
+   * thing there is a measurement of.
+   */
+  it('breaks a lonely reading over the lines that were measured', () => {
+    expect(after([said('あいうえおかきくけこさし')], [150, 150, 60])).toEqual([
+      'あいうえお\nかきくけこ\nさし',
+    ])
+  })
+
+  it('does not divide the characters evenly between lines of different lengths', () => {
+    const [broken] = after([said('あいうえおかきくけこさし')], [150, 150, 60])
+    expect(broken).not.toBe('あいうえ\nおかきく\nけこさし')
+  })
+
+  it('follows a long first line and two short ones', () => {
+    expect(after([said('あいうえおかきくけこ')], [300, 100, 100])).toEqual([
+      'あいうえおか\nきく\nけこ',
+    ])
+  })
+
+  /** The reader that found its own breaks still outranks a measurement. */
+  it('leaves a reading that knows its own breaks alone', () => {
+    expect(after([said('あい\nうえおかきくけこさし')], [150, 150, 60])[0]).toBe(
+      'あい\nうえおかきくけこさし',
+    )
+  })
+
+  /** ⭐ And a template that read the same sentence still outranks it. */
+  it('prefers a template that says the same thing over the measurement', () => {
+    const [, borrowed] = after(
+      [said('あいうえ\nおかきくけこさし'), said('あいうえおかきくけこさし')],
+      [150, 150, 60],
+    )
+    expect(borrowed).toBe('あいうえ\nおかきくけこさし')
+  })
+
+  it('leaves a reading flat where only one line was measured', () => {
+    expect(after([said('あいうえおかきくけこさし')], [150])).toEqual(['あいうえおかきくけこさし'])
+  })
+
+  it('leaves a reading flat where nothing was measured', () => {
+    expect(after([said('あいうえおかきくけこさし')], [])).toEqual(['あいうえおかきくけこさし'])
+  })
+
+  it('does not make more lines than it has characters', () => {
+    expect(after([said('あい')], [150, 150, 60])).toEqual(['あ\nい'])
+  })
+
+  it('never answers an empty line', () => {
+    for (const lines of [[300, 1, 1], [1, 1, 300], [5, 5, 5, 5, 5, 5]]) {
+      for (const text of ['あいう', 'あ', 'あいうえおか']) {
+        expect(after([said(text)], lines)[0].split('\n').every((l) => l.length > 0)).toBe(true)
+      }
+    }
   })
 })
