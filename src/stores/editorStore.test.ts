@@ -233,6 +233,105 @@ describe('addLabelAt', () => {
     editor.redo()
     expect(labelsOf(project).map((l) => l.id)).toEqual(['a', 'b', id])
   })
+
+  /**
+   * ⭐ Which reading an object stands for is settled once for the whole page.
+   * An object that grabbed the nearest reading as it was drawn would be
+   * answering a question the page is about to answer properly.
+   */
+  it('leaves a new object standing for nothing, however near a reading is', () => {
+    const { project, editor } = openOnePage()
+    project.allFiles[0].ocr.candidates = [
+      {
+        hash: 'near',
+        source: 'manga-ocr',
+        text: 'ふん',
+        original: 'ふん',
+        x: 50,
+        y: 200,
+        w: 100,
+        h: 50,
+        confidence: 0.99,
+        label: 'text_bubble',
+      },
+    ]
+    editor.addLabelAt(100, 225)
+    expect(labelsOf(project).at(-1)?.source).toEqual({ hash: null, by: 'auto' })
+  })
+})
+
+describe('cmdApplyVerdict', () => {
+  it('does nothing at all when the page decided nothing', () => {
+    const { editor } = openOnePage([label('a')])
+    editor.cmdApplyVerdict(PAGE, { fills: new Map(), spawns: [] })
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('points a standing object at the reading the page chose', () => {
+    const { project, editor } = openOnePage([label('a')])
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map([['a', { hash: 'r1', by: 'auto' as const }]]),
+      spawns: [],
+    })
+    expect(labelsOf(project)[0].source).toEqual({ hash: 'r1', by: 'auto' })
+  })
+
+  it('creates an object set the way the artwork was measured', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map(),
+      spawns: [
+        {
+          hash: 'r1',
+          text: 'ふん',
+          centre: { x: 300, y: 400 },
+          vertical: true,
+          fontSizePx: 38,
+          leadingPercent: 118,
+        },
+      ],
+    })
+    const born = labelsOf(project).at(-1)
+    expect(born?.style).toMatchObject({
+      direction: 'vertical',
+      fontSizePx: 38,
+      leadingPercent: 118,
+    })
+    expect(born?.source).toEqual({ hash: 'r1', by: 'auto' })
+  })
+
+  it('leaves the seed style alone where the run measured nothing', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map(),
+      spawns: [{ hash: 'r1', text: 'ふん', centre: { x: 300, y: 400 } }],
+    })
+    expect(labelsOf(project).at(-1)?.style).toEqual(project.header.seedStyle)
+  })
+
+  /**
+   * ⭐ What somebody wants back after pressing the button is the page as it was
+   * before they pressed it, not one object of eleven.
+   */
+  it('takes a whole run back in one step', () => {
+    const { project, editor } = openOnePage([label('a')])
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map([['a', { hash: 'r1', by: 'auto' as const }]]),
+      spawns: [
+        { hash: 'r2', text: 'に', centre: { x: 300, y: 400 } },
+        { hash: 'r3', text: 'さん', centre: { x: 600, y: 400 } },
+      ],
+    })
+    expect(labelsOf(project)).toHaveLength(3)
+
+    editor.undo()
+    expect(labelsOf(project)).toHaveLength(1)
+    expect(labelsOf(project)[0].source).toEqual({ hash: null, by: 'auto' })
+
+    editor.redo()
+    expect(labelsOf(project)).toHaveLength(3)
+    expect(labelsOf(project)[0].source).toEqual({ hash: 'r1', by: 'auto' })
+  })
 })
 
 describe('addLabelAtViewCenter', () => {

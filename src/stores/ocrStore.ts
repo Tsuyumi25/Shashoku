@@ -4,10 +4,11 @@ import type { OcrModel, OcrPageResult, OcrProgress } from '@shared/ocr/types'
 import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
 import { textOf } from '@shared/page/text'
 import { layersDirOf } from '@shared/ssk/constants'
-import { settleReadings } from '@shared/ocr/candidates'
+import { decide } from '@shared/ocr/decide'
 import { fold } from '@shared/ocr/clean'
 import type { OcrArrival } from '@shared/ocr/pool'
 import type { OcrModelPreference } from '@shared/preferences/types'
+import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -40,6 +41,16 @@ const ROUTE_OF: Partial<Record<OcrModel, OcrRoute>> = {
   baberu: BABERU_OCR,
   hayai: HAYAI_OCR,
 }
+
+/**
+ * Which readers may only vote.
+ *
+ * ⭐ Empty, and kept anyway. Whether a source takes part in the vote and whether
+ * it may create an object out of nothing are two separate permissions, and the
+ * shape has to exist before the source that needs it arrives — otherwise the
+ * first unreliable reader to be added is one that can litter a page.
+ */
+const MAY_NOT_CREATE: ReadonlySet<string> = new Set()
 
 /**
  * What each station of a trip is called, for saying where a long wait has got
@@ -185,7 +196,8 @@ export const useOcrStore = defineStore('ocr', () => {
         `${layersDirOf(pageDir)}/${artwork}`,
         onomatopoeia(),
       )
-      settle(pageId, arrivalsOf(found))
+      useProjectStore().absorbReadings(pageId, arrivalsOf(found))
+      settle(pageId)
       shown.value = new Set(shown.value).add(pageId)
     } catch (e) {
       problem.value = e instanceof Error ? e.message : String(e)
@@ -196,31 +208,27 @@ export const useOcrStore = defineStore('ocr', () => {
   }
 
   /**
-   * One act, not two call sites: a reading that entered the pool without being
-   * offered to the objects waiting for it would leave the page looking as if
-   * the trip had done nothing.
+   * The page's own court, over the whole pool.
+   *
+   * ⚠️ Held whether or not the trip brought anything new. A rerun that read
+   * nothing it had not read before still has to decide again — an object drawn
+   * by hand since the last pass is exactly the case that depends on it, and
+   * gating this on new readings would leave that object empty for ever.
    */
-  function settle(pageId: string, arrivals: readonly OcrArrival[]) {
+  function settle(pageId: string) {
     const project = useProjectStore()
-    const born = project.absorbReadings(pageId, arrivals)
-    if (born.size === 0) return
-
-    const pool = project.readingsOfPage(pageId)
-    const confidenceOf = new Map(pool.map((c) => [c.hash, c.confidence]))
-    const settled = settleReadings(
-      project.labelsOf(pageId).map((object) => {
-        const held = object.source.hash
-        return {
+    useEditorStore().cmdApplyVerdict(
+      pageId,
+      decide(
+        project.labelsOf(pageId).map((object) => ({
           id: object.id,
           centre: labelCentre(object),
           source: object.source,
-          heldConfidence:
-            held === null || held === 'own' ? null : (confidenceOf.get(held) ?? null),
-        }
-      }),
-      pool.filter((c) => born.has(c.hash)),
+        })),
+        project.readingsOfPage(pageId),
+        MAY_NOT_CREATE,
+      ),
     )
-    for (const [id, source] of settled) project.setLabelSource(pageId, id, source)
   }
 
   /**

@@ -95,19 +95,14 @@ const object = computed(() => {
 
 const pool = computed(() => (pageId.value ? project.readingsOfPage(pageId.value) : []))
 
-const currentFile = computed(() =>
-  pageId.value ? (project.pageById(pageId.value) ?? null) : null,
-)
-
 const rows = computed(() => {
   const o = object.value
-  const file = currentFile.value
-  if (!o || !file) return []
+  if (!o) return []
   const centre = drawnLabel(textOf(o), o.style, o.effects, { x: o.x, y: o.y }, o.rotation).center
-  return candidatesFor(o, centre, pool.value, file.page)
+  return candidatesFor(o, centre, pool.value)
 })
 
-/** How many of them were read near this object, the slot's own row aside. */
+/** How many were read where this object stands, the slot's own row aside. */
 const nearby = computed(() => rows.value.filter((r) => !r.held && r.hash !== 'own').length)
 
 /**

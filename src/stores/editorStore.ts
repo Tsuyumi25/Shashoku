@@ -5,6 +5,7 @@ import type {
   LayerEntry,
   RasterLayerEntry,
   TextLayerEntry,
+  TextSource,
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
@@ -27,7 +28,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
-import { sourceForNewObject } from '@shared/ocr/candidates'
+import type { Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 
 export interface Command {
@@ -644,16 +645,92 @@ export const useEditorStore = defineStore('editor', () => {
       tags: [],
       rotation: 0,
       lines: [''],
-      // Nothing near enough leaves the slot unanswered rather than settled,
-      // so a later run is still free to fill it.
-      source: sourceForNewObject(
-        drawnLabel('', project.header.seedStyle, [], { x, y }, 0).center,
-        project.readingsOfPage(currentPageId.value),
-      ),
+      // ⭐ Unanswered, and left that way. Which reading an object stands for is
+      // settled once for the whole page, by weighing every reading against
+      // every object at once — an object that grabbed the nearest reading as it
+      // was drawn would be answering a question the page is about to answer
+      // properly, and would have to be overruled to fix it.
+      source: { hash: null, by: 'auto' },
       ownSource: '',
       translations: [],
       translation: null,
       style: { ...project.header.seedStyle },
+    })
+  }
+
+  /**
+   * Everything a page's own court decided, as one step.
+   *
+   * ⭐ One step and not one per object. What somebody wants back after pressing
+   * the button is the page as it was before they pressed it — undoing a run
+   * eleven objects at a time would be eleven presses to reach a state nobody
+   * asked to stop at.
+   *
+   * The new objects are built here rather than by the court, which answers
+   * about the artwork and knows nothing about styles or identifiers.
+   */
+  function cmdApplyVerdict(pageId: string, verdict: Verdict) {
+    const project = useProjectStore()
+    if (verdict.fills.size === 0 && verdict.spawns.length === 0) return
+
+    const before = new Map<string, TextSource>()
+    for (const id of verdict.fills.keys()) {
+      const label = project.labelById(pageId, id)
+      if (label) before.set(id, label.source)
+    }
+
+    const seed = project.header.seedStyle
+    const born = verdict.spawns.map((spawn) => {
+      const style: TextStyle = {
+        ...seed,
+        direction: spawn.vertical === undefined
+          ? seed.direction
+          : spawn.vertical
+            ? 'vertical'
+            : 'horizontal',
+        fontSizePx: spawn.fontSizePx ?? seed.fontSizePx,
+        leadingPercent: spawn.leadingPercent ?? seed.leadingPercent,
+      }
+      // Placed by where the reading was, which is the middle of the balloon —
+      // so the anchor is worked back from that rather than written to it, since
+      // which corner the anchor names depends on how the text is aligned.
+      const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
+      const label: TextLayerEntry = {
+        kind: 'text',
+        id: generateLabelId(),
+        visible: true,
+        locked: false,
+        opacity: 1,
+        blendMode: 'normal',
+        effects: [],
+        x: spawn.centre.x - empty.center.x,
+        y: spawn.centre.y - empty.center.y,
+        tags: [],
+        rotation: 0,
+        lines: [''],
+        source: { hash: spawn.hash, by: 'auto' },
+        ownSource: '',
+        translations: [],
+        translation: null,
+        style,
+      }
+      return label
+    })
+
+    const places = new Map<string, LabelPlace>()
+    pushCommand({
+      label: `recognize ${pageId}`,
+      do: () => {
+        for (const [id, source] of verdict.fills) project.setLabelSource(pageId, id, source)
+        for (const label of born) project.addLabel(pageId, label, places.get(label.id))
+      },
+      undo: () => {
+        for (const label of born) {
+          const place = project.deleteLabel(pageId, label.id)
+          if (place) places.set(label.id, place)
+        }
+        for (const [id, source] of before) project.setLabelSource(pageId, id, source)
+      },
     })
   }
 
@@ -1621,6 +1698,7 @@ export const useEditorStore = defineStore('editor', () => {
     deleteSelection,
     moveObjectsTo,
     cmdAddLabel,
+    cmdApplyVerdict,
     cmdDuplicateLabel,
     cmdMoveLabel,
     cmdPlaceLayer,
