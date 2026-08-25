@@ -43,131 +43,154 @@
       <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
 
       <!--
-        Where the reading being pointed at in the list was read. Nothing here
-        is an object — it is a mark that lasts as long as the pointer rests.
-      -->
-      <OcrOverlay v-if="ocrPointedBox" :pointed-box="ocrPointedBox" :view="view" />
+        ⭐ Everything that follows the document, under one transform.
 
-      <!--
-        The boxes of whichever routes are switched on. Under the pointed mark
-        above so that the one being pointed at still reads as the one.
+        Each of these used to multiply its own page coordinates by the view,
+        build a style string and have the framework write it — so one turn of
+        the wheel was that work done again for every element on screen. They are
+        written in page pixels now and the stage carries the view once. It is
+        also the more honest sentence: "these follow the document" is what the
+        transform says, rather than every element saying it separately and
+        everyone hoping they agree.
       -->
-      <OcrBoxes v-if="ocrBoxes.length" :boxes="ocrBoxes" :view="view" />
-
-      <!--
-        The lines, under the frames rather than over them: a frame is what says
-        an object is there, and a line drawn across one would be covering the
-        thing it points at. It takes no pointer of its own — which line a click
-        landed on is worked out from the page point, the same way the objects
-        are.
-      -->
-      <svg
-        v-if="pageReady && connecting"
-        class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-        :style="{ '--line-stroke': `${LINE_STROKE_PX}px` }"
-      >
-        <defs>
-          <marker
-            v-for="head in ARROW_HEADS"
-            :id="head.id"
-            :key="head.id"
-            viewBox="0 0 8 8"
-            refX="7"
-            refY="4"
-            markerWidth="7"
-            markerHeight="7"
-            markerUnits="userSpaceOnUse"
-            orient="auto"
-          >
-            <path d="M 0 0 L 8 4 L 0 8 z" :fill="head.fill" />
-          </marker>
-        </defs>
-        <line
-          v-for="line in drawnLines"
-          :key="line.key"
-          :x1="line.a.x"
-          :y1="line.a.y"
-          :x2="line.b.x"
-          :y2="line.b.y"
-          :class="line.chosen ? 'reading-line-chosen' : 'reading-line'"
-          :marker-end="line.chosen ? 'url(#reading-arrow-chosen)' : 'url(#reading-arrow)'"
-        />
-        <line
-          v-if="previewLine"
-          :x1="previewLine.a.x"
-          :y1="previewLine.a.y"
-          :x2="previewLine.b.x"
-          :y2="previewLine.b.y"
-          :class="previewLine.refused ? 'reading-line-refused' : 'reading-line-preview'"
-          :marker-end="previewLine.refused ? undefined : 'url(#reading-arrow)'"
-        />
-      </svg>
-
-      <div v-if="pageReady" class="pointer-events-none absolute inset-0">
+      <div :style="stageStyle">
         <!--
-          The move tool alone, which is already the only one that can pick a
-          raster layer. A rectangle drawn around what cannot be grabbed says
-          nothing, and under a brush it says it right where the work is — the
-          layer being painted is the whole page often enough that its frame
-          lands across everything being drawn.
+          Where the reading being pointed at in the list was read. Nothing here
+          is an object — it is a mark that lasts as long as the pointer rests.
         -->
-        <template v-if="framesShow">
-          <RasterFrame
-            v-for="layer in rasterFrames"
-            :key="layer.id"
-            :frame="frameOf(layer)"
-            :view="view"
-            :selected="layer.id === editor.cursorId"
-            :in-selection="editor.isSelected(layer.id)"
-            :pointed="layer.id === pointedLayerId"
-            :pointer="framesTakePointer ? 'handles' : 'none'"
-            :place="placement.placementOf(layer.id)"
-            @select="onSelectObject(layer.id, $event)"
-            @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
-            @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
-            @commit="onLayerCommit(layer)"
+        <OcrOverlay v-if="ocrPointedBox" :pointed-box="ocrPointedBox" />
+
+        <!--
+          The boxes of whichever routes are switched on. Under the pointed mark
+          above so that the one being pointed at still reads as the one.
+        -->
+        <OcrBoxes v-if="ocrBoxes.length" :boxes="ocrBoxes" />
+
+        <!--
+          The lines, under the frames rather than over them: a frame is what says
+          an object is there, and a line drawn across one would be covering the
+          thing it points at. It takes no pointer of its own — which line a click
+          landed on is worked out from the page point, the same way the objects
+          are.
+        -->
+        <svg
+          v-if="pageReady && connecting"
+          class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        >
+          <defs>
+            <!--
+              Sized in page units that come to a constant number of screen pixels,
+              because `markerWidth` is an attribute rather than a property and
+              cannot be written in `--px`. Two numbers per view change, against a
+              marker that would otherwise grow to the size of a balloon at 8x.
+            -->
+            <marker
+              v-for="head in ARROW_HEADS"
+              :id="head.id"
+              :key="head.id"
+              viewBox="0 0 8 8"
+              refX="7"
+              refY="4"
+              :markerWidth="arrowSize"
+              :markerHeight="arrowSize"
+              markerUnits="userSpaceOnUse"
+              orient="auto"
+            >
+              <path d="M 0 0 L 8 4 L 0 8 z" :fill="head.fill" />
+            </marker>
+          </defs>
+          <line
+            v-for="line in drawnLines"
+            :key="line.key"
+            :x1="line.a.x"
+            :y1="line.a.y"
+            :x2="line.b.x"
+            :y2="line.b.y"
+            :class="line.chosen ? 'reading-line-chosen' : 'reading-line'"
+            :marker-end="line.chosen ? 'url(#reading-arrow-chosen)' : 'url(#reading-arrow)'"
           />
-        </template>
-        <LabelBox
-          v-for="object in objects"
-          :key="object.id"
-          :pointer="framesTakePointer ? 'box' : 'none'"
-          :framed="connecting"
-          :handles="!connecting"
-          :text="object.text"
-          :text-style="object.style"
-          :effects="object.effects"
-          :x="object.x"
-          :y="object.y"
-          :rotation="object.rotation"
-          :accent="object.accent"
-          :tags="object.tags"
-          :natural="editor.viewContentSize"
-          :view="view"
-          :selected="object.id === editor.cursorId"
-          :in-selection="editor.isSelected(object.id)"
-          :locked="object.locked"
-          :editing="object.id === textEditingId"
-          :selection="object.id === textEditingId ? textRange : null"
-          :caret-key="object.id === textEditingId ? caretKey : 0"
-          @edit-at="beginCanvasTextEdit(object.id, $event)"
-          @select-text="(anchor, focus) => setTextRange(anchor, focus)"
-          @select="onSelectObject(object.id, $event)"
-          @move="moveLabelTo(object.id, $event)"
-          @move-end="(from, to) => commitLabelMove(object.id, from, to)"
-          @scale-start="beginLabelScale(object.id)"
-          @scale="(fontSizePx, at) => scaleLabelTo(object.id, fontSizePx, at)"
-          @scale-end="commitLabelScale(object.id)"
-          @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
-          @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
+          <line
+            v-if="previewLine"
+            :x1="previewLine.a.x"
+            :y1="previewLine.a.y"
+            :x2="previewLine.b.x"
+            :y2="previewLine.b.y"
+            :class="previewLine.refused ? 'reading-line-refused' : 'reading-line-preview'"
+            :marker-end="previewLine.refused ? undefined : 'url(#reading-arrow)'"
+          />
+        </svg>
+
+        <div v-if="pageReady" class="pointer-events-none absolute inset-0">
+          <!--
+            The move tool alone, which is already the only one that can pick a
+            raster layer. A rectangle drawn around what cannot be grabbed says
+            nothing, and under a brush it says it right where the work is — the
+            layer being painted is the whole page often enough that its frame
+            lands across everything being drawn.
+          -->
+          <template v-if="framesShow">
+            <RasterFrame
+              v-for="layer in rasterFrames"
+              :key="layer.id"
+              :frame="frameOf(layer)"
+              :view="view"
+              :selected="layer.id === editor.cursorId"
+              :in-selection="editor.isSelected(layer.id)"
+              :pointed="layer.id === pointedLayerId"
+              :pointer="framesTakePointer ? 'handles' : 'none'"
+              :place="placement.placementOf(layer.id)"
+              @select="onSelectObject(layer.id, $event)"
+              @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
+              @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
+              @commit="onLayerCommit(layer)"
+            />
+          </template>
+          <LabelBox
+            v-for="object in objects"
+            :key="object.id"
+            :pointer="framesTakePointer ? 'box' : 'none'"
+            :framed="connecting"
+            :handles="!connecting"
+            :text="object.text"
+            :text-style="object.style"
+            :effects="object.effects"
+            :x="object.x"
+            :y="object.y"
+            :rotation="object.rotation"
+            :accent="object.accent"
+            :tags="object.tags"
+            :natural="editor.viewContentSize"
+            :view="view"
+            :selected="object.id === editor.cursorId"
+            :in-selection="editor.isSelected(object.id)"
+            :locked="object.locked"
+            :editing="object.id === textEditingId"
+            :selection="object.id === textEditingId ? textRange : null"
+            :caret-key="object.id === textEditingId ? caretKey : 0"
+            @edit-at="beginCanvasTextEdit(object.id, $event)"
+            @select-text="(anchor, focus) => setTextRange(anchor, focus)"
+            @select="onSelectObject(object.id, $event)"
+            @move="moveLabelTo(object.id, $event)"
+            @move-end="(from, to) => commitLabelMove(object.id, from, to)"
+            @scale-start="beginLabelScale(object.id)"
+            @scale="(fontSizePx, at) => scaleLabelTo(object.id, fontSizePx, at)"
+            @scale-end="commitLabelScale(object.id)"
+            @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
+            @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
+          />
+        </div>
+
+        <!--
+          A rectangle drawn on the page, so it stands on the stage with the rest
+          — only its border is held to screen pixels, being a mark on the
+          interface rather than something the page holds.
+        -->
+        <div
+          v-if="objectMarquee"
+          class="pointer-events-none absolute border-solid border-primary bg-primary/10"
+          :style="objectMarqueeStyle"
         />
       </div>
-
-      <div
-        v-if="objectMarquee"
-        class="pointer-events-none absolute border border-primary bg-primary/10"
-        :style="objectMarqueeStyle"
-      />
 
       <!--
         The brush, drawn in screen coordinates over everything else. Rotating
@@ -220,6 +243,7 @@ import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
+import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
@@ -237,7 +261,6 @@ import { useRasterTarget } from '@/composables/useRasterTarget'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import {
-  centeredBoxOnScreen,
   contentToScreenPx,
   screenToContentPx,
   screenToPagePx,
@@ -607,6 +630,22 @@ function accentOf(tags: readonly string[]): string | undefined {
 }
 
 const containerRef = useTemplateRef('containerRef')
+
+/**
+ * The stage's whole transform, and the one number the overlays on it need to
+ * keep a mark screen-sized.
+ */
+const stageStyle = computed(() => stageStyleFor(view))
+
+/**
+ * ⚠️ The viewport's corner, not the stage's — the stage travels with the view,
+ * and a gesture measuring from it would be dividing by a ruler that had already
+ * moved. See `useCanvasStage`.
+ */
+provideViewportOrigin(() => {
+  const rect = containerRef.value?.getBoundingClientRect()
+  return rect ? { left: rect.left, top: rect.top } : { left: 0, top: 0 }
+})
 const overlayCanvasRef = useTemplateRef('overlayCanvasRef')
 
 
@@ -636,17 +675,20 @@ const objectMarqueeRect = computed(() =>
 const objectMarqueeStyle = computed(() => {
   const rect = objectMarqueeRect.value
   if (!rect) return {}
-  const box = centeredBoxOnScreen(
-    { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
-    { w: rect.w, h: rect.h },
-    view,
-  )
+  const box = {
+    centerX: rect.x + rect.w / 2,
+    centerY: rect.y + rect.h / 2,
+    width: rect.w,
+    height: rect.h,
+  }
   return {
+    borderWidth: 'calc(1px * var(--px))',
     left: `${box.centerX}px`,
     top: `${box.centerY}px`,
     width: `${box.width}px`,
     height: `${box.height}px`,
-    transform: `translate(-50%, -50%) rotate(${view.rotate}rad)`,
+    // No turn of its own: the stage already carries the view's.
+    transform: 'translate(-50%, -50%)',
   }
 })
 
@@ -775,8 +817,8 @@ const drawnLines = computed(() => {
     out.push({
       // Both ends quoted, so no pair of ids spells another pair's key.
       key: `${keyPrefix}${JSON.stringify([edge.from, edge.to])}`,
-      a: toScreen(line.a),
-      b: toScreen(line.b),
+      a: line.a,
+      b: line.b,
       chosen: chosen !== null && chosen.edge.from === edge.from && chosen.edge.to === edge.to,
     })
   }
@@ -804,14 +846,23 @@ const previewLine = computed(() => {
   const target = hoverTargetId.value
   const to = target === null ? undefined : objectBoxes.value.get(target)
   if (to === undefined) {
-    return { a: toScreen(nearestAnchor(from, g.at)), b: toScreen(g.at), refused: false }
+    return { a: nearestAnchor(from, g.at), b: g.at, refused: false }
   }
   const line = readingLineBetween(from, to)
-  return { a: toScreen(line.a), b: toScreen(line.b), refused: connect.refuses(target as string) }
+  return { a: line.a, b: line.b, refused: connect.refuses(target as string) }
 })
 
-/** How thick a line is drawn, in screen pixels. */
+/** How thick a line is drawn, in screen pixels; the stylesheet holds the same. */
 const LINE_STROKE_PX = 1.5
+
+/**
+ * How long an arrow head is, in the stage's own units, so it comes out the same
+ * size on screen at any zoom.
+ */
+const ARROW_SCREEN_PX = 7
+const arrowSize = computed(() =>
+  view.scale === 0 ? ARROW_SCREEN_PX : ARROW_SCREEN_PX / view.scale,
+)
 
 /**
  * How close a click has to come to a line to have landed on it. The stroke's
@@ -1612,10 +1663,13 @@ useEventListener(window, 'blur', () => {
   stroke-linecap: round;
   filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.9))
     drop-shadow(0 0 2px rgb(255 255 255 / 0.7));
+  /* Screen pixels whatever the stage is scaled to — a line is a mark on the
+     interface, not something the page holds. The dashes follow it. */
+  vector-effect: non-scaling-stroke;
 }
 .reading-line {
   stroke: var(--primary);
-  stroke-width: var(--line-stroke);
+  stroke-width: 1.5;
 }
 .reading-line-chosen {
   stroke: var(--foreground);
@@ -1623,13 +1677,13 @@ useEventListener(window, 'blur', () => {
 }
 .reading-line-preview {
   stroke: var(--primary);
-  stroke-width: var(--line-stroke);
+  stroke-width: 1.5;
   stroke-dasharray: 4 3;
 }
 /* Refused before the click rather than reported after it. */
 .reading-line-refused {
   stroke: var(--destructive);
-  stroke-width: var(--line-stroke);
+  stroke-width: 1.5;
   stroke-dasharray: 2 4;
 }
 

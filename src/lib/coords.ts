@@ -164,28 +164,8 @@ export function screenToPagePx(
 }
 
 /**
- * Screen placement of a content-sized box centred on a content point, for the
- * elements that live outside the transformed stage and carry their own pixels.
- * The box stays axis aligned: a rotated view moves its centre but never its
- * width or height, so whoever draws into it decides what to do about rotation.
- */
-export function centeredBoxOnScreen(
-  center: { x: number; y: number },
-  size: { w: number; h: number },
-  view: ViewTransform,
-): { centerX: number; centerY: number; width: number; height: number } {
-  const p = contentToScreenPx(center.x, center.y, view)
-  return {
-    centerX: p.x,
-    centerY: p.y,
-    width: size.w * view.scale,
-    height: size.h * view.scale,
-  }
-}
-
-/**
- * Where a screen point lands inside a frame placed by `centeredBoxOnScreen`, in
- * the frame's own upright pixels with the origin at its top left corner.
+ * Where a screen point lands inside a frame the stage placed, in the frame's own
+ * upright pixels with the origin at its top left corner.
  *
  * The frame is drawn as a box of `box × scale` turned by `turn` about its own
  * centre, so reading a point back out is that chain run backwards: to the

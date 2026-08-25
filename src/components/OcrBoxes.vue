@@ -18,26 +18,25 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { contentToScreenPx, type ViewTransform } from '@/lib/coords'
+
 
 const props = defineProps<{
+  /** In page pixels; the stage carries the view. */
   boxes: readonly { hash: string; x: number; y: number; w: number; h: number }[]
-  view: ViewTransform
 }>()
 
 const drawn = computed(() =>
   props.boxes.map((box) => ({
     key: box.hash,
-    // Corner by corner through the transform, so a rotated view turns the box
-    // with the artwork instead of leaving an upright rectangle over it.
+    // A polygon rather than a rect, for the same reason `OcrOverlay` uses one:
+    // the stage may be turned.
     points: [
       [box.x, box.y],
       [box.x + box.w, box.y],
       [box.x + box.w, box.y + box.h],
       [box.x, box.y + box.h],
     ]
-      .map(([x, y]) => contentToScreenPx(x, y, props.view))
-      .map((p) => `${p.x},${p.y}`)
+      .map(([x, y]) => `${x},${y}`)
       .join(' '),
   })),
 )
@@ -51,5 +50,7 @@ const drawn = computed(() =>
   fill: none;
   stroke: oklch(0.65 0.19 285);
   stroke-width: 1.5;
+  /* Screen pixels, whatever the stage is scaled to. */
+  vector-effect: non-scaling-stroke;
 }
 </style>

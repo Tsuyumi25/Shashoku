@@ -64,7 +64,6 @@ import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
-  centeredBoxOnScreen,
   clamp,
   framePoint,
   framePxToScreen,
@@ -209,9 +208,19 @@ const substitution = computed(() => {
   return missing === null ? '' : missingFamilyLabel(missing)
 })
 
-// On the drawn centre rather than the stored one, so what is grabbed is where
-// the text actually is and the two cannot part company by half a pixel.
-const box = computed(() => centeredBoxOnScreen(drawn.value.center, drawn.value.box, props.view))
+/**
+ * On the drawn centre rather than the stored one, so what is grabbed is where
+ * the text actually is and the two cannot part company by half a pixel.
+ *
+ * In page pixels: the stage carries the view, so a frame that multiplied by it
+ * here would be scaled twice.
+ */
+const box = computed(() => ({
+  centerX: drawn.value.center.x,
+  centerY: drawn.value.center.y,
+  width: drawn.value.box.w,
+  height: drawn.value.box.h,
+}))
 
 /**
  * Where the object was before the drag wrote anything. A drag reports how far
@@ -338,8 +347,15 @@ function onRotateEnd() {
 
 // ── Projecting the field's caret onto the drawn text ───────────────────────
 
-/** How thick a caret is on screen. Constant, so the zoom cannot thin it away. */
+/**
+ * How thick a caret is on screen. Constant, so the zoom cannot thin it away —
+ * which is why it is written in `--px` where it is drawn, and in real pixels
+ * only where the native input is being placed.
+ */
 const CARET_PX = 2
+
+/** The same thickness, in the stage's own units. */
+const CARET_ON_STAGE = `calc(${CARET_PX}px * var(--px))`
 
 const surfaceEl = ref<HTMLElement | null>(null)
 const surface = useTextEditSurface()
@@ -375,27 +391,28 @@ const projection = computed(() => {
   })
 })
 
-/** Layout pixels to screen pixels inside the frame, which is already turned. */
-function scaled(value: number): number {
-  return value * props.view.scale
-}
-
+/**
+ * ⭐ Nothing converts. The engine lays text out in document pixels and the frame
+ * is now sized in them too, so a cluster's rectangle is already where it goes —
+ * which is the whole of what putting the overlays under one transform buys
+ * here.
+ */
 const caretBox = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return null
   const r = projection.value.caret(at.end)
   return vertical.value
     ? {
-        left: `${scaled(r.x)}px`,
-        top: `${scaled(r.y)}px`,
-        width: `${scaled(r.width)}px`,
-        height: `${CARET_PX}px`,
+        left: `${r.x}px`,
+        top: `${r.y}px`,
+        width: `${r.width}px`,
+        height: CARET_ON_STAGE,
       }
     : {
-        left: `${scaled(r.x)}px`,
-        top: `${scaled(r.y)}px`,
-        width: `${CARET_PX}px`,
-        height: `${scaled(r.height)}px`,
+        left: `${r.x}px`,
+        top: `${r.y}px`,
+        width: CARET_ON_STAGE,
+        height: `${r.height}px`,
       }
 })
 
@@ -403,10 +420,10 @@ const selectionBoxes = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return []
   return projection.value.selection(at.start, at.end).map((r) => ({
-    left: `${scaled(r.x)}px`,
-    top: `${scaled(r.y)}px`,
-    width: `${scaled(r.width)}px`,
-    height: `${scaled(r.height)}px`,
+    left: `${r.x}px`,
+    top: `${r.y}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
   }))
 })
 
@@ -443,8 +460,8 @@ function publishCaret(): void {
   surface.showCaretAt({
     x: p.x,
     y: p.y,
-    width: vertical.value ? scaled(r.width) : CARET_PX,
-    height: vertical.value ? CARET_PX : scaled(r.height),
+    width: vertical.value ? r.width * props.view.scale : CARET_PX,
+    height: vertical.value ? CARET_PX : r.height * props.view.scale,
     angle: turn.value,
     vertical: vertical.value,
   })
@@ -581,10 +598,11 @@ const CAPTION_CORNER_OFFSET_PX = 16
  * and then is cheaper than the logic for flipping sides.
  */
 function captionStyle(counterTurn: number) {
+  const out = `${CAPTION_CORNER_OFFSET_PX}px * var(--px)`
   return {
     left: '0px',
     top: '0px',
-    transform: `translate(calc(-50% - ${CAPTION_CORNER_OFFSET_PX}px), calc(${CAPTION_CORNER_OFFSET_PX}px)) rotate(${counterTurn}rad)`,
+    transform: `translate(calc(-50% - ${out}), calc(${out})) rotate(${counterTurn}rad) scale(var(--px))`,
     transformOrigin: 'top center',
   }
 }

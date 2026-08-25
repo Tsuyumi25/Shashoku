@@ -22,28 +22,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { OcrCrop } from '@shared/ocr/types'
-import { contentToScreenPx, type ViewTransform } from '@/lib/coords'
+
 
 const props = defineProps<{
-  /** The reading the pointer is over in the list, if any. */
+  /** The reading the pointer is over in the list, if any. In page pixels. */
   pointedBox: OcrCrop | null
-  view: ViewTransform
 }>()
 
 const points = computed(() => {
   const box = props.pointedBox
   if (!box) return null
-  // Four corners each through the transform rather than a rect placed by its
-  // origin, so a rotated view turns the mark with the artwork instead of
-  // leaving an upright rectangle floating over slanted panels.
+  // A polygon rather than a rect: the stage may be turned, and a rect placed by
+  // its origin would leave an upright rectangle floating over slanted panels.
   return [
     [box.x, box.y],
     [box.x + box.width, box.y],
     [box.x + box.width, box.y + box.height],
     [box.x, box.y + box.height],
   ]
-    .map(([x, y]) => contentToScreenPx(x, y, props.view))
-    .map((p) => `${p.x},${p.y}`)
+    .map(([x, y]) => `${x},${y}`)
     .join(' ')
 })
 </script>
@@ -55,5 +52,7 @@ const points = computed(() => {
   fill: color-mix(in srgb, oklch(0.62 0.19 265) 18%, transparent);
   stroke: oklch(0.62 0.19 265);
   stroke-width: 2;
+  /* Screen pixels, whatever the stage is scaled to. */
+  vector-effect: non-scaling-stroke;
 }
 </style>

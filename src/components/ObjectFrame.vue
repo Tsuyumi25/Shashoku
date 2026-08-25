@@ -19,7 +19,7 @@
       <div
         v-for="corner in CORNERS"
         :key="corner.key"
-        class="absolute h-2 w-2 border border-primary bg-background"
+        class="absolute border border-primary bg-background"
         :class="corner.cursor"
         :style="cornerStyle(corner)"
         @pointerdown.stop="onScaleDown($event, corner)"
@@ -28,7 +28,7 @@
         @pointercancel="onScaleUp"
       />
 
-      <div class="pointer-events-none absolute w-px bg-primary" :style="antennaStemStyle" />
+      <div class="pointer-events-none absolute bg-primary" :style="antennaStemStyle" />
       <div
         class="absolute flex cursor-grab items-center justify-center rounded-full"
         :style="antennaHandleStyle"
@@ -37,7 +37,7 @@
         @pointerup="onRotateUp"
         @pointercancel="onRotateUp"
       >
-        <div class="h-2.5 w-2.5 rounded-full border border-primary bg-background" />
+        <div class="rounded-full border border-primary bg-background" :style="dotStyle" />
       </div>
 
       <div
@@ -48,10 +48,11 @@
         @pointerup="onReferenceUp"
         @pointercancel="onReferenceUp"
       >
-        <div class="pointer-events-none absolute h-4 w-px bg-primary" />
-        <div class="pointer-events-none absolute h-px w-4 bg-primary" />
+        <div class="pointer-events-none absolute bg-primary" :style="crossVerticalStyle" />
+        <div class="pointer-events-none absolute bg-primary" :style="crossHorizontalStyle" />
         <div
-          class="pointer-events-none absolute h-2.5 w-2.5 rounded-full border border-primary bg-background"
+          class="pointer-events-none absolute rounded-full border border-primary bg-background"
+          :style="dotStyle"
         />
       </div>
     </template>
@@ -69,6 +70,7 @@ import {
   type ViewTransform,
 } from '@/lib/coords'
 import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/labelBox'
+import { useViewportOrigin } from '@/composables/useCanvasStage'
 
 /**
  * The frame around one object: what says there is something here, and — for the
@@ -91,12 +93,15 @@ import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/la
  * that is still changing length.
  */
 const props = defineProps<{
-  /** Screen placement, already resolved by whoever knows this node's geometry. */
+  /**
+   * Where this node stands, in page pixels — the stage carries the view, so
+   * nothing here multiplies by it.
+   */
   box: { centerX: number; centerY: number; width: number; height: number }
   /**
-   * The view the box was placed through, which is also what puts a pointer on
-   * the page — the one thing a gesture has to speak in if it is to survive the
-   * view moving under it.
+   * The view the stage is carrying, which is what puts a pointer on the page —
+   * the one thing a gesture has to speak in if it is to survive the view moving
+   * under it.
    */
   view: ViewTransform
   /** The object's turn on the page, in radians. */
@@ -232,6 +237,13 @@ const outlineWidth = computed(() => {
   return 0
 })
 
+/**
+ * How the frame lies on screen — the view's turn and the object's.
+ *
+ * ⚠️ Not what the element is turned by. The stage already carries the view's
+ * turn, so the element wears the object's alone; this is for the arithmetic
+ * that speaks in client coordinates, where both turns are in force.
+ */
 const turn = computed(() => props.view.rotate + props.rotation)
 
 /**
@@ -240,17 +252,21 @@ const turn = computed(() => props.view.rotate + props.rotation)
  * state, so half of it could never have been a class anyway — and a rule split
  * between a stylesheet and an inline value is a rule with two places to be
  * wrong.
+ *
+ * Its width is in `--px` — screen pixels — because an outline is a mark on the
+ * interface rather than a part of the document, and one that thinned away as
+ * the page was zoomed out would stop saying anything.
  */
 const boxStyle = computed(() => ({
   left: `${props.box.centerX}px`,
   top: `${props.box.centerY}px`,
   width: `${props.box.width}px`,
   height: `${props.box.height}px`,
-  transform: `translate(-50%, -50%) rotate(${turn.value}rad)`,
+  transform: `translate(-50%, -50%) rotate(${props.rotation}rad)`,
   // Always solid; a width of zero is what makes it absent, so there is one
   // number deciding whether the outline is there and how heavy it is.
   outlineStyle: 'solid' as const,
-  outlineWidth: `${outlineWidth.value}px`,
+  outlineWidth: `calc(${outlineWidth.value}px * var(--px))`,
   // An object no registered tag speaks for draws in the ordinary colour, which
   // is what "nobody has said what this is" looks like.
   outlineColor: props.accent ?? 'var(--primary)',
@@ -287,6 +303,9 @@ function cornerStyle(corner: Corner) {
   return {
     left: `${corner.kx * 100}%`,
     top: `${corner.ky * 100}%`,
+    width: `calc(8px * var(--px))`,
+    height: `calc(8px * var(--px))`,
+    borderWidth: 'calc(1px * var(--px))',
     transform: 'translate(-50%, -50%)',
     pointerEvents: handlePointer.value,
   }
@@ -301,16 +320,17 @@ function cornerStyle(corner: Corner) {
 const antennaStemStyle = computed(() => ({
   left: '50%',
   top: '0px',
-  height: `${ANTENNA_LENGTH_PX}px`,
+  width: 'calc(1px * var(--px))',
+  height: `calc(${ANTENNA_LENGTH_PX}px * var(--px))`,
   transform: 'translate(-50%, -100%)',
 }))
 
 const antennaHandleStyle = computed(() => ({
   left: '50%',
   top: '0px',
-  width: `${ANTENNA_HANDLE_HIT_PX}px`,
-  height: `${ANTENNA_HANDLE_HIT_PX}px`,
-  transform: `translate(-50%, calc(-50% - ${ANTENNA_LENGTH_PX}px))`,
+  width: `calc(${ANTENNA_HANDLE_HIT_PX}px * var(--px))`,
+  height: `calc(${ANTENNA_HANDLE_HIT_PX}px * var(--px))`,
+  transform: `translate(-50%, calc(-50% - ${ANTENNA_LENGTH_PX}px * var(--px)))`,
   pointerEvents: handlePointer.value,
 }))
 
@@ -327,24 +347,18 @@ function centerOnScreen(): Point {
 }
 
 /**
- * The stage's own corner in client coordinates — the one thing standing between
- * a pointer's client coordinates and the stage-local ones the view speaks.
+ * The viewport's corner in client coordinates — the one thing standing between
+ * a pointer's client coordinates and the page ones the view speaks.
  *
- * Asked of the offset parent, which is by definition the element this frame's
- * own placement is measured from, and which the view moving does not move: only
- * the frames inside it travel. ⚠️ Deriving it from this frame instead — its
- * rectangle less the stage-local centre it was given — reads true and is a
- * trap. The two come from different clocks: `box` is a prop, already carrying
- * the new view by the time a view change is answered, while the rectangle is
- * the last layout, still carrying the old one. Their difference then holds a
- * whole zoom's worth of travel that never happened.
+ * ⚠️ The viewport and not this frame's offset parent, which is now the stage
+ * and travels with every pan. And ⚠️ never derived from this frame — its
+ * rectangle less the page centre it was given reads true and is a trap: `box`
+ * is a prop, already carrying the new view by the time a view change is
+ * answered, while the rectangle is the last layout, still carrying the old one.
+ * Their difference then holds a whole zoom's worth of travel that never
+ * happened.
  */
-function stageOrigin(): { left: number; top: number } {
-  const stage = boxEl.value?.offsetParent
-  if (!stage) return { left: 0, top: 0 }
-  const rect = stage.getBoundingClientRect()
-  return { left: rect.left, top: rect.top }
-}
+const stageOrigin = useViewportOrigin()
 
 /** Where a client point sits on the page. What every gesture here measures in. */
 function pageAt(clientX: number, clientY: number): Anchor {
@@ -359,9 +373,13 @@ function pageAt(clientX: number, clientY: number): Anchor {
  */
 function pointOnScreen(ratio: Point): Point {
   const c = centerOnScreen()
+  const scale = props.view.scale
   const out = turnedAround(
     ORIGIN,
-    { x: (ratio.x - 0.5) * props.box.width, y: (ratio.y - 0.5) * props.box.height },
+    {
+      x: (ratio.x - 0.5) * props.box.width * scale,
+      y: (ratio.y - 0.5) * props.box.height * scale,
+    },
     turn.value,
   )
   return { x: c.x + out.x, y: c.y + out.y }
@@ -374,8 +392,7 @@ function pointOnScreen(ratio: Point): Point {
  * point is on the page.
  */
 function pageDeltaToFrame(d: Displacement): Point {
-  const w = props.box.width / props.view.scale
-  const h = props.box.height / props.view.scale
+  const { width: w, height: h } = props.box
   if (w <= 0 || h <= 0) return ORIGIN
   const turned = turnedAround(ORIGIN, { x: d.dx, y: d.dy }, -props.rotation)
   return { x: turned.x / w, y: turned.y / h }
@@ -424,9 +441,10 @@ const REFERENCE_HIT_PX = 20
  * an edge it was only passing.
  */
 function snapReference(at: Point): Point {
+  const scale = props.view.scale
   const near = REFERENCE_POINTS.find(
     (p) =>
-      Math.hypot((at.x - p.x) * props.box.width, (at.y - p.y) * props.box.height) <=
+      Math.hypot((at.x - p.x) * props.box.width * scale, (at.y - p.y) * props.box.height * scale) <=
       REFERENCE_SNAP_PX,
   )
   return near ?? at
@@ -437,11 +455,22 @@ function snapReference(at: Point): Point {
  * upright in place — a crosshair lying on its side reads as a shape rather than
  * as a mark on a point.
  */
+/**
+ * The parts a person aims at, all sized in screen pixels through `--px`: a
+ * handle that shrank with the page would stop being reachable, which is the one
+ * thing a handle cannot do.
+ */
+const dotStyle = { width: 'calc(10px * var(--px))', height: 'calc(10px * var(--px))', borderWidth: 'calc(1px * var(--px))' }
+
+const crossVerticalStyle = { width: 'calc(1px * var(--px))', height: 'calc(16px * var(--px))' }
+
+const crossHorizontalStyle = { width: 'calc(16px * var(--px))', height: 'calc(1px * var(--px))' }
+
 const referenceStyle = computed(() => ({
   left: `${reference.value.x * 100}%`,
   top: `${reference.value.y * 100}%`,
-  width: `${REFERENCE_HIT_PX}px`,
-  height: `${REFERENCE_HIT_PX}px`,
+  width: `calc(${REFERENCE_HIT_PX}px * var(--px))`,
+  height: `calc(${REFERENCE_HIT_PX}px * var(--px))`,
   transform: `translate(-50%, -50%) rotate(${-turn.value}rad)`,
   pointerEvents: handlePointer.value,
 }))
@@ -556,10 +585,12 @@ function onUp(e: PointerEvent) {
 function onDoubleClick(e: MouseEvent) {
   if (props.box.width <= 0 || props.box.height <= 0) return
   const c = centerOnScreen()
+  const scale = props.view.scale
+  if (scale <= 0) return
   const out = turnedAround(ORIGIN, { x: e.clientX - c.x, y: e.clientY - c.y }, -turn.value)
   emit('dblclick', {
-    x: out.x / props.box.width + 0.5,
-    y: out.y / props.box.height + 0.5,
+    x: out.x / (props.box.width * scale) + 0.5,
+    y: out.y / (props.box.height * scale) + 0.5,
   })
 }
 

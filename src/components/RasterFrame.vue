@@ -22,7 +22,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ObjectFrame from '@/components/ObjectFrame.vue'
-import { centeredBoxOnScreen, type ViewTransform } from '@/lib/coords'
+import type { ViewTransform } from '@/lib/coords'
 import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
 
 /**
@@ -97,14 +97,17 @@ function onRotate(radians: number) {
  * The frame is placed from its centre, while a layer stores its top-left corner
  * — the PNG's own origin, which is what `drawImage` is given. The turn is left
  * to the frame itself, so what is measured here is the upright box.
+ *
+ * In page pixels: the stage carries the view.
  */
 const box = computed(() => {
   const center = frameCenter(props.frame)
   const { scale, dx, dy } = props.place
-  return centeredBoxOnScreen(
-    { x: center.x + dx, y: center.y + dy },
-    { w: props.frame.w * scale, h: props.frame.h * scale },
-    props.view,
-  )
+  return {
+    centerX: center.x + dx,
+    centerY: center.y + dy,
+    width: props.frame.w * scale,
+    height: props.frame.h * scale,
+  }
 })
 </script>
