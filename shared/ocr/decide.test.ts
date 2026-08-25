@@ -180,6 +180,23 @@ describe('decide', () => {
     expect(decide([object({ source: { by: 'auto', from: settled!.from } })], pool).fills.size).toBe(0)
   })
 
+  /**
+   * ⭐ What makes setting a reading aside worth saving: clear a page of noise,
+   * press the button again, and the noise stays gone.
+   */
+  it('leaves a reading somebody set aside out of the argument entirely', () => {
+    const pool = agreed().map((r) => ({ ...r, setAside: true }))
+    const verdict = decide([object()], pool)
+    expect(verdict.fills.size).toBe(0)
+    expect(verdict.spawns).toEqual([])
+  })
+
+  it('decides the place from what is left when one reader was set aside', () => {
+    const [first, ...rest] = agreed({ text: 'ふん' })
+    const pool = [{ ...first, text: 'ふう', setAside: true }, ...rest]
+    expect(decide([], pool).spawns.map((s) => s.text)).toEqual(['ふん'])
+  })
+
   it('carries the winner’s line breaks onto the object it creates', () => {
     const [born] = decide([], agreed({ text: 'ふん\nそうかい' })).spawns
     expect(born.text).toBe('ふん\nそうかい')

@@ -93,7 +93,11 @@ export function decide(
   pool: readonly OcrCandidatePersisted[],
   mayNotCreate: ReadonlySet<string> = new Set(),
 ): Verdict {
-  const heard = placesIn(pool)
+  // ⚠️ Before the places are worked out, not after. A reading somebody has
+  // turned down must not shape the place either — it is out of the argument
+  // entirely, or clearing a page of noise and pressing the button again would
+  // put all of it back up for a vote.
+  const heard = placesIn(pool.filter((reading) => !reading.setAside))
     .map((place) => ({ place, top: claimsOf(place.readings)[0] }))
     .filter((one): one is { place: Place; top: Claim } => one.top !== undefined)
     // The strongest place is served first, which is what settles a contest over

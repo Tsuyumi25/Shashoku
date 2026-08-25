@@ -588,7 +588,7 @@ function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
   const at = `candidates[${i}]`
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { hash, source, text, original, x, y, w, h, confidence, label } = v
-  const { vertical, fontSizePx, leadingPercent } = v
+  const { vertical, fontSizePx, leadingPercent, setAside } = v
 
   // Free-form on purpose — an unknown source is still a reading someone can
   // use — but never empty: no identity means unrecognizable on a rerun, and
@@ -630,6 +630,10 @@ function parseOcrCandidate(v: unknown, i: number): OcrCandidatePersisted {
     candidate.fontSizePx = fontSizePx
   if (typeof leadingPercent === 'number' && Number.isFinite(leadingPercent) && leadingPercent > 0)
     candidate.leadingPercent = leadingPercent
+  // Only the true one is kept, so an entry nobody has turned down carries
+  // nothing — and so that a `false` written by some older hand reads the same
+  // as never having been said.
+  if (setAside === true) candidate.setAside = true
   return candidate
 }
 

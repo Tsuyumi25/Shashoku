@@ -57,7 +57,9 @@ export function candidatesFor(
 ): SourceCandidate[] {
   const held = object.source.from ?? 'own'
 
-  const here = placesIn(pool)
+  // A reading somebody set aside is off the list for good — see
+  // `shared/ocr/offer.ts`, which asks the same question for the page at large.
+  const here = placesIn(pool.filter((reading) => !reading.setAside))
     .filter((place) => nearEnough(centre, place))
     .map((place) => ({ place, apart: distanceTo(centre, place) }))
     .sort((a, b) => a.apart - b.apart)[0]

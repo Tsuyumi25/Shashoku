@@ -657,6 +657,22 @@ describe("a page's readings", () => {
     const empty: OcrJson = parseOcr(ocrWith())
     expect(empty.candidates).toEqual([])
   })
+
+  /**
+   * ⭐ The whole point of saving it: an afternoon spent clearing a page has to
+   * survive closing the project.
+   */
+  it('round trips a reading somebody set aside', () => {
+    const read = parseOcr(ocrWith(candidate({ setAside: true })))
+    expect(read.candidates[0].setAside).toBe(true)
+    expect(parseOcr(serializeOcr(read))).toEqual(read)
+  })
+
+  it('carries nothing on a reading nobody has turned down', () => {
+    const read = parseOcr(ocrWith(candidate()))
+    expect(read.candidates[0].setAside).toBeUndefined()
+    expect(JSON.parse(serializeOcr(read)).candidates[0]).not.toHaveProperty('setAside')
+  })
 })
 
 describe("a text object's source", () => {

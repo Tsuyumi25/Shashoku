@@ -384,6 +384,26 @@ export interface OcrCandidatePersisted {
   fontSizePx?: number
   /** Baseline to baseline, as a percentage of the type size. */
   leadingPercent?: number
+
+  /**
+   * Somebody said this page has no use for this reading.
+   *
+   * ⭐ Saved, and so is the whole point. It used to be a note in memory that
+   * went when the project was closed, which meant an afternoon of clearing a
+   * page came back the next morning. Two of the four recognizers read the same
+   * balloon a character apart; the loser has to be dismissable for good, or it
+   * stands beside a settled balloon for ever.
+   *
+   * ⚠️ It says nothing about the words. A reading set aside is still what a
+   * model read, and an object made from it before it was set aside keeps saying
+   * what it says. This only takes it off the list of things still being offered
+   * — and out of the page's next decision, which must not weigh a reading
+   * somebody has already turned down.
+   *
+   * Absent rather than false on the ordinary reading, so a page of them carries
+   * nothing extra.
+   */
+  setAside?: boolean
 }
 
 export interface OcrJson {
