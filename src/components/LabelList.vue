@@ -216,11 +216,11 @@
                   canvas — a translation being typed elsewhere is still the
                   translation this row is about.
                 -->
-                <span
+                <pre
                   v-if="!isEditing(element as LabelRow) || pinned"
-                  class="text-sm leading-snug whitespace-pre-wrap"
+                  class="reading text-sm leading-snug whitespace-pre-wrap"
                   :class="isBlank((element as LabelRow).label) && 'text-muted-foreground/50'"
-                >{{ preview(element as LabelRow) }}</span>
+                >{{ preview(element as LabelRow) }}<br v-if="endsOnABreak(element as LabelRow)" /></pre>
 
                 <div
                   v-if="(element as LabelRow).label.tags.length > 0"
@@ -391,6 +391,20 @@ function isEditing(row: LabelRow): boolean {
 
 function preview(row: LabelRow): string {
   return isBlank(row.label) ? '(未翻譯)' : textOf(row.label)
+}
+
+/**
+ * A last line with nothing on it is not a line box — CSS treats one that holds
+ * no content and does not itself end in a break as not existing at all. So a
+ * translation the typesetter ended on a break would stand a line shorter here
+ * than the engine draws it, and copy a line shorter than the object reads.
+ *
+ * A `<br>` is what puts that boundary back, and it is only ever asked for when
+ * the text really does end on one, so it never claims a break that was not
+ * typed. Blink builds DOM out of plain text the same way.
+ */
+function endsOnABreak(row: LabelRow): boolean {
+  return preview(row).endsWith('\n')
 }
 
 function sourceOf(row: LabelRow): string | null {
@@ -656,6 +670,18 @@ function orderedTags(tags: readonly string[]): string[] {
  */
 .label-input {
   field-sizing: content;
+}
+
+/*
+ * `<pre>`, because where a translation breaks is a decision the typesetter made
+ * and the element for structure carried by the breaks themselves rather than by
+ * markup is this one. Its monospace stack is not part of that and is handed
+ * back to the panel.
+ */
+.reading {
+  font-family: inherit;
+  font-feature-settings: inherit;
+  font-variation-settings: inherit;
 }
 
 /*
