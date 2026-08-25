@@ -8,7 +8,7 @@ import { settleBreaks } from '@shared/ocr/breaks'
 import { decide } from '@shared/ocr/decide'
 import { fold } from '@shared/ocr/clean'
 import type { OcrArrival } from '@shared/ocr/pool'
-import type { OcrModelPreference } from '@shared/preferences/types'
+import type { OcrPreference } from '@shared/preferences/types'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -24,12 +24,14 @@ const BABERU_OCR = 'baberu-ocr'
 const HAYAI_OCR = 'hayai-ocr-v2'
 
 /**
- * Here rather than in the component: the name is the identity a reading is
- * stored under, and a second list of the same names is a second thing to keep
- * in step.
+ * Every reader a page's pool can hold an entry from.
+ *
+ * ⚠️ Not exported any more, and that is the point: nothing outside this file
+ * picks a reader now. They are stages of one trip, and a second list of these
+ * names anywhere else would be a second thing to keep in step.
  */
-export const OCR_ROUTES = [MANGA_OCR, PP_OCR, BABERU_OCR, HAYAI_OCR] as const
-export type OcrRoute = (typeof OCR_ROUTES)[number]
+const OCR_ROUTES = [MANGA_OCR, PP_OCR, BABERU_OCR, HAYAI_OCR] as const
+type OcrRoute = (typeof OCR_ROUTES)[number]
 
 /**
  * What the engine calls a reader, and what a reading made by it is stored
@@ -143,28 +145,25 @@ export const useOcrStore = defineStore('ocr', () => {
     }
   })
 
-  /** What was measured about a model, with whatever the reader changed on top. */
-  function settingsFor(route: OcrRoute): OcrModelPreference {
-    return { device: usePreferencesStore().prefs.ocr[route]?.device ?? 'cpu' }
+  /**
+   * How this machine reads a page.
+   *
+   * ⭐ The run's, not each model's. The recognizers are stages of one trip now,
+   * so which device to use is a question about the trip — and a machine with a
+   * card runs the whole of it there.
+   */
+  function settings(): OcrPreference {
+    return usePreferencesStore().prefs.ocr
   }
 
   /**
    * Writes the whole entry rather than the changed field: a half entry would be
-   * merged against a default that is free to move, and a model quietly changing
+   * merged against a default that is free to move, and a run quietly changing
    * behaviour under a setting somebody already looked at is worse than a file
    * that repeats itself.
    */
-  function configure(route: OcrRoute, change: Partial<OcrModelPreference>) {
-    usePreferencesStore().prefs.ocr[route] = { ...settingsFor(route), ...change }
-  }
-
-  /** Whether the hand-drawn effects take part in a trip at all. */
-  function onomatopoeia(): boolean {
-    return usePreferencesStore().prefs.ocrOnomatopoeia
-  }
-
-  function setOnomatopoeia(on: boolean) {
-    usePreferencesStore().prefs.ocrOnomatopoeia = on
+  function configure(change: Partial<OcrPreference>) {
+    usePreferencesStore().prefs.ocr = { ...settings(), ...change }
   }
 
   /**
@@ -216,7 +215,7 @@ export const useOcrStore = defineStore('ocr', () => {
     try {
       const found = await window.ocr.readPage(
         `${layersDirOf(pageDir)}/${artwork}`,
-        onomatopoeia(),
+        settings().onomatopoeia,
       )
       useProjectStore().absorbReadings(pageId, arrivalsOf(found))
       settle(pageId)
@@ -275,10 +274,8 @@ export const useOcrStore = defineStore('ocr', () => {
     readPage,
     forget,
     problem,
-    settingsFor,
+    settings,
     configure,
-    onomatopoeia,
-    setOnomatopoeia,
   }
 })
 

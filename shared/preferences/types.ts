@@ -45,17 +45,30 @@ export const MIN_UNDO_PIXEL_BYTES = 16 * 1024 * 1024;
  */
 export type OcrDevice = "cpu" | "gpu";
 
-/**
- * Held per model rather than once for all of them: this is not a preference
- * about OCR, it is a fact about each model that a reader is allowed to
- * disagree with.
- */
-export function defaultOcrPreference(): OcrModelPreference {
-  return { device: "cpu" };
+export function defaultOcrPreference(): OcrPreference {
+  return { device: "cpu", onomatopoeia: true };
 }
 
-export interface OcrModelPreference {
+/**
+ * How this machine reads a page.
+ *
+ * ⭐ One setting rather than one per model. The recognizers are stages of a
+ * single run now, not alternatives somebody picks between, so which device to
+ * use is a question about the run — a per-model answer to it was always a way
+ * of saying which models you meant to use, and there is nothing to say: a
+ * machine with a card runs the whole trip on it.
+ */
+export interface OcrPreference {
   device: OcrDevice;
+  /**
+   * Whether the run is offered the regions a layout head calls onomatopoeia —
+   * the drawn effects outside the balloons.
+   *
+   * ⭐ One switch for the whole group. Which reader is any good at them was
+   * measured and is not a preference; whether a chapter of nothing but effects
+   * is worth reading is a judgement, and making it once has to be enough.
+   */
+  onomatopoeia: boolean;
 }
 
 export interface Preferences {
@@ -112,22 +125,7 @@ export interface Preferences {
    * next opened, which is a different question with a different answer.
    */
   undoPixelBytes: number;
-  /**
-   * Only what a reader has changed. A model absent from here has never been
-   * touched and takes the default its own route declares, so this file does
-   * not have to be edited every time one is added.
-   */
-  ocr: Record<string, OcrModelPreference>;
-  /**
-   * Whether the hand-drawn sound effects take part in reading a page at all.
-   *
-   * ⭐ One switch for the whole group rather than one per model. Which reader is
-   * any good at them was measured and is not a preference; whether a chapter of
-   * nothing but effects is worth reading is a judgement, and making it once has
-   * to be enough — on a page like that, per-model switches are the same decision
-   * taken four times.
-   */
-  ocrOnomatopoeia: boolean;
+  ocr: OcrPreference;
 }
 
 /**
@@ -153,7 +151,6 @@ export function defaultPreferences(): Preferences {
     // ceiling bites before the machine does.
     undoPixelSteps: 10,
     undoPixelBytes: 512 * 1024 * 1024,
-    ocr: {},
-    ocrOnomatopoeia: true,
+    ocr: defaultOcrPreference(),
   };
 }

@@ -72,3 +72,32 @@ describe("breaks in the font sample", () => {
     expect(twice.fontSampleText).toBe(once.fontSampleText);
   });
 });
+
+describe("how this machine reads a page", () => {
+  it("round trips the run's own settings", () => {
+    const prefs = defaultPreferences();
+    prefs.ocr = { device: "gpu", onomatopoeia: false };
+
+    expect(parsePreferences(serializePreferences(prefs)).ocr).toEqual(prefs.ocr);
+  });
+
+  /**
+   * ⚠️ A file written when this was a device per model opens on the defaults.
+   * There is nothing in one to carry over: what it held was which device each
+   * model ran on, and the run no longer offers that choice — a machine with a
+   * card runs the whole trip on it.
+   */
+  it("opens a file that kept a device per model on the defaults", () => {
+    const older = JSON.stringify({
+      ocr: { "manga-ocr": { device: "gpu" }, "ppocr-v6": { device: "cpu" } },
+      ocrOnomatopoeia: false,
+    });
+
+    expect(parsePreferences(older).ocr).toEqual(defaultPreferences().ocr);
+  });
+
+  it("keeps the half of it that was written and defaults the rest", () => {
+    const half = JSON.stringify({ ocr: { onomatopoeia: false } });
+    expect(parsePreferences(half).ocr).toEqual({ device: "cpu", onomatopoeia: false });
+  });
+});

@@ -5,7 +5,7 @@ import {
   MIN_UNDO_PIXEL_STEPS,
   defaultOcrPreference,
   defaultPreferences,
-  type OcrModelPreference,
+  type OcrPreference,
   type Preferences,
 } from "./types";
 
@@ -61,7 +61,6 @@ export function parsePreferences(raw: string): Preferences {
     undoPixelSteps,
     undoPixelBytes,
     ocr,
-    ocrOnomatopoeia,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
@@ -116,18 +115,14 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof undoPixelBytes === "number" && Number.isFinite(undoPixelBytes)) {
     prefs.undoPixelBytes = Math.max(MIN_UNDO_PIXEL_BYTES, Math.round(undoPixelBytes));
   }
+  // ⚠️ A file written when this was a record keyed by model opens on the
+  // defaults. There is nothing in one to carry over: what it held was which
+  // device each model ran on, and the run no longer offers that choice.
   if (isRecord(ocr)) {
-    for (const [model, value] of Object.entries(ocr)) {
-      if (!isRecord(value)) continue;
-      const kept: Partial<OcrModelPreference> = {};
-      if (value.device === "cpu" || value.device === "gpu") kept.device = value.device;
-      if (Object.keys(kept).length > 0) {
-        prefs.ocr[model] = { ...defaultOcrPreference(), ...kept };
-      }
-    }
-  }
-  if (typeof ocrOnomatopoeia === "boolean") {
-    prefs.ocrOnomatopoeia = ocrOnomatopoeia;
+    const kept: Partial<OcrPreference> = {};
+    if (ocr.device === "cpu" || ocr.device === "gpu") kept.device = ocr.device;
+    if (typeof ocr.onomatopoeia === "boolean") kept.onomatopoeia = ocr.onomatopoeia;
+    prefs.ocr = { ...defaultOcrPreference(), ...kept };
   }
   return prefs;
 }
@@ -148,7 +143,6 @@ export function serializePreferences(prefs: Preferences): string {
       undoPixelSteps: prefs.undoPixelSteps,
       undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,
-      ocrOnomatopoeia: prefs.ocrOnomatopoeia,
     },
     null,
     2,
