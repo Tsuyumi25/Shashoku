@@ -972,6 +972,35 @@ export const useProjectStore = defineStore('project', () => {
     return new Set(born)
   }
 
+  /**
+   * Turn a batch of readings down, or take that back.
+   *
+   * A batch because the unit somebody rejects is a place: taking a row out of a
+   * list already happens by dragging it onto a balloon, so what is left when
+   * they reach for this is "none of these" — one sentence, and one write.
+   *
+   * ⚠️ The words are untouched. A reading set aside is still what a model read,
+   * and an object already made from it goes on saying what it says.
+   */
+  function setReadingsAside(pageId: string, hashes: readonly string[], aside: boolean) {
+    const file = pageById(pageId)
+    if (!file) return
+    const wanted = new Set(hashes)
+    let moved = false
+    for (const reading of file.ocr.candidates) {
+      if (!wanted.has(reading.hash)) continue
+      if (aside) {
+        if (reading.setAside === true) continue
+        reading.setAside = true
+      } else {
+        if (reading.setAside !== true) continue
+        delete reading.setAside
+      }
+      moved = true
+    }
+    if (moved) markPageDirty(pageId)
+  }
+
   function readingsOfPage(pageId: string): readonly OcrCandidatePersisted[] {
     return pageById(pageId)?.ocr.candidates ?? []
   }
@@ -1187,6 +1216,7 @@ export const useProjectStore = defineStore('project', () => {
     correctTranslation,
     removeTranslation,
     absorbReadings,
+    setReadingsAside,
     readingsOfPage,
     forgetReadings,
     setLabelStyle,

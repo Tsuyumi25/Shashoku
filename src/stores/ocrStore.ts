@@ -54,6 +54,21 @@ const ROUTE_OF: Partial<Record<OcrModel, OcrRoute>> = {
 const MAY_NOT_CREATE: ReadonlySet<string> = new Set()
 
 /**
+ * Which readers the list's own floor does not apply to.
+ *
+ * ⭐ A confidence is only comparable between readers who mean the same thing by
+ * it. `hayai` is the one asked about hand-drawn lettering and returns lower
+ * numbers across the board than the three that read printed type — on a fully
+ * hand-lettered page its median was 0.64 against their 0.48 to 0.53, and it was
+ * the one worth reading there. Held to the same line it would be the first
+ * thing cut from exactly the pages that need it.
+ *
+ * ⚠️ A third permission alongside voting and creating, and separate from both
+ * on purpose: see `shared/ocr/offer.ts`.
+ */
+export const OWN_CONFIDENCE_SCALE: ReadonlySet<string> = new Set([HAYAI_OCR])
+
+/**
  * What each station of a trip is called, for saying where a long wait has got
  * to. A station the engine names and this list does not is shown under its own
  * name rather than dropped — a fifth reader should read as an unfamiliar stop,

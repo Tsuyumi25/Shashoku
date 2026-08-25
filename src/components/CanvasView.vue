@@ -181,6 +181,14 @@
         </div>
 
         <!--
+          The readings still on offer, standing on the artwork. Only while the
+          source is the side being worked on: they are evidence about what the
+          artwork says, and there is nothing to judge from them once the work
+          has moved on to what it should say instead.
+        -->
+        <SourceCards v-if="pageReady && editor.textSide === 'source'" />
+
+        <!--
           A rectangle drawn on the page, so it stands on the stage with the rest
           — only its border is held to screen pixels, being a mark on the
           interface rather than something the page holds.
@@ -241,6 +249,7 @@ import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
 import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
+import SourceCards from '@/components/SourceCards.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'

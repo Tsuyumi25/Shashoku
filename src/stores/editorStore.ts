@@ -9,6 +9,7 @@ import type {
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
+import { useCardStore } from '@/stores/cardStore'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { screenToPagePx } from '@/lib/coords'
 import { blankTextObject, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
@@ -752,6 +753,88 @@ export const useEditorStore = defineStore('editor', () => {
         for (const [id, source] of before) project.setLabelSource(pageId, id, source)
       },
     })
+  }
+
+  /**
+   * Send a whole list off the page, or bring it back.
+   *
+   * ⭐ One step for the batch. What somebody is saying is "none of these", which
+   * is one sentence and should cost one Ctrl+Z — and the reason the gesture is a
+   * button rather than a row-by-row dismissal is that the unit being rejected is
+   * the place, not the reading.
+   */
+  function cmdSetReadingsAside(pageId: string, hashes: readonly string[], aside: boolean) {
+    if (hashes.length === 0) return
+    const project = useProjectStore()
+    pushCommand({
+      label: `${aside ? 'set-aside' : 'take-back'} ${hashes.length}`,
+      do: () => project.setReadingsAside(pageId, hashes, aside),
+      undo: () => project.setReadingsAside(pageId, hashes, !aside),
+    })
+  }
+
+  /**
+   * A card put somewhere by hand.
+   *
+   * ⚠️ On the stack although the position itself is never saved. What Ctrl+Z
+   * takes back is the last thing somebody did, and moving a card out of the way
+   * is one of the things they do — a stack that skipped past it to undo an edit
+   * they had finished with would be answering a question nobody asked.
+   *
+   * Applied first, as the drag writes through so the card keeps up with the
+   * pointer; only the release reaches here.
+   */
+  function cmdMoveCard(
+    key: string,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ) {
+    if (from.x === to.x && from.y === to.y) return
+    const cards = useCardStore()
+    pushCommand(
+      {
+        label: `move-card ${key}`,
+        do: () => cards.moveTo(key, to),
+        undo: () => cards.moveTo(key, from),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
+   * An object made where a reading was dropped, standing on that reading.
+   *
+   * ⭐ Set the way the artwork was measured *where it landed*, not where it was
+   * read. Somebody dropping a row onto a balloon is saying "this sentence
+   * belongs here", and how that balloon is set is a fact about the balloon —
+   * taking the type from the place the words came off would set a horizontal
+   * caption vertically because the balloon it was misread from happened to be.
+   */
+  function cmdAddLabelFromReading(
+    pageId: string,
+    at: { x: number; y: number },
+    reading: { hash: string; text: string },
+    measured: Typography,
+  ) {
+    const project = useProjectStore()
+    const style = measuredStyle(project.header.seedStyle, measured)
+    const label = blankTextObject(generateLabelId(), style)
+    label.source = {
+      ...emptyBody(style),
+      by: 'auto',
+      lines: linesOf(reading.text),
+      from: reading.hash,
+    }
+    // Placed by its middle, as a run's own objects are: which corner the anchor
+    // names depends on how the text is aligned, so it is worked back rather than
+    // written to.
+    const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
+    const anchor = { x: at.x - empty.center.x, y: at.y - empty.center.y }
+    label.source.x = anchor.x
+    label.source.y = anchor.y
+    label.translation.x = anchor.x
+    label.translation.y = anchor.y
+    cmdAddLabel(pageId, label)
   }
 
   /**
@@ -1731,6 +1814,9 @@ export const useEditorStore = defineStore('editor', () => {
     moveObjectsTo,
     cmdAddLabel,
     cmdApplyVerdict,
+    cmdSetReadingsAside,
+    cmdAddLabelFromReading,
+    cmdMoveCard,
     cmdDuplicateLabel,
     cmdMoveLabel,
     cmdPlaceLayer,

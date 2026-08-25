@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -16,6 +17,7 @@ export function useOpenProject() {
   const editor = useEditorStore()
   const library = useLibraryStore()
   const selection = useSelectionStore()
+  const cards = useCardStore()
 
   /** What went wrong last, in the user's language, for the caller to show. */
   const lastError = ref<string | null>(null)
@@ -26,6 +28,9 @@ export function useOpenProject() {
     // goes the same way, since two projects can hold a page of the same name.
     editor.clearHistory()
     selection.reset()
+    // Where a card was dragged to is this session's, and the session ends here.
+    // The placement is deterministic, so every card comes back where it was.
+    cards.reset()
     editor.startOnPage(project.files[0]?.pageId ?? null)
     await library.refresh()
   }

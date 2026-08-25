@@ -183,62 +183,50 @@
               -->
               <div class="flex min-w-0 flex-1 flex-col">
                 <!--
-                  Source above translation, the order the page is checked in.
-                  A dash rather than nothing when no source is written, so
-                  every row keeps the same two-line rhythm and a missing
-                  source is visible instead of merely absent.
+                  ⭐ The side being worked on is the row's main line, and the
+                  other is the footnote above it — so switching sides swaps
+                  which body is underneath, not merely which one takes the
+                  caret. A row whose translation stayed on the bottom would go
+                  on saying the translation is the point while every keystroke
+                  went into the source.
 
-                  ⭐ Which of the two lines takes the caret follows the side
-                  being worked on, so the row a person types into is the body
-                  the canvas is showing them.
+                  A dash rather than nothing when the line above says nothing,
+                  so every row keeps the same two-line rhythm and an empty body
+                  is visible instead of merely absent.
                 -->
-                <textarea
-                  v-if="isEditing(element as LabelRow) && editor.textSide === 'source'"
-                  :ref="takeFocus"
-                  rows="1"
-                  spellcheck="false"
-                  placeholder="(沒有原文)"
-                  class="label-input w-full resize-none bg-transparent text-[10px] leading-snug text-muted-foreground focus:outline-none placeholder:text-muted-foreground/50"
-                  :class="pinned && 'pinned'"
-                  :style="pinnedStyle"
-                  :value="sourceOf(element as LabelRow) ?? ''"
-                  @input="onInput(element as LabelRow, $event)"
-                  @keydown="onInputKey($event)"
-                  @blur="onInputBlur(element as LabelRow)"
-                />
                 <span
-                  v-if="!isEditing(element as LabelRow) || pinned || editor.textSide !== 'source'"
                   class="text-[10px] leading-snug whitespace-pre-wrap text-muted-foreground"
-                  :class="!sourceOf(element as LabelRow) && 'opacity-50'"
-                >{{ sourceOf(element as LabelRow) ?? '—' }}</span>
+                  :class="!asideText(element as LabelRow) && 'opacity-50'"
+                >{{ asideText(element as LabelRow) || '—' }}</span>
+
                 <!--
                   One box per session wherever it is standing. Pinned to the
                   canvas it is the same element with the same text and the same
                   caret, which is what makes the two ways of editing one edit.
                 -->
                 <textarea
-                  v-if="isEditing(element as LabelRow) && editor.textSide === 'translation'"
+                  v-if="isEditing(element as LabelRow)"
                   :ref="takeFocus"
                   rows="1"
                   spellcheck="false"
-                  placeholder="(未翻譯)"
+                  :placeholder="blankLabel"
                   class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
                   :class="pinned && 'pinned'"
                   :style="pinnedStyle"
-                  :value="textOf((element as LabelRow).label.translation)"
+                  :value="mainText(element as LabelRow)"
                   @input="onInput(element as LabelRow, $event)"
                   @keydown="onInputKey($event)"
                   @blur="onInputBlur(element as LabelRow)"
                 />
                 <!--
                   The row goes on reading as a row while the box is away on the
-                  canvas — a translation being typed elsewhere is still the
-                  translation this row is about.
+                  canvas — a body being typed elsewhere is still the body this
+                  row is about.
                 -->
                 <pre
-                  v-if="!isEditing(element as LabelRow) || pinned || editor.textSide !== 'translation'"
+                  v-if="!isEditing(element as LabelRow) || pinned"
                   class="reading text-sm leading-snug whitespace-pre-wrap"
-                  :class="isBlank((element as LabelRow).label.translation) && 'text-muted-foreground/50'"
+                  :class="isMainBlank(element as LabelRow) && 'text-muted-foreground/50'"
                 >{{ preview(element as LabelRow) }}<br v-if="endsOnABreak(element as LabelRow)" /></pre>
 
                 <div
@@ -271,7 +259,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
-import { isBlank, textOf, textOnSide } from '@shared/page/text'
+import { isBlank, textOnSide } from '@shared/page/text'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   buildLabelRows,
@@ -408,8 +396,31 @@ function isEditing(row: LabelRow): boolean {
   return pending?.pageId === row.pageId && pending?.labelId === row.label.id
 }
 
+/** The other body, on the small line above. */
+function asideText(row: LabelRow): string {
+  return textOnSide(row.label, editor.textSide === 'source' ? 'translation' : 'source')
+}
+
+/** And the one being worked on, which is the line the caret opens in. */
+function mainText(row: LabelRow): string {
+  return textOnSide(row.label, editor.textSide)
+}
+
+/**
+ * Whether the main line says nothing at all — which on the translation side is
+ * not the same as having typed nothing into it, so it goes through the
+ * resolution rather than reading `lines`.
+ */
+function isMainBlank(row: LabelRow): boolean {
+  return editor.textSide === 'source'
+    ? row.label.source.lines.every((line) => line.length === 0)
+    : isBlank(row.label.translation)
+}
+
+const blankLabel = computed(() => (editor.textSide === 'source' ? '(沒有原文)' : '(未翻譯)'))
+
 function preview(row: LabelRow): string {
-  return isBlank(row.label.translation) ? '(未翻譯)' : textOf(row.label.translation)
+  return isMainBlank(row) ? blankLabel.value : mainText(row)
 }
 
 /**
@@ -424,10 +435,6 @@ function preview(row: LabelRow): string {
  */
 function endsOnABreak(row: LabelRow): boolean {
   return preview(row).endsWith('\n')
-}
-
-function sourceOf(row: LabelRow): string | null {
-  return row.label.source.lines.join('\n') || null
 }
 
 /**
