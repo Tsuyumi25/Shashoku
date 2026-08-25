@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { TagDefinition } from '@shared/tags/types'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
-import { groupByValue, type BucketObject } from './valueBuckets'
+import type { TextLayerEntry } from '@shared/page/types'
+import { blankTextObject } from '@shared/page/schema'
+import type { TextSide } from '@shared/page/text'
+import { bucketObjectsOf, groupByValue, type BucketObject } from './valueBuckets'
 
 const registry: TagDefinition[] = [
   { name: '框内', color: '#ff0000' },
@@ -109,5 +112,41 @@ describe('groupByValue', () => {
   it('leaves untagged objects to the end', () => {
     const groups = groupByValue([object('a', []), object('b', ['框内'])], ALL, registry)
     expect(groups.map((g) => g.tags)).toEqual([['框内'], []])
+  })
+})
+
+describe('which body the statistics count', () => {
+  function twoBodied(id: string, sourcePx: number, translationPx: number): TextLayerEntry {
+    const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
+    entry.source = { ...entry.source, style: { ...DEFAULT_TEXT_STYLE, fontSizePx: sourcePx } }
+    entry.translation = {
+      ...entry.translation,
+      style: { ...DEFAULT_TEXT_STYLE, fontSizePx: translationPx },
+    }
+    return entry
+  }
+
+  const page = [twoBodied('a', 41, 20), twoBodied('b', 37, 20)]
+
+  it('reads the body it was asked about and not the other one', () => {
+    expect(bucketObjectsOf('001.png', page, 'translation').map((o) => o.style.fontSizePx)).toEqual([
+      20, 20,
+    ])
+  })
+
+  /**
+   * ⭐ Not an omission. "Your other objects are mostly 28px" says nothing to a
+   * body whose size came off the drawing it is standing on, and offering it
+   * would invite somebody to overwrite a measurement with a fashion.
+   */
+  it('has no pool for the source at all', () => {
+    expect(bucketObjectsOf('001.png', page, 'source')).toEqual([])
+  })
+
+  /** Which is what makes one page two different statistics, asked one side at a time. */
+  it('gives the two sides two different answers about the same objects', () => {
+    const asked = (side: TextSide) => bucketObjectsOf('001.png', page, side).length
+    expect(asked('translation')).toBe(2)
+    expect(asked('source')).toBe(0)
   })
 })

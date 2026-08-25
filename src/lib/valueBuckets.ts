@@ -3,6 +3,7 @@ import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
 import { textObjects } from '@shared/page/tree'
+import { bodyOnSide, type TextSide } from '@shared/page/text'
 
 /** One text object, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
@@ -13,16 +14,35 @@ export interface BucketObject {
 }
 
 /**
- * One page's objects as every statistic here sees them. Nothing is filtered
- * out — an object votes for itself, which is what keeps a panel drawn from
- * these from ever being empty for an object that exists.
+ * One page's objects as every statistic here sees them, for one of the two
+ * bodies. Nothing else is filtered out — an object votes for itself, which is
+ * what keeps a panel drawn from these from ever being empty for an object that
+ * exists.
+ *
+ * ⭐ The source has no pool at all, and that is not an omission. A statistic
+ * over these fields answers "what does this kind of line usually look like" —
+ * a question about choices somebody made and may want to repeat. A source's
+ * size and direction were measured off the artwork, one balloon at a time;
+ * "your other objects are mostly 28px" says nothing to a body whose size came
+ * from the drawing it is standing on, and offering it would invite somebody to
+ * overwrite a measurement with a fashion.
+ *
+ * ⚠️ Which side is asked for is the caller's to state. Read off the mode here,
+ * this would answer differently depending on which tool was open — and the
+ * callers that mean the translation whatever the tool says would be silently
+ * wrong half the time.
  */
-export function bucketObjectsOf(pageId: string, layers: readonly LayerEntry[]): BucketObject[] {
+export function bucketObjectsOf(
+  pageId: string,
+  layers: readonly LayerEntry[],
+  side: TextSide,
+): BucketObject[] {
+  if (side === 'source') return []
   return textObjects(layers).map((label) => ({
     id: label.id,
     pageId,
     tags: label.tags,
-    style: label.translation.style,
+    style: bodyOnSide(label, side).style,
   }))
 }
 

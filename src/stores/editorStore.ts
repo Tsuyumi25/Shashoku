@@ -155,6 +155,14 @@ export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {
  * laid on. A field the run did not measure keeps the value underneath — absent
  * means nothing was measured, and filling it in with a guess would let an
  * estimate be read as an observation.
+ *
+ * ⭐ The two measured numbers are rounded on the way in. What arrives is the
+ * output of a square root or a regression head, carrying fifteen significant
+ * digits of precision it does not have — and the statistics that ask "what size
+ * does this kind of line use" bucket by exact equality, so every object landed
+ * in a bucket of its own and the recommendations were a wall of ones. Rounding
+ * costs nothing anybody can see at these sizes and gives the question back its
+ * premise.
  */
 function measuredStyle(base: TextStyle, measured: Typography): TextStyle {
   return {
@@ -165,8 +173,11 @@ function measuredStyle(base: TextStyle, measured: Typography): TextStyle {
         : measured.vertical
           ? 'vertical'
           : 'horizontal',
-    fontSizePx: measured.fontSizePx ?? base.fontSizePx,
-    leadingPercent: measured.leadingPercent ?? base.leadingPercent,
+    fontSizePx: measured.fontSizePx === undefined ? base.fontSizePx : Math.round(measured.fontSizePx),
+    leadingPercent:
+      measured.leadingPercent === undefined
+        ? base.leadingPercent
+        : Math.round(measured.leadingPercent),
   }
 }
 
@@ -1716,10 +1727,17 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  /** Every text object in the chapter, which is what the statistics count. */
+  /**
+   * Every text object in the chapter, which is what the statistics count.
+   *
+   * The translation whatever tool is open: what this feeds is the style a newly
+   * tagged object is given, and that style is written to the translation.
+   */
   function chapterBucketObjects(): BucketObject[] {
     const project = useProjectStore()
-    return project.files.flatMap((file) => bucketObjectsOf(file.pageId, file.page.layers))
+    return project.files.flatMap((file) =>
+      bucketObjectsOf(file.pageId, file.page.layers, 'translation'),
+    )
   }
 
   /**

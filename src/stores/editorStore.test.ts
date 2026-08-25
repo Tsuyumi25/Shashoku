@@ -2749,3 +2749,47 @@ describe('the translation candidates', () => {
     expect(rowsOf(project).map((c) => c.id)).toEqual(['m'])
   })
 })
+
+/**
+ * ⭐ What arrives is a square root or a regression head — fifteen significant
+ * digits of precision it does not have. The statistics that ask "what size does
+ * this kind of line use" bucket by exact equality, so unrounded every object
+ * landed in a bucket of its own and every recommendation was a count of one.
+ */
+describe('a style set the way a run measured the artwork', () => {
+  const reading = { hash: 'h1', text: 'ふん' }
+
+  it('rounds the measured size and leading to whole numbers', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, {
+      vertical: true,
+      fontSizePx: 27.712812921102035,
+      leadingPercent: 118.40000152587891,
+    })
+    const { style } = labelsOf(project)[0].source
+    expect(style.fontSizePx).toBe(28)
+    expect(style.leadingPercent).toBe(118)
+  })
+
+  /** Two balloons a hair apart are one size, which is the whole point. */
+  it('lands two nearly equal measurements on the same value', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, { hash: 'a', text: '一' }, {
+      fontSizePx: 27.6,
+    })
+    editor.cmdAddLabelFromReading(PAGE, { x: 300, y: 100 }, { hash: 'b', text: '二' }, {
+      fontSizePx: 28.4,
+    })
+    expect(labelsOf(project).map((l) => l.source.style.fontSizePx)).toEqual([28, 28])
+  })
+
+  /** ⚠️ Absent still means unmeasured, and keeps whatever it is laid over. */
+  it('leaves a field the run did not measure alone', () => {
+    const { project, editor } = openOnePage()
+    const seed = project.header.seedStyle
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, {})
+    const { style } = labelsOf(project)[0].source
+    expect(style.fontSizePx).toBe(seed.fontSizePx)
+    expect(style.leadingPercent).toBe(seed.leadingPercent)
+  })
+})

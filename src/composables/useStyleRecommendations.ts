@@ -45,6 +45,12 @@ export interface StyleSuggestionSet {
  * ⚠️ Only the fields the recommender has rows for appear in `byField`. The
  * weight walk has none: a face travels with its family, so the font row's
  * candidates already carry it.
+ *
+ * ⭐ Counted on the body being worked on, and the source has no pool — so under
+ * the source tool the strips draw nothing at all, which is the true answer. The
+ * panel used to show the translation's statistics beside the source's controls
+ * and mark the source's values against them: three things pointing at two
+ * different bodies.
  */
 export function useStyleRecommendations(
   targets: Ref<readonly AppearanceTarget<TextLayerEntry>[]>,
@@ -97,7 +103,10 @@ export function useStyleRecommendations(
   const sampleKey = computed(() => {
     if (tagState.value.kind !== 'one') return ''
     const ids = targets.value.map((t) => t.entry.id).sort()
-    return JSON.stringify([tagState.value.value, ids])
+    // ⚠️ The side is part of it. What the two bodies of one object look like are
+    // two different statistics, and a sample held over a switch would mark the
+    // panel's values against the other body's counts.
+    return JSON.stringify([editor.textSide, tagState.value.value, ids])
   })
 
   /**
@@ -111,7 +120,7 @@ export function useStyleRecommendations(
     sampleKey,
     () => {
       sample.value = project.files.flatMap((file) =>
-        bucketObjectsOf(file.pageId, file.page.layers).map((object) => ({
+        bucketObjectsOf(file.pageId, file.page.layers, editor.textSide).map((object) => ({
           ...object,
           tags: [...object.tags],
           style: { ...object.style },
