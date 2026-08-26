@@ -22,6 +22,36 @@ export interface Breakable {
 }
 
 /**
+ * When a break given to a reading is worse than none.
+ *
+ * ⭐ Only breaks this file hands out are ever refused. A reading that found its
+ * own breaks is reporting the artwork, however odd the shape looks — a balloon
+ * really can be set one character to the line. What is checked here is our
+ * guess, and the honest answer to a bad guess is no guess.
+ *
+ * Two shapes, and they catch the same failure at different sizes. A tall stack
+ * of scraps is what proportional sharing produces when the measured columns
+ * describe something other than the sentence being placed in them — a run of
+ * small marks read as separate lines, a balloon whose columns were found in the
+ * artwork around it. Past a certain height it does not matter how the lines
+ * fall: nothing anybody letters breaks that often.
+ *
+ * ⚠️ Descriptive rather than measured, like the thresholds in `similar.ts`. If
+ * real breaks start being refused, these are the numbers to argue with.
+ */
+const LINE_LIMIT = 8
+const CROWDED_LINES = 5
+const SHORT_LINE = 3
+const SHORT_LINES = 3
+
+function shredded(text: string): boolean {
+  const lines = linesOf(text)
+  if (lines.length > LINE_LIMIT) return true
+  if (lines.length < CROWDED_LINES) return false
+  return lines.filter((line) => [...line].length <= SHORT_LINE).length >= SHORT_LINES
+}
+
+/**
  * `lines` is how long each of the place's measured lines is, along the direction
  * it is read, in the order they are read. It is what answers when no reading
  * here found a break of its own — ⭐ dividing the characters evenly instead
@@ -54,6 +84,9 @@ export function settleBreaks<T extends Breakable>(
     // the measurement only knows how much room each line took.
     const template = templates.find((t) => sameClaim(flatten(t.text), said))
     const broken = template ? borrow(template.text, said) : share(said, lines)
+    // The reading arrived on one line, so refusing the break is leaving it
+    // there — no need to take anything back out.
+    if (shredded(broken)) return reading
     return broken === reading.text ? reading : { ...reading, text: broken }
   })
 }

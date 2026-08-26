@@ -168,3 +168,50 @@ describe('settleBreaks, against the lines the artwork was measured to have', () 
     }
   })
 })
+
+/**
+ * ⭐ The measured columns are not always the sentence's. When they describe
+ * something else — marks read as lines of their own, columns found in the
+ * artwork around the balloon — sharing the characters out over them produces a
+ * stack of scraps, and no guess beats a bad one.
+ */
+describe('settleBreaks, refusing a break that shreds the reading', () => {
+  it('refuses a break past the height anything is lettered at', () => {
+    const text = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひ'
+    expect(after([said(text)], Array(9).fill(10))).toEqual([text])
+  })
+
+  it('takes one exactly at that height, where the lines are worth reading', () => {
+    const text = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみ'
+    expect(after([said(text)], Array(8).fill(10))[0].split('\n')).toHaveLength(8)
+  })
+
+  it('refuses a short stack that is mostly scraps', () => {
+    const text = 'あいうえおかきくけこさしす'
+    expect(after([said(text)], [100, 20, 20, 20, 100])).toEqual([text])
+  })
+
+  it('takes a short stack that is not', () => {
+    expect(after([said('あいうえおかきくけこさしすせそたち')], [100, 20, 20, 100, 100])).toEqual([
+      'あいうえお\nか\nき\nくけこさし\nすせそたち',
+    ])
+  })
+
+  /**
+   * ⚠️ Only our own guesses are refused. A balloon really can be lettered one
+   * character to the line, and a reader that saw that is reporting the artwork
+   * rather than guessing at it.
+   */
+  it('leaves a reading that found its own breaks however tall it stands', () => {
+    const tall = 'あ\nい\nう\nえ\nお\nか\nき\nく\nけ'
+    expect(after([said(tall)], Array(9).fill(10))).toEqual([tall])
+  })
+
+  it('refuses to transplant a break that would shred the reading it lands on', () => {
+    const tall = 'あ\nい\nう\nえ\nお\nか\nき\nく\nけ'
+    expect(after([said(tall, 0.9), said('あいうえおかきくけ', 0.8)])).toEqual([
+      tall,
+      'あいうえおかきくけ',
+    ])
+  })
+})
