@@ -11,6 +11,7 @@
  * every proportional break one place left. Alignment is only legitimate because
  * the similarity gate has already established they are the same sentence.
  */
+import { costGrid } from './align'
 import { flatten } from './vote'
 import { sameClaim } from './similar'
 
@@ -137,18 +138,7 @@ function borrow(template: string, said: string): string {
  */
 function alignment(from: readonly string[], to: readonly string[]): number[] {
   const [m, n] = [from.length, to.length]
-  const cost: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-  )
-  for (let i = 1; i <= m; i += 1) {
-    for (let j = 1; j <= n; j += 1) {
-      cost[i][j] = Math.min(
-        cost[i - 1][j] + 1,
-        cost[i][j - 1] + 1,
-        cost[i - 1][j - 1] + (from[i - 1] === to[j - 1] ? 0 : 1),
-      )
-    }
-  }
+  const cost = costGrid(from, to)
 
   // Walked back from the end along the path the table was built for. Row i is
   // recorded the first time the walk reaches it, which — going backwards — is

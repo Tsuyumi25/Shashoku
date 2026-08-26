@@ -57,7 +57,28 @@
         @pointercancel="onRowCancel"
       >
         <div class="source-row-text">
-          <p class="source-text">{{ row.reading.text || EMPTY_READING }}</p>
+          <!--
+            Marked character by character against the other readings this card
+            is still offering, so what stands out is the one place they part
+            company — which on these pages is a single character far more often
+            than it is a word.
+          -->
+          <!--
+            ⚠️ The characters are written without a break between them. This
+            column wraps with `pre-wrap`, so a newline left between two spans by
+            the template would be a space the reading does not have.
+          -->
+          <p v-if="row.marks.length > 0" class="source-text"><span
+            v-for="(mark, at) in row.marks"
+            :key="at"
+            :class="standingOf(mark)"
+          >{{ mark.ch }}</span></p>
+          <!--
+            Plain, for the two cases with nothing to mark: a place offering a
+            single reading, which has nothing to be compared against, and a
+            reading with no characters in it at all.
+          -->
+          <p v-else class="source-text">{{ row.reading.text || EMPTY_READING }}</p>
           <p class="source-who">{{ row.reading.source }}</p>
         </div>
         <span class="source-score" :class="sureness(row.reading.confidence)">
@@ -134,6 +155,7 @@ import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { textOfBody } from '@shared/page/text'
 import { screenToContentPx } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { markDisagreements, type Mark } from '@/lib/readingDiff'
 import { sourceLook } from '@/lib/sourceLook'
 import { obbHoldsPoint, type Obb } from '@/lib/selection/obb'
 import {
@@ -378,7 +400,7 @@ function clearOfTheRest(
 interface DrawnCard {
   key: string
   plan: CardPlan
-  rows: { reading: OcrCandidatePersisted; live: boolean }[]
+  rows: { reading: OcrCandidatePersisted; live: boolean; marks: Mark[] }[]
   style: Record<string, string>
 }
 
@@ -390,6 +412,12 @@ const drawn = computed<DrawnCard[]>(() => {
     const box = cards$.boxOf(key)
     if (!box) return
     const live = new Set(list.readings.map((r) => r.hash))
+    // ⚠️ Against what is still standing, not against everything the place ever
+    // offered. A reading already taken up is invisible in the card, and letting
+    // it decide a column would mark the rows still being judged over a
+    // disagreement with something nobody can see.
+    const marked = markDisagreements(list.readings.map((r) => r.text))
+    const marksOf = new Map(list.readings.map((r, at) => [r.hash, marked[at]]))
     out.push({
       key,
       plan: {
@@ -400,7 +428,11 @@ const drawn = computed<DrawnCard[]>(() => {
         ...(aside ? { aside: true } : {}),
         ...box,
       },
-      rows: list.full.map((reading) => ({ reading, live: live.has(reading.hash) })),
+      rows: list.full.map((reading) => ({
+        reading,
+        live: live.has(reading.hash),
+        marks: marksOf.get(reading.hash) ?? [],
+      })),
       style: {
         left: `${box.x}px`,
         top: `${box.y}px`,
@@ -417,6 +449,29 @@ const drawn = computed<DrawnCard[]>(() => {
   for (const list of listed.value.parked) take(list, asideKeyOf(list), true)
   return out
 })
+
+/** How many factions past the first get a treatment of their own. */
+const NAMED_FACTIONS = 3
+
+/**
+ * How a character is drawn, given the company it keeps.
+ *
+ * ⭐ Colour carries the standing and nothing else; what tells two factions
+ * apart is an underline and then a weight. Three colours a reader has to hold
+ * apart is two more than the ones with colour vision deficiency can rely on,
+ * and green against blue against the plain text colour is a distinction that
+ * survives every common form of it.
+ *
+ * ⚠️ No italic among them. The type here falls back to a Japanese face for
+ * everything but the digits, and those faces have no italic to reach for — the
+ * browser shears the glyphs instead, at a size where the sheared and the
+ * upright are exactly what somebody is being asked to tell apart.
+ */
+function standingOf(mark: Mark): string {
+  if (mark.unanimous) return 'source-agreed'
+  if (mark.faction === null) return 'source-alone'
+  return `source-faction source-faction-${Math.min(mark.faction, NAMED_FACTIONS - 1)}`
+}
 
 /** Where every card stands, for refusing a drop that landed on one. */
 const cardBoxes = computed<Box[]>(() => drawn.value.map((c) => c.plan))
@@ -663,6 +718,26 @@ function setAside(plan: CardPlan) {
   box-shadow: 0 calc(1px * var(--px)) calc(4px * var(--px)) rgb(0 0 0 / 0.25);
   pointer-events: auto;
   user-select: none;
+
+  /* Named once and read in both places a card uses them — the score at the end
+     of a row, and the characters the readings disagree over. */
+  --settled: oklch(0.46 0.16 150);
+  --wavering: oklch(0.48 0.13 75);
+  --contested: oklch(0.48 0.21 25);
+  /* ⚠️ Blue rather than a third warm colour, and dark enough to read as body
+     text rather than as a chart key. Blue against green is the one hue pair
+     that survives every common colour vision deficiency; two warm colours are
+     the pair that survives none of them. */
+  --divided: oklch(0.5 0.15 245);
+}
+
+/* This project switches theme with a class rather than the system setting, so
+   a `prefers-color-scheme` query here would follow the wrong thing entirely. */
+:global(.dark) .source-card {
+  --settled: oklch(0.7 0.2 150);
+  --wavering: oklch(0.74 0.17 85);
+  --contested: oklch(0.66 0.22 25);
+  --divided: oklch(0.74 0.13 240);
 }
 
 /*
@@ -752,24 +827,57 @@ function setAside(plan: CardPlan) {
   line-height: 2.1;
 }
 .sure {
-  color: oklch(0.46 0.16 150);
+  color: var(--settled);
 }
 .unsure {
-  color: oklch(0.48 0.13 75);
+  color: var(--wavering);
 }
 .doubtful {
-  color: oklch(0.48 0.21 25);
+  color: var(--contested);
 }
-/* This project switches theme with a class rather than the system setting, so
-   a `prefers-color-scheme` query here would follow the wrong thing entirely. */
-:global(.dark) .sure {
-  color: oklch(0.7 0.2 150);
+
+/*
+ * Where the readings on a card part company, character by character.
+ *
+ * ⚠️ Green here is the same green as a high score and means something else: one
+ * is how sure a model was, the other whether the models agreed. They share the
+ * palette because they lean the same way, and a card carrying two different
+ * greens would ask a reader to hold two colour languages at once.
+ */
+.source-agreed {
+  color: var(--settled);
 }
-:global(.dark) .unsure {
-  color: oklch(0.74 0.17 85);
+
+/*
+ * ⭐ Claimed by one reading alone, and drawn in the plain text colour with no
+ * emphasis whatever. Standing alone is not being wrong — the reader asked
+ * about hand-drawn lettering is regularly the only one that gets a balloon
+ * right — so a warning colour here would be an accusation the card is in no
+ * position to make. What the marking says is who has support; the plain
+ * characters are the ones that have none.
+ */
+.source-alone {
+  color: var(--foreground);
 }
-:global(.dark) .doubtful {
-  color: oklch(0.66 0.22 25);
+
+/*
+ * Readings that back each other without carrying the column. The colour says
+ * "somebody agrees with this"; the underline and the weight say which side.
+ *
+ * ⚠️ Only the second and third factions are decorated, and the first — much the
+ * commonest, since three readings splitting two against one is the ordinary
+ * shape of a disagreement — is left plain blue. A decoration on the case that
+ * happens constantly is a decoration on most of the card.
+ */
+.source-faction {
+  color: var(--divided);
+}
+.source-faction-1 {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.source-faction-2 {
+  font-weight: 700;
 }
 
 .source-foot {
