@@ -644,6 +644,118 @@ describe('pending text edit', () => {
   })
 })
 
+describe('pending reading edit', () => {
+  const withReading = (text: string, labels: ReturnType<typeof label>[] = []) => {
+    const opened = openOnePage(labels)
+    opened.project.allFiles[0].ocr.candidates = [
+      {
+        hash: 'r1',
+        source: 'manga-ocr',
+        text,
+        original: text,
+        x: 50,
+        y: 200,
+        w: 100,
+        h: 50,
+        confidence: 0.99,
+        label: 'text_bubble',
+      },
+    ]
+    return opened
+  }
+
+  it('turns one correction into one undo entry', () => {
+    const { project, editor } = withReading('ふん')
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふ')
+    project.setReadingText(PAGE, 'r1', 'ふう')
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    editor.commitTextEdit()
+
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふん')
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('records nothing when the text came back unchanged', () => {
+    const { project, editor } = withReading('ふん')
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    project.setReadingText(PAGE, 'r1', 'ふん')
+    editor.commitTextEdit()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  /**
+   * ⭐ The whole reason this shares the object side's choke point rather than
+   * having one of its own: everything that already ends a typing session ends
+   * this kind too, without any of those places knowing it exists.
+   */
+  it('is closed by a typing session on an object beginning', () => {
+    const { project, editor } = withReading('ふん', [label('a', 'a0')])
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    editor.beginTextEdit(PAGE, 'a', 'a0')
+
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふん')
+  })
+
+  it('keeps the stack in the order things happened', () => {
+    const { project, editor } = withReading('ふん', [label('a', 'a0')])
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    editor.selectOnly('a')
+    editor.deleteSelection()
+
+    expect(labelsOf(project)).toHaveLength(0)
+    editor.undo()
+    expect(labelsOf(project)).toHaveLength(1)
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふうん')
+    editor.undo()
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふん')
+  })
+
+  /**
+   * ⭐ What makes correcting a reading safe to offer at all. The identity is
+   * fixed when the reading is created, so an object built from it goes on
+   * naming it and a rerun still recognizes it as one the page already has.
+   */
+  it('leaves the identity and what the model said where they were', () => {
+    const { project, editor } = withReading('ふん')
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    editor.commitTextEdit()
+
+    expect(project.readingsOfPage(PAGE)[0].hash).toBe('r1')
+    expect(project.readingsOfPage(PAGE)[0].original).toBe('ふん')
+  })
+
+  it('drops a session whose reading has left the pool', () => {
+    const { project, editor } = withReading('ふん')
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.forgetReadings(PAGE)
+    editor.commitTextEdit()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('flushes what has been typed and keeps the visit open', () => {
+    const { project, editor } = withReading('ふん')
+    editor.beginReadingEdit(PAGE, 'r1', 'ふん')
+    project.setReadingText(PAGE, 'r1', 'ふう')
+    editor.flushTextEdit()
+    project.setReadingText(PAGE, 'r1', 'ふうん')
+    editor.commitTextEdit()
+
+    editor.undo()
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふう')
+    editor.undo()
+    expect(project.readingsOfPage(PAGE)[0].text).toBe('ふん')
+  })
+})
+
 describe('revealLabel', () => {
   it('turns to the page an object lives on and selects that object', () => {
     const project = useProjectStore()

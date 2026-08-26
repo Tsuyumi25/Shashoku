@@ -57,17 +57,41 @@
       >
         <div class="source-row-text">
           <!--
+            ⭐ The row being corrected is a plain box, and the markings are off
+            for as long as it is. What they answer is "which of these do I
+            want", which is a question somebody has finished with by the time
+            they are fixing a character in one — and a caret dragged through
+            coloured text reads the colour as a selection.
+          -->
+          <textarea
+            v-if="editing === row.reading.hash"
+            v-auto-grow
+            v-caret="caret"
+            rows="1"
+            spellcheck="false"
+            :placeholder="EMPTY_READING"
+            class="source-text source-input"
+            :value="row.reading.text"
+            @pointerdown.stop
+            @focus="opened(row.reading)"
+            @input="write(row.reading.hash, $event)"
+            @blur="closed(row.reading.hash)"
+          />
+          <!--
             Marked character by character against the other readings this card
             is still offering, so what stands out is the one place they part
             company — which on these pages is a single character far more often
             than it is a word.
-          -->
-          <!--
+
             ⚠️ The characters are written without a break between them. This
             column wraps with `pre-wrap`, so a newline left between two spans by
             the template would be a space the reading does not have.
           -->
-          <p v-if="row.marks.length > 0" class="source-text"><span
+          <p
+            v-else-if="row.marks.length > 0"
+            class="source-text"
+            @pointerdown.stop.prevent="row.live && open(row.reading.hash, $event)"
+          ><span
             v-for="(mark, at) in row.marks"
             :key="at"
             :class="standingOf(mark)"
@@ -77,7 +101,11 @@
             single reading, which has nothing to be compared against, and a
             reading with no characters in it at all.
           -->
-          <p v-else class="source-text">{{ row.reading.text || EMPTY_READING }}</p>
+          <p
+            v-else
+            class="source-text"
+            @pointerdown.stop.prevent="row.live && open(row.reading.hash, $event)"
+          >{{ row.reading.text || EMPTY_READING }}</p>
           <p class="source-who">{{ row.reading.source }}</p>
         </div>
         <span class="source-score" :class="sureness(row.reading.confidence)">
@@ -147,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, ref, watch, watchEffect, type Directive } from 'vue'
 import type { OcrCandidatePersisted } from '@shared/page/types'
 import type { Box, Place } from '@shared/ocr/places'
 import { placesIn } from '@shared/ocr/places'
@@ -157,6 +185,7 @@ import { isLocked, textObjects } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { textOfBody } from '@shared/page/text'
 import { screenToContentPx } from '@/lib/coords'
+import { vAutoGrow } from '@/lib/autoGrow'
 import { drawnLabel } from '@/lib/labelRaster'
 import { markDisagreements, type Mark } from '@/lib/readingDiff'
 import { sourceLook } from '@/lib/sourceLook'
@@ -477,6 +506,109 @@ function holds(box: Box, at: { x: number; y: number }): boolean {
   return at.x >= box.x && at.x <= box.x + box.w && at.y >= box.y && at.y <= box.y + box.h
 }
 
+// ── Correcting a reading in place ──────────────────────────────────────────
+
+/**
+ * Which row is open for typing, if any.
+ *
+ * ⭐ Opened by a single press on the words, because the words are the only part
+ * of a row that could mean anything else. Everything a hand does to a row —
+ * carrying it to a balloon, moving the card — is aimed at the name underneath
+ * or the card's own grip, so the text is free to mean "put the caret here" with
+ * nothing to disambiguate it against. No second click, and no mode.
+ */
+const editing = ref<string | null>(null)
+
+/** Where in the row the press landed, for the box that replaces it. */
+const caret = ref(0)
+
+/**
+ * A box that opens with the caret where the pointer went down.
+ *
+ * ⭐ Where it landed rather than at either end. The press *is* the statement —
+ * somebody puts their finger on the character that is wrong — and a caret that
+ * jumped to the end would make every correction a journey back.
+ */
+const vCaret: Directive<HTMLTextAreaElement, number> = {
+  mounted(el, binding) {
+    el.focus()
+    const at = Math.min(binding.value, el.value.length)
+    el.setSelectionRange(at, at)
+  },
+}
+
+/**
+ * Which character of a row the pointer is on.
+ *
+ * ⚠️ Measured with a range over the whole row rather than from the node the hit
+ * test names. The marking cuts the text into a span per character, so what
+ * comes back is an offset into one span and says nothing about where that span
+ * stands in the sentence.
+ */
+function offsetAt(e: PointerEvent): number {
+  const el = e.currentTarget as HTMLElement
+  const spot = document.caretPositionFromPoint?.(e.clientX, e.clientY)
+  if (!spot || !el.contains(spot.offsetNode)) return el.textContent?.length ?? 0
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  range.setEnd(spot.offsetNode, spot.offset)
+  return range.toString().length
+}
+
+function open(hash: string, e: PointerEvent) {
+  if (e.button !== 0) return
+  caret.value = offsetAt(e)
+  editing.value = hash
+}
+
+/**
+ * ⚠️ The session opens on focus rather than on the press, so that a box the
+ * caret reaches any other way still records where it started from.
+ */
+function opened(reading: OcrCandidatePersisted) {
+  const pageId = editor.currentPageId
+  if (pageId === null) return
+  editor.beginReadingEdit(pageId, reading.hash, reading.text)
+}
+
+/** Every keystroke writes through, so the card and its markings keep up. */
+function write(hash: string, e: Event) {
+  const pageId = editor.currentPageId
+  if (pageId === null) return
+  project.setReadingText(pageId, hash, (e.target as HTMLTextAreaElement).value)
+}
+
+/**
+ * ⚠️ Only the row that is still the open one closes anything.
+ *
+ * Pressing straight into another row opens that one before this box comes
+ * down, and taking down a box that still holds the caret fires blur — so this
+ * arrives *after* the next row is already open. Closing unconditionally would
+ * undo the press that just landed, and worse, commit the session that press had
+ * only just begun: what followed would write through and never reach the undo
+ * stack.
+ *
+ * The visit this box was making is closed all the same, by the one that
+ * replaced it — `beginReadingEdit` ends whatever was open before it starts.
+ */
+function closed(hash: string) {
+  if (editing.value !== hash) return
+  editor.commitTextEdit()
+  editing.value = null
+}
+
+/**
+ * ⚠️ A page turned under an open box closes it. The rows on the next page are
+ * another page's readings, and one of them holding this hash would open with a
+ * caret nobody put there.
+ */
+watch(
+  () => editor.currentPageId,
+  () => {
+    editing.value = null
+  },
+)
+
 // ── Moving a card by its grip ──────────────────────────────────────────────
 
 const grip = ref<{
@@ -780,6 +912,45 @@ function dismiss(plan: CardPlan) {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--foreground);
+}
+
+/*
+ * A caret on the words and a hand everywhere else on the row: pressing the text
+ * is the one gesture here that does not move something.
+ *
+ * ⚠️ And the words are selectable where the rest of the card is not. The card
+ * turns selection off so that dragging a row never sweeps up text, but a run
+ * with `user-select: none` has no caret positions in it at all — a hit test
+ * against one returns nothing, and the box that opens cannot know which
+ * character was pressed. Only the rows that can be corrected get it back.
+ */
+.source-row-live .source-text {
+  cursor: text;
+  user-select: text;
+}
+
+/*
+ * ⚠️ Only what a textarea brings of its own is reset — the size, the leading and
+ * the wrapping stay with `.source-text`, which the box carries as well. Setting
+ * them again here is how the line under the caret ends up a hair off the line
+ * beside it, and every row below shifts as one is opened.
+ */
+.source-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+  resize: none;
+  outline: none;
+  /* The directive keeps it exactly as tall as its text, so a scrollbar here
+     would only ever be a rounding error made visible — and a scrollbar under
+     the pointer is a field that eats the canvas's wheel. */
+  overflow: hidden;
+}
+.source-input::placeholder {
+  color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
 }
 
 /* Which model said it, under the words rather than beside them — the same

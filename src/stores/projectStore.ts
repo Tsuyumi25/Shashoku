@@ -1007,6 +1007,27 @@ export const useProjectStore = defineStore('project', () => {
     if (moved) markPageDirty(pageId)
   }
 
+  /**
+   * Correct what a reading says, where it stands.
+   *
+   * ⭐ The identity does not move, and that is what makes this safe to offer at
+   * all. An identity is fixed when a reading is created and never recomputed,
+   * so an object built from this one goes on naming it, and a rerun recognizes
+   * it as one the page already has — which is to say a correction survives the
+   * next run instead of being overwritten by it.
+   *
+   * ⚠️ `original` is left alone. It is what the model said, and the comparison
+   * between the two is the only record that anybody touched this.
+   */
+  function setReadingText(pageId: string, hash: string, text: string) {
+    const file = pageById(pageId)
+    if (!file) return
+    const reading = file.ocr.candidates.find((r) => r.hash === hash)
+    if (!reading || reading.text === text) return
+    reading.text = text
+    markPageDirty(pageId)
+  }
+
   function readingsOfPage(pageId: string): readonly OcrCandidatePersisted[] {
     return pageById(pageId)?.ocr.candidates ?? []
   }
@@ -1222,6 +1243,7 @@ export const useProjectStore = defineStore('project', () => {
     removeTranslation,
     absorbReadings,
     setReadingsAside,
+    setReadingText,
     readingsOfPage,
     forgetReadings,
     setLabelStyle,

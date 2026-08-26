@@ -539,6 +539,42 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * The reading being corrected right now, on the same split as a translation:
+   * every keystroke writes straight through, so the card and the markings on it
+   * keep up, and the visit is what enters the undo stack.
+   *
+   * ⚠️ A reference of its own rather than a second shape for `pendingTextEdit`,
+   * which several places read expecting an object's. Only one of the two is ever
+   * open — there is one caret — and `commitTextEdit` closes this kind first, so
+   * every place that already ends a typing session ends this one too.
+   */
+  const pendingReadingEdit = ref<{ pageId: string; hash: string; from: string } | null>(null)
+
+  /** Undefined once the reading being corrected has left the pool under the caret. */
+  function textOfPendingReading(): string | undefined {
+    const pending = pendingReadingEdit.value
+    if (!pending) return undefined
+    const project = useProjectStore()
+    return project.readingsOfPage(pending.pageId).find((r) => r.hash === pending.hash)?.text
+  }
+
+  function beginReadingEdit(pageId: string, hash: string, from: string) {
+    commitTextEdit()
+    pendingReadingEdit.value = { pageId, hash, from }
+  }
+
+  function commitReadingEdit() {
+    const pending = pendingReadingEdit.value
+    if (!pending) return
+    const text = textOfPendingReading()
+    // Cleared first, as on the object side: the command below re-enters here
+    // through pushCommand, and this is what stops it recursing.
+    pendingReadingEdit.value = null
+    if (text === undefined) return
+    cmdUpdateReadingText(pending.pageId, pending.hash, pending.from, text)
+  }
+
+  /**
    * The one choke point every way into typing goes through — a double click, a
    * key on a row, stepping to the next one — so a locked translation never gets
    * a caret in the first place. Letting the box open and refusing the keystrokes
@@ -553,6 +589,10 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function commitTextEdit() {
+    // Both kinds of visit end here, so the eleven places that already close a
+    // typing session — changing page, changing selection, every command — close
+    // a correction to a reading without any of them having to know it exists.
+    commitReadingEdit()
     const pending = pendingTextEdit.value
     if (!pending) return
     const text = textOfPending()
@@ -598,7 +638,12 @@ export const useEditorStore = defineStore('editor', () => {
   function flushTextEdit() {
     const pending = pendingTextEdit.value
     const text = textOfPending()
+    const reading = pendingReadingEdit.value
+    const readingText = textOfPendingReading()
     commitTextEdit()
+    if (reading && readingText !== undefined) {
+      pendingReadingEdit.value = { ...reading, from: readingText }
+    }
     if (!pending || text === undefined) return
     pendingTextEdit.value = { ...pending, from: text }
   }
@@ -1518,6 +1563,23 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  /**
+   * A correction to what a model read.
+   *
+   * ⚠️ Gated on nothing, where the object side is gated on the layer's lock. A
+   * reading belongs to no layer and stands on no canvas — it is evidence about
+   * the artwork, and there is nothing here that locking could have meant.
+   */
+  function cmdUpdateReadingText(pageId: string, hash: string, oldText: string, newText: string) {
+    if (oldText === newText) return
+    const project = useProjectStore()
+    pushCommand({
+      label: `update-reading ${hash}`,
+      do: () => project.setReadingText(pageId, hash, newText),
+      undo: () => project.setReadingText(pageId, hash, oldText),
+    })
+  }
+
   /** The proposal an object is reading, when it is reading one. */
   function chosenCandidate(
     pageId: string,
@@ -1993,6 +2055,8 @@ export const useEditorStore = defineStore('editor', () => {
     beginTextEdit,
     commitTextEdit,
     flushTextEdit,
+    pendingReadingEdit,
+    beginReadingEdit,
     editBy,
     pushCommand,
     forgetJournals,
