@@ -10,6 +10,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
+import { sourceLook } from '@/lib/sourceLook'
 import { layerWithEffects, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
@@ -71,8 +72,11 @@ const dpr = window.devicePixelRatio || 1
 
 const raster = useRasterStore()
 /**
- * ⚠️ Which body is painted is the interface's question, not the page's — the
- * compositor answers it differently and always draws the translation.
+ * ⚠️ Which body is painted, and how, are the interface's questions rather than
+ * the page's — the compositor answers both differently. It always draws the
+ * translation, and it draws it in the style the object carries, because what it
+ * builds is the page as delivered. A reference treatment for reading a source
+ * against un-lettered artwork belongs on screen and nowhere else.
  */
 const editor = useEditorStore()
 const stroke = useStrokeOverlayStore()
@@ -156,16 +160,23 @@ const effectedRasters = computed(() => {
  */
 const drawnTexts = computed(() => {
   const out = new Map<string, DrawnLabel>()
+  // ⚠️ The same treatment the frames are measured with, and it has to be: a
+  // halo grows the bitmap, so a frame that counted one around text drawn
+  // without it is a frame that does not sit on its own letters.
+  const reference = editor.textSide === 'source'
   for (const node of props.nodes) {
     if (node.kind !== 'text') continue
     const entry = node.entry
     const body = bodyOnSide(entry, editor.textSide)
+    const look = reference
+      ? sourceLook(body.style)
+      : { style: body.style, effects: entry.effects }
     out.set(
       entry.id,
       drawnLabel(
         textOnSide(entry, editor.textSide),
-        body.style,
-        entry.effects,
+        look.style,
+        look.effects,
         { x: body.x, y: body.y },
         body.rotation,
       ),

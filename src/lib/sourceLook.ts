@@ -32,10 +32,17 @@ import type { TextStyle } from '@shared/text-style/types'
  */
 export const SOURCE_COLOR = '#1d4ed8'
 
-/** Wide enough to hold a line of dialogue off busy line art, and no wider. */
+/**
+ * Wide enough to hold a line of dialogue off busy line art.
+ *
+ * ⚠️ Outside, so this is what the reader sees rather than what gets drawn — the
+ * stroke laid down under the fill is twice it. Widening this eats the counters
+ * of nothing, since it grows away from the letter; what it costs is the artwork
+ * behind, which is why it stops here.
+ */
 export const SOURCE_HALO: LayerEffect = {
   kind: 'stroke',
-  width: 4,
+  width: 5,
   color: '#ffffff',
   position: 'outside',
 }
