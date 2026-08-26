@@ -46,8 +46,6 @@ export interface CardPlan extends Box {
   readings: readonly OcrCandidatePersisted[]
   /** The place it came off, for saying which artwork it is about. */
   from: Box
-  /** Turned down, and parked off the document — see `marginCards`. */
-  aside?: boolean
 }
 
 /**
@@ -202,67 +200,6 @@ function sidesFor(place: Box, size: { w: number; h: number }, gap: number): Box[
 }
 
 /**
- * The lists a reader has turned down, parked in the margin beside the page.
- *
- * ⭐ Each keeps its own identity rather than being poured into one shelf. What
- * somebody said when they pressed the button was "not from this balloon" — a
- * judgement about one place — and a single merged pile throws that away: the
- * rows lose which artwork they came off, which is the only thing that would let
- * anybody use one later.
- *
- * ⭐ Beside the page and not gone. A run offers far more readings than a page
- * has balloons, and the ones already ruled out are most of what makes the rest
- * hard to see — but ruling one out is a judgement about an afternoon's work,
- * not about the reading: it stays in the pool, so a rerun still finds it and
- * the direction and size it measured are still there to be dropped onto a
- * balloon later.
- *
- * The canvas shows margin all round the artwork, and that is where these go — a
- * place a reader can still reach and still drag out of, which is the whole
- * difference between setting something aside and deleting it.
- *
- * ⚠️ Off the left edge: where these pages are read *to*, rather than the side
- * the next balloon is read from. Stacked down it in the order the places are
- * read, so a list parked here is where its balloon would have put it.
- */
-export function marginCards(
-  places: readonly Listed[],
-  basePx: number,
-  page: { width: number; height: number },
-): CardPlan[] {
-  const gap = basePx * GAP
-  const ordered = [...places].sort((a, b) => a.y - b.y || a.x - b.x)
-  const out: CardPlan[] = []
-  // Wrapped into columns a page tall rather than run down one long strip: a
-  // whole page's lists in a single column is several pages of scrolling, while
-  // a block of columns beside the artwork is one thing to look at.
-  let y = 0
-  let columnLeft = -gap * 2
-  let columnWidth = 0
-  for (const place of ordered) {
-    const size = cardSize(textsOf(place.full), basePx)
-    if (y > 0 && y + size.h > page.height) {
-      columnLeft -= columnWidth + gap
-      y = 0
-      columnWidth = 0
-    }
-    columnWidth = Math.max(columnWidth, size.w)
-    out.push({
-      key: asideKeyOf(place),
-      full: place.full,
-      readings: place.readings,
-      from: { x: place.x, y: place.y, w: place.w, h: place.h },
-      aside: true,
-      x: columnLeft - size.w,
-      y,
-      ...size,
-    })
-    y += size.h + gap
-  }
-  return out
-}
-
-/**
  * Slide a box along one axis until nothing standing is under it.
  *
  * ⭐ One axis, and the one that keeps it near where it wanted to be. A card put
@@ -297,8 +234,9 @@ export function slideClear(
  * would look for it. Poured into one column instead they would all be equally
  * far from everything, which is the same as being nowhere.
  *
- * ⚠️ Not the same thing as being set aside. These are lists still waiting to be
- * judged; what moved them is the page, not a decision about them.
+ * ⚠️ Not a dismissal. These are lists still waiting to be judged, and what put
+ * them here is the page having no room, not anything anybody decided about
+ * them — a dismissed list is not drawn at all.
  */
 export function outsideCards(
   places: readonly Listed[],
@@ -471,15 +409,6 @@ export const CROWDED = 0.25
  */
 export function keyOf(place: Box): string {
   return `${place.x},${place.y},${place.w},${place.h}`
-}
-
-/**
- * And the name its parked copy answers to. Separate, because a rerun can bring
- * a place fresh readings after its old ones were turned down — leaving it with
- * a list on the page and a list in the margin at once.
- */
-export function asideKeyOf(place: Box): string {
-  return `aside/${keyOf(place)}`
 }
 
 /**

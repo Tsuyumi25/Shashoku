@@ -29,8 +29,7 @@
     -->
     <div
       class="source-grip"
-      :class="card.plan.aside && 'source-grip-aside'"
-      :title="card.plan.aside ? '挪走的清單——拖著它換位置' : '拖動這張清單'"
+      title="拖動這張清單"
       @pointerdown.stop="onGripDown(card.key, $event)"
       @pointermove="onGripMove"
       @pointerup="onGripUp"
@@ -90,26 +89,30 @@
     <!--
       ⭐ The one destructive gesture on this side, and it is a button. Taking a
       reading up already removes it from the list, so what is left when somebody
-      reaches for this is "none of these" — the unit being rejected is the
+      reaches for this is "none of these" — the unit being dismissed is the
       place, not the row. It is here even with one row left: one vocabulary of
       gestures is better than two.
+
+      ⭐ And the card goes, rather than standing somewhere else. What somebody
+      has said is that they are finished with this balloon, and a page that
+      answered by lining the finished lists up along the edge would spend the
+      margin on exactly the work already done — the reason to press this is to
+      stop seeing them.
+
+      ⚠️ Dismissed is not deleted. The readings stay in the pool, where a rerun
+      still finds them and the page's own decision still weighs them; what has
+      been recorded is only that nobody wants them shown again. Ctrl+Z takes
+      the whole list back, and clearing the page's readings outright is what
+      offers them afresh.
     -->
     <button
-      v-if="!card.plan.aside"
       type="button"
-      class="source-foot source-foot-aside"
+      class="source-foot source-foot-dismiss"
       @pointerdown.stop
-      @click="setAside(card.plan)"
+      @click="dismiss(card.plan)"
     >
-      整批挪走
+      整批刪掉
     </button>
-    <!--
-      ⚠️ And no way back on a parked list, deliberately. Putting a reading back
-      on the page is not something anybody wants for its own sake — finding that
-      one of them was right means dragging it onto the balloon, which the rows
-      here already do. A list turned down by mistake is what Ctrl+Z is for.
-    -->
-    <p v-else class="source-foot source-foot-shelf">挪走的</p>
   </div>
 
   <!--
@@ -148,7 +151,7 @@ import { computed, ref, watchEffect } from 'vue'
 import type { OcrCandidatePersisted } from '@shared/page/types'
 import type { Box, Place } from '@shared/ocr/places'
 import { placesIn } from '@shared/ocr/places'
-import { answeredBy, offeredReadings } from '@shared/ocr/offer'
+import { offeredReadings } from '@shared/ocr/offer'
 import { claimsOf } from '@shared/ocr/vote'
 import { isLocked, textObjects } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
@@ -159,13 +162,11 @@ import { markDisagreements, type Mark } from '@/lib/readingDiff'
 import { sourceLook } from '@/lib/sourceLook'
 import { obbHoldsPoint, type Obb } from '@/lib/selection/obb'
 import {
-  asideKeyOf,
   cardSize,
   EMPTY_READING,
   CROWDED,
   crowding,
   keyOf,
-  marginCards,
   outsideCards,
   planCards,
   slideClear,
@@ -255,15 +256,13 @@ const offeredHashes = computed(
     ),
 )
 
-/** Every place, with what it is offering now and what it has been turned down over. */
-const byPlace = computed(() => {
-  const answered = answeredBy(objects.value)
-  return placesIn(pool.value).map((place) => ({
+/** Every place, with whatever it is still offering. */
+const byPlace = computed(() =>
+  placesIn(pool.value).map((place) => ({
     place,
     offering: place.readings.filter((r) => offeredHashes.value.has(r.hash)),
-    parked: place.readings.filter((r) => r.setAside === true && !answered.has(r.hash)),
-  }))
-})
+  })),
+)
 
 /** Everything on this page that a card must not cover. */
 const obstacles = computed<Box[]>(() => [
@@ -287,35 +286,23 @@ function pinKey(key: string): string {
  * open a hole in a card nobody had touched.
  */
 watchEffect(() => {
-  for (const { place, offering, parked } of byPlace.value) {
-    if (offering.length > 0) {
-      cards$.noteShown(pinKey(keyOf(place)), offering.map((r) => r.hash))
-    }
-    if (parked.length > 0) {
-      cards$.noteShown(pinKey(asideKeyOf(place)), parked.map((r) => r.hash))
-    }
+  for (const { place, offering } of byPlace.value) {
+    if (offering.length === 0) continue
+    cards$.noteShown(pinKey(keyOf(place)), offering.map((r) => r.hash))
   }
 })
 
 /** Everything with a list to show, sized against what that list has held. */
-const listed = computed(() => {
+const listed = computed<Listed[]>(() => {
   const held = new Map(pool.value.map((r) => [r.hash, r]))
-  const rowsOf = (key: string, now: readonly OcrCandidatePersisted[]) => {
-    const ever = cards$.rowsShown(pinKey(key))
+  const out: Listed[] = []
+  for (const { place, offering } of byPlace.value) {
+    if (offering.length === 0) continue
+    const ever = cards$.rowsShown(pinKey(keyOf(place)))
     const full = ever.map((hash) => held.get(hash)).filter((r): r is OcrCandidatePersisted => !!r)
-    return full.length > 0 ? full : now
+    out.push({ ...place, full: full.length > 0 ? full : offering, readings: offering })
   }
-  const onPage: Listed[] = []
-  const parked: Listed[] = []
-  for (const { place, offering, parked: aside } of byPlace.value) {
-    if (offering.length > 0) {
-      onPage.push({ ...place, full: rowsOf(keyOf(place), offering), readings: offering })
-    }
-    if (aside.length > 0) {
-      parked.push({ ...place, full: rowsOf(asideKeyOf(place), aside), readings: aside })
-    }
-  }
-  return { onPage, parked }
+  return out
 })
 
 /**
@@ -334,13 +321,13 @@ watchEffect(() => {
   // and never asked again. A verdict that could flip as objects were made would
   // move every list on the page at once — the one thing somebody working down
   // them must not have happen.
-  if (cards$.boxesUnder(prefix).length === 0 && listed.value.onPage.length > 0) {
-    const trial = planCards(listed.value.onPage, obstacles.value, base, page)
+  if (cards$.boxesUnder(prefix).length === 0 && listed.value.length > 0) {
+    const trial = planCards(listed.value, obstacles.value, base, page)
     cards$.settleCrowding(prefix, crowding(trial, obstacles.value, page) > CROWDED)
   }
 
   const tight = cards$.isCrowded(prefix)
-  const fresh = listed.value.onPage.filter((p) => !cards$.boxOf(pinKey(keyOf(p))))
+  const fresh = listed.value.filter((p) => !cards$.boxOf(pinKey(keyOf(p))))
   if (fresh.length > 0) {
     // ⚠️ Out through the nearest edge, not into one pile: a list still belongs
     // to its own balloon, and what moved it was the page rather than any
@@ -355,19 +342,10 @@ watchEffect(() => {
     }
   }
 
-  for (const plan of marginCards(listed.value.parked, base, page)) {
-    const key = pinKey(plan.key)
-    if (cards$.boxOf(key)) continue
-    cards$.place(key, clearOfTheRest(plan, prefix, base, page))
-  }
-
   // A rerun can bring a place something new after its card was placed. It grows
   // downward from where it stands, so its top does not move.
-  for (const list of listed.value.onPage) {
+  for (const list of listed.value) {
     cards$.grow(pinKey(keyOf(list)), cardSize(textsOf(list.full), base))
-  }
-  for (const list of listed.value.parked) {
-    cards$.grow(pinKey(asideKeyOf(list)), cardSize(textsOf(list.full), base))
   }
 })
 
@@ -407,10 +385,11 @@ interface DrawnCard {
 const drawn = computed<DrawnCard[]>(() => {
   const base = basePx.value
   const out: DrawnCard[] = []
-  const take = (list: Listed, name: string, aside: boolean) => {
+  for (const list of listed.value) {
+    const name = keyOf(list)
     const key = pinKey(name)
     const box = cards$.boxOf(key)
-    if (!box) return
+    if (!box) continue
     const live = new Set(list.readings.map((r) => r.hash))
     // ⚠️ Against what is still standing, not against everything the place ever
     // offered. A reading already taken up is invisible in the card, and letting
@@ -425,7 +404,6 @@ const drawn = computed<DrawnCard[]>(() => {
         full: list.full,
         readings: list.readings,
         from: { x: list.x, y: list.y, w: list.w, h: list.h },
-        ...(aside ? { aside: true } : {}),
         ...box,
       },
       rows: list.full.map((reading) => ({
@@ -445,8 +423,6 @@ const drawn = computed<DrawnCard[]>(() => {
       },
     })
   }
-  for (const list of listed.value.onPage) take(list, keyOf(list), false)
-  for (const list of listed.value.parked) take(list, asideKeyOf(list), true)
   return out
 })
 
@@ -684,7 +660,7 @@ function drop(
   })
 }
 
-function setAside(plan: CardPlan) {
+function dismiss(plan: CardPlan) {
   const pageId = editor.currentPageId
   if (pageId === null) return
   editor.cmdSetReadingsAside(
@@ -762,12 +738,6 @@ function setAside(plan: CardPlan) {
 }
 .source-grip:hover {
   background: color-mix(in oklch, var(--muted-foreground) 58%, transparent);
-}
-.source-grip-aside {
-  background: color-mix(in oklch, var(--destructive) 35%, transparent);
-}
-.source-grip-aside:hover {
-  background: color-mix(in oklch, var(--destructive) 60%, transparent);
 }
 .source-grip:active {
   cursor: grabbing;
@@ -888,16 +858,11 @@ function setAside(plan: CardPlan) {
   line-height: 1.4;
   cursor: pointer;
 }
-.source-foot-aside {
+.source-foot-dismiss {
   color: var(--destructive);
 }
-.source-foot-aside:hover {
+.source-foot-dismiss:hover {
   background: color-mix(in oklch, var(--destructive) 12%, transparent);
-}
-.source-foot-shelf {
-  color: var(--muted-foreground);
-  cursor: default;
-  text-align: center;
 }
 
 /* Every object that can be landed on. Outlined and not filled: these are up all

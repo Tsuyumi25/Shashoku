@@ -5,7 +5,6 @@ import {
   cardSize,
   CROWDED,
   crowding,
-  marginCards,
   outsideCards,
   planCards,
   textsOf,
@@ -179,49 +178,6 @@ describe('planCards', () => {
   })
 })
 
-describe('marginCards', () => {
-  const place = (x: number, y: number): Box => ({ x, y, w: 120, h: 90 })
-
-  it('has nothing to park when nothing has been turned down', () => {
-    expect(marginCards([], BASE, PAGE)).toEqual([])
-  })
-
-  /** ⚠️ Off the page, where a reader can still reach it and still drag out of it. */
-  it('stands each list off the left edge of the page', () => {
-    const cards = marginCards([listed(place(400, 500), ['ふん', 'ふう'])], BASE, PAGE)
-    expect(cards[0].x + cards[0].w).toBeLessThan(0)
-    expect(cards[0].aside).toBe(true)
-  })
-
-  /**
-   * ⭐ One list to a place, not one pile. What somebody said was "not from this
-   * balloon", and a merged pile throws away which balloon that was — the only
-   * thing that would let anybody use one of these rows later.
-   */
-  it('keeps one list to a place, each still saying which artwork it came off', () => {
-    const a = place(400, 200)
-    const b = place(400, 900)
-    const cards = marginCards([listed(a, ['ふん']), listed(b, ['ふう'])], BASE, PAGE)
-    expect(cards).toHaveLength(2)
-    expect(cards.map((c) => c.from)).toEqual([a, b])
-  })
-
-  it('stacks them clear of each other, in reading order', () => {
-    const a = place(400, 900)
-    const b = place(400, 200)
-    const cards = marginCards([listed(a, ['ふん']), listed(b, ['ふう'])], BASE, PAGE)
-    expect(cards[0].from).toEqual(b)
-    expect(cards[0].y + cards[0].h).toBeLessThanOrEqual(cards[1].y)
-  })
-
-  it('answers to a name of its own, so a place can have a list on the page as well', () => {
-    const one = place(400, 500)
-    const [card] = marginCards([listed(one, ['ふん'])], BASE, PAGE)
-    const [onPage] = planCards([listed(one, ['ふん'])], [one], BASE, PAGE)
-    expect(card.key).not.toBe(onPage.key)
-  })
-})
-
 describe('outsideCards', () => {
   const place = (x: number, y: number): Box => ({ x, y, w: 120, h: 90 })
 
@@ -275,12 +231,6 @@ describe('outsideCards', () => {
     expect(outsideCards([...lists].reverse(), BASE, PAGE)).toEqual(
       outsideCards(lists, BASE, PAGE),
     )
-  })
-
-  /** ⚠️ Moved by the page, not by a decision about them. */
-  it('does not mark a list as turned down', () => {
-    const [card] = outsideCards([listed(place(60, 800), ['ふん'])], BASE, PAGE)
-    expect(card.aside).toBeUndefined()
   })
 })
 
