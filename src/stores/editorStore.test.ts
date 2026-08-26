@@ -296,7 +296,7 @@ describe('cmdApplyVerdict', () => {
       ],
     })
     const born = labelsOf(project).at(-1)
-    expect(born?.source.style).toMatchObject({
+    expect(born?.translation.style).toMatchObject({
       direction: 'vertical',
       fontSizePx: 38,
       leadingPercent: 118,
@@ -310,7 +310,7 @@ describe('cmdApplyVerdict', () => {
       fills: new Map(),
       spawns: [{ from: 'r1', text: 'ふん', centre: { x: 300, y: 400 } }],
     })
-    expect(labelsOf(project).at(-1)?.source.style).toEqual(project.header.seedStyle)
+    expect(labelsOf(project).at(-1)?.translation.style).toEqual(project.header.seedStyle)
   })
 
   /**
@@ -2878,7 +2878,7 @@ describe('a style set the way a run measured the artwork', () => {
       fontSizePx: 27.712812921102035,
       leadingPercent: 118.40000152587891,
     })
-    const { style } = labelsOf(project)[0].source
+    const { style } = labelsOf(project)[0].translation
     expect(style.fontSizePx).toBe(28)
     expect(style.leadingPercent).toBe(118)
   })
@@ -2892,7 +2892,7 @@ describe('a style set the way a run measured the artwork', () => {
     editor.cmdAddLabelFromReading(PAGE, { x: 300, y: 100 }, { hash: 'b', text: '二' }, {
       fontSizePx: 28.4,
     })
-    expect(labelsOf(project).map((l) => l.source.style.fontSizePx)).toEqual([28, 28])
+    expect(labelsOf(project).map((l) => l.translation.style.fontSizePx)).toEqual([28, 28])
   })
 
   /** ⚠️ Absent still means unmeasured, and keeps whatever it is laid over. */
@@ -2900,8 +2900,100 @@ describe('a style set the way a run measured the artwork', () => {
     const { project, editor } = openOnePage()
     const seed = project.header.seedStyle
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, {})
-    const { style } = labelsOf(project)[0].source
+    const { style } = labelsOf(project)[0].translation
     expect(style.fontSizePx).toBe(seed.fontSizePx)
     expect(style.leadingPercent).toBe(seed.leadingPercent)
+  })
+
+  /**
+   * ⚠️ A leading is a share of the type size, so it is the one measurement that
+   * still means what it meant at a size the balloon never used.
+   */
+  it('keeps the measured leading on a source object re-set at the page size', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, {
+      vertical: true,
+      fontSizePx: 38,
+      leadingPercent: 118,
+    })
+    expect(labelsOf(project)[0].source.style).toMatchObject({
+      direction: 'vertical',
+      leadingPercent: 118,
+    })
+  })
+})
+
+/**
+ * ⭐ The source side is read against the artwork underneath it. Set the way the
+ * artwork is set, it covers the very thing it is being checked against.
+ */
+describe('the one size the source side is read at', () => {
+  const reading = { hash: 'h1', text: 'ふん' }
+
+  /** A fiftieth of the short edge of the scan opened below. */
+  const READING_SIZE_PX = 86
+
+  /**
+   * ⚠️ A scan rather than the 1200px page the rest of these tests open. A
+   * fiftieth of 1200 is the seed size itself, so every expectation here would
+   * hold just as well against a derivation that had stopped working and fallen
+   * back to the seed.
+   */
+  function openScan(labels: TextLayerEntry[] = []) {
+    const opened = openOnePage(labels)
+    opened.project.allFiles[0].page.width = 4299
+    opened.project.allFiles[0].page.height = 6071
+    return opened
+  }
+
+  it('sets a dropped reading at the page size rather than at the measured one', () => {
+    const { project, editor } = openScan()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { fontSizePx: 38 })
+    expect(labelsOf(project)[0].source.style.fontSizePx).toBe(READING_SIZE_PX)
+  })
+
+  it('sets a born object at it too, however the balloon was measured', () => {
+    const { project, editor } = openScan()
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map(),
+      spawns: [
+        { from: 'r1', text: 'いち', centre: { x: 300, y: 400 }, fontSizePx: 38 },
+        { from: 'r2', text: 'に', centre: { x: 600, y: 400 }, fontSizePx: 72 },
+      ],
+    })
+    expect(labelsOf(project).map((l) => l.source.style.fontSizePx)).toEqual([
+      READING_SIZE_PX,
+      READING_SIZE_PX,
+    ])
+  })
+
+  /** Correcting what an object says is not an occasion to re-size its source. */
+  it('holds a standing object at it when a run fills it', () => {
+    const { project, editor } = openScan([label('a')])
+    editor.cmdApplyVerdict(PAGE, {
+      fills: new Map([['a', { text: 'ふん', from: 'r1', fontSizePx: 38 }]]),
+      spawns: [],
+    })
+    expect(labelsOf(project)[0].source.style.fontSizePx).toBe(READING_SIZE_PX)
+  })
+})
+
+/**
+ * The head that answers leading reads the gap between two lines, and a region
+ * holding one line has no gap to read — what comes back there is invented.
+ */
+describe('a measured leading out of the range a page can be set in', () => {
+  const reading = { hash: 'h1', text: 'ふん' }
+
+  it('refuses to stack the lines through each other', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { leadingPercent: 41 })
+    expect(labelsOf(project)[0].source.style.leadingPercent).toBe(100)
+  })
+
+  it('refuses to blow the lines apart', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { leadingPercent: 900 })
+    expect(labelsOf(project)[0].source.style.leadingPercent).toBe(250)
   })
 })

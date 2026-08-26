@@ -12,7 +12,7 @@ import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import { useCardStore } from '@/stores/cardStore'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
-import { screenToPagePx } from '@/lib/coords'
+import { clamp, screenToPagePx } from '@/lib/coords'
 import { blankTextObject, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
 import { bodyOnSide, linesOf, textOnSide, type TextSide } from '@shared/page/text'
 import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
@@ -151,6 +151,34 @@ export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {
 
 
 /**
+ * What a measured leading is allowed to come back as.
+ *
+ * The head that answers it reads the gap between two lines, and a region
+ * holding a single line has no gap to be read — what comes back there is
+ * invented, and under 100% it stacks the lines through each other. Wide enough
+ * that a leading actually read off two lines passes through untouched.
+ */
+const MIN_LEADING_PERCENT = 100
+const MAX_LEADING_PERCENT = 250
+
+/**
+ * The type size of every source object on a page, as a share of its short edge.
+ *
+ * ⭐ The source side is not typeset — it is read against the artwork underneath
+ * it, which is the one thing setting it the way the artwork is set would cover.
+ * So it is held at one size for the whole page and the measurement is spent on
+ * the translation, which is the side that has to end up looking like the
+ * original. The short edge rather than either named one, so a spread and a
+ * single page put the same size on screen.
+ *
+ * The number is what carries the default type size across resolutions: a
+ * fiftieth of 1200px is `DEFAULT_TEXT_STYLE.fontSizePx`, so a page scanned at
+ * four times that reads at four times the size and neither of them has to be
+ * zoomed to be legible over the artwork.
+ */
+const SOURCE_SIZE_DIVISOR = 50
+
+/**
  * A style set the way one run measured the artwork, over whatever it is being
  * laid on. A field the run did not measure keeps the value underneath — absent
  * means nothing was measured, and filling it in with a guess would let an
@@ -177,8 +205,40 @@ function measuredStyle(base: TextStyle, measured: Typography): TextStyle {
     leadingPercent:
       measured.leadingPercent === undefined
         ? base.leadingPercent
-        : Math.round(measured.leadingPercent),
+        : clamp(Math.round(measured.leadingPercent), MIN_LEADING_PERCENT, MAX_LEADING_PERCENT),
   }
+}
+
+/**
+ * The same run's measurement, at the one size the source side is read at.
+ *
+ * ⭐ The leading rides along exactly as measured. It is a share of the type
+ * size rather than a length, so the spacing a balloon was set with survives
+ * being re-set at a size that balloon never used — which is what keeps a
+ * source object reading with the rhythm of the line it stands for.
+ */
+function sourceStyle(
+  base: TextStyle,
+  measured: Typography,
+  page: { width: number; height: number },
+): TextStyle {
+  return {
+    ...measuredStyle(base, measured),
+    fontSizePx: Math.round(Math.min(page.width, page.height) / SOURCE_SIZE_DIVISOR),
+  }
+}
+
+/**
+ * The corner to write so that an empty object comes out centred on `at`, which
+ * corner the anchor names being a matter of how the text is aligned.
+ *
+ * ⚠️ Worked out per side. The two sides are no longer set at one size, so one
+ * anchor written to both would centre whichever side it was computed from and
+ * hang the other off it.
+ */
+function anchorFor(style: TextStyle, at: { x: number; y: number }): { x: number; y: number } {
+  const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
+  return { x: at.x - empty.center.x, y: at.y - empty.center.y }
 }
 
 
@@ -779,6 +839,8 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     if (verdict.fills.size === 0 && verdict.spawns.length === 0) return
 
+    const page = project.pageById(pageId)?.page
+    if (!page) return
     const seed = project.header.seedStyle
 
     const before = new Map<string, SourceBody>()
@@ -793,23 +855,22 @@ export const useEditorStore = defineStore('editor', () => {
         from: filling.from,
         // ⚠️ Only the type, never the position. The object already stands where
         // it stands, and this is a correction to what it says.
-        style: measuredStyle(label.source.style, filling),
+        style: sourceStyle(label.source.style, filling, page),
       })
     }
 
     const born = verdict.spawns.map((spawn) => {
       const style = measuredStyle(seed, spawn)
+      const read = sourceStyle(seed, spawn, page)
       const label = blankTextObject(generateLabelId(), style)
-      label.source = { ...emptyBody(style), by: 'auto', lines: linesOf(spawn.text), from: spawn.from }
-      // Placed by where the reading was, which is the middle of the balloon —
-      // so the anchor is worked back from that rather than written to it, since
-      // which corner the anchor names depends on how the text is aligned.
-      const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
-      const anchor = { x: spawn.centre.x - empty.center.x, y: spawn.centre.y - empty.center.y }
-      label.source.x = anchor.x
-      label.source.y = anchor.y
-      label.translation.x = anchor.x
-      label.translation.y = anchor.y
+      label.source = { ...emptyBody(read), by: 'auto', lines: linesOf(spawn.text), from: spawn.from }
+      // Placed by where the reading was, which is the middle of the balloon.
+      const source = anchorFor(read, spawn.centre)
+      const translation = anchorFor(style, spawn.centre)
+      label.source.x = source.x
+      label.source.y = source.y
+      label.translation.x = translation.x
+      label.translation.y = translation.y
       return label
     })
 
@@ -935,23 +996,24 @@ export const useEditorStore = defineStore('editor', () => {
     measured: Typography,
   ) {
     const project = useProjectStore()
+    const page = project.pageById(pageId)?.page
+    if (!page) return
     const style = measuredStyle(project.header.seedStyle, measured)
+    const read = sourceStyle(project.header.seedStyle, measured, page)
     const label = blankTextObject(generateLabelId(), style)
     label.source = {
-      ...emptyBody(style),
+      ...emptyBody(read),
       by: 'auto',
       lines: linesOf(reading.text),
       from: reading.hash,
     }
-    // Placed by its middle, as a run's own objects are: which corner the anchor
-    // names depends on how the text is aligned, so it is worked back rather than
-    // written to.
-    const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
-    const anchor = { x: at.x - empty.center.x, y: at.y - empty.center.y }
-    label.source.x = anchor.x
-    label.source.y = anchor.y
-    label.translation.x = anchor.x
-    label.translation.y = anchor.y
+    // Placed by its middle, as a run's own objects are.
+    const source = anchorFor(read, at)
+    const translation = anchorFor(style, at)
+    label.source.x = source.x
+    label.source.y = source.y
+    label.translation.x = translation.x
+    label.translation.y = translation.y
     cmdAddLabel(pageId, label)
   }
 
