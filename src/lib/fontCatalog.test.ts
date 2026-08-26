@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { EngineFontSource } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 import {
   catalog,
   catalogByFace,
   catalogByFamily,
+  chosenDefaultFamily,
+  defaultFamily,
   faceKey,
   faceOrder,
   representativeOf,
@@ -22,6 +25,33 @@ function face(patch: Partial<FontEntry>): FontEntry {
     ...patch,
   }
 }
+
+/** A face at a path of its own, which is what the stubbed engine answers by. */
+function faceAt(family: string, path: string, kind: 'system' | 'imported' = 'system'): FontEntry {
+  return face({
+    family,
+    displayName: family,
+    postscriptName: `${family}-Regular`,
+    origin: { kind, path, faceIndex: 0 },
+  })
+}
+
+/** Which of the stubbed fonts can draw everything asked of them. */
+let drawable = new Set<string>()
+let asked: string[] = []
+
+Object.assign(globalThis, {
+  window: {
+    engine: {
+      uncoveredClusters: (font: EngineFontSource) => {
+        // Optional on the surface, for the faces whose only handle is bytes.
+        const path = font.path ?? ''
+        asked.push(path)
+        return drawable.has(path) ? [] : [0]
+      },
+    },
+  },
+})
 
 describe('faceOrder', () => {
   it('orders by weight inside a family', () => {
@@ -124,5 +154,79 @@ describe('the catalogue maps', () => {
   it('falls back to the file for the key of a nameless face', () => {
     const entry = face({ postscriptName: '', origin: { kind: 'system', path: '/a.ttc', faceIndex: 2 } })
     expect(faceKey(entry)).toBe('/a.ttc#2')
+  })
+})
+
+describe('defaultFamily', () => {
+  beforeEach(() => {
+    chosenDefaultFamily.value = ''
+    drawable = new Set()
+    asked = []
+  })
+
+  /**
+   * ⭐ Checked rather than taken in order. The catalogue is sorted by display
+   * name, so its first system family is whichever sorts first — usually a Latin
+   * face, which would draw this kind of work as boxes from end to end. That is
+   * the picture having no font at all gives, reached the long way round.
+   */
+  it('takes the first system family that can set the sample', () => {
+    catalog.value = [faceAt('Latin', '/latin.ttf'), faceAt('Kanji', '/kanji.ttf')]
+    drawable.add('/kanji.ttf')
+    expect(defaultFamily.value).toBe('Kanji')
+  })
+
+  /**
+   * ⚠️ A folder somebody added is a choice about their work. What is answered
+   * here is what to draw before anybody has chosen anything.
+   */
+  it('never takes a family the user imported, even where it would serve', () => {
+    catalog.value = [faceAt('Mine', '/mine.ttf', 'imported'), faceAt('Theirs', '/sys.ttf')]
+    drawable.add('/mine.ttf')
+    drawable.add('/sys.ttf')
+    expect(defaultFamily.value).toBe('Theirs')
+  })
+
+  it('answers with the family somebody chose', () => {
+    catalog.value = [faceAt('First', '/first.ttf'), faceAt('Chosen', '/chosen.ttf')]
+    drawable.add('/first.ttf')
+    drawable.add('/chosen.ttf')
+    chosenDefaultFamily.value = 'Chosen'
+    expect(defaultFamily.value).toBe('Chosen')
+  })
+
+  /**
+   * ⭐ So a preferences file carried between two machines leaves neither of
+   * them drawing boxes for want of the other's font.
+   */
+  it('picks for itself when the chosen family is not on this machine', () => {
+    catalog.value = [faceAt('Here', '/here.ttf')]
+    drawable.add('/here.ttf')
+    chosenDefaultFamily.value = 'Elsewhere'
+    expect(defaultFamily.value).toBe('Here')
+  })
+
+  /** Which leaves the boxes, the same as before — there is nothing to draw with. */
+  it('answers with nothing when no system family can set the sample', () => {
+    catalog.value = [faceAt('Latin', '/latin.ttf')]
+    expect(defaultFamily.value).toBe('')
+  })
+
+  it('asks about a family once however many faces it has', () => {
+    catalog.value = [
+      faceAt('Many', '/many.ttf'),
+      face({
+        family: 'Many',
+        displayName: 'Many',
+        style: 'Bold',
+        weight: 700,
+        postscriptName: 'Many-Bold',
+        origin: { kind: 'system', path: '/many-bold.ttf', faceIndex: 0 },
+      }),
+      faceAt('Next', '/next.ttf'),
+    ]
+    drawable.add('/next.ttf')
+    expect(defaultFamily.value).toBe('Next')
+    expect(asked).toEqual(['/many.ttf', '/next.ttf'])
   })
 })

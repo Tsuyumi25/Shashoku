@@ -366,15 +366,35 @@ describe('drawnLabel', () => {
     expect(notdefCalls.at(-1)?.phaseX).toBeCloseTo(0.25, 9)
   })
 
-  it('tells an unchosen family apart from a family this machine lacks', () => {
-    // Both draw boxes, but only one of them is the user's next move, so the
-    // two cannot collapse into the same value.
-    const unchosen = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), NONE, { x: 10, y: 10 })
-    expect(unchosen.sample).not.toBeNull()
-    expect(unchosen.missingFamily).toBe('')
+  /**
+   * ⭐ Naming nothing and naming something absent look alike and are opposite.
+   * A style that names no family is drawn in whatever this machine offers by
+   * default — nobody has said anything for that to contradict. A style that
+   * names a family this machine lacks is drawn as boxes however good a default
+   * is to hand: the name is a fact about the project, and setting the page in
+   * some other face would show a page typeset in a font it does not name.
+   */
+  it('draws a style that names no family in the default this machine offers', () => {
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), NONE, { x: 10, y: 10 })
+    expect(drawn.missingFamily).toBeNull()
+    expect(calls.at(-1)?.postscriptName).toBe('TestFace-Regular')
+  })
 
-    const absent = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, { x: 10, y: 10 })
+  it('goes on drawing a family this machine lacks as boxes, default or no', () => {
+    const absent = drawnLabel(uniqueText(), styleWith({ fontFamily: 'Absent' }), NONE, {
+      x: 10,
+      y: 10,
+    })
     expect(absent.missingFamily).toBe('Absent')
+    expect(notdefCalls.length).toBeGreaterThan(0)
+  })
+
+  /** Which leaves the boxes and the wording that goes with them, as before. */
+  it('draws boxes for an unchosen family when this machine has nothing to offer', () => {
+    catalog.value = []
+    const drawn = drawnLabel(uniqueText(), styleWith({ fontFamily: '' }), NONE, { x: 10, y: 10 })
+    expect(drawn.sample).not.toBeNull()
+    expect(drawn.missingFamily).toBe('')
   })
 
   it('words the two cases differently', () => {

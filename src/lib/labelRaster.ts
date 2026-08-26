@@ -1,7 +1,13 @@
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { engineStrokeFor } from '@shared/effects/stroke'
-import { catalogByFace, catalogByFamily, catalogLoaded, representativeOf } from './fontCatalog'
+import {
+  catalogByFace,
+  catalogByFamily,
+  catalogLoaded,
+  defaultFamily,
+  representativeOf,
+} from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
 import {
   frameCenter,
@@ -47,7 +53,13 @@ const NOTHING: LabelRaster = { sample: null, missingFamily: null }
 function resolveFace(style: TextStyle) {
   const exact = style.fontFace ? catalogByFace.value.get(style.fontFace) : undefined
   if (exact) return exact
-  const faces = catalogByFamily.value.get(style.fontFamily)
+  // ⭐ A style that names nothing takes the machine's default; one that names a
+  // family this machine lacks takes the boxes. The two look alike and are
+  // opposite: the second is a project saying something this computer cannot
+  // honour, and answering it with another face would draw a page in a font the
+  // project does not name. See ADR 0001.
+  const family = style.fontFamily || defaultFamily.value
+  const faces = catalogByFamily.value.get(family)
   return faces ? representativeOf(faces) : null
 }
 

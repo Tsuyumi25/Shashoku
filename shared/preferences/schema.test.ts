@@ -6,6 +6,35 @@ import {
   defaultPreferences,
 } from "./types";
 
+describe("the family a style that names none is drawn in", () => {
+  it("comes back with what was written", () => {
+    const prefs = defaultPreferences();
+    prefs.defaultFontFamily = "Noto Sans CJK JP";
+    expect(parsePreferences(serializePreferences(prefs)).defaultFontFamily).toBe(
+      "Noto Sans CJK JP",
+    );
+  });
+
+  it("takes nothing from a file that says nothing about it", () => {
+    expect(parsePreferences("{}").defaultFontFamily).toBe("");
+  });
+
+  /**
+   * ⭐ Including one this machine has never heard of. The catalogue picks for
+   * itself when it cannot find the name, and a name that means nothing here may
+   * be exactly right on the machine this file came from.
+   */
+  it("keeps a family the machine reading the file may not have", () => {
+    expect(parsePreferences('{"defaultFontFamily":"ヒラギノ角ゴ"}').defaultFontFamily).toBe(
+      "ヒラギノ角ゴ",
+    );
+  });
+
+  it("ignores a value that is not a string", () => {
+    expect(parsePreferences('{"defaultFontFamily":42}').defaultFontFamily).toBe("");
+  });
+});
+
 describe("how far pixel history reaches", () => {
   it("comes back with what was written", () => {
     const prefs = defaultPreferences();

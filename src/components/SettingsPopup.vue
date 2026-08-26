@@ -29,7 +29,9 @@
         </nav>
 
         <div class="settings-body">
-          <OcrSettings v-if="active === 'ocr'" />
+          <FontSettings v-if="active === 'fonts'" />
+
+          <OcrSettings v-else-if="active === 'ocr'" />
 
           <div v-else-if="active === 'about'">
             <h3 class="mb-3 text-sm font-medium">關於</h3>
@@ -58,21 +60,23 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'reka-ui'
-import { Info, ScanText, X } from '@lucide/vue'
+import { Info, ScanText, Type, X } from '@lucide/vue'
+import FontSettings from '@/components/FontSettings.vue'
 import OcrSettings from '@/components/OcrSettings.vue'
 import { useUiStore } from '@/stores/uiStore'
 import { version as VERSION } from '../../package.json'
 
 const ui = useUiStore()
 
-type TabKey = 'ocr' | 'about'
+type TabKey = 'fonts' | 'ocr' | 'about'
 
 const TABS: { key: TabKey; title: string; icon: Component }[] = [
+  { key: 'fonts', title: '字體', icon: Type },
   { key: 'ocr', title: '文字辨識', icon: ScanText },
   { key: 'about', title: '關於', icon: Info },
 ]
 
-const active = ref<TabKey>('ocr')
+const active = ref<TabKey>('fonts')
 </script>
 
 <style scoped>

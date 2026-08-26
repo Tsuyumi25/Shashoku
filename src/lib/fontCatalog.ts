@@ -44,6 +44,75 @@ export const catalogByFace = computed(() => {
 })
 
 /**
+ * What a family has to be able to draw before it can stand in for one nobody
+ * chose: both kana, a han character and a Latin letter.
+ *
+ * ⭐ Checked rather than trusting the order. The catalogue is sorted by display
+ * name, so its first system family is whichever one sorts first — on most
+ * machines a Latin face, which would draw every character of this kind of work
+ * as a missing-glyph box. That is the same picture as having no font at all,
+ * arrived at by a longer route.
+ *
+ * ⚠️ Four characters and not a page of them. This is a floor, not a survey: it
+ * separates the families that can set the work from the ones that cannot, and
+ * a family that clears it and then lacks some particular character says so the
+ * ordinary way — as a box, with the picker naming what is missing.
+ */
+const SAMPLE = 'あア字A'
+
+/**
+ * The first system family that can set the sample.
+ *
+ * ⚠️ Only families the platform supplied, never an imported one. A folder
+ * somebody added is a choice about this project; what is being answered here
+ * is what to draw before anybody has chosen anything.
+ *
+ * One lookup per family rather than per face, and cmap only — no shaping, no
+ * raster. A thousand families cost a memory-map each, which is the same work
+ * the picker already does to draw one screen of cells.
+ */
+const firstDrawable = computed(() => {
+  const tried = new Set<string>()
+  for (const entry of catalog.value) {
+    if (entry.origin.kind !== 'system' || tried.has(entry.family)) continue
+    tried.add(entry.family)
+    if (window.engine.uncoveredClusters(engineSourceFor(entry), SAMPLE).length === 0) {
+      return entry.family
+    }
+  }
+  return ''
+})
+
+/**
+ * The family somebody picked for styles that name none, as the preferences
+ * hold it.
+ *
+ * ⚠️ Written from outside rather than read from the store. This module is the
+ * catalogue; how a machine is configured is not its business, and reaching for
+ * a store here would put a Pinia instance between the canvas and its fonts.
+ */
+export const chosenDefaultFamily = ref('')
+
+/**
+ * What a style that names no family of its own is drawn in.
+ *
+ * ⭐ Not font fallback, and nothing about ADR 0001 changes. A style that names
+ * a family this machine lacks still draws as boxes — the name is a fact about
+ * the project and the absence is a fact about the machine, and papering over
+ * it would show a page typeset in a font the project does not name. This is
+ * the other question: what to draw when the project names nothing at all.
+ *
+ * A chosen family this machine does not have falls through to the picking, so
+ * a preferences file that syncs between two machines leaves neither of them
+ * drawing boxes for want of the other's font.
+ */
+export const defaultFamily = computed(() => {
+  const chosen = chosenDefaultFamily.value
+  if (chosen && catalogByFamily.value.has(chosen)) return chosen
+  return firstDrawable.value
+})
+
+/**
  * What tells one catalogue row from another. The PostScript name identifies a
  * face across directories; the path stands in for the rare face that has none.
  */

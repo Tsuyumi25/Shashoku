@@ -80,6 +80,26 @@ export interface Preferences {
    * families out of the catalogue with it.
    */
   fontFolders: string[];
+  /**
+   * The family a style that names none of its own is drawn in.
+   *
+   * ⭐ A preference and never a project field. An object that named no family
+   * still names none when a collaborator opens it, and each machine answers
+   * with a face it actually has — writing an answer into the file would hand
+   * somebody else a name off this computer, which is the one thing storing
+   * families by name is meant to prevent.
+   *
+   * ⚠️ Not font fallback, and the distinction is the whole of ADR 0001's last
+   * section. Nothing here is consulted for an object that names a family: one
+   * whose family this machine lacks still draws as boxes, because the name is
+   * a fact about the project and the absence is a fact about the machine.
+   * This answers the different question of what to draw when nobody has
+   * chosen yet.
+   *
+   * Empty means the catalogue picks one. Set, it names a family, and a machine
+   * without that family picks as though it were empty.
+   */
+  defaultFontFamily: string;
   /** Sample size in the font picker grid. */
   fontSamplePx: number;
   /** Empty means the picker's first preset; the presets are localizable UI. */
@@ -136,6 +156,7 @@ export function defaultPreferences(): Preferences {
   return {
     fontFavorites: [],
     fontFolders: [],
+    defaultFontFamily: "",
     fontSamplePx: 40,
     fontSampleText: "",
     fontSampleVertical: false,

@@ -9,6 +9,7 @@ import {
   type MissingGlyphMode,
   type SidePanel,
 } from '@shared/preferences/types'
+import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
 
@@ -113,6 +114,26 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.fontSampleVertical = vertical
   }
 
+  function setDefaultFontFamily(family: string) {
+    prefs.defaultFontFamily = family
+  }
+
+  /**
+   * Handed to the catalogue rather than read from there.
+   *
+   * The canvas resolves a face on every repaint and cannot reach a store to do
+   * it — a Pinia instance between a label and its font would be one more thing
+   * that has to exist before anything can be drawn. So the preference is
+   * pushed into the module that already holds the faces.
+   */
+  watch(
+    () => prefs.defaultFontFamily,
+    (family) => {
+      chosenDefaultFamily.value = family
+    },
+    { immediate: true },
+  )
+
   function setMissingGlyphMode(mode: MissingGlyphMode) {
     prefs.missingGlyphMode = mode
   }
@@ -140,6 +161,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     removeFontFolder,
     addScanPoint,
     removeScanPoint,
+    setDefaultFontFamily,
     setMissingGlyphMode,
     setMarkMissingGlyphs,
     setSidePanel,

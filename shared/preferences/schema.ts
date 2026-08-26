@@ -50,6 +50,7 @@ export function parsePreferences(raw: string): Preferences {
   const {
     fontFavorites,
     fontFolders,
+    defaultFontFamily,
     fontSamplePx,
     fontSampleText,
     fontSampleVertical,
@@ -72,6 +73,12 @@ export function parsePreferences(raw: string): Preferences {
     prefs.fontFolders = fontFolders.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
     );
+  }
+  // Kept whatever it says, including a family this machine has never heard of:
+  // the catalogue picks for itself when it cannot find one, and a name that
+  // means nothing here may be exactly right on the machine this file syncs to.
+  if (typeof defaultFontFamily === "string") {
+    prefs.defaultFontFamily = defaultFontFamily;
   }
   if (typeof fontSamplePx === "number" && Number.isFinite(fontSamplePx)) {
     prefs.fontSamplePx = Math.min(
@@ -132,6 +139,7 @@ export function serializePreferences(prefs: Preferences): string {
     {
       fontFavorites: prefs.fontFavorites,
       fontFolders: prefs.fontFolders,
+      defaultFontFamily: prefs.defaultFontFamily,
       fontSamplePx: prefs.fontSamplePx,
       fontSampleText: prefs.fontSampleText,
       fontSampleVertical: prefs.fontSampleVertical,
