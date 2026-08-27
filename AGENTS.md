@@ -5,23 +5,64 @@ this repository.
 
 ## Comments
 
-- Default: write no comments. Add one only when the WHY is non-obvious
-  — a hidden constraint, a subtle invariant, a workaround for a specific
-  bug, or behavior that would surprise a reader.
-- Never explain WHAT the code does — well-named identifiers do that.
-- All comments in English. No non-English text in code comments.
+Default: none. Prose about code rots — the code moves, the paragraph
+stays, and what was an explanation becomes a wrong one. It also lands in
+the context of every future reader, human or agent, on every pass over
+that file.
+
+This is a ladder. Stop at the first rung that holds:
+
+1. Does the code say it? → no comment
+2. Does the code around it say it? → no comment
+3. Would a reader with an agent over the whole repo work it out?
+   → no comment
+4. Does it take something outside the repo to know — an upstream bug, a
+   limit of some API, a number that was measured, a line in a spec?
+   → then, and only then, a comment
+5. Never explain WHAT the code does. Well-named identifiers do that.
+
+One case sits outside the ladder: a shortcut taken on purpose, whose
+ceiling is known. Working code looks like the best answer, and the next
+person builds on it. Mark it `TODO` or `HACK` on one line, naming the
+ceiling. If it does not fit on one line it is not a shortcut, it is a
+design.
+
+All comments in English. No non-English text in code comments.
 
 ## Commit messages
+
+The subject is required. The body is not.
 
 - All commit messages in English.
 - Format: `type(scope): short effect` — feat / fix / refactor / docs /
   style / perf / test / build / ci / chore.
 - The subject is an index: imperative mood, the trade's shared
-  vocabulary, ten words at most. Someone grepping the log knows
-  `migrate`, `cache`, `undo` — not our metaphors.
-- The prose goes in the body: the effect, the invariant that now holds,
-  the WHY. Body only when there is a real WHY. Do not narrate process
-  ("tried X, then Y, then Z"). Write the conclusion, not the journey.
+  vocabulary, ten words at most. Someone grepping the log looks for
+  `migrate`, `cache`, `undo` — use the words they would type.
+- **Default to no body.** The diff already says what changed, and a
+  commit existing at all says the change was wanted. Apply the same
+  ladder as comments: write a body only for what it takes something
+  outside the repo to know.
+- Never narrate process ("tried X, then Y, then Z"). Write the
+  conclusion, not the journey.
+- Describe the diff, not the work. Intermediate states never entered
+  history; a reader cannot see the file that was renamed away before the
+  commit.
+- No unearned forward references ("a later commit will add Y"), and no
+  identifiers that only exist locally — a `jj` change ID is a dead
+  reference to anyone reading plain git.
+
+## Crediting other projects
+
+Attribution the licence asks for is required: when code or weights come
+from somewhere else, the notice goes in. Keep it factual — upstream URL
+and licence.
+
+Do not write down that an approach was copied from a project whose code
+is not in this repository. State the reason instead:
+
+- ✗ "matching how project X does it, normalize here first"
+- ✓ "normalize here, or the second call sees accumulated values"
 
 ## Language
 
