@@ -29,13 +29,25 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
+      manifest = lib.importJSON ./package.json;
+
+      # pnpm reads `packageManager` and replaces itself with the version named
+      # there, so on every other platform that field decides which resolver
+      # writes the lockfile. nixpkgs' build hook turns that off, which leaves
+      # this the only way for a Nix build to run the same one — and the
+      # channel's 10.34.0 is inside the vulnerable range of GHSA-5wx6-mg75-v57r.
+      pnpm = pkgs.pnpm_10.override {
+        version = lib.removePrefix "pnpm@" manifest.packageManager;
+        hash = "sha256-BuAQiklB3i1wnhw7yEHT6QxFxqJs7Kx29iBE+gLKwaA=";
+      };
+
       sidecar = pkgs.callPackage ./nix/sidecar.nix {
         inherit pyproject-nix uv2nix pyproject-build-systems;
       };
 
       engine = pkgs.callPackage ./nix/engine.nix { };
 
-      app = pkgs.callPackage ./nix/app.nix { inherit sidecar engine; };
+      app = pkgs.callPackage ./nix/app.nix { inherit pnpm sidecar engine; };
 
       electronLibs = with pkgs; [
         glib
@@ -159,9 +171,8 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [
+        packages = [ pnpm ] ++ (with pkgs; [
           nodejs_22
-          pnpm_10
           cargo
           rustc
           # The gate's own tools, so that what it says on a machine is what it
@@ -170,8 +181,12 @@
           clippy
           rustfmt
           uv
-        ];
+        ]);
+        # Off here and nowhere else. In `.npmrc` it would reach contributors
+        # without Nix too, and which pnpm they run would go back to being
+        # whatever their machine happens to have installed.
         shellHook = ''
+          export npm_config_manage_package_manager_versions=false
           export NIX_LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (electronLibs ++ sidecarLibs)}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
         '';
       };

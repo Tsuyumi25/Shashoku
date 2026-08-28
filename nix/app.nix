@@ -3,7 +3,7 @@
   stdenv,
   fetchPnpmDeps,
   pnpmConfigHook,
-  pnpm_10,
+  pnpm,
   nodejs_22,
   electron_43,
   makeWrapper,
@@ -36,20 +36,19 @@ stdenv.mkDerivation (finalAttrs: {
     ];
   };
 
-  # Pinned to the major the manifest's `packageManager` names rather than the
-  # channel's default, which is a major ahead: the lockfile is what this and
-  # every other platform install from, and reading it with a resolver it was
-  # not written by is a way to get a different tree.
+  # The version the manifest's `packageManager` names, which is what this and
+  # every other platform install the lockfile with. Reading it with a resolver
+  # it was not written by is a way to get a different tree.
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
-    pnpm = pnpm_10;
+    inherit pnpm;
     fetcherVersion = 4;
     hash = "sha256-sj/LFftZO+ebnv9+9AXuU2wdFoaqH1gAftwcXJuDzq8=";
   };
 
   nativeBuildInputs = [
     nodejs_22
-    pnpm_10
+    pnpm
     pnpmConfigHook
     makeWrapper
   ];
