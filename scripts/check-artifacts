@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# A repository script for the same reason as its evaluation-only sibling, and
+# `--no-update-lock-file` for the same one.
 set -eu
 
 exec nix flake check --no-update-lock-file --print-build-logs

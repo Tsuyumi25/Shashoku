@@ -56,23 +56,30 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      # `rust-toolchain.toml` is where this repository says which toolchain it
-      # means, and the flake reads that same file. Installing a floating stable
-      # here instead put a second answer in the workflow, and the two drifted
-      # far enough apart that a lint added in the newer one failed a tree the
-      # older one called clean — a red with nothing changed, and no way to
-      # reproduce it from the devShell the setup instructions hand out.
-      - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11 # v3.22.2
-
-      # Before the cache below, which keys what it stores on the compiler it can
-      # see.
-      - name: Take the Rust toolchain from the flake
-        run: |
-          nix develop --no-update-lock-file \
-            -c sh -c 'command -v cargo rustc cargo-clippy cargo-fmt' 2>/dev/null \
-            | xargs -n1 dirname | sort -u >> "$GITHUB_PATH"
+      # From rustup reading `rust-toolchain.toml`, which is the file the flake
+      # reads too — the same official binaries either way. Nix is deliberately
+      # absent from this job: its promise is that the source checks can be had
+      # without it, and a job that installs Nix to fetch a compiler proves
+      # nothing about that.
+      #
+      # `rustflags` must be emptied. The action otherwise exports `-D warnings`
+      # for every cargo invocation in the job, which is not what the tasks
+      # themselves say, so a warning would fail here and pass in the devShell.
+      # `cache: false` because the cache below is the one this repository
+      # already pins.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+          rustflags: ""
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # `version-file` is not optional here: the action looks for a
+      # `required-version` in the repository root, and this project's
+      # `pyproject.toml` is a directory down.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version-file: python/pyproject.toml
 
       # `postinstall` fetches an Electron for development. Nothing below opens
       # a window — the suite runs under Node — and the package's typings, which
@@ -81,32 +88,12 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
-      # The tasks below are the manifest's, called one at a time rather than
-      # through `check:source`: what is repeated here is the membership of that
-      # list, not the commands, and calling them separately is what keeps a
-      # failure pointing at one step with a boundary and a timeout of its own.
-      #
-      # Layout first, because it is the one thing here nobody has to read a
-      # diagnostic to fix, and because a tree left to drift turns some later
-      # `cargo fmt` into a diff whose real change is buried in whitespace.
-      - run: pnpm check:rust-format
-
-      # Then what compiles but probably does not mean what it says. The suite
-      # below answers whether the behaviour is right; this answers a smaller and
-      # different question, which is why it is worth its own line.
-      - run: pnpm check:rust-lints
-
-      - run: pnpm test:rust
-
-      - run: pnpm engine:build:debug
-      - run: pnpm typecheck
-
-      # A typecheck is not a build. Alias resolution, the main/preload split and
-      # the ESM/CJS boundary are all decided by the bundler, and each of them can
-      # be red while `vue-tsc` is green. Cheap next to anything in the other job.
-      - run: pnpm build
-
-      - run: pnpm test
+      # The composite, not its members. Naming them one at a time here would
+      # put the membership of that list in a second place and let the two
+      # drift; the diagnostics it costs are smaller than they look, since a
+      # failing sub-task still names itself in the log.
+      - name: Check source
+        run: pnpm check:source
 
   # `nix flake check` builds all three derivations and runs their checks: the
   # crate's own tests fall out of the engine build, and the scripts then ask
@@ -151,20 +138,6 @@ jobs:
         with:
           name: shashoku
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
-      # `--no-update-lock-file` wherever a flake command appears, here and
-      # inside both scripts, because such a command may otherwise amend
-      # `flake.lock` to make itself succeed, and a green built on an input this
-      # repository does not name is the same false answer as a rewritten
-      # `Cargo.lock`.
-      #
-      # Whether the lockfile still resolves to what the manifest asks for. The
-      # Nix side consumes `uv.lock` through uv2nix and would happily build a
-      # stale one, so a sidecar that starts is not evidence that the lock is
-      # current. Node, pnpm and `uv` all come from the devShell rather than
-      # three setup steps of their own.
-      - name: Check the Python lock
-        run: nix develop --no-update-lock-file -c pnpm check:python-lock
 
       # No path filter above it. The application derivation's sources include
       # the renderer, so nearly every commit is a rebuild the filter would have

@@ -2,6 +2,11 @@
 # Here rather than in `package.json` alone: the Nix job has no Node, so
 # reaching a package script there means entering the devShell first — and
 # that realizes the very flake this asks about.
+#
+# `--no-update-lock-file` because a flake command may otherwise amend
+# `flake.lock` to make itself succeed, and a green built on an input this
+# repository does not name is the same false answer as a rewritten
+# `Cargo.lock`.
 set -eu
 
 exec nix flake check --no-build --show-trace --no-update-lock-file
