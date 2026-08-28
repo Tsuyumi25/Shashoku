@@ -23,8 +23,8 @@
     "test:rust": "cargo test --workspace --locked",
     "check:python-lock": "uv lock --check --project python",
     "check:source": "pnpm check:rust-format && pnpm check:rust-lints && pnpm test:rust && pnpm engine:build:debug && pnpm typecheck && pnpm build && pnpm test && pnpm check:python-lock",
-    "check:flake-eval": "nix flake check --no-build --show-trace --no-update-lock-file",
-    "check:artifacts": "nix flake check --print-build-logs --no-update-lock-file"
+    "check:flake-eval": "./scripts/check-flake-eval",
+    "check:artifacts": "./scripts/check-artifacts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.7.4",

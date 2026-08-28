@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Here rather than in `package.json` alone: the Nix job has no Node, so
+# reaching a package script there means entering the devShell first — and
+# that realizes the very flake this asks about.
+set -eu
+
+exec nix flake check --no-build --show-trace --no-update-lock-file

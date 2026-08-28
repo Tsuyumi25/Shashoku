@@ -126,6 +126,14 @@ jobs:
       # Nix it installs free to move.
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11 # v3.22.2
 
+      # Immediately, and through the script rather than the package alias that
+      # names it. Nothing here has Node, so reaching that alias would enter the
+      # devShell — which realizes the pinned Rust toolchain and the patched
+      # pnpm, neither of them in `cache.nixos.org`, and all of it after
+      # evaluating the flake this step exists to evaluate. A cache is no use to
+      # it either: `--no-build` fetches nothing.
+      - run: ./scripts/check-flake-eval
+
       # A real binary cache rather than a scratch space beside the runner, which
       # settles two things at once: what CI does not have to rebuild, and where
       # someone installing this gets it prebuilt from. Entries are addressed by
@@ -144,10 +152,11 @@ jobs:
           name: shashoku
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # `--no-update-lock-file` on every one of these, because a flake command
-      # may otherwise amend `flake.lock` to make itself succeed, and a green
-      # built on an input this repository does not name is the same false answer
-      # as a rewritten `Cargo.lock`.
+      # `--no-update-lock-file` wherever a flake command appears, here and
+      # inside both scripts, because such a command may otherwise amend
+      # `flake.lock` to make itself succeed, and a green built on an input this
+      # repository does not name is the same false answer as a rewritten
+      # `Cargo.lock`.
       #
       # Whether the lockfile still resolves to what the manifest asks for. The
       # Nix side consumes `uv.lock` through uv2nix and would happily build a
@@ -157,14 +166,9 @@ jobs:
       - name: Check the Python lock
         run: nix develop --no-update-lock-file -c pnpm check:python-lock
 
-      # Evaluation alone first. A flake that does not evaluate says so in
-      # seconds, and finding that out after a gigabyte of PyTorch has been
-      # fetched is the same answer arriving much later.
-      - run: nix develop --no-update-lock-file -c pnpm check:flake-eval
-
       # No path filter above it. The application derivation's sources include
       # the renderer, so nearly every commit is a rebuild the filter would have
       # had to allow through anyway — what makes this cheap is the cache, plus
       # the OCR environment reading only `python/`, which leaves the gigabyte
       # untouched by a change to a component.
-      - run: nix develop --no-update-lock-file -c pnpm check:artifacts
+      - run: ./scripts/check-artifacts
