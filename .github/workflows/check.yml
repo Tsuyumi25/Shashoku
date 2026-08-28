@@ -53,15 +53,15 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
-      # The toolchain comes from the flake, which is the only place this
-      # repository says which one it means. Installing a floating stable here
-      # instead put a second answer in the workflow, and the two drifted far
-      # enough apart that a lint added in the newer one failed a tree the older
-      # one called clean — a red with nothing changed, and no way to reproduce
-      # it from the devShell the setup instructions hand out.
+      # `rust-toolchain.toml` is where this repository says which toolchain it
+      # means, and the flake reads that same file. Installing a floating stable
+      # here instead put a second answer in the workflow, and the two drifted
+      # far enough apart that a lint added in the newer one failed a tree the
+      # older one called clean — a red with nothing changed, and no way to
+      # reproduce it from the devShell the setup instructions hand out.
       - uses: DeterminateSystems/determinate-nix-action@527f17dd63d2d60d3e5552934bc84b9a33a14d11 # v3.22.2
 
       # Before the cache below, which keys what it stores on the compiler it can
@@ -81,26 +81,22 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
+      # The tasks below are the manifest's, called one at a time rather than
+      # through `check:source`: what is repeated here is the membership of that
+      # list, not the commands, and calling them separately is what keeps a
+      # failure pointing at one step with a boundary and a timeout of its own.
+      #
       # Layout first, because it is the one thing here nobody has to read a
       # diagnostic to fix, and because a tree left to drift turns some later
       # `cargo fmt` into a diff whose real change is buried in whitespace.
-      - run: cargo fmt --all -- --check
+      - run: pnpm check:rust-format
 
       # Then what compiles but probably does not mean what it says. The suite
       # below answers whether the behaviour is right; this answers a smaller and
       # different question, which is why it is worth its own line.
-      #
-      # `--locked` here too, and for a reason the step below cannot supply: this
-      # is a cargo invocation like any other, so left to itself it would repair
-      # a stale lockfile and hand the repaired one to the check that was meant
-      # to catch it.
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: pnpm check:rust-lints
 
-      # `--locked` because everything below is a cargo build in disguise, and
-      # cargo's own answer to a manifest the lockfile no longer matches is to
-      # rewrite the lockfile and carry on. That would have CI repair the working
-      # tree and then report green on a resolution nobody committed.
-      - run: cargo test --workspace --locked
+      - run: pnpm test:rust
 
       - run: pnpm engine:build:debug
       - run: pnpm typecheck
@@ -148,26 +144,27 @@ jobs:
           name: shashoku
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
+      # `--no-update-lock-file` on every one of these, because a flake command
+      # may otherwise amend `flake.lock` to make itself succeed, and a green
+      # built on an input this repository does not name is the same false answer
+      # as a rewritten `Cargo.lock`.
+      #
       # Whether the lockfile still resolves to what the manifest asks for. The
       # Nix side consumes `uv.lock` through uv2nix and would happily build a
       # stale one, so a sidecar that starts is not evidence that the lock is
-      # current. `uv` comes from the devShell rather than a second setup step.
+      # current. Node, pnpm and `uv` all come from the devShell rather than
+      # three setup steps of their own.
       - name: Check the Python lock
-        run: nix develop --no-update-lock-file -c uv lock --check --project python
+        run: nix develop --no-update-lock-file -c pnpm check:python-lock
 
       # Evaluation alone first. A flake that does not evaluate says so in
       # seconds, and finding that out after a gigabyte of PyTorch has been
       # fetched is the same answer arriving much later.
-      - run: nix flake check --no-build --show-trace --no-update-lock-file
+      - run: nix develop --no-update-lock-file -c pnpm check:flake-eval
 
-      # `--no-update-lock-file` because a flake command may otherwise amend
-      # `flake.lock` to make itself succeed, and a green built on an input this
-      # repository does not name is the same false answer as a rewritten
-      # `Cargo.lock`.
-      #
       # No path filter above it. The application derivation's sources include
       # the renderer, so nearly every commit is a rebuild the filter would have
       # had to allow through anyway — what makes this cheap is the cache, plus
       # the OCR environment reading only `python/`, which leaves the gigabyte
       # untouched by a change to a component.
-      - run: nix flake check --no-update-lock-file --print-build-logs
+      - run: nix develop --no-update-lock-file -c pnpm check:artifacts
