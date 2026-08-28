@@ -5,7 +5,7 @@
   pnpmConfigHook,
   pnpm,
   nodejs_22,
-  electron_43,
+  electron,
   makeWrapper,
   sidecar,
   engine,
@@ -43,7 +43,7 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     inherit pnpm;
     fetcherVersion = 4;
-    hash = "sha256-sj/LFftZO+ebnv9+9AXuU2wdFoaqH1gAftwcXJuDzq8=";
+    hash = "sha256-BYj0e1pTJxCiuD0nCZRZ0QRWEKoZ/wTGzx9EKNirYjo=";
   };
 
   nativeBuildInputs = [
@@ -78,7 +78,7 @@ stdenv.mkDerivation (finalAttrs: {
     ln -s "${engine}/${engine.nodeModule}" \
           "$out/share/shashoku/node_modules/@shashoku/engine"
 
-    makeWrapper ${lib.getExe electron_43} "$out/bin/shashoku" \
+    makeWrapper ${lib.getExe electron} "$out/bin/shashoku" \
       --add-flags "$out/share/shashoku" \
       --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true}}" \
       --inherit-argv0 \
@@ -89,7 +89,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   # So a check can reach the runtime this package has rather than naming a
   # version of it a second time.
-  passthru.electron = electron_43;
+  passthru.electron = electron;
 
   meta = {
     description = "Manga translation and typesetting workflow";

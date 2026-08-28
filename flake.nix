@@ -31,6 +31,18 @@
 
       manifest = lib.importJSON ./package.json;
 
+      # nixpkgs builds these from source, so an attribute is one version and
+      # asking it for another means leaving `cache.nixos.org` and compiling.
+      # What the declarations buy is a mismatch that says so, leaving whoever
+      # hits it to choose between waiting for nixpkgs and moving off this
+      # channel.
+      declared =
+        what: version: pkg:
+        if pkg.version == version then
+          pkg
+        else
+          throw "${what}: this repository declares ${version}, nixpkgs has ${pkg.version}";
+
       # pnpm reads `packageManager` and replaces itself with the version named
       # there, so on every other platform that field decides which resolver
       # writes the lockfile. nixpkgs' build hook turns that off, which leaves
@@ -41,13 +53,22 @@
         hash = "sha256-BuAQiklB3i1wnhw7yEHT6QxFxqJs7Kx29iBE+gLKwaA=";
       };
 
+      # Not `overrideAttrs` on this one: `electron_43` is a wrapper whose
+      # `buildCommand` names the unwrapped store path outright and which has no
+      # unpackPhase, so `version` moves while `src` is ignored — the package
+      # would be a new version by name and an old one by content, and every
+      # assertion about it would still pass.
+      electron = declared "electron" manifest.devDependencies.electron pkgs.electron_43;
+
       sidecar = pkgs.callPackage ./nix/sidecar.nix {
         inherit pyproject-nix uv2nix pyproject-build-systems;
       };
 
       engine = pkgs.callPackage ./nix/engine.nix { };
 
-      app = pkgs.callPackage ./nix/app.nix { inherit pnpm sidecar engine; };
+      app = pkgs.callPackage ./nix/app.nix {
+        inherit pnpm electron sidecar engine;
+      };
 
       electronLibs = with pkgs; [
         glib
