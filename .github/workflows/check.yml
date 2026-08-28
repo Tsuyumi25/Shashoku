@@ -144,4 +144,4 @@ jobs:
       # had to allow through anyway — what makes this cheap is the cache, plus
       # the OCR environment reading only `python/`, which leaves the gigabyte
       # untouched by a change to a component.
-      - run: ./scripts/check-artifacts
+      - run: ./scripts/check-nix-artifacts
