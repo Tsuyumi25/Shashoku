@@ -148,6 +148,24 @@
       };
 
       checks.${system} = {
+        # Nix evaluates lazily, so a comparison nothing reaches never runs.
+        # Every one of these was reachable only because some other output
+        # happened to name the package — `uv` through the devShell alone — and
+        # dropping that reference would have retired the check without a word.
+        # Naming the four versions in an attribute set is what forces them:
+        # instantiating this derivation needs each one computed.
+        version-contract = pkgs.runCommand "shashoku-version-contract"
+          {
+            declared = lib.concatStringsSep " " [
+              electron.version
+              nodejs.version
+              python.version
+              uv.version
+            ];
+          } ''
+          touch "$out"
+        '';
+
         sidecar = pkgs.runCommand "shashoku-sidecar-check" { } ''
           export HOME="$TMPDIR"
           ${sidecar}/bin/python ${./nix/checks/sidecar.py}
