@@ -22,7 +22,7 @@
     "check:rust-lints": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "test:rust": "cargo test --workspace --locked",
     "check:python-lock": "uv lock --check --project python",
-    "check:source": "pnpm check:rust-format && pnpm check:rust-lints && pnpm test:rust && pnpm engine:build:debug && pnpm typecheck && pnpm build && pnpm test && pnpm check:python-lock",
+    "check:source": "pnpm check:rust-format && pnpm check:python-lock && pnpm check:rust-lints && pnpm test:rust && pnpm engine:build:debug && pnpm typecheck && pnpm build && pnpm test",
     "check:flake-eval": "./scripts/check-flake-eval",
     "check:artifacts": "./scripts/check-artifacts"
   },
