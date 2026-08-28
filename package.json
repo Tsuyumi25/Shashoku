@@ -17,7 +17,14 @@
     "test:watch": "vitest",
     "engine:build": "pnpm --filter @shashoku/engine build",
     "engine:build:debug": "pnpm --filter @shashoku/engine build:debug",
-    "sidecar:sync": "uv sync --project python"
+    "sidecar:sync": "uv sync --project python",
+    "check:rust-format": "cargo fmt --all -- --check",
+    "check:rust-lints": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "test:rust": "cargo test --workspace --locked",
+    "check:python-lock": "uv lock --check --project python",
+    "check:source": "pnpm check:rust-format && pnpm check:rust-lints && pnpm test:rust && pnpm engine:build:debug && pnpm typecheck && pnpm build && pnpm test && pnpm check:python-lock",
+    "check:flake-eval": "nix flake check --no-build --show-trace --no-update-lock-file",
+    "check:artifacts": "nix flake check --print-build-logs --no-update-lock-file"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.7.4",
