@@ -38,10 +38,11 @@ include = ["shashoku_ocr*"]
 [tool.uv]
 # Exact rather than a range across the minor. Upstream calls a patch
 # non-breaking and only breaks the lock schema on a minor, but the verdict is
-# not the schema: 0.11.32 made `uv lock --check` reject non-canonical lockfiles
-# that 0.11.21 accepts. A range would let one lockfile be green on one machine
-# and red on another.
-required-version = "==0.11.21"
+# not the schema: within 0.11 alone three patch releases moved what
+# `uv lock --check` accepts, and 0.11.32 began rejecting lockfiles 0.11.21
+# reads. A range would let one lockfile be green on one machine and red on
+# another.
+required-version = "==0.12.5"
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]

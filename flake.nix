@@ -2,7 +2,7 @@
   description = "Shashoku — manga translation and typesetting workflow";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
