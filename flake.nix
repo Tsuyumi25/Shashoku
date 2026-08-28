@@ -60,14 +60,23 @@
       # assertion about it would still pass.
       electron = declared "electron" manifest.devDependencies.electron pkgs.electron_43;
 
+      nodejs = declared "node" (lib.fileContents ./.nvmrc) pkgs.nodejs_22;
+
+      python = declared "python" (lib.fileContents ./python/.python-version) pkgs.python313;
+
+      uv = declared "uv" (
+        lib.removePrefix "==" (lib.importTOML ./python/pyproject.toml).tool.uv.required-version
+      ) pkgs.uv;
+
       sidecar = pkgs.callPackage ./nix/sidecar.nix {
+        python313 = python;
         inherit pyproject-nix uv2nix pyproject-build-systems;
       };
 
       engine = pkgs.callPackage ./nix/engine.nix { };
 
       app = pkgs.callPackage ./nix/app.nix {
-        inherit pnpm electron sidecar engine;
+        inherit pnpm electron nodejs sidecar engine;
       };
 
       electronLibs = with pkgs; [
@@ -130,7 +139,7 @@
 
         engine = pkgs.runCommand "shashoku-engine-check"
           { SHASHOKU_ENGINE = "${engine}/${engine.nodeModule}"; } ''
-          ${lib.getExe pkgs.nodejs_22} ${./nix/checks/engine.js}
+          ${lib.getExe nodejs} ${./nix/checks/engine.js}
           touch "$out"
         '';
 
@@ -192,8 +201,15 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = [ pnpm ] ++ (with pkgs; [
-          nodejs_22
+        packages = [
+          nodejs
+          pnpm
+          uv
+          # `python/.python-version` names a patch version, so uv now insists on
+          # exactly that interpreter and would otherwise go and download one.
+          python
+        ]
+        ++ (with pkgs; [
           cargo
           rustc
           # The gate's own tools, so that what it says on a machine is what it
@@ -201,7 +217,6 @@
           # lints, and the answer would depend on whose shell asked.
           clippy
           rustfmt
-          uv
         ]);
         # Off here and nowhere else. In `.npmrc` it would reach contributors
         # without Nix too, and which pnpm they run would go back to being

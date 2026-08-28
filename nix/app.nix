@@ -4,7 +4,7 @@
   fetchPnpmDeps,
   pnpmConfigHook,
   pnpm,
-  nodejs_22,
+  nodejs,
   electron,
   makeWrapper,
   sidecar,
@@ -47,7 +47,7 @@ stdenv.mkDerivation (finalAttrs: {
   };
 
   nativeBuildInputs = [
-    nodejs_22
+    nodejs
     pnpm
     pnpmConfigHook
     makeWrapper
