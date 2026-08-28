@@ -106,9 +106,21 @@ something asks for it.
 
 ## Validation
 
-Named tasks live in `package.json`. When to run them is not this
-repository's business — that is a personal workflow, and it lives on
-whichever machine has it.
+Named tasks live in `package.json`; the two that drive Nix are implemented
+in `scripts/` so that a job with no Node can still reach them. When to run
+any of them is not this repository's business — that is a personal
+workflow, and it lives on whichever machine has it.
+
+Two lanes, and neither stands in for the other:
+
+| Lane | Needs | Entry | Answers |
+|---|---|---|---|
+| Source | Node, pnpm, a Rust toolchain, uv — **not** Nix | `check:source` | The code, the locks, the N-API surface, the bundles, the suite |
+| Packaging | Nix | `check:flake-eval`, `check:nix-artifacts` | The version contract, and whether the assembled package runs |
+
+Both are expected green before work is handed over. The source lane is the
+one a contributor without Nix can run end to end; `nix flake check` is a
+question about Nix and cannot be asked without it.
 
 Times are rounded from the individual steps of one successful warm-cache
 x86_64-linux workflow run. A row that names more than one task adds those
