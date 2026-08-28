@@ -110,20 +110,23 @@ Named tasks live in `package.json`. When to run them is not this
 repository's business — that is a personal workflow, and it lives on
 whichever machine has it.
 
-Timings come from one hot-cache CI run on x86_64-linux and are there to
-compare tasks against each other. They are not timeouts.
+Times are rounded from the individual steps of one successful warm-cache
+x86_64-linux workflow run. A row that names more than one task adds those
+steps up, across jobs where they ran in different ones — no composite was
+itself timed, and `check:source` is the sum of the eight it calls. They are
+there to compare tasks against each other, and they are not timeouts.
 
 **What a change asks for**
 
-| Changed | Run | Time |
+| Changed | Run | Estimated warm time |
 |---|---|---|
-| Rust internals | `check:rust-format`, `check:rust-lints`, `test:rust` | 1m10s |
-| The N-API surface, or behaviour visible from TypeScript | `check:source` | 2m57s |
-| TypeScript, Vue, Electron, bundler config | `typecheck && build && test` | 28s |
-| `python/pyproject.toml`, `python/uv.lock` | `check:python-lock && check:artifacts` | 1m22s |
+| Rust internals | `check:rust-format`, `check:rust-lints`, `test:rust` | ≈1m10s |
+| The N-API surface, or behaviour visible from TypeScript | `check:source` | ≈2m57s |
+| TypeScript, Vue, Electron, bundler config | `typecheck && build && test` | ≈28s |
+| `python/pyproject.toml`, `python/uv.lock` | `check:python-lock && check:artifacts` | ≈1m22s |
 | Python sidecar code, the model registry | `check:artifacts` | 52s |
-| `flake.nix`, `flake.lock`, `nix/`, a version pin | `check:flake-eval && check:artifacts` | 55s |
-| Before handing the work over | `check:source` | 2m57s |
+| `flake.nix`, `flake.lock`, `nix/`, a version pin | `check:flake-eval && check:artifacts` | ≈55s |
+| Before handing the work over | `check:source` | ≈2m57s |
 
 `test` needs a current debug addon. A clean checkout, or anything that
 touched the engine, wants `engine:build:debug` first — 49s in the same
