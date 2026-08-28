@@ -104,6 +104,54 @@ the same reason: it is a gigabyte of PyTorch that a session may never reach
 for. Weights are not part of it — each model downloads itself the first time
 something asks for it.
 
+## Validation
+
+Named tasks live in `package.json`. When to run them is not this
+repository's business — that is a personal workflow, and it lives on
+whichever machine has it.
+
+Timings come from one hot-cache CI run on x86_64-linux and are there to
+compare tasks against each other. They are not timeouts.
+
+**What a change asks for**
+
+| Changed | Run | Time |
+|---|---|---|
+| Rust internals | `check:rust-format`, `check:rust-lints`, `test:rust` | 1m10s |
+| The N-API surface, or behaviour visible from TypeScript | `check:source` | 2m57s |
+| TypeScript, Vue, Electron, bundler config | `typecheck && build && test` | 28s |
+| `python/pyproject.toml`, `python/uv.lock` | `check:python-lock && check:artifacts` | 1m22s |
+| Python sidecar code, the model registry | `check:artifacts` | 52s |
+| `flake.nix`, `flake.lock`, `nix/`, a version pin | `check:flake-eval && check:artifacts` | 55s |
+| Before handing the work over | `check:source` | 2m57s |
+
+`test` needs a current debug addon. A clean checkout, or anything that
+touched the engine, wants `engine:build:debug` first — 49s in the same
+run.
+
+**What each one leaves out**
+
+| Task | Does not cover |
+|---|---|
+| `check:source` | Builds no Nix package and runs nothing in `nix/checks/`, so the packaged sidecar, where the addon lands, the Electron wrapper and whether the renderer comes up are all unseen |
+| `typecheck`, `test` | The Python model registry. Everything green on the Node side is not evidence that the registry and the packaged sidecar agree |
+| `check:flake-eval` | Evaluation only — it builds no artifact |
+| `check:artifacts` | Does not run rustfmt, clippy, `vue-tsc`, electron-vite or vitest. The engine derivation reruns the crate's tests, which does not stand in for the source layer |
+| every task here | CI's orchestration: jobs, caching, matrix, timeouts |
+
+**Contracts more than one component shares**
+
+Editing one side of these is not the same as checking one side. Run every
+component the contract reaches, even when the edit landed in a single
+directory.
+
+| Contract | Inputs | Run |
+|---|---|---|
+| Native engine API | `crates/shashoku-engine/`, `shared/engine/`, `electron/lib/engine.ts`, preload | `check:source` |
+| OCR request and response, model names | `python/shashoku_ocr/`, `shared/ocr/`, `electron/lib/ocrSidecar.ts`, `nix/checks/sidecar.py` | `check:source && check:artifacts` |
+| Installed file layout | `electron.vite.config.ts`, `nix/app.nix`, `nix/checks/{app,engine,renderer}.js` | `build && check:artifacts` |
+| Tool and runtime versions | `rust-toolchain.toml`, `.nvmrc`, `package.json`, `python/.python-version`, `python/pyproject.toml`, `flake.lock` | `check:flake-eval && check:source && check:artifacts` |
+
 ## Architecture
 
 Layout as of this commit — modules land incrementally:
