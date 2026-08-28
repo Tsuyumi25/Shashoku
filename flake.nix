@@ -21,9 +21,14 @@
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, pyproject-nix, uv2nix, pyproject-build-systems, ... }:
+  outputs = { nixpkgs, pyproject-nix, uv2nix, pyproject-build-systems, rust-overlay, ... }:
     let
       inherit (nixpkgs) lib;
       system = "x86_64-linux";
@@ -68,12 +73,24 @@
         lib.removePrefix "==" (lib.importTOML ./python/pyproject.toml).tool.uv.required-version
       ) pkgs.uv;
 
+      # No assertion beside this one, and no channel to wait for: these are
+      # official binaries off static.rust-lang.org, so the file names a version
+      # and gets it. It is the same file rustup reads, which is how a
+      # contributor without Nix arrives at the same compiler and the same set
+      # of lints.
+      rust = (rust-overlay.lib.mkRustBin { } pkgs).fromRustupToolchainFile ./rust-toolchain.toml;
+
       sidecar = pkgs.callPackage ./nix/sidecar.nix {
         python313 = python;
         inherit pyproject-nix uv2nix pyproject-build-systems;
       };
 
-      engine = pkgs.callPackage ./nix/engine.nix { };
+      engine = pkgs.callPackage ./nix/engine.nix {
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rust;
+          rustc = rust;
+        };
+      };
 
       app = pkgs.callPackage ./nix/app.nix {
         inherit pnpm electron nodejs sidecar engine;
@@ -208,16 +225,8 @@
           # `python/.python-version` names a patch version, so uv now insists on
           # exactly that interpreter and would otherwise go and download one.
           python
-        ]
-        ++ (with pkgs; [
-          cargo
-          rustc
-          # The gate's own tools, so that what it says on a machine is what it
-          # says in CI. A clippy from somewhere else is a different set of
-          # lints, and the answer would depend on whose shell asked.
-          clippy
-          rustfmt
-        ]);
+          rust
+        ];
         # Off here and nowhere else. In `.npmrc` it would reach contributors
         # without Nix too, and which pnpm they run would go back to being
         # whatever their machine happens to have installed.
