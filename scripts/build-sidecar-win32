@@ -64,8 +64,13 @@ echo "==> exporting requirements from python/uv.lock"
 # version <...>") before anything below has run. That pin is intentionally
 # not re-checked here — loosening it in a wrapper would defeat the point of
 # having it in pyproject.toml at all.
+#
+# Hashes and index URLs both come out of the lock rather than being restated
+# here: `--emit-index-url` writes `[[tool.uv.index]]`'s entries into the file
+# (both of them, `pytorch-cpu` included), and the default hash emission gives
+# every requirement the sha256 set `uv.lock` recorded for it.
 requirements="${WORK}/requirements-win32.txt"
-uv export --frozen --no-dev --no-emit-project --no-hashes \
+uv export --frozen --no-dev --no-emit-project --emit-index-url \
   --project "$PYTHON_PROJECT" -o "$requirements"
 
 echo "==> building shashoku_ocr's own wheel"
@@ -79,19 +84,27 @@ fi
 
 echo "==> installing third-party packages for x86_64-pc-windows-msvc"
 mkdir -p "$SITE_DIR"
-# `uv export` does not carry `[[tool.uv.index]]` into the requirements file it
-# writes unless asked with `--emit-index-url`, which the export above does not
-# pass — so the index is named here instead. `torch==2.13.0+cpu`'s local
-# version segment (`+cpu`) does not exist on PyPI, and uv's default
-# `first-index` strategy stops at the first index that has a `torch` at all, so
-# without both of these flags the install fails with "No solution found when
-# resolving dependencies". uv itself retries transient network failures on each
-# of these downloads.
+# Two indexes are in play, and `unsafe-best-match` is what makes uv look past
+# the first one: `torch==2.13.0+cpu`'s local version segment (`+cpu`) does not
+# exist on PyPI, and the default `first-index` strategy stops at the first
+# index that has a `torch` at all, so without it the resolution fails with "No
+# solution found when resolving dependencies".
+#
+# `--require-hashes` is what makes that safe rather than merely convenient.
+# Searching every index for every package is the shape dependency confusion
+# attacks are built for — a same-named package with a higher version on the
+# index nobody meant to serve it. With hashes required, every artifact has to
+# match a sha256 `uv.lock` already recorded, so an impostor cannot be
+# substituted for a package this project resolved somewhere else. It also
+# turns a silently re-resolved dependency into a build failure, which is the
+# behaviour a release pipeline wants from a lockfile in the first place.
+#
+# uv itself retries transient network failures on each of these downloads.
 uv pip install \
   --python-platform x86_64-pc-windows-msvc \
   --python-version 3.13 \
-  --extra-index-url https://download.pytorch.org/whl/cpu \
   --index-strategy unsafe-best-match \
+  --require-hashes \
   --target "$SITE_DIR" \
   -r "$requirements"
 
