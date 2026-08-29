@@ -48,6 +48,18 @@ export function createWindow(): BrowserWindow {
   // whatever has mounted, and a load beginning is that becoming untrue again.
   win.webContents.on("did-start-loading", forgetReady);
 
+  // Menu.setApplicationMenu(null) in index.ts strips the app menu, and with it
+  // every accelerator Electron would otherwise wire up for free — F12 among
+  // them. A packaged build has no menu and no terminal, so without this the
+  // only way to see what a sidecar wrote to stderr would be to reproduce the
+  // failure on a machine running a dev build instead. Ctrl+Shift+I is not the
+  // substitute: this app already binds it to inverting the mask selection.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || input.key !== "F12" || input.isAutoRepeat) return;
+    event.preventDefault();
+    win.webContents.toggleDevTools();
+  });
+
   // Built hidden and revealed only once maximized, so the first frame on screen
   // is already full size. maximize() reveals a hidden window by itself but
   // leaves it unfocused, hence the show() after it.
