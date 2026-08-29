@@ -244,6 +244,11 @@
           # exactly that interpreter and would otherwise go and download one.
           python
           rust
+          # `napi build --cross-compile` shells out to `cargo xwin`; finding it
+          # on `PATH` is what stops it from falling back to `cargo install
+          # cargo-xwin`, which would reach outside this declaration for a tool
+          # the environment is supposed to provide.
+          pkgs.cargo-xwin
         ];
         # Off here and nowhere else. In `.npmrc` it would reach contributors
         # without Nix too, and which pnpm they run would go back to being

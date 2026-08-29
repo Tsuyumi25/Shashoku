@@ -17,6 +17,8 @@
     "test:watch": "vitest",
     "engine:build": "pnpm --filter @shashoku/engine build",
     "engine:build:debug": "pnpm --filter @shashoku/engine build:debug",
+    "engine:build:win32": "pnpm --filter @shashoku/engine build:win32",
+    "engine:check-win32-imports": "./scripts/check-engine-imports",
     "sidecar:sync": "uv sync --project python",
     "check:rust-format": "cargo fmt --all -- --check",
     "check:rust-lints": "cargo clippy --workspace --all-targets --locked -- -D warnings",

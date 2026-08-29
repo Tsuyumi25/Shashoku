@@ -1,0 +1,126 @@
+#!/usr/bin/env node
+// Reads a Windows `.node`'s PE import table with `objdump -p` — which runs on
+// Linux because the distro binutils in this devShell were built with PE (BFD
+// `pei-x86-64`) support alongside ELF, not because anything here emulates
+// Windows — and fails if a DLL shows up that isn't in EXPECTED_DLLS. A DLL
+// this list doesn't name is something the target machine might not have.
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+
+const target =
+  process.argv[2] ??
+  "crates/shashoku-engine/shashoku-engine.win32-x64-msvc.node";
+
+// Every entry here is either a DLL the Windows loader maps into any process
+// before user code runs, an API set forwarding to one, or a piece of the
+// dynamically-linked C/C++ runtime that rustc's `x86_64-pc-windows-msvc`
+// target pulls in by default. None of it is bundled in the installer
+// (`Windows打包/spec.md`'s Out of Scope: no vendored VC++ DLLs) — it is what
+// Microsoft's own central deployment is expected to already provide.
+const EXPECTED_DLLS = [
+  {
+    name: "kernel32.dll",
+    reason:
+      "Base Win32 API (process/file/memory); every Windows binary imports it.",
+  },
+  {
+    name: "ntdll.dll",
+    reason:
+      "Windows native API; the loader maps it into every process ahead of kernel32.",
+  },
+  {
+    name: "api-ms-win-core-synch-l1-2-0.dll",
+    reason:
+      "API set for WaitOnAddress/WakeByAddress; Rust std's Windows Mutex/Condvar have used it since 1.66.",
+  },
+  {
+    name: "bcryptprimitives.dll",
+    reason:
+      "ProcessPrng; Rust std seeds HashMap's SipHash keys through it (std::sys::pal::windows::rand). Ships in System32 on Windows 10+.",
+  },
+  {
+    name: "vcruntime140.dll",
+    reason:
+      "MSVC C++ exception handling (_CxxThrowException) — the dynamic-CRT default for windows-msvc.",
+  },
+  {
+    name: "api-ms-win-crt-runtime-l1-1-0.dll",
+    reason: "Universal CRT startup/exit; part of the same dynamic-CRT default.",
+  },
+  {
+    name: "api-ms-win-crt-math-l1-1-0.dll",
+    reason:
+      "Universal CRT floating-point functions, reached from the rasterizer's geometry.",
+  },
+  {
+    name: "api-ms-win-crt-heap-l1-1-0.dll",
+    reason:
+      "Universal CRT heap (HeapAlloc/free); the default global allocator on windows-msvc.",
+  },
+];
+
+const expectedByName = new Map(
+  EXPECTED_DLLS.map((entry) => [entry.name.toLowerCase(), entry]),
+);
+
+if (!existsSync(target)) {
+  console.error(
+    `${target} does not exist. Build it first: pnpm engine:build:win32`,
+  );
+  process.exit(1);
+}
+
+// `objdump -p` also lists every bound symbol under each DLL, which for this
+// binary is several MB of text — enough to overflow a synchronous pipe
+// (`ENOBUFS`) before Node gets to apply `maxBuffer`. `grep` throws that away
+// before it crosses the pipe; only the `DLL Name:` header lines are read
+// back. `pipefail` is what keeps a real `objdump` failure from being read as
+// "grep found nothing" (grep's own no-match exit code is also 1).
+let output;
+try {
+  output = execFileSync(
+    "bash",
+    ["-c", `set -o pipefail; objdump -p "$1" | grep 'DLL Name:'`, "--", target],
+    { encoding: "utf8" },
+  );
+} catch (err) {
+  if (err.status === 1 && !err.stderr) {
+    // grep found zero "DLL Name:" lines; objdump itself did not fail.
+    output = "";
+  } else {
+    console.error(`objdump -p ${target} failed:\n${err.stderr || err.message}`);
+    process.exit(1);
+  }
+}
+
+const found = new Set();
+for (const match of output.matchAll(/^\s*DLL Name:\s*(\S+)/gm)) {
+  found.add(match[1]);
+}
+
+if (found.size === 0) {
+  console.error(`objdump -p ${target} listed no imports at all — that means
+the parse above found nothing, not that the binary has no imports. Every
+PE DLL needs kernel32.dll at minimum.`);
+  process.exit(1);
+}
+
+const unexpected = [...found].filter(
+  (name) => !expectedByName.has(name.toLowerCase()),
+);
+
+console.log(`${target}: ${found.size} imported DLL(s)`);
+for (const name of [...found].sort()) {
+  const entry = expectedByName.get(name.toLowerCase());
+  console.log(`  ${entry ? "✓" : "✗"} ${name}${entry ? ` — ${entry.reason}` : " — not in EXPECTED_DLLS"}`);
+}
+
+if (unexpected.length > 0) {
+  console.error(
+    `\n${unexpected.length} unexpected DLL(s): ${unexpected.join(", ")}`,
+  );
+  console.error(
+    "Each one is a dependency a clean Windows machine might not have. Add it to EXPECTED_DLLS with a reason, or find out why it's linked and remove it.",
+  );
+  process.exit(1);
+}
