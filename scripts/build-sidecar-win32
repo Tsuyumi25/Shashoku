@@ -12,11 +12,18 @@ set -euo pipefail
 # https://github.com/astral-sh/python-build-standalone/releases/download/<release>/SHA256SUMS
 PBS_RELEASE="20260825"
 PBS_PYTHON_VERSION="3.13.15"
-PBS_ASSET="cpython-${PBS_PYTHON_VERSION}+${PBS_RELEASE}-x86_64-pc-windows-msvc-install_only.tar.gz"
+PBS_ASSET="cpython-${PBS_PYTHON_VERSION}+${PBS_RELEASE}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
 PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PBS_ASSET}"
-PBS_SHA256="82a792c25550a421b29f381eaeafa6dccd1ffcbd97a1b1507b202f5df877cecf"
-# The `install_only_stripped` variant is 84 MiB smaller unpacked. Not used
-# without a measured compressed-size number to justify it.
+PBS_SHA256="c1dc1e267f2a81493ce6e94837263f648f1eb6d0df73a1492469c1fed025ce8f"
+# `_stripped` rather than plain `install_only`, on measurement rather than on
+# the name. Unpacked, the two archives differ by exactly 41 `.pdb` files and
+# nothing else — every `.py`, `.pyc`, `.dll` and `.exe` is byte-identical, so
+# nothing Python needs to name a file and a line in a traceback is in the
+# difference. Those 41 files are 84.5 MiB unpacked and 13.3 MiB once run
+# through the switches electron-builder actually uses on the payload
+# (`-mx=9 -md=1m -ms=off -mf=BCJ`, see `electron-builder.yml`). That figure is
+# the whole saving and not an estimate of it: the payload is non-solid, so
+# each file's compressed size stands on its own.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_PROJECT="${ROOT}/python"
