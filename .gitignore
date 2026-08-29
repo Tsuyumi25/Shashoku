@@ -14,5 +14,9 @@ crates/*/*.node
 python/.venv/
 python/**/__pycache__/
 python/*.egg-info/
+# `uv build`'s setuptools backend leaves this in the source tree. Anchored to
+# `python/` so it doesn't also match the top-level `build/` that holds the
+# app icon (`build/icon.ico`, `build/icon.svg`).
+python/build/
 result
 result-*

@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Builds the Windows OCR sidecar's Python payload without a Windows machine:
+# a python-build-standalone interpreter plus a `uv pip install --target` tree
+# of every third-party package and this project's own wheel. `uv` only runs
+# here, at build time — none of it ships in the installer. See
+# `Windows打包/spec.md`「④ Python 環境怎麼進產物」「為什麼是全包」.
+set -euo pipefail
+
+# python-build-standalone tags releases by date, not by the CPython version
+# inside them, so both are pinned independently. Bumping either means
+# re-reading the sha256 for the new asset from that release's SHA256SUMS:
+# https://github.com/astral-sh/python-build-standalone/releases/download/<release>/SHA256SUMS
+PBS_RELEASE="20260825"
+PBS_PYTHON_VERSION="3.13.15"
+PBS_ASSET="cpython-${PBS_PYTHON_VERSION}+${PBS_RELEASE}-x86_64-pc-windows-msvc-install_only.tar.gz"
+PBS_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${PBS_ASSET}"
+PBS_SHA256="82a792c25550a421b29f381eaeafa6dccd1ffcbd97a1b1507b202f5df877cecf"
+# The `install_only_stripped` variant is 84 MiB smaller unpacked. Not used
+# without a measured compressed-size number to justify it.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_PROJECT="${ROOT}/python"
+OUT_DIR="${ROOT}/dist/sidecar-win32"
+
+mkdir -p "${ROOT}/dist"
+WORK="$(mktemp -d "${ROOT}/dist/.sidecar-win32.XXXXXX")"
+# Nothing below ever writes into $OUT_DIR directly — only this staging
+# directory. A failure at any step (including uv's own version check, the
+# very first thing that runs) leaves $OUT_DIR exactly as it was: either
+# absent or the last complete build, never a half-populated tree that a
+# rerun could mistake for done.
+#
+# `python/build/` is also cleaned up here rather than left to `.gitignore`
+# alone: it is `uv build`'s setuptools backend leaving `build/lib/...` behind
+# in the source tree (not under $WORK, since that's a byproduct of building
+# *in* $PYTHON_PROJECT, not an output path we control), and it would
+# otherwise sit there after every run whether or not it ever reaches git.
+trap 'rm -rf "$WORK" "${PYTHON_PROJECT}/build"' EXIT
+
+PY_DIR="${WORK}/py"
+SITE_DIR="${WORK}/site"
+
+retry_download() {
+  local url="$1" dest="$2" attempts=3 attempt delay
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if curl --fail --location --show-error --silent --output "$dest" "$url"; then
+      return 0
+    fi
+    rm -f "$dest"
+    echo "warning: download attempt ${attempt}/${attempts} failed: ${url}" >&2
+    if ((attempt < attempts)); then
+      delay=$((attempt * 5))
+      sleep "$delay"
+    fi
+  done
+  echo "error: giving up on ${url} after ${attempts} attempts" >&2
+  return 1
+}
+
+echo "==> exporting requirements from python/uv.lock"
+# This is also where a wrong `uv` gets caught: `python/pyproject.toml` pins
+# `[tool.uv] required-version = "==0.12.5"`, and `uv export` refuses outright
+# on a mismatch ("Required uv version ==0.12.5 does not match the running
+# version <...>") before anything below has run. That pin is intentionally
+# not re-checked here — loosening it in a wrapper would defeat the point of
+# having it in pyproject.toml at all.
+requirements="${WORK}/requirements-win32.txt"
+uv export --frozen --no-dev --no-emit-project --no-hashes \
+  --project "$PYTHON_PROJECT" -o "$requirements"
+
+echo "==> building shashoku_ocr's own wheel"
+wheel_dir="${WORK}/wheel"
+uv build --wheel --project "$PYTHON_PROJECT" -o "$wheel_dir"
+wheel_file="$(find "$wheel_dir" -maxdepth 1 -name '*.whl' -print -quit)"
+if [ -z "$wheel_file" ]; then
+  echo "error: uv build did not produce a wheel in ${wheel_dir}" >&2
+  exit 1
+fi
+
+echo "==> installing third-party packages for x86_64-pc-windows-msvc"
+mkdir -p "$SITE_DIR"
+# `uv export` does not carry `[[tool.uv.index]]` into the requirements file it
+# writes unless asked with `--emit-index-url`, which the export above does not
+# pass — so the index is named here instead. `torch==2.13.0+cpu`'s local
+# version segment (`+cpu`) does not exist on PyPI, and uv's default
+# `first-index` strategy stops at the first index that has a `torch` at all, so
+# without both of these flags the install fails with "No solution found when
+# resolving dependencies". uv itself retries transient network failures on each
+# of these downloads.
+uv pip install \
+  --python-platform x86_64-pc-windows-msvc \
+  --python-version 3.13 \
+  --extra-index-url https://download.pytorch.org/whl/cpu \
+  --index-strategy unsafe-best-match \
+  --target "$SITE_DIR" \
+  -r "$requirements"
+
+echo "==> installing shashoku_ocr's own wheel"
+# `--no-emit-project` above is what dropped shashoku_ocr from the
+# requirements file in the first place; `--no-deps` here is safe because
+# every dependency it has is already in $SITE_DIR from the step above.
+uv pip install --no-deps --target "$SITE_DIR" "$wheel_file"
+
+if [ ! -d "${SITE_DIR}/shashoku_ocr" ]; then
+  echo "error: shashoku_ocr package is missing from ${SITE_DIR}" >&2
+  exit 1
+fi
+if find "$SITE_DIR" -maxdepth 1 -iname 'pytest*' -print -quit | grep -q .; then
+  echo "error: a dev-only dependency leaked into ${SITE_DIR}" >&2
+  exit 1
+fi
+
+echo "==> downloading python-build-standalone ${PBS_PYTHON_VERSION}+${PBS_RELEASE}"
+tarball="${WORK}/${PBS_ASSET}"
+retry_download "$PBS_URL" "$tarball"
+
+actual_sha256="$(sha256sum "$tarball" | cut -d' ' -f1)"
+if [ "$actual_sha256" != "$PBS_SHA256" ]; then
+  echo "error: ${PBS_ASSET} sha256 mismatch (want ${PBS_SHA256}, got ${actual_sha256})" >&2
+  exit 1
+fi
+
+mkdir -p "$PY_DIR"
+tar -xzf "$tarball" -C "$PY_DIR" --strip-components=1
+rm -f "$tarball"
+
+rm -rf "$OUT_DIR"
+mv "$WORK" "$OUT_DIR"
+
+echo "==> done: ${OUT_DIR}"

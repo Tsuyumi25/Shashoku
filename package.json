@@ -20,6 +20,7 @@
     "engine:build:win32": "pnpm --filter @shashoku/engine build:win32",
     "engine:check-win32-imports": "./scripts/check-engine-imports",
     "sidecar:sync": "uv sync --project python",
+    "sidecar:build-win32": "./scripts/build-sidecar-win32",
     "check:rust-format": "cargo fmt --all -- --check",
     "check:rust-lints": "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "test:rust": "cargo test --workspace --locked",
