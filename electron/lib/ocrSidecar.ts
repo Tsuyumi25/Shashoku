@@ -4,6 +4,8 @@ import { createInterface } from "node:readline";
 import { app, BrowserWindow } from "electron";
 import { CHANNELS } from "@shared/ipc/channels";
 import type { OcrModel, OcrPageResult, OcrProgress, OcrStatus } from "@shared/ocr/types";
+import { EngineLog } from "./engineLog";
+import { LineSplitter } from "./lineSplitter";
 
 /**
  * The Python models, as a process the main process owns.
@@ -97,6 +99,9 @@ class OcrSidecar {
   // Keyed by the registry's own names rather than by `OcrModel`, because not
   // everything the sidecar holds is one.
   private loading = new Map<string, Promise<void>>();
+  // One log across every restart, not one per attempt — a crash loop should
+  // read as a crash loop in the file, not as a series of empty ones.
+  private readonly log = new EngineLog();
 
   private announce(status: OcrStatus) {
     this.broadcast(CHANNELS.ocrStatus, status);
@@ -135,9 +140,16 @@ class OcrSidecar {
     this.starting = new Promise<void>((ready, failed) => {
       this.announce({ state: "starting" });
       const { interpreter, cwd } = launchSpec();
+      const env = sanitizedEnv();
+      // Only the values this function itself decided, never the whole
+      // environment — the rest is the user's machine, and may hold tokens.
+      this.log.write(
+        `starting: interpreter=${interpreter} cwd=${cwd ?? "(app default)"} ` +
+          `LD_LIBRARY_PATH=${env.LD_LIBRARY_PATH || "(unset)"} HF_HOME=${env.HF_HOME || "(unset)"}`,
+      );
       const child = spawn(interpreter, ["-m", "shashoku_ocr"], {
         cwd,
-        env: sanitizedEnv(),
+        env,
       });
       this.child = child;
 
@@ -177,21 +189,36 @@ class OcrSidecar {
         else waiter.reject(new Error(message.error ?? "the OCR engine gave no reason"));
       });
 
-      createInterface({ input: child.stderr }).on("line", (line) => {
+      // Not `readline`: stderr carries a `\r`-redrawn progress bar, and
+      // `readline` only breaks lines on `\n` — it would hold the whole
+      // download as one line until the bar finally closes.
+      const splitter = new LineSplitter();
+      const record = (line: string) => {
         console.log("[ocr]", line);
+        this.log.write(line);
+      };
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        for (const line of splitter.push(chunk)) record(line);
+      });
+      child.stderr.on("end", () => {
+        for (const line of splitter.flush()) record(line);
       });
 
       child.once("spawn", () => {
+        this.log.write("spawned; treated as ready");
         this.announce({ state: "ready" });
         ready();
       });
       child.on("error", (problem) => {
+        this.log.write(`start failed: ${problem}`);
         this.announce({ state: "error", detail: String(problem) });
         this.collapse(`the OCR engine could not start: ${problem}`);
         failed(problem);
       });
       child.on("exit", (code, signal) => {
         const how = signal ? `signal ${signal}` : `code ${code}`;
+        this.log.write(`exited: ${how}`);
         this.announce({ state: "stopped", detail: how });
         // The wording matters more than it looks: an engine that died takes
         // the request with it but not the next one, and saying so is what
