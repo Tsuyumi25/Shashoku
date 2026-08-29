@@ -60,7 +60,42 @@ export function resolveLaunchSpec(
 const BLOCKED_EXACT = new Set(["VIRTUAL_ENV"]);
 const BLOCKED_PREFIXES = ["PYTHON", "CONDA"];
 
+/**
+ * Name segments that mark a variable as carrying a secret.
+ *
+ * Compared segment by segment after splitting on `_`, not as substrings: a
+ * substring test for `KEY` also swallows `MONKEY_BUSINESS`, and a variable
+ * the engine needed going missing fails far more quietly than a leak does.
+ */
+const CREDENTIAL_SEGMENTS = new Set([
+  "TOKEN",
+  "TOKENS",
+  "SECRET",
+  "SECRETS",
+  "KEY",
+  "KEYS",
+  "APIKEY",
+  "PASSWORD",
+  "PASSWD",
+  "PASSPHRASE",
+  "CREDENTIAL",
+  "CREDENTIALS",
+  "AUTH",
+]);
+
+function isCredentialVar(name: string): boolean {
+  // Uppercased on every platform, unlike the rule below it. That rule is
+  // about names Python itself reads, so POSIX's case-sensitivity is the whole
+  // point of it; this one is about secrets, and a secret is a secret whatever
+  // it is spelled like.
+  return name
+    .toUpperCase()
+    .split("_")
+    .some((segment) => CREDENTIAL_SEGMENTS.has(segment));
+}
+
 function isBlockedVar(name: string, platform: NodeJS.Platform): boolean {
+  if (isCredentialVar(name)) return true;
   // Windows treats environment variable names as case-insensitive; POSIX
   // does not, so a hypothetical lowercase `virtual_env` there is a distinct
   // variable and is left alone.
@@ -82,6 +117,13 @@ function isBlockedVar(name: string, platform: NodeJS.Platform): boolean {
  * `LOCALAPPDATA`, and nothing for proxy or CA configuration either. Naming
  * every variable a Python process, a proxy, and a certificate store between
  * them might care about is not a list that stays finished.
+ *
+ * What that argument does not excuse is handing the engine secrets. It loads
+ * at least one model with `trust_remote_code=True`, so code this repo did not
+ * write runs in that process, and "everything the launching shell was
+ * carrying" is a poor thing to give it. Hence `CREDENTIAL_SEGMENTS`: still a
+ * blocklist, so `APPDATA` and the proxy and CA variables keep arriving on
+ * their own, but one that reads names rather than enumerating them.
  */
 export function resolveSidecarEnv(
   platform: NodeJS.Platform,

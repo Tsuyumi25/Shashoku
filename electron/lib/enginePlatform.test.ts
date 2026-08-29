@@ -98,6 +98,71 @@ describe("resolveSidecarEnv", () => {
     expect(env.virtual_env).toBe("/kept");
   });
 
+  // The engine loads at least one model with `trust_remote_code=True`, so
+  // code this repo did not write runs inside that process. Inheriting the
+  // parent's environment wholesale therefore hands that code every secret the
+  // shell this app was launched from happens to be carrying.
+  describe("credential-shaped names", () => {
+    const secrets = {
+      SHASHOKU_MCP_TOKEN: "leaked",
+      GITHUB_TOKEN: "leaked",
+      AWS_SECRET_ACCESS_KEY: "leaked",
+      OPENAI_API_KEY: "leaked",
+      NPM_PASSWORD: "leaked",
+      HF_TOKEN: "leaked",
+      SOME_CREDENTIALS: "leaked",
+      DEPLOY_PASSPHRASE: "leaked",
+    };
+
+    it("drops them on every platform", () => {
+      for (const platform of ["linux", "win32", "darwin"] as const) {
+        const env = resolveSidecarEnv(platform, secrets, "/models");
+        expect(Object.keys(secrets).filter((name) => name in env)).toEqual([]);
+      }
+    });
+
+    // Unlike the `VIRTUAL_ENV` rule above, this one ignores case everywhere.
+    // That rule is about a name Python itself reads, so POSIX's
+    // case-sensitivity is the whole point; a secret is a secret whatever it
+    // is spelled like.
+    it("ignores case even on POSIX", () => {
+      const env = resolveSidecarEnv("linux", { github_token: "leaked" }, "/models");
+      expect(env.github_token).toBeUndefined();
+    });
+
+    // Matching has to be per underscore-separated segment. A plain substring
+    // test for `KEY` also swallows this one, and a variable the engine needed
+    // going missing fails far more quietly than a leak does.
+    it("does not swallow an ordinary name that merely contains one", () => {
+      const env = resolveSidecarEnv(
+        "win32",
+        {
+          MONKEY_BUSINESS: "kept",
+          LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local",
+          HTTPS_PROXY: "http://proxy:3128",
+          KEYBOARD_LAYOUT: "kept",
+        },
+        "C:\\models",
+      );
+      expect(env.MONKEY_BUSINESS).toBe("kept");
+      expect(env.LOCALAPPDATA).toBe("C:\\Users\\a\\AppData\\Local");
+      expect(env.HTTPS_PROXY).toBe("http://proxy:3128");
+      expect(env.KEYBOARD_LAYOUT).toBe("kept");
+    });
+
+    // NixOS's nix-ld path is read straight out of the inherited environment a
+    // few lines further down, so a rule that caught it would break every
+    // Linux launch rather than merely thinning the environment.
+    it("leaves the nix-ld library path alone", () => {
+      const env = resolveSidecarEnv(
+        "linux",
+        { NIX_LD_LIBRARY_PATH: "/run/current-system/sw/lib" },
+        "/models",
+      );
+      expect(env.LD_LIBRARY_PATH).toBe("/run/current-system/sw/lib");
+    });
+  });
+
   it("sets PYTHONUTF8 on every platform", () => {
     expect(resolveSidecarEnv("win32", {}, "C:\\models").PYTHONUTF8).toBe("1");
     expect(resolveSidecarEnv("linux", {}, "/models").PYTHONUTF8).toBe("1");
