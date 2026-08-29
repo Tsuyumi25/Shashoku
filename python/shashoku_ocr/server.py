@@ -12,7 +12,7 @@ import sys
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import IO, Any
+from typing import IO, Any, Iterable
 
 from .page import STATIONS, read_page
 from .registry import Registry
@@ -102,7 +102,7 @@ class Server:
         raise ValueError(f"unknown op: {op!r}")
 
 
-def serve(source: IO[str], out: IO[str]) -> int:
+def serve(source: Iterable[str], out: IO[str]) -> int:
     server = Server(out)
     log("shashoku-ocr sidecar ready")
 
