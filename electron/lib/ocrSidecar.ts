@@ -57,6 +57,22 @@ export const REQUEST_SILENCE_MS = 180_000;
 export const HANDSHAKE_SILENCE_MS = 30_000;
 
 /**
+ * How long the `shutdown` request itself may go unanswered.
+ *
+ * Its own number, and emphatically not `REQUEST_SILENCE_MS`: that budget is
+ * sized for a page of OCR, while the engine that cannot answer this is
+ * precisely the engine that is mid-request — see `stop()` below. Spending the
+ * request budget here would mean waiting three minutes for a reply only an
+ * *idle* engine was ever going to send, and `before-quit` awaits this, so
+ * those three minutes are a window the app refuses to close in.
+ *
+ * An idle engine answers in the time it takes to write one line of JSON, so
+ * this only has to cover one that has just finished work and not yet come
+ * back round to its read.
+ */
+export const SHUTDOWN_ANSWER_MS = 2_000;
+
+/**
  * How long a well-mannered goodbye is given before the signal.
  *
  * Exported for the same reason as the two silence budgets above: a test
@@ -381,15 +397,23 @@ class OcrSidecar {
    * affairs in order when it is between requests, and cannot hear anything at
    * all when it is inside a native call — which is most of the time it is
    * doing work. So it is asked, and then, if it is still there, told.
+   *
+   * Both stages are bounded, and by their own budgets rather than the
+   * request path's: the whole of this is what `before-quit` waits on, so any
+   * budget spent here is a window in which the app will not close.
+   *
+   * `send` directly rather than `request`, which would `start()` first — a
+   * stop has no business bringing an engine up to say goodbye to.
    */
   async stop() {
     const child = this.child;
     if (!child) return;
 
     try {
-      await this.request("shutdown");
+      await this.send(child, "shutdown", {}, SHUTDOWN_ANSWER_MS);
     } catch {
-      // It was already leaving, or already gone.
+      // Never answered, already leaving, or already gone — all three end the
+      // same way, one step down.
     }
     // Closing stdin is the same signal the engine watches for when this
     // process dies without warning, so it is also the ordinary way to end it.

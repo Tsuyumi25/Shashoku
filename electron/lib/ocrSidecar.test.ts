@@ -114,6 +114,7 @@ async function boot() {
     logSpy,
     HANDSHAKE_SILENCE_MS: mod.HANDSHAKE_SILENCE_MS,
     REQUEST_SILENCE_MS: mod.REQUEST_SILENCE_MS,
+    SHUTDOWN_ANSWER_MS: mod.SHUTDOWN_ANSWER_MS,
     SHUTDOWN_GRACE_MS: mod.SHUTDOWN_GRACE_MS,
   };
 }
@@ -382,6 +383,37 @@ describe("stop", () => {
     await vi.advanceTimersByTimeAsync(0);
     await flush();
     await expect(stopPromise).resolves.toBeUndefined();
+  });
+
+  // Both tests above answer the `shutdown`, which is the case that was never
+  // in doubt. The engine only answers when it is between requests — `stop()`'s
+  // own comment says as much — so the case that decides how long a quit takes
+  // is the one where it is inside a native call and never answers at all.
+  it("gives up on an unanswered shutdown in its own budget, not the request's", async () => {
+    const { engine, child, SHUTDOWN_ANSWER_MS, SHUTDOWN_GRACE_MS } = await bootReady();
+    const stopPromise = engine.stop();
+    await flush();
+    expect(lastRequest(child).op).toBe("shutdown");
+
+    // Deliberately never answered, exactly as a busy engine would not answer.
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_ANSWER_MS);
+    await flush();
+    expect(child.stdin.end).toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_GRACE_MS);
+    await flush();
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    await vi.advanceTimersByTimeAsync(0);
+    await flush();
+    await expect(stopPromise).resolves.toBeUndefined();
+  });
+
+  it("keeps the whole shutdown far below a single request's silence budget", async () => {
+    const { engine, SHUTDOWN_ANSWER_MS, SHUTDOWN_GRACE_MS, REQUEST_SILENCE_MS } =
+      await bootReady();
+    engine.stop();
+    expect(SHUTDOWN_ANSWER_MS + SHUTDOWN_GRACE_MS).toBeLessThan(REQUEST_SILENCE_MS / 10);
   });
 
   it("resolves immediately, without spawning anything, when no engine has ever run", async () => {
