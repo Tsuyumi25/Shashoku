@@ -251,13 +251,13 @@ Var pid
   ; did not catch) is scheduled for the next boot instead of silently left
   ; behind.
   ;
-  ; TODO: this is not a faithful port of upstream's structure. Upstream closes
-  ; the `isUpdated` block with `${endif}` and then runs `SetOutPath $TEMP` and
-  ; `RMDir /r $INSTDIR` unconditionally — clearing whatever shallow
-  ; directories the rename left behind, and moving the uninstaller's own
-  ; working directory out of $INSTDIR first, since NSIS cannot delete the
-  ; current working directory. Turning that `${endif}` into the `${else}`
-  ; below drops both of those from the update path.
+  ; The update path keeps upstream's plain `RMDir /r`, not `RMDIR_LOGGED`. The
+  ; rename above has already taken the directory away, so what is left for
+  ; this line to remove is whatever could not move — shallow directories, if
+  ; anything at all. `RMDIR_LOGGED` reports a failure to remove as an error in
+  ; the details pane, and NSIS does not document whether `RMDir` sets the
+  ; error flag for a directory that is simply not there, so it would risk
+  ; announcing a failure on every ordinary update.
   !macro customRemoveFiles
     ${if} ${isUpdated}
       CreateDirectory "$PLUGINSDIR\old-install"
@@ -273,6 +273,11 @@ Var pid
         Pop $R0
         Abort `Can't rename "$INSTDIR" to "$PLUGINSDIR\old-install".`
       ${endif}
+
+      ; Both lines are upstream's, and both matter: NSIS cannot delete its own
+      ; working directory, and the rename leaves shallow directories behind.
+      SetOutPath $TEMP
+      RMDir /r $INSTDIR
     ${else}
       SetOutPath $TEMP
       !insertmacro RMDIR_LOGGED "$INSTDIR" "the application"
