@@ -56,8 +56,14 @@ export const REQUEST_SILENCE_MS = 180_000;
  */
 export const HANDSHAKE_SILENCE_MS = 30_000;
 
-/** How long a well-mannered goodbye is given before the signal. */
-const SHUTDOWN_GRACE_MS = 2_000;
+/**
+ * How long a well-mannered goodbye is given before the signal.
+ *
+ * Exported for the same reason as the two silence budgets above: a test
+ * driving fake timers needs the real number, not a copy that could drift
+ * from it.
+ */
+export const SHUTDOWN_GRACE_MS = 2_000;
 
 interface Pending {
   resolve: (value: unknown) => void;

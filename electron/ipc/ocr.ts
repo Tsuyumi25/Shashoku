@@ -13,12 +13,22 @@ export function registerOcrHandlers() {
   ipcMain.handle(CHANNELS.ocrUnload, (_event, model: OcrModel) => engine.unload(model));
   ipcMain.handle(CHANNELS.ocrStop, () => engine.stop());
 
-  // Best effort, and deliberately not a reason to hold up the quit: the window
-  // has its own grace period to finish saving, and stealing the shutdown from
-  // it to wait on a subprocess would be the wrong thing to make someone wait
-  // for. What actually guarantees no engine is left behind is on the far side
-  // — it watches its own stdin, which closes whatever kills this process.
-  app.on("before-quit", () => {
-    void engine.stop().catch(() => {});
+  // Blocking, not fire-and-forget: the engine is a separate process this one
+  // does not own a job object for, so letting Electron's own exit race ahead
+  // of it leaves a python.exe still holding its own files open underneath the
+  // very directory an update is about to overwrite. `engine.stop()` already
+  // caps its own wait and force-kills past it, so the delay this adds to quit
+  // is bounded, not open-ended.
+  let engineStopped = false;
+  app.on("before-quit", (event) => {
+    if (engineStopped) return;
+    event.preventDefault();
+    void engine
+      .stop()
+      .catch(() => {})
+      .then(() => {
+        engineStopped = true;
+        app.quit();
+      });
   });
 }

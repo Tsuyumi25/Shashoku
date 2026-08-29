@@ -101,6 +101,13 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   artifactName: "${productName}-Setup-${version}.${ext}"
+  # A standard uninstall removes the app's own settings and logs — not the
+  # models (LOCALAPPDATA, a different tree; see `build/installer.nsh`'s
+  # extra confirm-gated opt-in for those) and not the user's projects
+  # (arbitrary files outside anything this app tracks). electron-builder's
+  # own default for this is `false`, which would silently leave preferences
+  # and logs behind on every ordinary uninstall.
+  deleteAppDataOnUninstall: true
 
 # Do not set `compression`, `sevenZipOptions`, or `ELECTRON_BUILDER_7Z_FILTER`
 # here. NSIS's own compressor is pinned to `zlib` by electron-builder itself

@@ -109,7 +109,13 @@ async function boot() {
   const logSpy = vi.spyOn(EngineLog.prototype, "write");
 
   const mod = await import("./ocrSidecar");
-  return { engine: mod.ocrSidecar(), logSpy, HANDSHAKE_SILENCE_MS: mod.HANDSHAKE_SILENCE_MS, REQUEST_SILENCE_MS: mod.REQUEST_SILENCE_MS };
+  return {
+    engine: mod.ocrSidecar(),
+    logSpy,
+    HANDSHAKE_SILENCE_MS: mod.HANDSHAKE_SILENCE_MS,
+    REQUEST_SILENCE_MS: mod.REQUEST_SILENCE_MS,
+    SHUTDOWN_GRACE_MS: mod.SHUTDOWN_GRACE_MS,
+  };
 }
 
 /** Drives a fresh child through a successful handshake and returns it. */
@@ -321,6 +327,67 @@ describe("ordinary requests, after the handshake succeeds", () => {
     await flush();
 
     await expect(resultPromise).rejects.toThrow("boom");
+  });
+});
+
+describe("stop", () => {
+  // This is the half of "no longer fire-and-forget" that lives inside the
+  // engine itself: given a real exit, or none, `stop()` still has to settle
+  // rather than return before either has happened. The other half — the
+  // `before-quit` call site not racing ahead of this promise — is
+  // `electron/ipc/ocr.test.ts`; that file is what actually regressed before
+  // this fix, since this method's own wait-then-kill shape was already
+  // correct and simply untested.
+  it("asks first, and waits for the child to actually exit before resolving", async () => {
+    const { engine, child } = await bootReady();
+    const stopPromise = engine.stop();
+    await flush();
+
+    const shutdown = lastRequest(child);
+    expect(shutdown.op).toBe("shutdown");
+
+    reply(child, shutdown.id, {});
+    await flush();
+    expect(child.stdin.end).toHaveBeenCalled();
+
+    let settled = false;
+    stopPromise.then(() => {
+      settled = true;
+    });
+    await flush();
+    expect(settled).toBe(false);
+
+    child.emit("exit", 0, null);
+    await flush();
+
+    expect(settled).toBe(true);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("force-kills once the grace period passes without the child exiting on its own", async () => {
+    const { engine, child, SHUTDOWN_GRACE_MS } = await bootReady();
+    const stopPromise = engine.stop();
+    await flush();
+
+    reply(child, lastRequest(child).id, {});
+    await flush();
+    expect(child.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_GRACE_MS);
+    await flush();
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    // The kill's own exit echoes in on its own timer, same as the
+    // handshake's — see the equivalent step in the handshake tests above.
+    await vi.advanceTimersByTimeAsync(0);
+    await flush();
+    await expect(stopPromise).resolves.toBeUndefined();
+  });
+
+  it("resolves immediately, without spawning anything, when no engine has ever run", async () => {
+    const { engine } = await boot();
+    await expect(engine.stop()).resolves.toBeUndefined();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });
 
