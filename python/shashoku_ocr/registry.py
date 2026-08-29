@@ -10,7 +10,8 @@ from __future__ import annotations
 import importlib
 import threading
 import time
-from typing import Any, Protocol
+from contextlib import contextmanager
+from typing import Any, Iterator, Protocol
 
 
 class Model(Protocol):
@@ -65,6 +66,41 @@ class Registry:
             if not model.is_loaded():
                 raise RuntimeError(f"model {name!r} is not loaded")
         return model
+
+    @contextmanager
+    def held(self, name: str) -> Iterator[Any]:
+        """Borrow a model for exactly the span it is used, lock held throughout.
+
+        `load()` and `get()` each take the per-model lock only long enough to
+        check or flip `is_loaded()`, then hand the model back unguarded. That
+        is fine for a single request, but two pages reading with the same
+        model in parallel both pass that check, both receive the same object,
+        and whichever finishes first unloads it while the other is still
+        mid-inference — the caller then reads a `None` where a processor used
+        to be. Holding the lock for the whole block closes that window: a
+        second caller waiting on `held()` does not get in until the first one
+        has both used the model and unloaded it.
+
+        The price is that two callers wanting the *same* model now run one
+        after the other rather than sharing the loaded weights — the lock is
+        per-model, so different models still run side by side.
+
+        ⚠️ Not reentrant. Do not ask the registry for this same model again
+        from inside the block: the lock is a plain `threading.Lock`, and a
+        second acquire from the thread already holding it deadlocks rather
+        than succeeding.
+
+        Unloads on the way out even when the block raises, so a model that
+        failed mid-use does not stay resident.
+        """
+        model = self.instance(name)
+        with self.gates[name]:
+            if not model.is_loaded():
+                model.load()
+            try:
+                yield model
+            finally:
+                model.unload()
 
     def load(self, name: str) -> float:
         model = self.instance(name)

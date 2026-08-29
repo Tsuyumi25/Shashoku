@@ -69,7 +69,7 @@ def read_page(
             for at, region in enumerate(regions)
             if region["label"] != DRAWN or model in READS_DRAWN
         ]
-        with _held(registry, model) as reader:
+        with registry.held(model) as reader:
             if model == "ppocr":
                 # The cutter and one of the readers are the same weights, so
                 # the columns are found while they are already in memory. Every
@@ -97,7 +97,7 @@ def _regions(registry: Any, image_path: str, say: Callable[[str], None]) -> list
     found: list[dict[str, Any]] = []
     for detector in ("bubble", "layout"):
         say(f"detect-{detector}")
-        with _held(registry, detector) as model:
+        with registry.held(detector) as model:
             found.extend(model.detect(image_path, None))
 
     kept: list[dict[str, Any]] = []
@@ -115,7 +115,7 @@ def _measure(
 ) -> None:
     """How each region is set, written onto the regions in place."""
     say("typography")
-    with _held(registry, "fontdet") as appraiser:
+    with registry.held("fontdet") as appraiser:
         measured = appraiser.read(image_path, [_box(r) for r in regions])
     for region, one in zip(regions, measured):
         region["vertical"] = direction_of(region, one)
@@ -195,21 +195,6 @@ def _read_columns(
         }
         for at, group in pieces.items()
     ]
-
-
-class _held:
-    """One model's weights, in memory for exactly as long as they are used."""
-
-    def __init__(self, registry: Any, name: str) -> None:
-        self.registry = registry
-        self.name = name
-
-    def __enter__(self) -> Any:
-        self.registry.load(self.name)
-        return self.registry.get(self.name)
-
-    def __exit__(self, *_: Any) -> None:
-        self.registry.unload(self.name)
 
 
 def _box(b: dict[str, Any]) -> dict[str, Any]:
