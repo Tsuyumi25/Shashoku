@@ -55,11 +55,22 @@ Var pid
 ;
 ; `RMDir /r` alone, which is what electron-builder's own uninstaller falls
 ; back to, does not pass `/REBOOTOK`: a locked file is silently left behind
-; instead of being scheduled for the next boot. `/REBOOTOK` fixes that, but
-; introduces a new problem this macro exists to solve — telling "this call
-; just scheduled a reboot" apart from "a reboot was already scheduled by an
-; earlier step in the same uninstall run" (for us: the models directory can
-; be removed before $INSTDIR is, see `customUnInstall` below). Snapshotting
+; instead of being scheduled for the next boot. `/REBOOTOK` improves on that,
+; but only sometimes, and never for a standard account: NSIS implements it
+; with `MoveFileEx`'s `MOVEFILE_DELAY_UNTIL_REBOOT`, which Microsoft
+; documents as usable "only if the process is in the context of a user who
+; belongs to the administrators group or the LocalSystem account" — it writes
+; the pending rename under HKLM. `electron-builder.yml` sets
+; `perMachine: false`, so this installer does not elevate and this flag is
+; best-effort, not a guarantee. ⚠️ Do not treat it as the answer to a locked
+; file; closing whatever holds the lock is, and that is what
+; `customCheckAppRunning` above is for.
+;
+; `/REBOOTOK` also introduces a problem this macro exists to solve — telling
+; "this call just scheduled a reboot" apart from "a reboot was already
+; scheduled by an earlier step in the same uninstall run" (for us: the models
+; directory can be removed before $INSTDIR is, see `customUnInstall` below).
+; Snapshotting
 ; the reboot flag before the call and OR-ing it back in afterward is what
 ; makes that distinction possible, rather than one step's success silently
 ; clearing another step's pending-reboot flag.
@@ -94,15 +105,22 @@ Var pid
   ClearErrors
   RMDir /r /REBOOTOK "${_path}"
 
+  ; Read before branching, not inside a success branch. The OR below reads $1
+  ; on every path, and `Push $1` above only saves the caller's value — it does
+  ; not clear it — so leaving it unset on the failure path means OR-ing
+  ; against whatever the caller happened to be holding, and a stale "1" there
+  ; asks the user for a reboot that would delete nothing. Reading it here is
+  ; also the truer test: `/REBOOTOK` can defer part of a tree and still set
+  ; the error flag on a file it could not even defer, so "something was
+  ; scheduled" and "something failed" are not exclusive.
+  !insertmacro GET_REBOOTFLAG_TO_VAR $1
+
   ${If} ${Errors}
     DetailPrint "[Error] Failed to remove ${_description}: ${_path}"
+  ${ElseIf} $1 == "1"
+    DetailPrint "[Reboot] Scheduled removal of ${_description}: ${_path}"
   ${Else}
-    !insertmacro GET_REBOOTFLAG_TO_VAR $1
-    ${If} $1 == "1"
-      DetailPrint "[Reboot] Scheduled removal of ${_description}: ${_path}"
-    ${Else}
-      DetailPrint "[OK] Removed ${_description}: ${_path}"
-    ${EndIf}
+    DetailPrint "[OK] Removed ${_description}: ${_path}"
   ${EndIf}
 
   ${If} $0 == "1"
