@@ -23,7 +23,13 @@ def hub_cached(repo: str, revision: str, **kwargs: Any) -> bool:
     about to cost. Every route here downloads on first use, so the answer is
     never "you cannot" — it is "this will reach the network first".
     """
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import get_cached_repo_tree, snapshot_download
+    from huggingface_hub.errors import CachedRepoTreeNotFoundError
+
+    try:
+        get_cached_repo_tree(repo, revision=revision)
+    except CachedRepoTreeNotFoundError:
+        return False
 
     try:
         snapshot_download(repo, revision=revision, local_files_only=True, **kwargs)
