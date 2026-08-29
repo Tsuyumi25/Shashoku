@@ -234,3 +234,22 @@ def test_windows_with_a_real_pipe_polls() -> None:
 
     assert isinstance(result, PolledPipeLines)
     assert list(result) == ["hi\n"]
+
+
+def test_a_failing_peek_is_not_mistaken_for_a_closed_pipe() -> None:
+    """`None` from `peek` means the peer is gone; anything else going wrong
+    has to travel rather than be filed under "the conversation ended".
+
+    The Windows half of that split — which Win32 error codes count as gone —
+    lives in `win32_pipe_source`, and only a real pipe handle can exercise
+    it. This is the half `PolledPipeLines` is responsible for keeping: it
+    must not swallow what `peek` raises.
+    """
+
+    def peek() -> int | None:
+        raise OSError(6, "The handle is invalid")
+
+    reader = PolledPipeLines(peek, lambda size: b"", poll_interval=0)
+
+    with pytest.raises(OSError):
+        next(reader)

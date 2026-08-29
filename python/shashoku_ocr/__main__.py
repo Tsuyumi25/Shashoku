@@ -59,6 +59,15 @@ def utf8_stdin(stream: IO[str] | None = None) -> IO[str]:
 # below.
 POLL_INTERVAL_SECONDS = 0.01
 
+# The two Win32 errors that mean the writing end has gone away, as opposed to
+# the call itself having failed. Treating every failure as end-of-input — which
+# is what returning `None` unconditionally did — hands the same verdict to a
+# bad handle, an exhausted resource, and a peer that closed cleanly, so a real
+# fault arrives disguised as a tidy shutdown that nobody investigates.
+ERROR_BROKEN_PIPE = 109
+ERROR_PIPE_NOT_CONNECTED = 233
+PEER_GONE_ERRORS = frozenset({ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED})
+
 
 class PolledPipeLines(Iterator[str]):
     """Assembles request lines from a pipe without ever sitting inside a
@@ -163,9 +172,11 @@ class PolledPipeLines(Iterator[str]):
 
             available = self._peek()
             if available is None:
-                # `PeekNamedPipe` failing here (as opposed to at the very
-                # first call, which `win32_pipe_source` treats as "this
-                # isn't really a pipe") means the peer closed its end.
+                # `None` is `peek`'s word for "the peer closed its end", and
+                # only that. Anything else that goes wrong down there is
+                # raised instead of returned, and is deliberately left to
+                # travel: a failure disguised as a clean end of input is a
+                # failure nobody goes looking for.
                 self._peer_gone = True
                 continue
 
@@ -186,29 +197,58 @@ def win32_pipe_source() -> tuple[Callable[[], int | None], Callable[[int], bytes
     """Build the real `peek`/`read` pair for stdin's `PeekNamedPipe`, or
     `None` if stdin's handle does not answer to it at all.
 
-    A handle that does not answer is not an error case to recover from —
-    it is Windows telling us stdin is a redirected file or a console rather
-    than a pipe, and `for line in stream` was already correct for both of
-    those; only a live pipe can deadlock the way `PolledPipeLines` exists to
-    avoid.
+    A handle that does not answer *the opening probe* is not an error case to
+    recover from — it is Windows telling us stdin is a redirected file or a
+    console rather than a pipe, and `for line in stream` was already correct
+    for both of those; only a live pipe can deadlock the way
+    `PolledPipeLines` exists to avoid. Once that probe has succeeded, though,
+    the same failure means something else entirely, and the returned `peek`
+    says so: `None` only for the two errors that mean the peer is gone, and
+    an exception for everything else.
     """
     import msvcrt
 
     fd = 0
     handle = msvcrt.get_osfhandle(fd)
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    # `use_last_error=True` gives ctypes its own copy of `GetLastError` for
+    # each call into this library, rather than leaving us to read a
+    # thread-global that any ctypes call in between could have overwritten.
+    # Built here rather than at import time because `ctypes.WinDLL` does not
+    # exist off Windows, and this module is imported on Linux by its tests.
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+
+    # Declared rather than left to ctypes' defaults. An undeclared integer
+    # argument is marshalled as a C `int`, and a HANDLE on 64-bit Windows is
+    # pointer-sized; Windows happens to keep handle values inside 32 bits, so
+    # this has been working by permission rather than by contract.
+    kernel32.PeekNamedPipe.argtypes = [
+        ctypes.wintypes.HANDLE,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+    ]
+    kernel32.PeekNamedPipe.restype = ctypes.wintypes.BOOL
 
     def peek() -> int | None:
         held = ctypes.wintypes.DWORD()
-        answered = kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(held), None)
-        if not answered:
+        if kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(held), None):
+            return held.value
+        code = ctypes.get_last_error()
+        if code in PEER_GONE_ERRORS:
             return None
-        return held.value
+        raise ctypes.WinError(code)  # type: ignore[attr-defined]
 
     def read(size: int) -> bytes:
         return os.read(fd, size)
 
-    if peek() is None:
+    # The probe is the one place where every failure means the same thing, so
+    # it is the one place that swallows them all.
+    try:
+        if peek() is None:
+            return None
+    except OSError:
         return None
     return peek, read
 
