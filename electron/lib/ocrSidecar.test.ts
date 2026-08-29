@@ -39,13 +39,13 @@ class FakeChild extends EventEmitter {
 }
 
 let currentChild: FakeChild | null = null;
-const spawnMock = vi.fn(() => {
+const spawnMock = vi.fn((..._args: unknown[]) => {
   const child = new FakeChild();
   currentChild = child;
   return child;
 });
 vi.mock("node:child_process", () => ({
-  spawn: () => spawnMock(),
+  spawn: (...args: unknown[]) => spawnMock(...args),
 }));
 
 class FakeWebContents {
@@ -61,6 +61,7 @@ vi.mock("electron", () => ({
   app: {
     getAppPath: () => "/fake/app",
     getPath: () => logDir,
+    isPackaged: false,
   },
   BrowserWindow: { getAllWindows: () => [fakeWindow] },
 }));
@@ -136,18 +137,23 @@ async function resultReplyForModels(child: FakeChild) {
 
 let tempDirs: string[] = [];
 
+const originalShashokuPython = process.env.SHASHOKU_PYTHON;
+
 beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
   currentChild = null;
   fakeWindow = new FakeWindow();
   spawnMock.mockClear();
+  delete process.env.SHASHOKU_PYTHON;
 });
 
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs = [];
+  if (originalShashokuPython === undefined) delete process.env.SHASHOKU_PYTHON;
+  else process.env.SHASHOKU_PYTHON = originalShashokuPython;
 });
 
 describe("handshake", () => {
@@ -315,5 +321,42 @@ describe("ordinary requests, after the handshake succeeds", () => {
     await flush();
 
     await expect(resultPromise).rejects.toThrow("boom");
+  });
+});
+
+describe("launch wiring", () => {
+  // These exercise the impure `launchSpec()`/`sanitizedEnv()` wrappers, not
+  // the platform logic itself — that matrix lives in `enginePlatform.test.ts`
+  // and `modelHome.test.ts`, tested as pure functions with the platform as a
+  // parameter. This just guards that the wiring between them and `spawn()`
+  // passes the right arguments in the right order.
+  it("spawns the dev venv interpreter under the app path when nothing is supplied", async () => {
+    const { engine } = await boot();
+    void engine.models();
+    await flush();
+
+    const [interpreter, , options] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { cwd?: string; env: NodeJS.ProcessEnv },
+    ];
+    expect(interpreter).toBe("/fake/app/python/.venv/bin/python");
+    expect(options.cwd).toBe("/fake/app/python");
+    expect(options.env.PYTHONUTF8).toBe("1");
+  });
+
+  it("lets SHASHOKU_PYTHON override the interpreter, with no cwd of its own", async () => {
+    process.env.SHASHOKU_PYTHON = "/opt/custom/python";
+    const { engine } = await boot();
+    void engine.models();
+    await flush();
+
+    const [interpreter, , options] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { cwd?: string },
+    ];
+    expect(interpreter).toBe("/opt/custom/python");
+    expect(options.cwd).toBeUndefined();
   });
 });

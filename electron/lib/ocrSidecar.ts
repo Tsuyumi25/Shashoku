@@ -1,11 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { join } from "node:path";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { app, BrowserWindow } from "electron";
 import { CHANNELS } from "@shared/ipc/channels";
 import type { OcrModel, OcrPageResult, OcrProgress, OcrStatus } from "@shared/ocr/types";
+import { type EngineLaunchSpec, resolveLaunchSpec, resolveSidecarEnv } from "./enginePlatform";
 import { EngineLog } from "./engineLog";
 import { LineSplitter } from "./lineSplitter";
+import { modelHome } from "./modelHome";
 
 /**
  * The Python models, as a process the main process owns.
@@ -65,44 +67,15 @@ interface Pending {
   heard: () => void;
 }
 
-function launchSpec(): { interpreter: string; cwd?: string } {
-  const supplied = process.env.SHASHOKU_PYTHON;
-  if (supplied) return { interpreter: supplied };
-
-  const root = app.getAppPath();
-  return {
-    interpreter: join(root, "python", ".venv", "bin", "python"),
-    cwd: join(root, "python"),
-  };
+function launchSpec(): EngineLaunchSpec {
+  // Packaged: the payload sits beside `resources/`, not inside `app.asar`.
+  // Dev: `getAppPath()` is this repo's root.
+  const root = app.isPackaged ? dirname(process.resourcesPath) : app.getAppPath();
+  return resolveLaunchSpec(process.platform, app.isPackaged, root, process.env.SHASHOKU_PYTHON);
 }
 
-/**
- * The environment the engine gets, rather than the one this process has.
- *
- * Electron exports variables that mean something to Electron and something
- * else to anything that reads them by accident, and a Python process inheriting
- * the lot has been a source of confusing failures elsewhere. Only what the
- * engine needs is passed on.
- *
- * `LD_LIBRARY_PATH` is the interesting one: the wheels are manylinux builds
- * that expect a distribution's shared libraries, which on NixOS live wherever
- * nix-ld was told to put them.
- */
-function sanitizedEnv(): NodeJS.ProcessEnv {
-  const { PATH, HOME, USER, LANG, TMPDIR, HF_HOME, NIX_LD_LIBRARY_PATH, LD_LIBRARY_PATH } =
-    process.env;
-  return {
-    PATH,
-    HOME,
-    USER,
-    LANG,
-    TMPDIR,
-    HF_HOME,
-    PYTHONUNBUFFERED: "1",
-    // Progress bars are drawn on stdout, which the protocol owns.
-    HF_HUB_DISABLE_PROGRESS_BARS: "1",
-    LD_LIBRARY_PATH: NIX_LD_LIBRARY_PATH ?? LD_LIBRARY_PATH ?? "",
-  };
+function sanitizedEnv(pythonPath: string[] | undefined): NodeJS.ProcessEnv {
+  return resolveSidecarEnv(process.platform, process.env, modelHome(), pythonPath);
 }
 
 class OcrSidecar {
@@ -153,8 +126,8 @@ class OcrSidecar {
 
     this.starting = new Promise<void>((ready, failed) => {
       this.announce({ state: "starting" });
-      const { interpreter, cwd } = launchSpec();
-      const env = sanitizedEnv();
+      const { interpreter, cwd, pythonPath } = launchSpec();
+      const env = sanitizedEnv(pythonPath);
       // Only the values this function itself decided, never the whole
       // environment — the rest is the user's machine, and may hold tokens.
       this.log.write(

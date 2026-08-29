@@ -21,12 +21,18 @@ export function resolveCacheRoot(
 ): string {
   // The platform asked about decides the separator, not the one this is
   // running on — otherwise the answer is only ever right at home.
+  // Two spellings because the platforms disagree and both are right: Windows
+  // and macOS name a user-visible folder after the product, beside `Documents`
+  // and `Application Support`, while the XDG directories are lowercase machine
+  // names nobody browses. Electron's own `getPath` already writes `Shashoku` on
+  // the first two, so a lowercase folder next to it reads as a second
+  // application.
   if (platform === "win32") {
     const local = env.LOCALAPPDATA || win32.join(home, "AppData", "Local");
-    return win32.join(local, "shashoku", "Cache");
+    return win32.join(local, "Shashoku", "Cache");
   }
   if (platform === "darwin") {
-    return posix.join(home, "Library", "Caches", "shashoku");
+    return posix.join(home, "Library", "Caches", "Shashoku");
   }
   // The XDG spec says a relative value is invalid and must be ignored.
   const xdg = env.XDG_CACHE_HOME;

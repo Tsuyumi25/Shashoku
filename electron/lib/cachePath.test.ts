@@ -26,19 +26,19 @@ describe("resolveCacheRoot", () => {
 
   it("uses the caches folder on macOS", () => {
     expect(resolveCacheRoot("darwin", {}, "/Users/a")).toBe(
-      "/Users/a/Library/Caches/shashoku",
+      "/Users/a/Library/Caches/Shashoku",
     );
   });
 
   it("uses LOCALAPPDATA on Windows", () => {
     expect(
       resolveCacheRoot("win32", { LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" }, "C:\\Users\\a"),
-    ).toBe("C:\\Users\\a\\AppData\\Local\\shashoku\\Cache");
+    ).toBe("C:\\Users\\a\\AppData\\Local\\Shashoku\\Cache");
   });
 
   it("falls back under the home folder when Windows does not say", () => {
     expect(resolveCacheRoot("win32", {}, "C:\\Users\\a")).toBe(
-      "C:\\Users\\a\\AppData\\Local\\shashoku\\Cache",
+      "C:\\Users\\a\\AppData\\Local\\Shashoku\\Cache",
     );
   });
 });
