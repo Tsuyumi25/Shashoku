@@ -1,0 +1,136 @@
+# Windows installer packaging. Only the win/NSIS target is exercised here —
+# see `Windows打包/spec.md`「Out of Scope」in the plan repo for what this
+# deliberately does not cover yet (arm64, auto-update, mac/Linux targets).
+#
+# Nothing in CI builds this target. `.github/workflows/check.yml` runs the
+# source suite and `nix flake check`, and neither reaches
+# `scripts/build-installer-win32` — the installer is built by hand, on Linux,
+# through Wine. So a build that finishes says the packaging config still
+# assembles and nothing more; whether a clean Windows machine can install,
+# run, and uninstall this is a question only a clean VM answers.
+#
+# `electron-builder` is pinned to an exact version in `package.json`
+# (`26.15.7`, the latest release), not a range: the NSIS payload's BCJ safety
+# pin below (see the `nsis:` block) only exists from `26.15.6` onward —
+# `packages/app-builder-lib/src/targets/archive.ts` on `26.15.3` through
+# `26.15.5` has no `installTimeDecodable` branch at all, so any of those
+# would silently go back to 7-Zip's own filter auto-selection.
+
+appId: io.github.tsuyumi25.shashoku
+productName: Shashoku
+
+directories:
+  # Kept apart from `dist/sidecar-win32/`, the Python payload staged by
+  # `scripts/build-sidecar-win32` — the two must not collide or partially
+  # overwrite each other.
+  output: dist/installer
+
+# The bundlers (electron-vite) already inline every npm dependency into
+# `out/main`, `out/preload`, `out/renderer` except the native addon, which a
+# bundler cannot follow through a `.node` file — see `electron/lib/engine.ts`.
+# So node_modules is excluded wholesale and only that one package's directory
+# is let back in — by exact file, not `@shashoku/engine/**/*`: that directory
+# is a pnpm workspace symlink straight to `crates/shashoku-engine/`, the
+# crate's own source tree (`src/`, `Cargo.toml`, `build.rs`), and a `**/*`
+# glob follows the symlink and packs all of it. `index.d.ts` is left out too
+# — types are a compile-time concern this addon doesn't need to carry at
+# runtime, and `nix/engine.nix` draws the same line for the same package.
+#
+# electron-builder still walks this pnpm workspace's full production
+# dependency tree before this filtering applies, and that walk cannot resolve
+# `content-type@2.0.0` — an optional peer pnpm never materializes here,
+# pulled in only by `@modelcontextprotocol/sdk`'s unused HTTP transport. No
+# `allowMissingDependencies` setting is needed for that: on this version, an
+# unresolved production dependency is only ever a warning
+# (`node-module-collector/moduleManager.ts`'s `PKG_NOT_FOUND` is logged at
+# `warn`, not thrown), and the dependency is unreachable through `files`
+# below regardless of whether it resolves.
+files:
+  - out/**/*
+  - package.json
+  - from: "."
+    filter:
+      - "!node_modules/**/*"
+      - "node_modules/@shashoku/engine/package.json"
+      - "node_modules/@shashoku/engine/index.js"
+      - "node_modules/@shashoku/engine/shashoku-engine.win32-x64-msvc.node"
+
+# A native addon's `dlopen` cannot reach into the asar virtual filesystem;
+# electron-builder's own smart-unpack would catch `*.node` automatically, but
+# it is named here explicitly rather than left to that default.
+asarUnpack:
+  - node_modules/@shashoku/engine/**/*
+
+# `electron/lib/enginePlatform.ts` resolves the packaged interpreter from
+# `dirname(process.resourcesPath)` — i.e. it expects `py/` and `site/` beside
+# `resources/`, not inside it. `extraResources` copies into the resources
+# directory; `extraFiles` copies into the install root instead, which is the
+# layout that function already assumes (verified against electron-builder's
+# own `PlatformSpecificBuildOptions.ts`, which documents exactly this split).
+#
+# Listed as two directories, not the parent `dist/sidecar-win32/`: that
+# staging tree is `scripts/build-sidecar-win32`'s own working area and may
+# hold other build byproducts alongside them.
+#
+# Paths are relative to the project directory on purpose.
+# `getFileMatchers` (electron-builder's own file-matching code) resolves a
+# `from` against the project directory before any `${...}` macro in it would
+# expand, so a macro that was meant to expand into an absolute path gets
+# treated as a literal relative path fragment instead and the build fails
+# with "file source doesn't exist" — silently misleading, not a crash at the
+# macro site.
+extraFiles:
+  - from: dist/sidecar-win32/py
+    to: py
+  - from: dist/sidecar-win32/site
+    to: site
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+
+# Per-user install, no elevation, and the user can pick where — this package
+# lands close to a gigabyte and per-machine would also rename the install
+# directory after the npm package name instead of the product name (see
+# electron-builder's `getWindowsInstallationDirName`, which only reaches for
+# `productFilename` when `!oneClick || perMachine`).
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+# Do not set `compression`, `sevenZipOptions`, or `ELECTRON_BUILDER_7Z_FILTER`
+# here. NSIS's own compressor is pinned to `zlib` by electron-builder itself
+# (`NsisTarget.ts`) and barely compresses anything; the real compression is
+# the `.7z` payload built one step earlier.
+#
+# That payload is not a plain `-mx=9` archive, even though `-mx=9` is what
+# `compute7zCompressArgs` picks for it. `nsis.differentialPackage` defaults
+# to on (`NsisTarget.ts`: `!this.isPortable && this.options.differentialPackage
+# !== false`), and `configureDifferentialAwareArchiveOptions` then forces
+# `dictSize` to 1 MB and `solid` to false — so the switches that actually run
+# are `-mx=9 -md=1m -ms=off`, and the built payload's header reads
+# `Method = BCJ LZMA2:20`, `Solid = -`. Both values were picked upstream in
+# 2018 to keep delta updates small, and nothing here ships auto-update yet.
+#
+# That payload's branch/exec filter is pinned to plain `BCJ`, which is also
+# why `ELECTRON_BUILDER_7Z_FILTER` cannot override it here: the install-time
+# NSIS extractor only decodes plain LZMA2/Copy and single-stream BCJ, not the
+# BCJ2 modern 7-Zip auto-applies to x86/x64 executables at `-mx>=1` — and it
+# does not error when it can't decode the rest, it silently skips them,
+# dropping the main exe and every native binary from the install. Measured
+# cost of the safe pin, on a standalone `7z -mx=9` run over the same tree
+# (default dictionary, solid on — not the switches above): BCJ2 325.5 MiB
+# against BCJ's 337.1 MiB, an 11.6 MiB (3.4%) difference. Not worth trading a
+# passing build for one that installs broken.
+#
+# Publishing is disabled via the `--publish never` CLI flag in
+# `scripts/build-installer-win32`, not a `publish:` key here: that key's
+# type is publish *targets* (github, s3, ...), not a bare policy string —
+# `configuration.ts`'s `publish` field is typed `AllPublishOptions |
+# Array<AllPublishOptions> | null`, so a string here would be read as an
+# unknown target's provider name. `--publish` on the CLI is a separate,
+# dedicated flag that does take the policy strings directly.

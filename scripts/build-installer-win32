@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Builds the Windows NSIS installer from this Linux checkout. electron-builder's
+# NSIS target self-executes the installer it just built, through Wine, to
+# produce the uninstaller (`packages/app-builder-lib/src/targets/win/nsis/NsisTarget.ts`
+# in electron-builder's own source, HEAD 44a10d4). Without Wine, or with the
+# wrong one, that step fails deep inside electron-builder with an error this
+# script would rather catch first and explain.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+wine_bin="$(command -v wine || true)"
+if [ -z "$wine_bin" ]; then
+  echo "error: wine is not on PATH.
+
+electron-builder's NSIS target runs the freshly built installer through Wine
+to generate the uninstaller. Enter the Nix devShell (it provides
+wineWow64Packages.stable) or install Wine yourself before retrying." >&2
+  exit 1
+fi
+
+# NSIS's install-time stub is a 32-bit PE binary. A Wine build without
+# WoW64 (32-bit) support crashes it with STATUS_INVALID_IMAGE_FORMAT
+# (0xc0000135) instead of running it — confirmed against nixpkgs'
+# `wineWow64Packages.stable` (ships both `lib/wine/i386-windows` and
+# `lib/wine/x86_64-windows`) versus its 64-bit-only `wine64` (ships only the
+# latter). `wine --version` cannot distinguish the two: both report the same
+# "wine-<version>" string regardless of which Windows bitness they support.
+wine_store_dir="$(dirname "$(dirname "$(readlink -f "$wine_bin")")")"
+if [ ! -d "$wine_store_dir/lib/wine/i386-windows" ]; then
+  echo "error: $wine_bin has no 32-bit (WoW64) Windows support (missing
+$wine_store_dir/lib/wine/i386-windows).
+
+NSIS's installer stub is a 32-bit binary; a 64-bit-only Wine build crashes it
+with STATUS_INVALID_IMAGE_FORMAT (0xc0000135) instead of running it. Use
+wineWow64Packages.stable (flake.nix's devShell already does), not wine64 or
+a plain wine build that turns out to be 64-bit only." >&2
+  exit 1
+fi
+
+# electron-builder does not set WINEPREFIX for this fallback path — on Linux,
+# a string/null `toolsets.wine` config falls straight through to the host
+# `wine` binary with no WINEPREFIX of its own
+# (`packages/app-builder-lib/src/toolsets/wine.ts`). Left unset, Wine
+# defaults to `~/.wine`, which this build has no business creating,
+# depending on, or leaving behind between runs.
+export WINEPREFIX
+WINEPREFIX="$(mktemp -d "${TMPDIR:-/tmp}/shashoku-wineprefix.XXXXXX")"
+trap 'rm -rf "$WINEPREFIX"' EXIT
+
+cd "$ROOT"
+pnpm build
+exec pnpm exec electron-builder --win nsis --x64 --publish never --config electron-builder.yml

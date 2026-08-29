@@ -249,6 +249,13 @@
           # cargo-xwin`, which would reach outside this declaration for a tool
           # the environment is supposed to provide.
           pkgs.cargo-xwin
+          # electron-builder's NSIS target runs the installer it just built
+          # through Wine to generate the uninstaller, and NSIS's install-time
+          # stub is 32-bit. `wineWow64Packages` (not plain `wine`/`wine64`,
+          # which are 64-bit only) is what still ships the 32-bit
+          # (`lib/wine/i386-windows`) side; a 64-bit-only build crashes that
+          # stub with STATUS_INVALID_IMAGE_FORMAT (0xc0000135).
+          pkgs.wineWow64Packages.stable
         ];
         # Off here and nowhere else. In `.npmrc` it would reach contributors
         # without Nix too, and which pnpm they run would go back to being
