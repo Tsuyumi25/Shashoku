@@ -38,7 +38,21 @@ const INPAINT_MODEL = "anime-lama";
  * page's trip: that is four readers over a page of regions and can run past any
  * honest total, but it never goes this long without reaching a station.
  */
-const REQUEST_SILENCE_MS = 180_000;
+export const REQUEST_SILENCE_MS = 180_000;
+
+/**
+ * How long the handshake `ping` may go unanswered before the engine is
+ * declared dead on arrival.
+ *
+ * Deliberately its own number, not `REQUEST_SILENCE_MS`: the handshake has
+ * nothing heavy to import yet, so a cold interpreter answering one line of
+ * JSON should be near-instant — but the very first launch may be reading that
+ * interpreter off a cold Windows disk, so it cannot be cut too fine either.
+ * 30s is generous for that worst case while still being six times short of
+ * the request budget, so a hung engine is caught long before a caller would
+ * otherwise blame "no one answered that request".
+ */
+export const HANDSHAKE_SILENCE_MS = 30_000;
 
 /** How long a well-mannered goodbye is given before the signal. */
 const SHUTDOWN_GRACE_MS = 2_000;
@@ -205,20 +219,71 @@ class OcrSidecar {
         for (const line of splitter.flush()) record(line);
       });
 
+      // `spawn` only proves the OS created a process; it says nothing about
+      // whether the interpreter inside it is any good. A missing package, an
+      // unloadable native library, a syntax error — every one of those spawns
+      // cleanly and then stays silent, which is exactly the shape of failure
+      // this handshake exists to catch before it is mistaken for a hung
+      // request three minutes later.
+      //
+      // Two flags, not one, because the two things that can go wrong here are
+      // independent: `startupSettled` says whether a verdict on the handshake
+      // has already been delivered, and `expectingExit` says whether an exit
+      // about to arrive is one this code just caused itself (by killing the
+      // child after a failed handshake) rather than new information.
+      let startupSettled = false;
+      let expectingExit = false;
+
       child.once("spawn", () => {
-        this.log.write("spawned; treated as ready");
-        this.announce({ state: "ready" });
-        ready();
+        this.log.write("spawned; awaiting handshake");
+        this.send<{ pong: boolean }>(child, "ping", {}, HANDSHAKE_SILENCE_MS).then(
+          () => {
+            if (startupSettled) return;
+            startupSettled = true;
+            this.log.write("handshake ok; ready");
+            this.announce({ state: "ready" });
+            ready();
+          },
+          (problem: Error) => {
+            // The child may already have reported its own death below — that
+            // path settles the same promise, so there is nothing left to add.
+            if (startupSettled) return;
+            startupSettled = true;
+            const reason = `the OCR engine did not answer the handshake: ${problem.message}`;
+            this.log.write(`handshake failed: ${reason}`);
+            this.announce({ state: "error", detail: reason });
+            this.collapse(reason);
+            expectingExit = true;
+            child.kill("SIGKILL");
+            failed(new Error(reason));
+          },
+        );
       });
       child.on("error", (problem) => {
         this.log.write(`start failed: ${problem}`);
         this.announce({ state: "error", detail: String(problem) });
         this.collapse(`the OCR engine could not start: ${problem}`);
+        startupSettled = true;
         failed(problem);
       });
       child.on("exit", (code, signal) => {
         const how = signal ? `signal ${signal}` : `code ${code}`;
         this.log.write(`exited: ${how}`);
+        // Expected: this is the handshake's own kill playing out, already
+        // reported as an error a moment ago. A second, contradictory
+        // "stopped" broadcast here would just make the status flicker.
+        if (expectingExit) return;
+        if (!startupSettled) {
+          // Died on its own before ever answering the ping — still a
+          // handshake failure, just one the engine announced by leaving
+          // rather than by staying silent.
+          startupSettled = true;
+          const reason = `the OCR engine stopped (${how}) before answering the handshake`;
+          this.announce({ state: "error", detail: reason });
+          this.collapse(reason);
+          failed(new Error(reason));
+          return;
+        }
         this.announce({ state: "stopped", detail: how });
         // The wording matters more than it looks: an engine that died takes
         // the request with it but not the next one, and saying so is what
@@ -229,11 +294,21 @@ class OcrSidecar {
     return this.starting;
   }
 
-  private async request<T>(op: string, body: Record<string, unknown> = {}): Promise<T> {
-    await this.start();
-    const child = this.child;
-    if (!child) throw new Error("the OCR engine is not running");
-
+  /**
+   * Sends one line of JSON to a given child and settles once its paired reply
+   * arrives, or after `silenceMs` of nothing.
+   *
+   * Takes the child as a parameter rather than reading `this.child`: the
+   * handshake has to speak to a process before that process is the ready one
+   * on file, and `request()` below is just the case where the two happen to
+   * be the same.
+   */
+  private send<T>(
+    child: ChildProcessWithoutNullStreams,
+    op: string,
+    body: Record<string, unknown>,
+    silenceMs: number,
+  ): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const giveUp = () => {
@@ -242,15 +317,22 @@ class OcrSidecar {
       const waiter: Pending = {
         resolve: resolve as (value: unknown) => void,
         reject,
-        timer: setTimeout(giveUp, REQUEST_SILENCE_MS),
+        timer: setTimeout(giveUp, silenceMs),
         heard: () => {
           clearTimeout(waiter.timer);
-          waiter.timer = setTimeout(giveUp, REQUEST_SILENCE_MS);
+          waiter.timer = setTimeout(giveUp, silenceMs);
         },
       };
       this.pending.set(id, waiter);
       child.stdin.write(`${JSON.stringify({ id, op, ...body })}\n`);
     });
+  }
+
+  private async request<T>(op: string, body: Record<string, unknown> = {}): Promise<T> {
+    await this.start();
+    const child = this.child;
+    if (!child) throw new Error("the OCR engine is not running");
+    return this.send<T>(child, op, body, REQUEST_SILENCE_MS);
   }
 
   /**
