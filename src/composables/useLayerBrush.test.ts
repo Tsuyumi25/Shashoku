@@ -211,6 +211,23 @@ function release(pointerId = 1, at?: { x: number; y: number }): PointerEvent {
 }
 
 /**
+ * A pen's own termination event — up, cancel, or a lost capture — at a real
+ * position. `release()` above is shaped like a mouse's: this one carries the
+ * pen's own `pointerType`, which is what lets the sampler's release-pressure
+ * fallback (last valid reading, not the spec's fixed 0) actually be reached.
+ */
+function penRelease(pointerId: number, at: { x: number; y: number }): PointerEvent {
+  return {
+    pointerId,
+    clientX: at.x,
+    clientY: at.y,
+    pointerType: 'pen',
+    pressure: 0,
+    currentTarget: container.value,
+  } as unknown as PointerEvent
+}
+
+/**
  * A move event carrying a coalesced list, the shape `getCoalescedEvents()`
  * hands back on real hardware. Once the list is non-empty the handler reads
  * only it, so the event's own position is never asserted on here.
@@ -1311,6 +1328,40 @@ describe('undo and redo refuse a stroke in flight', () => {
     expect(editor.canUndo).toBe(true)
   })
 
+  /**
+   * A stroke's commit outlives its release, so a second press can open
+   * before the first one's has landed — the same overlap
+   * 'does not let a stroke that has finished take down the one after it'
+   * exercises for the overlay. `strokesInFlight` has to be a count for this:
+   * a flag would go false the instant the first stroke's commit lands, even
+   * though the second is still being drawn.
+   */
+  it('stays blocked once an earlier stroke commits while a second stroke is still being drawn', async () => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerUp(release())
+
+    // The first stroke's commit is still queued behind its handover; this
+    // press opens before it has landed rather than after `settle()`.
+    brush.onPointerDown(press(150, 50))
+    brush.onPointerMove(press(160, 50))
+    await settle()
+
+    // The first stroke has committed by now; the second is still open with
+    // no pointerup of its own.
+    expect(editor.canUndo).toBe(true)
+    expect(editor.strokeInFlight).toBe(true)
+
+    editor.undo()
+
+    expect(editor.canRedo).toBe(false)
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBeGreaterThan(0)
+
+    brush.onPointerUp(release())
+    await settle()
+  })
+
   it('leaves undo and redo alone when no stroke is under way', async () => {
     const { editor, brush } = openBrush()
     expect(editor.strokeInFlight).toBe(false)
@@ -1356,6 +1407,40 @@ describe('the release walks the tail to its own position', () => {
     await settle()
 
     expect(layerPixels('r', { x: 90, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+})
+
+/**
+ * The pointer Events spec fixes a release's own `pressure` at 0, and
+ * `endIfMine` walks the tail from it anyway — the sampler is the one that
+ * substitutes the last valid pressure back in, exactly as it does for any
+ * mid-stroke sample reporting 0. Nothing before this exercised that fallback
+ * through the composable: every pen-typed event elsewhere in this file is a
+ * `press()`, and the sampler's own unit test drives `end()` directly,
+ * bypassing `pressureFrom` and `useLayerBrush` entirely.
+ */
+describe("a pen's release keeps the tail at its own last pressure", () => {
+  it('does not widen the tail to full nominal width, or drop it to nothing, at a release reporting pressure 0', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 40
+    const brush = useLayerBrush(container)
+
+    brush.onPointerDown(press(50, 50, { pointerType: 'pen', pressure: 0.15 }))
+    brush.onPointerMove(press(150, 50, { pointerType: 'pen', pressure: 0.15 }))
+    brush.onPointerUp(penRelease(1, { x: 200, y: 50 }))
+    await settle()
+
+    // Radius 20 at the nominal, full-pressure width reaches 15 px off the
+    // centreline; radius 3, what 0.15 of it scales to, does not — so this
+    // would fail if the release's 0 were forced to full pressure instead of
+    // falling back to the last real reading.
+    expect(layerPixels('r', { x: 200, y: 65, w: 1, h: 1 })[3]).toBe(0)
+    // And this would fail if the release's 0 were taken at face value: a
+    // radius-0 dab draws nothing, leaving the segment right before the
+    // release as blank as the one after it.
+    expect(layerPixels('r', { x: 198, y: 50, w: 1, h: 1 })[3]).toBeGreaterThan(0)
   })
 })
 
