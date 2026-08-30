@@ -1,8 +1,6 @@
 /**
  * One point along a gesture, before any dab has been decided from it: where
- * the pointer was, how hard it pressed, and when. Pressure and time ride
- * along unread by this ticket's math — pressure is pinned to 1 by the caller,
- * and nothing here yet has a curve or a filter to hand them to.
+ * the pointer was, how hard it pressed, and when.
  */
 export interface BrushSample {
   x: number
@@ -65,28 +63,46 @@ export function createBrushSampler(
 ): BrushSampler {
   let last: BrushSample | null = null
   let distanceToNextDab = 0
+  let lastValidPressure = 1
 
   function spacingFor(radius: number): number {
     return Math.max(1, radius * 2 * spacingRatio)
   }
 
   function dabAt(sample: BrushSample): Dab {
-    return { x: sample.x, y: sample.y, radius: shape.radius, opacity: shape.opacity }
+    return {
+      x: sample.x,
+      y: sample.y,
+      radius: shape.radius * sample.pressure,
+      opacity: shape.opacity,
+    }
+  }
+
+  /** The Pointer Events spec fixes `pointerup.pressure` at `0`. */
+  function condition(sample: BrushSample): BrushSample {
+    const p = sample.pressure
+    if (Number.isFinite(p) && p > 0 && p <= 1) {
+      lastValidPressure = p
+      return sample
+    }
+    return { ...sample, pressure: lastValidPressure }
   }
 
   function open(sample: BrushSample): Dab[] {
-    const dab = dabAt(sample)
-    last = sample
+    const conditioned = condition(sample)
+    const dab = dabAt(conditioned)
+    last = conditioned
     distanceToNextDab = spacingFor(dab.radius)
     return [dab]
   }
 
   function advance(to: BrushSample): Dab[] {
     const from = last as BrushSample
-    const dx = to.x - from.x
-    const dy = to.y - from.y
+    const toConditioned = condition(to)
+    const dx = toConditioned.x - from.x
+    const dy = toConditioned.y - from.y
     const length = Math.hypot(dx, dy)
-    last = to
+    last = toConditioned
     if (length === 0) return []
 
     const dabs: Dab[] = []
@@ -97,8 +113,8 @@ export function createBrushSampler(
       const dab = dabAt({
         x: from.x + dx * t,
         y: from.y + dy * t,
-        pressure: from.pressure + (to.pressure - from.pressure) * t,
-        time: from.time + (to.time - from.time) * t,
+        pressure: from.pressure + (toConditioned.pressure - from.pressure) * t,
+        time: from.time + (toConditioned.time - from.time) * t,
       })
       dabs.push(dab)
       distanceToNextDab = spacingFor(dab.radius)

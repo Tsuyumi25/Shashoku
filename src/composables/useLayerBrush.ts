@@ -201,10 +201,21 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     }
   }
 
-  /** A raw pointer position as the sampler sees it. Pressure is pinned to 1
-   * until the real value is wired through; time comes along unread. */
-  function sampleAt(at: Point): BrushSample {
-    return { x: at.x, y: at.y, pressure: 1, time: performance.now() }
+  /**
+   * A mouse has nothing pressure could mean, and the Pointer Events spec
+   * reports `0.5` for it while a button is down — a placeholder, not a
+   * measurement, that would otherwise halve every mouse stroke against its
+   * nominal size. A pen's own `pressure` is read as reported; the sampler is
+   * where an invalid or absent reading is turned into the last valid one.
+   */
+  function pressureFrom(e: PointerEvent): number {
+    return e.pointerType === 'pen' ? e.pressure : 1
+  }
+
+  /** A raw pointer position and pressure as the sampler sees them. Time comes
+   * along unread. */
+  function sampleAt(at: Point, e: PointerEvent): BrushSample {
+    return { x: at.x, y: at.y, pressure: pressureFrom(e), time: performance.now() }
   }
 
   /**
@@ -225,7 +236,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       if (ev.pointerId !== pointerId) continue
       const at = pageAt(ev)
       if (at === null || !Number.isFinite(at.x) || !Number.isFinite(at.y)) continue
-      samples.push(sampleAt(at))
+      samples.push(sampleAt(at, ev))
     }
     return samples
   }
@@ -392,7 +403,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
     }
     stroke = opened
-    applyDabs(opened.sampler.begin(sampleAt(at)))
+    applyDabs(opened.sampler.begin(sampleAt(at, e)))
     return true
   }
 
@@ -432,6 +443,16 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   function endIfMine(e: PointerEvent): boolean {
     const s = stroke
     if (s === null || e.pointerId !== s.pointerId) return false
+    /*
+     * The release's position walks the tail exactly like a move would, while
+     * `stroke` still points at `s` for `applyDabs` to find. Its pressure is
+     * not read this way: the sampler holds the last valid one instead, since
+     * the spec fixes a release's own `pressure` at 0.
+     */
+    const at = pageAt(e)
+    if (at !== null && Number.isFinite(at.x) && Number.isFinite(at.y)) {
+      applyDabs(s.sampler.end(sampleAt(at, e)))
+    }
     /*
      * Taken here rather than inside the release, because the release is queued
      * behind whatever is still finishing and by the time it runs another press

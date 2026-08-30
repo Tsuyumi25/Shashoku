@@ -175,14 +175,79 @@ describe('createBrushSampler', () => {
     },
   )
 
-  it('ignores pressure for radius and opacity in this ticket', () => {
+  it('never lets pressure touch opacity', () => {
     const sampler = createBrushSampler({ radius: 8, opacity: 0.6 })
     sampler.begin(sample(0, 0, 0.1))
     const dabs = sampler.push([sample(20, 0, 0.9)])
 
     for (const dab of dabs) {
-      expect(dab.radius).toBe(8)
       expect(dab.opacity).toBe(0.6)
     }
+  })
+
+  describe('pressure driving radius', () => {
+    it('scales a dab radius by the sample pressure it was placed at', () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      const [dab] = sampler.begin(sample(0, 0, 0.5))
+
+      expect(dab.radius).toBe(10)
+    })
+
+    it('does not let dab radius decrease while sample pressure rises monotonically', () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      const dabs = [
+        ...sampler.begin(sample(0, 0, 0.1)),
+        ...sampler.push([
+          sample(30, 0, 0.3),
+          sample(60, 0, 0.5),
+          sample(90, 0, 0.7),
+          sample(120, 0, 1),
+        ]),
+      ]
+
+      for (let i = 1; i < dabs.length; i++) {
+        expect(dabs[i].radius).toBeGreaterThanOrEqual(dabs[i - 1].radius)
+      }
+    })
+
+    it('holds the last valid pressure for a dab where a sample in the middle reports 0', () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      sampler.begin(sample(0, 0, 0.8))
+      const dabs = sampler.push([sample(10, 0, 0), sample(20, 0, 0.8)])
+
+      expect(dabs.length).toBeGreaterThan(0)
+      for (const dab of dabs) expect(dab.radius).toBeCloseTo(20 * 0.8)
+    })
+
+    it('takes the last valid pressure for a release reporting 0, not 0 itself', () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      sampler.begin(sample(0, 0, 0.6))
+      sampler.push([sample(50, 0, 0.6)])
+      const dabs = sampler.end(sample(60, 0, 0))
+
+      expect(dabs.length).toBeGreaterThan(0)
+      for (const dab of dabs) expect(dab.radius).toBeCloseTo(20 * 0.6)
+    })
+
+    it("keeps consecutive spacing tracking each dab's own size along a rising-then-falling pressure slope", () => {
+      const shape = { radius: 40, opacity: 1 }
+      const points = Array.from({ length: 200 }, (_, i) => {
+        const t = i / 199
+        const pressure = t < 0.5 ? 0.1 + t * 1.8 : 0.1 + (1 - t) * 1.8
+        return sample(i * 2, 0, Math.min(1, pressure))
+      })
+
+      const sampler = createBrushSampler(shape)
+      const dabs = [...sampler.begin(sample(0, 0, 0.1)), ...sampler.push(points)]
+
+      // The spacing a dab leaves behind it is recomputed from its own size, so
+      // the gap that follows it is bounded by that dab's radius, not the one
+      // ahead of it.
+      for (let i = 1; i < dabs.length; i++) {
+        const gap = dist(dabs[i - 1], dabs[i])
+        const spacing = Math.max(1, dabs[i - 1].radius * 2 * DEFAULT_BRUSH_SPACING_RATIO)
+        expect(gap).toBeLessThanOrEqual(spacing + 1e-9)
+      }
+    })
   })
 })

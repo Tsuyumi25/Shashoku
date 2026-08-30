@@ -172,19 +172,42 @@ const container = ref({
   },
 } as unknown as HTMLElement)
 
-function press(x: number, y: number, opts: { pointerId?: number; button?: number } = {}): PointerEvent {
+function press(
+  x: number,
+  y: number,
+  opts: { pointerId?: number; button?: number; pointerType?: string; pressure?: number } = {},
+): PointerEvent {
   return {
     clientX: x,
     clientY: y,
     pointerId: opts.pointerId ?? 1,
     button: opts.button ?? 0,
+    // A real mouse reports 0.5 while a button is down; carrying that through
+    // by default means every stroke here doubles as a check that it never
+    // reaches the brush's width.
+    pointerType: opts.pointerType ?? 'mouse',
+    pressure: opts.pressure ?? 0.5,
     currentTarget: container.value,
   } as unknown as PointerEvent
 }
 
-/** A termination event — up, cancel, or a lost capture — for a given pointer. */
-function release(pointerId = 1): PointerEvent {
-  return { pointerId, currentTarget: container.value } as unknown as PointerEvent
+/**
+ * A termination event — up, cancel, or a lost capture — for a given pointer.
+ *
+ * Without `at` it carries no position, the shape most of the suite's releases
+ * take and which the brush treats as nothing to walk the tail to. With `at`
+ * it is a release the hand actually moved to, position included and pressure
+ * at the spec's fixed 0.
+ */
+function release(pointerId = 1, at?: { x: number; y: number }): PointerEvent {
+  return {
+    pointerId,
+    clientX: at?.x,
+    clientY: at?.y,
+    pointerType: 'mouse',
+    pressure: 0,
+    currentTarget: container.value,
+  } as unknown as PointerEvent
 }
 
 /**
@@ -682,6 +705,22 @@ describe('the stroke as it is being drawn', () => {
   })
 
   /**
+   * A mouse reports `pressure` 0.5 while a button is down — the Pointer
+   * Events spec's placeholder for a device with no pressure support — and
+   * `press()` carries that through by default, so this exercises the real
+   * shape of a mouse event rather than a pressure of 1 picked to dodge it.
+   */
+  it('paints a mouse stroke at its nominal width, not halved by the 0.5 mice report', async () => {
+    const { brush } = open()
+    useSelectionStore().brushes.paint.size = 40
+    await pressAndSettle(brush, { x: 50, y: 50 })
+
+    // A radius of 20 reaches 18 px off the centreline; a radius of 10, halved
+    // by the 0.5, would not.
+    expect(shownAlpha(68, 50)).toBeGreaterThan(0)
+  })
+
+  /**
    * Which of the two directions a stroke is decides nothing about the coverage
    * and everything about how it meets the layer. These three operators are the
    * canvas's account of what the release will do.
@@ -1141,6 +1180,37 @@ describe('the three ways a stroke ends', () => {
   })
 })
 
+describe('the release walks the tail to its own position', () => {
+  function openBrush(size = 8) {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = size
+    return { editor, brush: useLayerBrush(container) }
+  }
+
+  it('paints past the last move, out to where the pointer came up', async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(60, 50))
+    brush.onPointerUp(release(1, { x: 90, y: 50 }))
+    await settle()
+
+    expect(layerPixels('r', { x: 90, y: 50, w: 1, h: 1 })[3]).toBeGreaterThan(0)
+  })
+
+  it('does nothing extra for a release with no position, as most of this suite sends', async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(60, 50))
+
+    expect(() => brush.onPointerUp(release())).not.toThrow()
+    await settle()
+
+    expect(layerPixels('r', { x: 90, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+})
+
 describe("the pen's eraser end", () => {
   it('freezes to erase at the press while a mask brush tool is on the rail, and does not re-read the tool mid-stroke', async () => {
     const { editor } = openWith(raster('r'))
@@ -1278,6 +1348,78 @@ describe('the same gesture split into different pointer events', () => {
     expect([...layerPixels('b', region)]).toEqual(reference)
     expect([...layerPixels('c', region)]).toEqual(reference)
     expect([...layerPixels('d', region)]).toEqual(reference)
+  })
+})
+
+/**
+ * The same invariant once radius no longer holds still along the gesture: an
+ * extra point inserted for a finer splitting has to interpolate pressure
+ * exactly as it interpolates position, or the two splittings describe
+ * different gestures and byte-identity would be the wrong thing to ask for.
+ */
+describe('the same gesture split into different pointer events, pressure varying along it', () => {
+  type Vertex = { x: number; y: number; pressure: number }
+
+  function lerp(a: Vertex, b: Vertex, t: number): Vertex {
+    if (t === 0) return { ...a }
+    if (t === 1) return { ...b }
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      pressure: a.pressure + (b.pressure - a.pressure) * t,
+    }
+  }
+
+  function expand(vertices: Vertex[], fractions: number[]): Vertex[] {
+    const out = [vertices[0]]
+    for (let i = 0; i < vertices.length - 1; i++) {
+      for (const t of fractions) out.push(lerp(vertices[i], vertices[i + 1], t))
+    }
+    return out
+  }
+
+  const vertices: Vertex[] = [
+    { x: 60, y: 60, pressure: 0.2 },
+    { x: 140, y: 60, pressure: 0.9 },
+    { x: 140, y: 150, pressure: 0.35 },
+    { x: 90, y: 110, pressure: 0.75 },
+  ]
+
+  async function paint(
+    editor: ReturnType<typeof useEditorStore>,
+    id: string,
+    points: Vertex[],
+  ): Promise<void> {
+    editor.selectOnly(id)
+    const brush = useLayerBrush(container)
+    brush.onPointerDown(
+      press(points[0].x, points[0].y, { pointerType: 'pen', pressure: points[0].pressure }),
+    )
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i]
+      brush.onPointerMove(press(p.x, p.y, { pointerType: 'pen', pressure: p.pressure }))
+    }
+    brush.onPointerUp(release())
+    await settle()
+  }
+
+  it('leaves byte-identical tiles whether the samples arrive whole, one at a time, or unevenly split', async () => {
+    const { editor } = openWith(raster('a'), raster('b'), raster('c'))
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 40
+
+    const wholeSegments = vertices
+    const onePointAtATime = expand(vertices, [0.25, 0.5, 0.75, 1])
+    const unevenSplit = expand(vertices, [0.12, 0.31, 0.47, 0.73, 0.9, 1])
+
+    await paint(editor, 'a', wholeSegments)
+    await paint(editor, 'b', onePointAtATime)
+    await paint(editor, 'c', unevenSplit)
+
+    const region = { x: 0, y: 0, w: 200, h: 200 }
+    const reference = [...layerPixels('a', region)]
+    expect([...layerPixels('b', region)]).toEqual(reference)
+    expect([...layerPixels('c', region)]).toEqual(reference)
   })
 })
 
