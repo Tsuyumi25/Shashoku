@@ -4,7 +4,13 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { hexToRgb } from '@/lib/color'
 import { screenToContentPx } from '@/lib/coords'
-import { strokeMask } from '@/lib/selection/brushMask'
+import { stampMaskCircle } from '@/lib/selection/brushMask'
+import {
+  createBrushSampler,
+  type BrushSample,
+  type BrushSampler,
+  type Dab,
+} from '@/lib/selection/brushSampler'
 import {
   clampToPage,
   EMPTY_RECT,
@@ -59,6 +65,9 @@ interface Stroke {
   color: string
   alphaLocked: boolean
   from: Point
+  /** Turns this stroke's raw samples into dabs, one pointer event at a time
+   * until batching feeds it more than one. */
+  sampler: BrushSampler
   /**
    * What the stroke has covered, already cut to the selection.
    *
@@ -179,14 +188,33 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     }
   }
 
-  function strokeTo(at: Point): void {
+  /** A raw pointer position as the sampler sees it. Pressure is pinned to 1
+   * until the real value is wired through; time comes along unread. */
+  function sampleAt(at: Point): BrushSample {
+    return { x: at.x, y: at.y, pressure: 1, time: performance.now() }
+  }
+
+  /**
+   * Stamps a batch of dabs the sampler already decided on, and folds the
+   * result into the stroke the way a single segment used to.
+   *
+   * `from`/`to` bound the raw pointer movement that produced these dabs, not
+   * the dabs themselves — every dab the sampler can return for this call
+   * lies between the two, so the padded box built from them is a safe
+   * superset regardless of how many dabs landed inside it.
+   */
+  function applyDabs(from: Point, to: Point, dabs: readonly Dab[]): void {
     const s = stroke
     if (s === null) return
+    if (dabs.length === 0) {
+      s.from = to
+      return
+    }
     const shape = s.shape
-    const window = clampToPage(segmentWindow(s.from, at, shape.radius), s.pageW, s.pageH)
+    const window = clampToPage(segmentWindow(from, to, shape.radius), s.pageW, s.pageH)
     s.surface = surfaceHolding(s.surface, window, s.pageW, s.pageH)
     if (isEmptyRect(window) || isEmptyRect(s.surface.region)) {
-      s.from = at
+      s.from = to
       return
     }
     overlay.holding(s.surface.region)
@@ -194,16 +222,20 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const stamped = stampedOver(window)
     // Always the painting direction: this is coverage, and the eraser's coverage
     // is laid down exactly like the brush's. The operator is the commit's.
-    const local = strokeMask(
-      stamped,
-      window.w,
-      window.h,
-      { x: s.from.x - window.x, y: s.from.y - window.y },
-      { x: at.x - window.x, y: at.y - window.y },
-      shape,
-      'paint',
-    )
-    s.from = at
+    let local: Rect = EMPTY_RECT
+    for (const dab of dabs) {
+      const stamp = stampMaskCircle(
+        stamped,
+        window.w,
+        window.h,
+        dab.x - window.x,
+        dab.y - window.y,
+        { radius: dab.radius, hardness: shape.hardness, opacity: dab.opacity },
+        'paint',
+      )
+      local = unionRect(local, stamp)
+    }
+    s.from = to
     if (isEmptyRect(local)) return
     const segment = {
       x: local.x + window.x,
@@ -218,6 +250,12 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     raiseInto(s.surface, stamped, window)
     s.dirty = unionRect(s.dirty, segment)
     show(s, segment)
+  }
+
+  function strokeTo(at: Point): void {
+    const s = stroke
+    if (s === null) return
+    applyDabs(s.from, at, s.sampler.push([sampleAt(at)]))
   }
 
   /**
@@ -318,6 +356,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // failure from being reported as an unhandled one while the stroke is out.
     void taken.catch(() => {})
     const alphaLocked = entry.alphaLocked
+    const shape = selection.brushShapeFor(mode)
     const opened: Stroke = {
       pointerId: e.pointerId,
       page,
@@ -325,17 +364,18 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       pageH: file.page.height,
       entry,
       mode,
-      shape: selection.brushShapeFor(mode),
+      shape,
       color: editor.foreground,
       alphaLocked,
       from: at,
+      sampler: createBrushSampler(shape),
       surface: EMPTY_SURFACE,
       dirty: EMPTY_RECT,
       taken,
       shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
     }
     stroke = opened
-    strokeTo(at)
+    applyDabs(at, at, opened.sampler.begin(sampleAt(at)))
     return true
   }
 

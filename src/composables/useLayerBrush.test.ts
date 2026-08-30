@@ -1191,3 +1191,76 @@ describe("the pen's eraser end", () => {
     expect(useLayerBrush(container).onPointerDown(press(50, 50, { button: 2 }))).toBe(false)
   })
 })
+
+/**
+ * The first invariant in `Shashoku-Plan`'s pixel-basics/brush spec: a gesture's
+ * pixels do not depend on how the browser sliced it into pointer events. The
+ * sampler test file proves the dabs it produces are split-independent on their
+ * own terms; this proves the assembly — sampler, stamp, cut, commit — agrees
+ * down to the byte once real engine tiles are on the other end.
+ */
+describe('the same gesture split into different pointer events', () => {
+  type Vertex = { x: number; y: number }
+
+  function lerp(a: Vertex, b: Vertex, t: number): Vertex {
+    // Exact at the endpoints, so every splitting below still passes through
+    // the same vertices rather than a floating-point neighbour of them.
+    if (t === 0) return { x: a.x, y: a.y }
+    if (t === 1) return { x: b.x, y: b.y }
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+  }
+
+  /** The same path, walked through extra colinear points — what a slower or
+   * faster event rate looks like for one continuous gesture. */
+  function expand(vertices: Vertex[], fractions: number[]): Vertex[] {
+    const out = [vertices[0]]
+    for (let i = 0; i < vertices.length - 1; i++) {
+      for (const t of fractions) out.push(lerp(vertices[i], vertices[i + 1], t))
+    }
+    return out
+  }
+
+  const vertices: Vertex[] = [
+    { x: 60, y: 60 },
+    { x: 140, y: 60 },
+    { x: 140, y: 150 },
+    { x: 90, y: 110 },
+  ]
+
+  async function paint(
+    editor: ReturnType<typeof useEditorStore>,
+    id: string,
+    points: Vertex[],
+  ): Promise<void> {
+    editor.selectOnly(id)
+    const brush = useLayerBrush(container)
+    brush.onPointerDown(press(points[0].x, points[0].y))
+    for (let i = 1; i < points.length; i++) brush.onPointerMove(press(points[i].x, points[i].y))
+    brush.onPointerUp(release())
+    await settle()
+  }
+
+  it('leaves byte-identical tiles whether the samples arrive whole, one at a time, unevenly split, or with zero-length samples mixed in', async () => {
+    const { editor } = openWith(raster('a'), raster('b'), raster('c'), raster('d'))
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 40
+
+    const wholeSegments = vertices
+    const onePointAtATime = expand(vertices, [0.25, 0.5, 0.75, 1])
+    const unevenSplit = expand(vertices, [0.12, 0.31, 0.47, 0.73, 0.9, 1])
+    const withZeroLengthSamples = onePointAtATime.flatMap((p, i) =>
+      i > 0 && i % 3 === 0 ? [p, p] : [p],
+    )
+
+    await paint(editor, 'a', wholeSegments)
+    await paint(editor, 'b', onePointAtATime)
+    await paint(editor, 'c', unevenSplit)
+    await paint(editor, 'd', withZeroLengthSamples)
+
+    const region = { x: 0, y: 0, w: 200, h: 200 }
+    const reference = [...layerPixels('a', region)]
+    expect([...layerPixels('b', region)]).toEqual(reference)
+    expect([...layerPixels('c', region)]).toEqual(reference)
+    expect([...layerPixels('d', region)]).toEqual(reference)
+  })
+})
