@@ -64,9 +64,7 @@ interface Stroke {
   shape: BrushShape
   color: string
   alphaLocked: boolean
-  from: Point
-  /** Turns this stroke's raw samples into dabs, one pointer event at a time
-   * until batching feeds it more than one. */
+  /** Turns this stroke's raw samples into dabs, a whole batch at a time. */
   sampler: BrushSampler
   /**
    * What the stroke has covered, already cut to the selection.
@@ -175,16 +173,31 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   }
 
   /**
-   * How far past the segment a stamp can reach, which is what the surface has
-   * to cover before the segment can be drawn into it.
+   * How far past a dab a stamp can reach, which is what the surface has to
+   * cover before a batch can be drawn into it.
+   *
+   * Built from the dabs themselves rather than from where the batch's
+   * samples started and ended: a coalesced delivery can bend partway
+   * through, and the straight line between its first and last point would
+   * then miss dabs sitting off to the side of it.
    */
-  function segmentWindow(from: Point, to: Point, radius: number): Rect {
+  function dabsWindow(dabs: readonly Dab[], radius: number): Rect {
+    let minX = dabs[0].x
+    let minY = dabs[0].y
+    let maxX = minX
+    let maxY = minY
+    for (const dab of dabs) {
+      if (dab.x < minX) minX = dab.x
+      if (dab.x > maxX) maxX = dab.x
+      if (dab.y < minY) minY = dab.y
+      if (dab.y > maxY) maxY = dab.y
+    }
     const pad = Math.ceil(radius) + 2
     return {
-      x: Math.floor(Math.min(from.x, to.x) - pad),
-      y: Math.floor(Math.min(from.y, to.y) - pad),
-      w: Math.ceil(Math.abs(to.x - from.x)) + pad * 2 + 1,
-      h: Math.ceil(Math.abs(to.y - from.y)) + pad * 2 + 1,
+      x: Math.floor(minX - pad),
+      y: Math.floor(minY - pad),
+      w: Math.ceil(maxX - minX) + pad * 2 + 1,
+      h: Math.ceil(maxY - minY) + pad * 2 + 1,
     }
   }
 
@@ -195,28 +208,40 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   }
 
   /**
-   * Stamps a batch of dabs the sampler already decided on, and folds the
-   * result into the stroke the way a single segment used to.
+   * The samples one move event is worth, in page space and already filtered
+   * to this stroke's own pointer.
    *
-   * `from`/`to` bound the raw pointer movement that produced these dabs, not
-   * the dabs themselves — every dab the sampler can return for this call
-   * lies between the two, so the padded box built from them is a safe
-   * superset regardless of how many dabs landed inside it.
+   * A tablet can report on the order of 240 points a second against one
+   * frame a moment, and `getCoalescedEvents()` is how the rest of them are
+   * recovered. A non-empty list stands in for the event outright — its own
+   * last entry already is this event's position — rather than being read
+   * beside it; the fallback exists for callers, real hardware included,
+   * that never populate it.
    */
-  function applyDabs(from: Point, to: Point, dabs: readonly Dab[]): void {
+  function moveBatch(e: PointerEvent, pointerId: number): BrushSample[] {
+    const events = e.getCoalescedEvents?.() ?? []
+    const samples: BrushSample[] = []
+    for (const ev of events.length > 0 ? events : [e]) {
+      if (ev.pointerId !== pointerId) continue
+      const at = pageAt(ev)
+      if (at === null || !Number.isFinite(at.x) || !Number.isFinite(at.y)) continue
+      samples.push(sampleAt(at))
+    }
+    return samples
+  }
+
+  /**
+   * Stamps a batch of dabs the sampler already decided on, and folds the
+   * result into the stroke once — the growth, the cut and the preview each
+   * run a single time no matter how many dabs the batch produced.
+   */
+  function applyDabs(dabs: readonly Dab[]): void {
     const s = stroke
-    if (s === null) return
-    if (dabs.length === 0) {
-      s.from = to
-      return
-    }
+    if (s === null || dabs.length === 0) return
     const shape = s.shape
-    const window = clampToPage(segmentWindow(from, to, shape.radius), s.pageW, s.pageH)
+    const window = clampToPage(dabsWindow(dabs, shape.radius), s.pageW, s.pageH)
     s.surface = surfaceHolding(s.surface, window, s.pageW, s.pageH)
-    if (isEmptyRect(window) || isEmptyRect(s.surface.region)) {
-      s.from = to
-      return
-    }
+    if (isEmptyRect(window) || isEmptyRect(s.surface.region)) return
     overlay.holding(s.surface.region)
 
     const stamped = stampedOver(window)
@@ -235,7 +260,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       )
       local = unionRect(local, stamp)
     }
-    s.from = to
     if (isEmptyRect(local)) return
     const segment = {
       x: local.x + window.x,
@@ -250,12 +274,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     raiseInto(s.surface, stamped, window)
     s.dirty = unionRect(s.dirty, segment)
     show(s, segment)
-  }
-
-  function strokeTo(at: Point): void {
-    const s = stroke
-    if (s === null) return
-    applyDabs(s.from, at, s.sampler.push([sampleAt(at)]))
   }
 
   /**
@@ -367,7 +385,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       shape,
       color: editor.foreground,
       alphaLocked,
-      from: at,
       sampler: createBrushSampler(shape),
       surface: EMPTY_SURFACE,
       dirty: EMPTY_RECT,
@@ -375,7 +392,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
     }
     stroke = opened
-    applyDabs(at, at, opened.sampler.begin(sampleAt(at)))
+    applyDabs(opened.sampler.begin(sampleAt(at)))
     return true
   }
 
@@ -394,10 +411,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   }
 
   function onPointerMove(e: PointerEvent): boolean {
-    if (stroke === null) return false
-    if (e.pointerId !== stroke.pointerId) return true
-    const at = pageAt(e)
-    if (at !== null) strokeTo(at)
+    const s = stroke
+    if (s === null) return false
+    if (e.pointerId !== s.pointerId) return true
+    applyDabs(s.sampler.push(moveBatch(e, s.pointerId)))
     return true
   }
 

@@ -149,6 +149,32 @@ describe('createBrushSampler', () => {
     expect(ended.map((d) => d.x)).toEqual([10])
   })
 
+  /**
+   * `getCoalescedEvents()` can hand back on the order of 240 points a
+   * second against one frame a moment. The residual distance is what stops
+   * that from multiplying the dab count — this pins the claim at the sizes
+   * a brush actually ships at, one batched `push` against the same samples
+   * fed one at a time.
+   */
+  it.each([20, 50, 100, 250])(
+    'radius %d: a batch of samples produces as many dabs as the same samples delivered one at a time',
+    (radius) => {
+      const length = 1000
+      const points = Array.from({ length }, (_, i) => sample(i + 1, 0))
+
+      const batched = createBrushSampler({ radius, opacity: 1 })
+      batched.begin(sample(0, 0))
+      const batchDabs = batched.push(points)
+
+      const perSample = createBrushSampler({ radius, opacity: 1 })
+      perSample.begin(sample(0, 0))
+      let perSampleCount = 0
+      for (const point of points) perSampleCount += perSample.push([point]).length
+
+      expect(batchDabs.length).toBe(perSampleCount)
+    },
+  )
+
   it('ignores pressure for radius and opacity in this ticket', () => {
     const sampler = createBrushSampler({ radius: 8, opacity: 0.6 })
     sampler.begin(sample(0, 0, 0.1))

@@ -187,6 +187,22 @@ function release(pointerId = 1): PointerEvent {
   return { pointerId, currentTarget: container.value } as unknown as PointerEvent
 }
 
+/**
+ * A move event carrying a coalesced list, the shape `getCoalescedEvents()`
+ * hands back on real hardware. Once the list is non-empty the handler reads
+ * only it, so the event's own position is never asserted on here.
+ */
+function coalescedMove(
+  points: { x: number; y: number; pointerId?: number }[],
+  pointerId = 1,
+): PointerEvent {
+  const events = points.map((p) => press(p.x, p.y, { pointerId: p.pointerId ?? pointerId }))
+  return {
+    ...events[events.length - 1],
+    getCoalescedEvents: () => events,
+  } as unknown as PointerEvent
+}
+
 /** Long enough for the handover, the write and the save obligation to land. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 40; i += 1) await Promise.resolve()
@@ -1262,5 +1278,108 @@ describe('the same gesture split into different pointer events', () => {
     expect([...layerPixels('b', region)]).toEqual(reference)
     expect([...layerPixels('c', region)]).toEqual(reference)
     expect([...layerPixels('d', region)]).toEqual(reference)
+  })
+})
+
+describe("a move event's coalesced points", () => {
+  function openBrush(size = 8) {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = size
+    return { editor, brush: useLayerBrush(container) }
+  }
+
+  function shownCanvas(id: string): FakeCanvas {
+    return useStrokeOverlayStore().overlayFor(id)!.canvas as unknown as FakeCanvas
+  }
+
+  /**
+   * A path that bends partway through, so the batch cannot be bounded by the
+   * straight line between where it started and where it ended — the case
+   * that would have clipped part of the stamp if the window still came from
+   * the segment's endpoints rather than from the dabs themselves.
+   */
+  const bentPath = [
+    { x: 60, y: 60 },
+    { x: 140, y: 60 },
+    { x: 140, y: 150 },
+    { x: 90, y: 110 },
+  ]
+
+  it('lands the same pixels as the same points delivered one move at a time', async () => {
+    const { editor } = openWith(raster('coalesced'), raster('separate'))
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 40
+
+    editor.selectOnly('coalesced')
+    const batched = useLayerBrush(container)
+    batched.onPointerDown(press(bentPath[0].x, bentPath[0].y))
+    batched.onPointerMove(coalescedMove(bentPath.slice(1)))
+    batched.onPointerUp(release())
+    await settle()
+
+    editor.selectOnly('separate')
+    const single = useLayerBrush(container)
+    single.onPointerDown(press(bentPath[0].x, bentPath[0].y))
+    for (const p of bentPath.slice(1)) single.onPointerMove(press(p.x, p.y))
+    single.onPointerUp(release())
+    await settle()
+
+    const region = { x: 0, y: 0, w: 200, h: 200 }
+    expect([...layerPixels('coalesced', region)]).toEqual([...layerPixels('separate', region)])
+  })
+
+  it('runs the growth, the cut and the preview once for a whole batch, not once per sample', async () => {
+    const { brush } = openBrush()
+    await pressAndSettle(brush, { x: 100, y: 100 })
+    // Grows the surface out to where the batch below will stay inside it, so
+    // the batch itself is the only thing left that could add another put.
+    brush.onPointerMove(press(160, 100))
+    const before = shownCanvas('r').puts.length
+
+    brush.onPointerMove(
+      coalescedMove([
+        { x: 110, y: 100 },
+        { x: 120, y: 100 },
+        { x: 130, y: 100 },
+        { x: 140, y: 100 },
+        { x: 150, y: 100 },
+      ]),
+    )
+
+    expect(shownCanvas('r').puts.length).toBe(before + 1)
+  })
+
+  it("drops a coalesced sample whose pointerId is not the stroke's", async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50, { pointerId: 1 }))
+
+    brush.onPointerMove(
+      coalescedMove([
+        { x: 200, y: 50, pointerId: 2 },
+        { x: 70, y: 50, pointerId: 1 },
+      ]),
+    )
+    brush.onPointerUp(release(1))
+    await settle()
+
+    expect(layerPixels('r', { x: 200, y: 50, w: 1, h: 1 })[3]).toBe(0)
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+
+  it('keeps a non-finite sample from reaching the sampler, without losing the rest of the batch', async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+
+    const bad = { ...press(50, 50), clientX: NaN, clientY: Infinity }
+    const good = press(70, 50)
+    const batch = { ...good, getCoalescedEvents: () => [bad, good] } as unknown as PointerEvent
+
+    expect(() => brush.onPointerMove(batch)).not.toThrow()
+    brush.onPointerUp(release())
+    await settle()
+
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
   })
 })
