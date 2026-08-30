@@ -4,6 +4,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { hexToRgb } from '@/lib/color'
 import { screenToContentPx } from '@/lib/coords'
+import { pressureFrom } from '@/lib/selection/brushInput'
 import { stampMaskCircle } from '@/lib/selection/brushMask'
 import {
   createBrushSampler,
@@ -200,17 +201,6 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       w: Math.ceil(maxX - minX) + pad * 2 + 1,
       h: Math.ceil(maxY - minY) + pad * 2 + 1,
     }
-  }
-
-  /**
-   * A mouse has nothing pressure could mean, and the Pointer Events spec
-   * reports `0.5` for it while a button is down — a placeholder, not a
-   * measurement, that would otherwise halve every mouse stroke against its
-   * nominal size. A pen's own `pressure` is read as reported; the sampler is
-   * where an invalid or absent reading is turned into the last valid one.
-   */
-  function pressureFrom(e: PointerEvent): number {
-    return e.pointerType === 'pen' ? e.pressure : 1
   }
 
   /** A raw pointer position and pressure as the sampler sees them. Time comes

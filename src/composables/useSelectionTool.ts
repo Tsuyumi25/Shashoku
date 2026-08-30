@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import { pixelHexAt } from '@/lib/color'
 import { screenToContentPx } from '@/lib/coords'
+import { pressureFrom } from '@/lib/selection/brushInput'
 import { heldSinceStart } from '@/lib/selection/marquee'
 import type { SelectionOp } from '@/lib/selection/mask'
 import type { Point } from '@/lib/selection/rect'
@@ -170,7 +171,7 @@ export function useSelectionTool(
     }
     const brushMode = maskBrushModeOf(editor.tool)
     if (brushMode !== null) {
-      selection.beginStroke(target, brushMode, at)
+      selection.beginStroke(target, brushMode, at, pressureFrom(e))
       return true
     }
 
@@ -195,7 +196,7 @@ export function useSelectionTool(
     if (at === null) return false
     if (Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) >= DRAG_SLOP) moved = true
     if (maskBrushModeOf(editor.tool) !== null) {
-      if (pressed) selection.strokeTo(at)
+      if (pressed) selection.strokeTo(at, pressureFrom(e))
       return true
     }
     if (editor.tool === 'wand') return true
@@ -212,7 +213,7 @@ export function useSelectionTool(
     const wasPressed = pressed
     pressed = false
     if (maskBrushModeOf(editor.tool) !== null) {
-      if (wasPressed) selection.endStroke()
+      if (wasPressed) selection.endStroke(pageAt(e) ?? undefined, pressureFrom(e))
       return wasPressed
     }
     if (!selection.isDrawing) return wasPressed

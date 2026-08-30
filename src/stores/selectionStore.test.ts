@@ -528,6 +528,44 @@ describe('the brush', () => {
     expect(sel.hasSelection).toBe(false)
   })
 
+  it('lays the same mask however the gesture was sliced into events', () => {
+    const sel = useSelectionStore()
+    const editor = useEditorStore()
+    const whole = { x: 0, y: 0, w: 32, h: 32 }
+    sel.brushes.paint.size = 16
+
+    sel.beginStroke(PAGE_A, 'paint', { x: 4, y: 16 })
+    sel.strokeTo({ x: 28, y: 16 })
+    sel.endStroke()
+    const inOne = [...(sel.maskPatchOf(PAGE_A.page, whole) ?? [])]
+    editor.undo()
+
+    sel.beginStroke(PAGE_A, 'paint', { x: 4, y: 16 })
+    for (const x of [9, 13, 18, 22, 25, 28]) sel.strokeTo({ x, y: 16 })
+    sel.endStroke()
+
+    expect([...(sel.maskPatchOf(PAGE_A.page, whole) ?? [])]).toEqual(inOne)
+  })
+
+  it('narrows where the pen pressed lighter', () => {
+    const sel = useSelectionStore()
+    const editor = useEditorStore()
+    sel.brushes.paint.size = 16
+
+    sel.beginStroke(PAGE_A, 'paint', { x: 4, y: 16 }, 1)
+    sel.strokeTo({ x: 28, y: 16 }, 1)
+    sel.endStroke({ x: 28, y: 16 }, 0)
+    const pressed = maskAt(sel, PAGE_A, 16, 10)
+    editor.undo()
+
+    sel.beginStroke(PAGE_A, 'paint', { x: 4, y: 16 }, 0.25)
+    sel.strokeTo({ x: 28, y: 16 }, 0.25)
+    sel.endStroke({ x: 28, y: 16 }, 0)
+
+    expect(pressed).toBeGreaterThan(0)
+    expect(maskAt(sel, PAGE_A, 16, 10)).toBe(0)
+  })
+
   it('erases back out of what was selected', () => {
     const sel = useSelectionStore()
     const editor = useEditorStore()

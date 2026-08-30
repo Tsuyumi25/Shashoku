@@ -8,10 +8,16 @@ import {
   DEFAULT_BRUSH_STABILIZATION,
   MAX_BRUSH_SIZE,
   MIN_BRUSH_SIZE,
-  strokeMask,
+  stampMaskCircle,
   type BrushShape,
   type MaskBrushMode,
 } from '@/lib/selection/brushMask'
+import {
+  createBrushSampler,
+  DEFAULT_BRUSH_SPACING_RATIO,
+  type BrushSampler,
+  type Dab,
+} from '@/lib/selection/brushSampler'
 import {
   boundsOfWindow,
   composeWindow,
@@ -505,7 +511,13 @@ export const useSelectionStore = defineStore('selection', () => {
   interface Stroke {
     target: MaskTarget
     mode: MaskBrushMode
-    from: Point
+    /** Size, hardness and opacity as they stood at the press, so a slider
+     * dragged mid-stroke cannot change the head partway through it. */
+    shape: BrushShape
+    /** Turns this stroke's raw samples into dabs, the same one the layer brush
+     * uses — a mask brush that spaced its stamps differently would be a second
+     * feel for the same hand. */
+    sampler: BrushSampler
     /** Where the mask was put away to start this stroke, when it had to be. */
     opened: string[]
     /**
@@ -539,14 +551,25 @@ export const useSelectionStore = defineStore('selection', () => {
    * the held mask straight away so Quick Mask keeps up with the hand — the same
    * split every drag on this canvas uses.
    */
-  function beginStroke(target: MaskTarget, mode: MaskBrushMode, at: Point): void {
+  function beginStroke(
+    target: MaskTarget,
+    mode: MaskBrushMode,
+    at: Point,
+    pressure = 1,
+  ): void {
     const opened: string[] = []
     if (!isHeldFor(target)) {
       opened.push(window.engine.maskHold(target.page, target.w, target.h))
       sync()
     }
-    stroke = { target, mode, from: at, opened, record: null, dirty: EMPTY_RECT }
-    strokeTo(at)
+    const shape = brushShapeFor(mode)
+    const sampler = createBrushSampler(
+      shape,
+      DEFAULT_BRUSH_SPACING_RATIO,
+      brushStabilizationFor(mode),
+    )
+    stroke = { target, mode, shape, sampler, opened, record: null, dirty: EMPTY_RECT }
+    stamp(sampler.begin({ x: at.x, y: at.y, pressure, time: performance.now() }))
   }
 
   /**
@@ -586,42 +609,66 @@ export const useSelectionStore = defineStore('selection', () => {
    * has to read before it can write. Anything narrower would clip the brush's
    * own falloff at the edge of what was fetched.
    */
-  function strokeWindowFor(s: Stroke, to: Point, radius: number): Rect {
+  function dabsWindow(s: Stroke, dabs: readonly Dab[], radius: number): Rect {
+    let minX = dabs[0].x
+    let minY = dabs[0].y
+    let maxX = minX
+    let maxY = minY
+    for (const dab of dabs) {
+      if (dab.x < minX) minX = dab.x
+      if (dab.x > maxX) maxX = dab.x
+      if (dab.y < minY) minY = dab.y
+      if (dab.y > maxY) maxY = dab.y
+    }
     const pad = Math.ceil(radius) + 2
-    const x = Math.min(s.from.x, to.x) - pad
-    const y = Math.min(s.from.y, to.y) - pad
     return clampToPage(
       {
-        x: Math.floor(x),
-        y: Math.floor(y),
-        w: Math.ceil(Math.abs(to.x - s.from.x)) + pad * 2 + 1,
-        h: Math.ceil(Math.abs(to.y - s.from.y)) + pad * 2 + 1,
+        x: Math.floor(minX - pad),
+        y: Math.floor(minY - pad),
+        w: Math.ceil(maxX - minX) + pad * 2 + 1,
+        h: Math.ceil(maxY - minY) + pad * 2 + 1,
       },
       s.target.w,
       s.target.h,
     )
   }
 
-  function strokeTo(at: Point): void {
+  function strokeTo(at: Point, pressure = 1): void {
     const s = stroke
     if (s === null) return
-    const shape = brushShapeFor(s.mode)
-    const region = strokeWindowFor(s, at, shape.radius)
-    if (isEmptyRect(region)) {
-      s.from = at
-      return
-    }
+    stamp(s.sampler.push([{ x: at.x, y: at.y, pressure, time: performance.now() }]))
+  }
+
+  /**
+   * Lays the dabs the sampler decided on into the held mask, in one read and
+   * one write however many of them there are.
+   *
+   * The window comes from the dabs rather than from where the samples that
+   * produced them started and ended: the stabilizer's own path trails the
+   * hand's, so a dab can sit outside the straight line between two raw
+   * samples, and a window built from those would clip it away in silence.
+   */
+  function stamp(dabs: readonly Dab[]): void {
+    const s = stroke
+    if (s === null || dabs.length === 0) return
+    const region = dabsWindow(s, dabs, s.shape.radius)
+    if (isEmptyRect(region)) return
     const window_ = readWindow(region)
-    const local = strokeMask(
-      window_.bytes,
-      region.w,
-      region.h,
-      { x: s.from.x - region.x, y: s.from.y - region.y },
-      { x: at.x - region.x, y: at.y - region.y },
-      shape,
-      s.mode,
-    )
-    s.from = at
+    let local = EMPTY_RECT
+    for (const dab of dabs) {
+      local = unionRect(
+        local,
+        stampMaskCircle(
+          window_.bytes,
+          region.w,
+          region.h,
+          dab.x - region.x,
+          dab.y - region.y,
+          { radius: dab.radius, hardness: s.shape.hardness, opacity: dab.opacity },
+          s.mode,
+        ),
+      )
+    }
     if (isEmptyRect(local)) return
 
     const dirty = { ...local, x: local.x + region.x, y: local.y + region.y }
@@ -635,7 +682,13 @@ export const useSelectionStore = defineStore('selection', () => {
     if (dirtyLog.length > DIRTY_LOG_LIMIT) dirtyLog.shift()
   }
 
-  function endStroke(): void {
+  function endStroke(at?: Point, pressure = 1): void {
+    // Walked before the stroke is let go of, so `stamp` still finds it. A
+    // release reports `0` by spec and the sampler substitutes the last valid
+    // reading, so the tail keeps the width the hand actually ended on.
+    if (stroke !== null && at !== undefined) {
+      stamp(stroke.sampler.end({ x: at.x, y: at.y, pressure, time: performance.now() }))
+    }
     const s = stroke
     stroke = null
     if (s === null) return
