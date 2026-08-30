@@ -153,19 +153,38 @@ function openWith(...layers: (RasterLayerEntry | GroupLayerEntry)[]) {
   return { project, editor }
 }
 
-/** A container whose box starts at the origin, so a client point is a page point. */
+/**
+ * A container whose box starts at the origin, so a client point is a page
+ * point. Capture is tracked for real, rather than stubbed to a no-op, so a
+ * release called on a pointer that was never captured — or already let go —
+ * throws instead of passing silently.
+ */
+let capturedPointers = new Set<number>()
 const container = ref({
   getBoundingClientRect: () => ({ left: 0, top: 0, width: PAGE.w, height: PAGE.h }),
-  setPointerCapture: () => {},
+  setPointerCapture: (id: number) => {
+    capturedPointers.add(id)
+  },
+  hasPointerCapture: (id: number) => capturedPointers.has(id),
+  releasePointerCapture: (id: number) => {
+    if (!capturedPointers.has(id)) throw new Error(`pointer ${id} was not captured`)
+    capturedPointers.delete(id)
+  },
 } as unknown as HTMLElement)
 
-function press(x: number, y: number): PointerEvent {
+function press(x: number, y: number, opts: { pointerId?: number; button?: number } = {}): PointerEvent {
   return {
     clientX: x,
     clientY: y,
-    pointerId: 1,
+    pointerId: opts.pointerId ?? 1,
+    button: opts.button ?? 0,
     currentTarget: container.value,
   } as unknown as PointerEvent
+}
+
+/** A termination event — up, cancel, or a lost capture — for a given pointer. */
+function release(pointerId = 1): PointerEvent {
+  return { pointerId, currentTarget: container.value } as unknown as PointerEvent
 }
 
 /** Long enough for the handover, the write and the save obligation to land. */
@@ -180,7 +199,7 @@ async function stroke(
 ): Promise<void> {
   brush.onPointerDown(press(from.x, from.y))
   if (to !== from) brush.onPointerMove(press(to.x, to.y))
-  brush.onPointerUp()
+  brush.onPointerUp(release())
   await settle()
 }
 
@@ -211,6 +230,7 @@ beforeEach(() => {
   engine.rasterReleaseAll()
   setActivePinia(createPinia())
   vi.restoreAllMocks()
+  capturedPointers = new Set()
 })
 
 describe('which handler a press belongs to', () => {
@@ -315,7 +335,7 @@ describe('what a stroke leaves behind', () => {
     const brush = useLayerBrush(container)
 
     brush.onPointerDown(press(50, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     editor.foreground = '#0000ff'
     await settle()
 
@@ -377,7 +397,7 @@ describe('what a stroke leaves behind', () => {
     brush.onPointerMove(press(70, 50))
     brush.onPointerMove(press(90, 50))
     brush.onPointerMove(press(110, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     expect(editor.canUndo).toBe(true)
@@ -448,7 +468,7 @@ describe('a selection bounds the stroke', () => {
     brush.onPointerDown(press(95, 50))
     brush.onPointerMove(press(115, 50))
     selection.deselect()
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     expect(layerPixels('r', { x: 95, y: 50, w: 1, h: 1 })[3]).toBe(255)
@@ -469,7 +489,7 @@ describe('a selection bounds the stroke', () => {
     brush.onPointerMove(press(97, 50))
     selection.deselect()
     brush.onPointerMove(press(150, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     expect(layerPixels('r', { x: 150, y: 50, w: 1, h: 1 })[3]).toBe(255)
@@ -620,12 +640,29 @@ describe('the stroke as it is being drawn', () => {
     expect(rim).toBeGreaterThan(0)
     expect(rim).toBeLessThan(255)
 
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     const written = layerPixels('r', { x: 60, y: 68, w: 1, h: 1 })
     expect(written[3]).toBe(rim)
     expect([...written.slice(0, 3)]).toEqual([0x33, 0x66, 0xff])
+  })
+
+  /**
+   * The rail is reachable while the hand is down, so a slider dragged
+   * mid-stroke must not change the head partway through a line already begun.
+   */
+  it('paints with the size it had at the press, not one changed mid-stroke', async () => {
+    const { brush } = open()
+    const selection = useSelectionStore()
+    selection.brushes.paint.size = 40
+    await pressAndSettle(brush, { x: 50, y: 50 })
+
+    selection.brushes.paint.size = 4
+    brush.onPointerMove(press(70, 50))
+
+    // A radius of 20 reaches 18 px off the centreline; a radius of 2 would not.
+    expect(shownAlpha(60, 68)).toBeGreaterThan(0)
   })
 
   /**
@@ -748,7 +785,7 @@ describe('the stroke as it is being drawn', () => {
     expect(raster.revision).toBe(drawn)
     expect(raster.committed).toBe(written)
 
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     expect(raster.committed).toBeGreaterThan(written)
@@ -766,10 +803,10 @@ describe('the stroke as it is being drawn', () => {
 
     brush.onPointerDown(press(50, 50))
     brush.onPointerMove(press(70, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     brush.onPointerDown(press(120, 50))
     brush.onPointerMove(press(140, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     expect(handed).toHaveBeenCalledTimes(1)
@@ -784,7 +821,7 @@ describe('the stroke as it is being drawn', () => {
     const { brush } = open(framed)
     brush.onPointerDown(press(50, 50))
     brush.onPointerMove(press(70, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
 
     // The release is queued behind the handover; this press lands first.
     brush.onPointerDown(press(120, 50))
@@ -834,7 +871,7 @@ describe('the stroke as it is being drawn', () => {
     brush.onPointerMove(press(70, 50))
     const canvas = useRasterStore().liveLayer('r')!.canvas
 
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     // The same canvas, so nothing shown on it was thrown away to make room.
@@ -851,7 +888,7 @@ describe('the stroke as it is being drawn', () => {
 
     await pressAndSettle(brush, { x: 50, y: 50 })
     brush.onPointerMove(press(90, 62))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     await settle()
 
     const patch = fill.mock.results[0].value as EngineLayerPixels
@@ -900,7 +937,7 @@ describe("the layer's own alpha lock", () => {
     const brush = useLayerBrush(container)
 
     brush.onPointerDown(press(50, 50))
-    brush.onPointerUp()
+    brush.onPointerUp(release())
     project.setLayerAlphaLocked(PAGE_ID, 'r', true)
     await settle()
 
@@ -959,5 +996,198 @@ describe('what a write wakes', () => {
     expect(woke).toBe(1)
 
     stop()
+  })
+})
+
+describe('a stroke belongs to the pointer that opened it', () => {
+  function openBrush(size = 8) {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = size
+    return { editor, brush: useLayerBrush(container) }
+  }
+
+  it('ignores a second pointer down while one stroke is under way', async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50, { pointerId: 1 }))
+
+    expect(brush.onPointerDown(press(200, 50, { pointerId: 2 }))).toBe(true)
+
+    brush.onPointerMove(press(70, 50, { pointerId: 1 }))
+    brush.onPointerUp(release(1))
+    await settle()
+
+    expect(layerPixels('r', { x: 200, y: 50, w: 1, h: 1 })[3]).toBe(0)
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+
+  it("a foreign pointer's move produces no dab", async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50, { pointerId: 1 }))
+
+    expect(brush.onPointerMove(press(200, 50, { pointerId: 2 }))).toBe(true)
+
+    brush.onPointerMove(press(70, 50, { pointerId: 1 }))
+    brush.onPointerUp(release(1))
+    await settle()
+
+    expect(layerPixels('r', { x: 200, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+
+  it("a foreign pointer's up does not end the stroke", async () => {
+    const { brush } = openBrush()
+    brush.onPointerDown(press(50, 50, { pointerId: 1 }))
+    brush.onPointerMove(press(70, 50, { pointerId: 1 }))
+
+    expect(brush.onPointerUp(release(2))).toBe(false)
+
+    brush.onPointerUp(release(1))
+    await settle()
+
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+})
+
+describe('the three ways a stroke ends', () => {
+  function openBrush(size = 8) {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = size
+    return { editor, brush: useLayerBrush(container) }
+  }
+
+  it('banks what was drawn, at the last known position, when the pointer is cancelled', async () => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+
+    brush.onPointerCancel(release())
+    await settle()
+
+    expect(editor.canUndo).toBe(true)
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+
+  it('banks what was drawn when the pointer loses capture', async () => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+
+    brush.onLostPointerCapture(release())
+    await settle()
+
+    expect(editor.canUndo).toBe(true)
+    expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
+  })
+
+  it('ends at most once, whichever of the three arrives first', async () => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+
+    expect(brush.onPointerUp(release())).toBe(true)
+    expect(brush.onPointerCancel(release())).toBe(false)
+    expect(brush.onLostPointerCapture(release())).toBe(false)
+    await settle()
+
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('is not a step when a cancelled press drew nothing', async () => {
+    const { editor, brush } = openBrush(0)
+    brush.onPointerDown(press(50, 50))
+
+    brush.onPointerCancel(release())
+    await settle()
+
+    expect(editor.canUndo).toBe(false)
+  })
+
+  /**
+   * `lostpointercapture` fires only once the browser has already let go, so
+   * the guard that asks before releasing has to hold for that case too rather
+   * than assume the press always still owns it.
+   */
+  it('asks before releasing capture rather than assuming it is held', async () => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    container.value.releasePointerCapture(1)
+
+    expect(() => brush.onLostPointerCapture(release())).not.toThrow()
+    await settle()
+
+    expect(editor.canUndo).toBe(true)
+  })
+})
+
+describe("the pen's eraser end", () => {
+  it('freezes to erase at the press while a mask brush tool is on the rail, and does not re-read the tool mid-stroke', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 8
+    await stroke(useLayerBrush(container), { x: 50, y: 50 }, { x: 90, y: 50 })
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBeGreaterThan(0)
+
+    const erase = vi.spyOn(engine, 'rasterErase')
+    const fill = vi.spyOn(engine, 'rasterFill')
+    const brush = useLayerBrush(container)
+    brush.onPointerDown(press(50, 50, { button: 5 }))
+    // Switched away from a mask brush entirely, which a live re-read of the
+    // tool would have to treat as a decline — the frozen mode does not.
+    editor.setTool('lasso')
+    brush.onPointerMove(press(90, 50, { button: 5 }))
+    brush.onPointerUp(release())
+    await settle()
+
+    expect(erase).toHaveBeenCalledTimes(1)
+    expect(fill).not.toHaveBeenCalled()
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+
+  /**
+   * CSP's own tail-switch binding (Modifier Key Settings) is per tool: a
+   * Pen-family tool's tail is the eraser, but a Figure or Selected-area tool's
+   * stays that tool. The eraser end only ever freezes a stroke that a mask
+   * brush would already have started.
+   */
+  it('declines when no mask brush tool is on the rail, even at button 5', async () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('lasso')
+    const brush = useLayerBrush(container)
+    const erase = vi.spyOn(engine, 'rasterErase')
+    const fill = vi.spyOn(engine, 'rasterFill')
+
+    expect(brush.onPointerDown(press(50, 50, { button: 5 }))).toBe(false)
+    expect(brush.onPointerMove(press(70, 50, { button: 5 }))).toBe(false)
+    brush.onPointerUp(release())
+    await settle()
+
+    expect(erase).not.toHaveBeenCalled()
+    expect(fill).not.toHaveBeenCalled()
+    expect(useRasterStore().holds('r')).toBe(false)
+  })
+
+  it('does not enter while Quick Mask is on', () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().toggleQuickMask()
+
+    expect(useLayerBrush(container).onPointerDown(press(50, 50, { button: 5 }))).toBe(false)
+  })
+
+  it('declines any button that is neither the tip nor the eraser end', () => {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+
+    expect(useLayerBrush(container).onPointerDown(press(50, 50, { button: 2 }))).toBe(false)
   })
 })

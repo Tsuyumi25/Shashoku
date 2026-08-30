@@ -8,6 +8,7 @@
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
+    @lostpointercapture="onLostPointerCapture"
     @pointerleave="onPointerLeave"
     @dblclick="selectionTool.onDoubleClick()"
     @contextmenu.prevent
@@ -1404,7 +1405,13 @@ function onPointerDown(e: PointerEvent) {
     beginBrushHud(hudMode, e.clientX - rect.left, e.clientY - rect.top)
     return
   }
-  if (e.button !== 0) return
+  if (e.button !== 0) {
+    // The pen's eraser end reaches only the brush — none of the gestures
+    // below, which all stay button-0 only, and the brush decides for itself
+    // whether this press is its own.
+    if (e.button === 5) layerBrush.onPointerDown(e)
+    return
+  }
   if (spaceDown.value) {
     el.setPointerCapture(e.pointerId)
     panning.value = true
@@ -1621,10 +1628,16 @@ function onPointerUp(e: PointerEvent) {
     return
   }
   if (!rotating.value && !panning.value) {
-    if (!layerBrush.onPointerUp() && selecting.value) selectionTool.onPointerUp(e)
+    const brushEnded =
+      e.type === 'pointercancel' ? layerBrush.onPointerCancel(e) : layerBrush.onPointerUp(e)
+    if (!brushEnded && selecting.value) selectionTool.onPointerUp(e)
   }
   rotating.value = false
   panning.value = false
+}
+
+function onLostPointerCapture(e: PointerEvent) {
+  layerBrush.onLostPointerCapture(e)
 }
 
 const ESCAPE_DOUBLE_MS = 400

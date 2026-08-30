@@ -28,7 +28,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useStrokeOverlayStore, type StrokeOverlayOp } from '@/stores/strokeOverlayStore'
-import type { MaskBrushMode } from '@/lib/selection/brushMask'
+import type { BrushShape, MaskBrushMode } from '@/lib/selection/brushMask'
 
 /**
  * A stroke under way, and everything it will need at the release.
@@ -44,11 +44,18 @@ import type { MaskBrushMode } from '@/lib/selection/brushMask'
  * write a stroke nobody watched being drawn.
  */
 interface Stroke {
+  /** Which pointer opened this stroke. A second one touching down is a
+   * different gesture, not a second hand on this one. */
+  pointerId: number
   page: string
   pageW: number
   pageH: number
   entry: RasterLayerEntry
   mode: MaskBrushMode
+  /** Size, hardness and opacity as they stood at the press: the rail is
+   * reachable while the hand is down, and a slider dragged mid-stroke must not
+   * change the head partway through it. */
+  shape: BrushShape
   color: string
   alphaLocked: boolean
   from: Point
@@ -144,11 +151,18 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    *
    * Quick Mask is what the same two tools point at the selection instead, so
    * the mode being on is the whole of the question — the tools themselves are
-   * one brush and one eraser either way.
+   * one brush and one eraser either way. Off it, the question is still which
+   * of the two is on the rail: the pen's eraser end freezes *that* stroke to
+   * erase, but only where a stroke was already going to happen. It does not
+   * reach past a tool with nothing to freeze — a lasso mid-drag, a click
+   * placing text.
    */
-  function directionFor(): MaskBrushMode | null {
+  function modeFor(e: PointerEvent): MaskBrushMode | null {
     if (selection.quickMask) return null
-    return maskBrushModeOf(editor.tool)
+    if (e.button !== 0 && e.button !== 5) return null
+    const on = maskBrushModeOf(editor.tool)
+    if (on === null) return null
+    return e.button === 5 ? 'erase' : on
   }
 
   /**
@@ -168,7 +182,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   function strokeTo(at: Point): void {
     const s = stroke
     if (s === null) return
-    const shape = selection.brushShapeFor(s.mode)
+    const shape = s.shape
     const window = clampToPage(segmentWindow(s.from, at, shape.radius), s.pageW, s.pageH)
     s.surface = surfaceHolding(s.surface, window, s.pageW, s.pageH)
     if (isEmptyRect(window) || isEmptyRect(s.surface.region)) {
@@ -273,7 +287,11 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   }
 
   function onPointerDown(e: PointerEvent): boolean {
-    const mode = directionFor()
+    // A stroke already under way owns the canvas until it ends. A second
+    // pointer touching down — a second finger, a second stylus — is not a
+    // request to start another one over it.
+    if (stroke !== null) return true
+    const mode = modeFor(e)
     if (mode === null) return false
     const page = editor.currentPageId
     const at = pageAt(e)
@@ -301,11 +319,13 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     void taken.catch(() => {})
     const alphaLocked = entry.alphaLocked
     const opened: Stroke = {
+      pointerId: e.pointerId,
       page,
       pageW: file.page.width,
       pageH: file.page.height,
       entry,
       mode,
+      shape: selection.brushShapeFor(mode),
       color: editor.foreground,
       alphaLocked,
       from: at,
@@ -335,19 +355,26 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
 
   function onPointerMove(e: PointerEvent): boolean {
     if (stroke === null) return false
+    if (e.pointerId !== stroke.pointerId) return true
     const at = pageAt(e)
     if (at !== null) strokeTo(at)
     return true
   }
 
   /**
-   * A cancelled pointer arrives here too and banks the stroke rather than
-   * dropping it, which is this canvas's standing convention for work the system
-   * interrupts.
+   * Release, cancel and a capture lost from under the hand all bank the
+   * stroke the same way — the system's reasons for interrupting a stroke are
+   * not this canvas's business, only that the part already drawn stays.
+   *
+   * Idempotent because the stroke is taken out from under `stroke` before
+   * anything async runs: whichever of the three arrives first ends it, and
+   * the other two then find nothing left to end. A foreign pointer's own
+   * ending is declined the same way a foreign pointer's move is — it never
+   * held this stroke, so it cannot close it.
    */
-  function onPointerUp(): boolean {
+  function endIfMine(e: PointerEvent): boolean {
     const s = stroke
-    if (s === null) return false
+    if (s === null || e.pointerId !== s.pointerId) return false
     /*
      * Taken here rather than inside the release, because the release is queued
      * behind whatever is still finishing and by the time it runs another press
@@ -355,10 +382,24 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
      * this one.
      */
     stroke = null
+    const el = e.currentTarget as HTMLElement | null
+    if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
     releases = releases.then(() => endStroke(s)).catch((err: unknown) => {
       console.error('stroke failed', err)
     })
     return true
+  }
+
+  function onPointerUp(e: PointerEvent): boolean {
+    return endIfMine(e)
+  }
+
+  function onPointerCancel(e: PointerEvent): boolean {
+    return endIfMine(e)
+  }
+
+  function onLostPointerCapture(e: PointerEvent): boolean {
+    return endIfMine(e)
   }
 
   async function endStroke(s: Stroke): Promise<void> {
@@ -437,5 +478,5 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     )
   }
 
-  return { onPointerDown, onPointerMove, onPointerUp }
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLostPointerCapture }
 }
