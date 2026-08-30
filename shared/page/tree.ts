@@ -1,4 +1,15 @@
-import type { GroupLayerEntry, LayerEntry, ManifestJson, TextLayerEntry } from './types'
+import type {
+  GroupLayerEntry,
+  LayerEntry,
+  ManifestJson,
+  RasterLayerEntry,
+  TextLayerEntry,
+} from './types'
+
+
+export function pageArtwork(layers: readonly LayerEntry[]): RasterLayerEntry | null {
+  return layers.find((e): e is RasterLayerEntry => e.kind === 'raster') ?? null
+}
 
 
 /** Every entry on the page, containers included, in tree order. */

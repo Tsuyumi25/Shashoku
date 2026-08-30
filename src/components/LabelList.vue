@@ -36,13 +36,14 @@
       <div
         tabindex="0"
         :data-page-id="group.page.pageId"
-        class="flex items-baseline gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+        class="flex items-center gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
         :class="[
           group.page.pageId === editor.currentPageId && 'text-foreground',
           isHere(group.page) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
         ]"
         @mousedown="editor.showPage(group.page.pageId)"
       >
+        <PageRowThumb v-if="fileOf(group.page.pageId)" :file="fileOf(group.page.pageId)!" />
         <span class="min-w-0 truncate text-xs font-medium">{{ group.page.name }}</span>
         <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
           {{ group.page.count }}
@@ -259,6 +260,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
+import PageRowThumb from '@/components/PageRowThumb.vue'
 import { isBlank, textOnSide } from '@shared/page/text'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
@@ -327,6 +329,12 @@ const pageGroups = computed(() => {
     rail: filtering.value ? 0 : railWidth(group.rows),
   }))
 })
+
+const filesById = computed(() => new Map(project.files.map((file) => [file.pageId, file])))
+
+function fileOf(pageId: string) {
+  return filesById.value.get(pageId)
+}
 
 /** What a range reaches over, in the order the panel is showing it. */
 const sequence = computed(() =>

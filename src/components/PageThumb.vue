@@ -51,27 +51,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
-import { useIntersectionObserver } from '@vueuse/core'
+import { computed, useTemplateRef } from 'vue'
 import { Check, ImageOff, Loader } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
-import { inRenderSlot, renderThumbnail, thumbnailKey } from '@/lib/pageThumbnail'
-import { useProjectStore } from '@/stores/projectStore'
+import { usePageThumbnail } from '@/composables/usePageThumbnail'
 
 /**
- * One finished page. Deliberately the composited result rather than the artwork
- * on its own: this grid is the last stop before delivery, and "did page 47 get
- * its text" is not a question the artwork can answer.
+ * One finished page. This grid is the last stop before delivery, so the cell is
+ * the whole page plus what it takes to pick it out of a run.
  */
 const props = defineProps<{ file: ProjectFile; selected: boolean }>()
 const emit = defineEmits<{ pick: [MouseEvent] }>()
 
-const project = useProjectStore()
-
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
-const src = ref<string | null>(null)
-const problem = ref<string | null>(null)
-const seen = ref(false)
+const { src, problem } = usePageThumbnail(cellRef, () => props.file)
 
 const badgeText = computed(() => {
   switch (props.file.badge) {
@@ -82,76 +75,5 @@ const badgeText = computed(() => {
     default:
       return null
   }
-})
-
-useIntersectionObserver(
-  cellRef,
-  ([entry]) => {
-    if (entry.isIntersecting) seen.value = true
-  },
-  { rootMargin: '400px' },
-)
-
-let url: string | null = null
-/** Which load the pending work belongs to, so a stale one cannot land. */
-let generation = 0
-
-function revoke() {
-  if (url) {
-    URL.revokeObjectURL(url)
-    url = null
-  }
-}
-
-async function bytesFor(): Promise<Uint8Array> {
-  /*
-   * Before the key, not just before the drawing. Making this reads `layers/`,
-   * and the newest paint may be in memory alone — a thumbnail of the page as it
-   * was half a minute ago is exactly the wrong answer to "did page 47 get
-   * typeset". The key is taken from the manifest, so settling first is also what
-   * keeps a stale picture from being filed under a name that looks current.
-   *
-   * Costs nothing when nothing is owed, which is every thumbnail but the few
-   * after an edit.
-   */
-  await project.flush()
-  const key = await thumbnailKey(props.file)
-  const cached = await window.api.readThumbnail(key)
-  if (cached) return cached
-
-  return inRenderSlot(async () => {
-    const png = await renderThumbnail(props.file)
-    // Failing to cache costs the next draw, not this one.
-    void window.api.writeThumbnail(key, png).catch(() => {})
-    return png
-  })
-}
-
-async function load() {
-  const mine = ++generation
-  revoke()
-  src.value = null
-  problem.value = null
-  if (!seen.value || props.file.badge !== 'ok' || !project.rootPath) return
-  try {
-    const bytes = await bytesFor()
-    if (mine !== generation) return
-    url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
-    src.value = url
-  } catch (err) {
-    if (mine !== generation) return
-    problem.value = err instanceof Error ? err.message : String(err)
-  }
-}
-
-// The grid is mounted only while it is on screen, so entering the project
-// manager is what re-reads a page that was typeset since the last look.
-watch(() => [seen.value, props.file.pageDir, project.rootPath] as const, () => void load(), {
-  immediate: true,
-})
-
-onBeforeUnmount(() => {
-  generation++
-  revoke()
 })
 </script>

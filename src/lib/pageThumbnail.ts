@@ -4,7 +4,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
 
 /** Longest edge of a cached thumbnail. */
-export const THUMBNAIL_EDGE = 320
+export const THUMBNAIL_EDGE = 640
 
 async function digest(text: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
@@ -71,21 +71,20 @@ async function encodePng(canvas: OffscreenCanvas): Promise<Uint8Array> {
 }
 
 /**
- * A project's cover is one layer file, not a composited page: the library knows
- * a project's path and where its first page keeps its bottom raster, and
- * compositing would mean opening every project in the sidebar to read its
- * labels. A cover says which project this is, which the bottom of page one does.
+ * One layer file, drawn small — a project's cover on the shelf, a page's
+ * artwork beside its heading. Neither is composited: what both are asking is
+ * which page this is, and the answer to that is on the paper.
  *
  * Its path is enough to key it. A layer file is written once by whatever made
  * it and never rewritten — an edit produces a new file — so the pixels behind a
  * path cannot change under the cache.
  */
-export function coverKey(
-  projectPath: string,
-  cover: string,
+export function layerImageKey(
+  dir: string,
+  file: string,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<string> {
-  return digest(JSON.stringify(['cover', edge, projectPath, cover]))
+  return digest(JSON.stringify(['layer', edge, dir, file]))
 }
 
 /**

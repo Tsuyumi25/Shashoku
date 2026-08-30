@@ -24,7 +24,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { ImageOff } from '@lucide/vue'
-import { coverKey, inRenderSlot, renderFitted } from '@/lib/pageThumbnail'
+import { layerImageKey, inRenderSlot, renderFitted } from '@/lib/pageThumbnail'
 
 /**
  * The bottom raster of a project's first page, read from inside the project
@@ -54,7 +54,7 @@ function revoke() {
 }
 
 async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array> {
-  const key = await coverKey(projectPath, cover)
+  const key = await layerImageKey(projectPath, cover)
   const cached = await window.api.readThumbnail(key)
   if (cached) return cached
 

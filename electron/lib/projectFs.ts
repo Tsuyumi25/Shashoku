@@ -37,6 +37,7 @@ import {
   parseManifest,
   serializeManifest,
 } from "@shared/page/schema";
+import { pageArtwork } from "@shared/page/tree";
 import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
 import { importBaseMap } from "./engine";
@@ -122,14 +123,9 @@ async function projectsUnder(folderPath: string): Promise<ScannedProject[]> {
 }
 
 /**
- * The bottom raster of the project's first readable page, relative to the
- * project folder.
- *
- * The bottom of a fresh page is its base map, which says which project this is
- * — and a project whose bottom layer has since been replaced is answered by
- * whatever the user put there instead, which says it just as well. Composited
- * covers are deliberately not an option: the sidebar would have to open every
- * project it lists to read their labels.
+ * The artwork of the project's first readable page, relative to the project
+ * folder. Composited covers are deliberately not an option: the sidebar would
+ * have to open every project it lists to read their labels.
  */
 async function coverOf(rootPath: string): Promise<string | null> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
@@ -151,8 +147,8 @@ async function coverOf(rootPath: string): Promise<string | null> {
     } catch {
       continue;
     }
-    const bottom = layers.find((l) => l.kind === "raster");
-    if (bottom?.kind === "raster") {
+    const bottom = pageArtwork(layers);
+    if (bottom) {
       return `${SHASHOKU_DIR}/${DIR_PAGES}/${pageId}/${DIR_LAYERS}/${bottom.file}`;
     }
   }
