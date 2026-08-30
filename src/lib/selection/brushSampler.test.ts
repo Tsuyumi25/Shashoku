@@ -250,4 +250,113 @@ describe('createBrushSampler', () => {
       }
     })
   })
+
+  describe('the stabilizer', () => {
+    it('leaves the path untouched at zero strength, matching the unstabilized sampler exactly', () => {
+      const raw = createBrushSampler({ radius: 12, opacity: 1 })
+      raw.begin(sample(0, 0))
+      const rawDabs = raw.push([sample(5, 3), sample(9, -2), sample(20, 10)])
+
+      const offExplicit = createBrushSampler({ radius: 12, opacity: 1 }, DEFAULT_BRUSH_SPACING_RATIO, 0)
+      offExplicit.begin(sample(0, 0))
+      const offDabs = offExplicit.push([sample(5, 3), sample(9, -2), sample(20, 10)])
+
+      expect(offDabs).toEqual(rawDabs)
+    })
+
+    it('moves the path away from the unfiltered one once switched on', () => {
+      const points = [sample(50, 0), sample(50, 50), sample(0, 50)]
+      const raw = createBrushSampler({ radius: 12, opacity: 1 })
+      raw.begin(sample(0, 0))
+      const rawDabs = raw.push(points)
+
+      const stabilized = createBrushSampler({ radius: 12, opacity: 1 }, DEFAULT_BRUSH_SPACING_RATIO, 0.7)
+      stabilized.begin(sample(0, 0))
+      const stabilizedDabs = stabilized.push(points)
+
+      expect(stabilizedDabs).not.toEqual(rawDabs)
+    })
+
+    it('is deterministic: the same calls against the same samples produce the same dabs every time', () => {
+      const points = [sample(8, 4), sample(19, -3), sample(31, 12), sample(40, 9)]
+      const run = (): Dab[] => {
+        const sampler = createBrushSampler({ radius: 15, opacity: 1 }, DEFAULT_BRUSH_SPACING_RATIO, 0.6)
+        return [...sampler.begin(sample(0, 0)), ...sampler.push(points)]
+      }
+
+      expect(run()).toEqual(run())
+    })
+
+    it('does not care where a fixed run of samples is split into pushes, once it is switched on', () => {
+      // The same points as ticket 04's grouping invariant, not the split's own
+      // interpolated ones: this is a regrouping of one fixed sequence, and a
+      // causal filter consuming it in the same order must not care where the
+      // batch boundaries fell.
+      const points = [sample(10, 0), sample(10, 10), sample(25, 10), sample(25, -5), sample(40, -5)]
+      const shape = { radius: 12, opacity: 1 }
+      const strength = 0.65
+
+      const runWith = (splits: BrushSample[][]): Dab[] => {
+        const sampler = createBrushSampler(shape, DEFAULT_BRUSH_SPACING_RATIO, strength)
+        const dabs = [...sampler.begin(sample(0, 0))]
+        for (const batch of splits) dabs.push(...sampler.push(batch))
+        return dabs
+      }
+
+      const whole = runWith([points])
+      const perSample = runWith(points.map((p) => [p]))
+      const uneven = runWith([points.slice(0, 2), points.slice(2, 3), points.slice(3)])
+
+      expect(perSample).toEqual(whole)
+      expect(uneven).toEqual(whole)
+    })
+
+    it('keeps the pointer no further behind than the lag it settles into, however long the stroke runs', () => {
+      const sampler = createBrushSampler({ radius: 2, opacity: 1 }, DEFAULT_BRUSH_SPACING_RATIO, 0.8)
+      let lastDab: Dab = sampler.begin(sample(0, 0))[0]
+      let x = 0
+      const step = 10
+
+      function advanceBy(n: number): number {
+        for (let i = 0; i < n; i++) {
+          x += step
+          const dabs = sampler.push([sample(x, 0)])
+          if (dabs.length > 0) lastDab = dabs[dabs.length - 1]
+        }
+        return x - lastDab.x
+      }
+
+      const earlyLag = advanceBy(50)
+      const laterLag = advanceBy(500)
+
+      // Bounded, not diverging: a longer straight run settles at the same
+      // trailing distance rather than falling further and further behind.
+      expect(Math.abs(laterLag - earlyLag)).toBeLessThan(2)
+    })
+
+    it('never changes a dab already handed back, however far the stroke continues afterwards', () => {
+      const sampler = createBrushSampler({ radius: 10, opacity: 1 }, DEFAULT_BRUSH_SPACING_RATIO, 0.7)
+      sampler.begin(sample(0, 0))
+      const early = sampler.push([sample(30, 0)])
+      const snapshot = early.map((d) => ({ ...d }))
+
+      sampler.push([sample(80, 40)])
+      sampler.end(sample(200, -30))
+
+      expect(early).toEqual(snapshot)
+    })
+
+    it('catches the tail up to the release position rather than leaving a stretch unwalked', () => {
+      const shape = { radius: 10, opacity: 1 }
+      const sampler = createBrushSampler(shape, DEFAULT_BRUSH_SPACING_RATIO, 0.85)
+      sampler.begin(sample(0, 0))
+      sampler.push(Array.from({ length: 30 }, (_, i) => sample((i + 1) * 5, 0)))
+
+      const spacing = shape.radius * 2 * DEFAULT_BRUSH_SPACING_RATIO
+      const dabs = sampler.end(sample(400, 0))
+
+      expect(dabs.length).toBeGreaterThan(0)
+      expect(400 - dabs[dabs.length - 1].x).toBeLessThanOrEqual(spacing + 1e-9)
+    })
+  })
 })

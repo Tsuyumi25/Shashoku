@@ -38,11 +38,10 @@ export const DEFAULT_BRUSH_SPACING_RATIO = 0.125
  * Turns a gesture's raw samples into dabs, one call at a time.
  *
  * Holds the memory `stampMaskCircle` is not allowed to: where the gesture
- * last was, and how far it has travelled since the last dab. That distance
- * survives from one call to the next, so a call boundary never rounds away
- * whatever distance a segment had left over. A stabilizer's filter state
- * would live in this same closure, next to those two, once one exists —
- * there is nothing to hold until it does.
+ * last was, how far it has travelled since the last dab, and the
+ * stabilizer's own trailing position. All three survive from one call to
+ * the next, so a call boundary never rounds away a segment's leftover
+ * distance or resets how far the smoothed path has fallen behind.
  *
  * Knows nothing of a pointer's identity and nothing of the DOM a sample came
  * from: a caller hands it page-space samples and reads dabs back.
@@ -52,14 +51,26 @@ export interface BrushSampler {
   begin(sample: BrushSample): Dab[]
   /** A batch of samples since the last call, oldest first. */
   push(samples: BrushSample[]): Dab[]
-  /** The release. Walks to this sample exactly like `push` would — it does
-   * not force a dab onto it. */
+  /** The release. Unlike `push`, walks straight to this sample's own
+   * position rather than the stabilizer's trailing one, so a stroke never
+   * ends with a stretch the smoothing left unwalked. */
   end(sample: BrushSample): Dab[]
 }
 
+/**
+ * Causal, forward-only smoothing over a stroke's path: each conditioned
+ * sample is pulled toward the last position the stroke settled on, by a
+ * fixed fraction, before it is used to place dabs. `0` leaves samples
+ * untouched.
+ *
+ * A stroke's edge is only ever this filter's *input* clipped by where dabs
+ * fall — nothing already placed is revisited, which is the one thing a
+ * retroactive smoother could not promise once coverage has taken a ceiling.
+ */
 export function createBrushSampler(
   shape: BrushSamplerShape,
   spacingRatio: number = DEFAULT_BRUSH_SPACING_RATIO,
+  stabilization: number = 0,
 ): BrushSampler {
   let last: BrushSample | null = null
   let distanceToNextDab = 0
@@ -88,6 +99,17 @@ export function createBrushSampler(
     return { ...sample, pressure: lastValidPressure }
   }
 
+  function stabilize(sample: BrushSample): BrushSample {
+    if (stabilization <= 0) return sample
+    const from = last as BrushSample
+    const pull = 1 - stabilization
+    return {
+      ...sample,
+      x: from.x + (sample.x - from.x) * pull,
+      y: from.y + (sample.y - from.y) * pull,
+    }
+  }
+
   function open(sample: BrushSample): Dab[] {
     const conditioned = condition(sample)
     const dab = dabAt(conditioned)
@@ -96,13 +118,14 @@ export function createBrushSampler(
     return [dab]
   }
 
-  function advance(to: BrushSample): Dab[] {
+  /** Walks from `last` to `to` exactly, at the configured spacing. Whether
+   * `to` is a stabilized position or a raw one is the caller's call. */
+  function walkTo(to: BrushSample): Dab[] {
     const from = last as BrushSample
-    const toConditioned = condition(to)
-    const dx = toConditioned.x - from.x
-    const dy = toConditioned.y - from.y
+    const dx = to.x - from.x
+    const dy = to.y - from.y
     const length = Math.hypot(dx, dy)
-    last = toConditioned
+    last = to
     if (length === 0) return []
 
     const dabs: Dab[] = []
@@ -113,8 +136,8 @@ export function createBrushSampler(
       const dab = dabAt({
         x: from.x + dx * t,
         y: from.y + dy * t,
-        pressure: from.pressure + (toConditioned.pressure - from.pressure) * t,
-        time: from.time + (toConditioned.time - from.time) * t,
+        pressure: from.pressure + (to.pressure - from.pressure) * t,
+        time: from.time + (to.time - from.time) * t,
       })
       dabs.push(dab)
       distanceToNextDab = spacingFor(dab.radius)
@@ -127,11 +150,13 @@ export function createBrushSampler(
     begin: open,
     push(samples) {
       const dabs: Dab[] = []
-      for (const sample of samples) dabs.push(...(last === null ? open(sample) : advance(sample)))
+      for (const sample of samples) {
+        dabs.push(...(last === null ? open(sample) : walkTo(stabilize(condition(sample)))))
+      }
       return dabs
     },
     end(sample) {
-      return last === null ? open(sample) : advance(sample)
+      return last === null ? open(sample) : walkTo(condition(sample))
     },
   }
 }

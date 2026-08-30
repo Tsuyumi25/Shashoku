@@ -7,6 +7,9 @@ export const MAX_BRUSH_SIZE = 500
 export const DEFAULT_BRUSH_SIZE = 40
 export const DEFAULT_BRUSH_HARDNESS = 0.8
 export const DEFAULT_BRUSH_OPACITY = 1
+/** Off: no settings surface offers this yet, so a stroke's raw feel is what
+ * every existing brush already ships with. */
+export const DEFAULT_BRUSH_STABILIZATION = 0
 
 /**
  * What a stamp is shaped by, apart from where it lands. Radius in page pixels;

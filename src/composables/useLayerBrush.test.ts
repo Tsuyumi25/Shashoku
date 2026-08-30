@@ -1525,3 +1525,43 @@ describe("a move event's coalesced points", () => {
     expect(layerPixels('r', { x: 65, y: 50, w: 1, h: 1 })[3]).toBe(255)
   })
 })
+
+/**
+ * The default ships the stabilizer off, so nothing above this line ever
+ * turns it on. Ticket 04's grouping invariant is a causal filter's property
+ * as much as an unfiltered path's, so it has to survive with the stabilizer
+ * switched on too — this pins that directly, with the strength turned up
+ * from the setting the rest of the suite never touches.
+ */
+describe("a move event's coalesced points, with the stabilizer switched on", () => {
+  it('still lands the same pixels as the same points delivered one move at a time', async () => {
+    const { editor } = openWith(raster('coalesced'), raster('separate'))
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = 40
+    useSelectionStore().brushes.paint.stabilization = 0.6
+
+    const bentPath = [
+      { x: 60, y: 60 },
+      { x: 140, y: 60 },
+      { x: 140, y: 150 },
+      { x: 90, y: 110 },
+    ]
+
+    editor.selectOnly('coalesced')
+    const batched = useLayerBrush(container)
+    batched.onPointerDown(press(bentPath[0].x, bentPath[0].y))
+    batched.onPointerMove(coalescedMove(bentPath.slice(1)))
+    batched.onPointerUp(release())
+    await settle()
+
+    editor.selectOnly('separate')
+    const single = useLayerBrush(container)
+    single.onPointerDown(press(bentPath[0].x, bentPath[0].y))
+    for (const p of bentPath.slice(1)) single.onPointerMove(press(p.x, p.y))
+    single.onPointerUp(release())
+    await settle()
+
+    const region = { x: 0, y: 0, w: 200, h: 200 }
+    expect([...layerPixels('coalesced', region)]).toEqual([...layerPixels('separate', region)])
+  })
+})

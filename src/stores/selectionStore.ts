@@ -5,6 +5,7 @@ import {
   DEFAULT_BRUSH_HARDNESS,
   DEFAULT_BRUSH_OPACITY,
   DEFAULT_BRUSH_SIZE,
+  DEFAULT_BRUSH_STABILIZATION,
   MAX_BRUSH_SIZE,
   MIN_BRUSH_SIZE,
   strokeMask,
@@ -50,6 +51,10 @@ export interface BrushSettings {
    * moments for different reasons.
    */
   opacity: number
+  /** How far the drawn path trails the raw samples, `0` to `1`. `0` is the
+   * raw feel; above it, a stroke's path resists following hand tremor at the
+   * cost of lagging the pointer while the hand is still moving. */
+  stabilization: number
 }
 
 export type SelectionGestureKind = 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon'
@@ -133,11 +138,13 @@ export const useSelectionStore = defineStore('selection', () => {
       size: DEFAULT_BRUSH_SIZE,
       hardness: DEFAULT_BRUSH_HARDNESS,
       opacity: DEFAULT_BRUSH_OPACITY,
+      stabilization: DEFAULT_BRUSH_STABILIZATION,
     },
     erase: {
       size: DEFAULT_BRUSH_SIZE,
       hardness: DEFAULT_BRUSH_HARDNESS,
       opacity: DEFAULT_BRUSH_OPACITY,
+      stabilization: DEFAULT_BRUSH_STABILIZATION,
     },
   })
 
@@ -521,6 +528,12 @@ export const useSelectionStore = defineStore('selection', () => {
     return { radius: settings.size / 2, hardness: settings.hardness, opacity: settings.opacity }
   }
 
+  /** The settings as the sampler takes them — a path filter rather than a
+   * stamp's shape, so it is not part of `BrushShape`. */
+  function brushStabilizationFor(mode: MaskBrushMode): number {
+    return brushes.value[mode].stabilization
+  }
+
   /**
    * A stroke is one entry in the stack however long it is, and it writes into
    * the held mask straight away so Quick Mask keeps up with the hand — the same
@@ -807,6 +820,7 @@ export const useSelectionStore = defineStore('selection', () => {
     brushes,
     brushRadiusFor,
     brushShapeFor,
+    brushStabilizationFor,
     hasSelection,
     isDrawing,
     maskPatchOf,

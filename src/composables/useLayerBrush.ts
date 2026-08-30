@@ -7,6 +7,7 @@ import { screenToContentPx } from '@/lib/coords'
 import { stampMaskCircle } from '@/lib/selection/brushMask'
 import {
   createBrushSampler,
+  DEFAULT_BRUSH_SPACING_RATIO,
   type BrushSample,
   type BrushSampler,
   type Dab,
@@ -396,7 +397,11 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       shape,
       color: editor.foreground,
       alphaLocked,
-      sampler: createBrushSampler(shape),
+      sampler: createBrushSampler(
+        shape,
+        DEFAULT_BRUSH_SPACING_RATIO,
+        selection.brushStabilizationFor(mode),
+      ),
       surface: EMPTY_SURFACE,
       dirty: EMPTY_RECT,
       taken,
