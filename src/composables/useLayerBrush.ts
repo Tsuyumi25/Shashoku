@@ -408,6 +408,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
     }
     stroke = opened
+    editor.beginStroke()
     applyDabs(opened.sampler.begin(sampleAt(at, e)))
     return true
   }
@@ -493,6 +494,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       // that no frame is drawn holding both; this is for the paths that never
       // reach there — a handover that failed, an engine that refused.
       overlay.end(s.shown)
+      editor.finishStroke()
     }
   }
 

@@ -1193,6 +1193,141 @@ describe('the three ways a stroke ends', () => {
   })
 })
 
+describe('undo and redo refuse a stroke in flight', () => {
+  function openBrush(size = 8) {
+    const { editor } = openWith(raster('r'))
+    editor.selectOnly('r')
+    editor.setTool('brush')
+    useSelectionStore().brushes.paint.size = size
+    return { editor, brush: useLayerBrush(container) }
+  }
+
+  it('takes nothing back while a stroke is under way', async () => {
+    const { editor, brush } = openBrush()
+    await stroke(brush, { x: 50, y: 50 })
+    expect(editor.canUndo).toBe(true)
+
+    brush.onPointerDown(press(150, 50))
+    brush.onPointerMove(press(160, 50))
+    editor.undo()
+
+    expect(editor.canRedo).toBe(false)
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBeGreaterThan(0)
+
+    brush.onPointerUp(release())
+    await settle()
+  })
+
+  it('puts nothing back while a stroke is under way', async () => {
+    const { editor, brush } = openBrush()
+    await stroke(brush, { x: 50, y: 50 })
+    editor.undo()
+    expect(editor.canRedo).toBe(true)
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBe(0)
+
+    brush.onPointerDown(press(150, 50))
+    brush.onPointerMove(press(160, 50))
+    editor.redo()
+
+    expect(editor.canUndo).toBe(false)
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBe(0)
+
+    brush.onPointerUp(release())
+    await settle()
+  })
+
+  it('undoes normally again once the stroke has ended', async () => {
+    const { editor, brush } = openBrush()
+    await stroke(brush, { x: 50, y: 50 })
+    expect(editor.canUndo).toBe(true)
+
+    editor.undo()
+
+    expect(editor.canUndo).toBe(false)
+    expect(layerPixels('r', { x: 50, y: 50, w: 1, h: 1 })[3]).toBe(0)
+  })
+
+  /**
+   * Release waits on the commit the same way a stroke's own end does, so a
+   * key pressed the instant the pointer comes up still has to reach past it —
+   * the case the redo stack used to lose a stroke over, before it could land.
+   */
+  it('stays blocked until the commit lands, not merely until the pointer comes up', async () => {
+    const { editor, brush } = openBrush()
+    await stroke(brush, { x: 50, y: 50 })
+    expect(editor.canUndo).toBe(true)
+
+    brush.onPointerDown(press(150, 50))
+    brush.onPointerMove(press(160, 50))
+    brush.onPointerUp(release())
+
+    editor.undo()
+    expect(editor.canRedo).toBe(false)
+
+    await settle()
+
+    editor.undo()
+    expect(editor.canRedo).toBe(true)
+  })
+
+  type Brush = ReturnType<typeof useLayerBrush>
+
+  it.each([
+    ['pointerup', (b: Brush) => b.onPointerUp(release())],
+    ['pointercancel', (b: Brush) => b.onPointerCancel(release())],
+    ['lostpointercapture', (b: Brush) => b.onLostPointerCapture(release())],
+  ] as const)('releases it on %s', async (_label, end) => {
+    const { editor, brush } = openBrush()
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    expect(editor.strokeInFlight).toBe(true)
+
+    end(brush)
+    await settle()
+
+    expect(editor.strokeInFlight).toBe(false)
+    await stroke(brush, { x: 90, y: 50 })
+    expect(editor.canRedo).toBe(false)
+    editor.undo()
+    expect(editor.canRedo).toBe(true)
+  })
+
+  it('releases it even when the commit throws', async () => {
+    const { editor, brush } = openBrush()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fill = vi.spyOn(engine, 'rasterFill').mockImplementation(() => {
+      throw new Error('engine refused')
+    })
+
+    brush.onPointerDown(press(50, 50))
+    brush.onPointerMove(press(70, 50))
+    brush.onPointerUp(release())
+    await settle()
+
+    expect(editor.strokeInFlight).toBe(false)
+
+    fill.mockRestore()
+    await stroke(brush, { x: 90, y: 50 })
+    expect(editor.canUndo).toBe(true)
+  })
+
+  it('leaves undo and redo alone when no stroke is under way', async () => {
+    const { editor, brush } = openBrush()
+    expect(editor.strokeInFlight).toBe(false)
+
+    await stroke(brush, { x: 50, y: 50 })
+    expect(editor.canUndo).toBe(true)
+
+    editor.undo()
+    expect(editor.canUndo).toBe(false)
+    expect(editor.canRedo).toBe(true)
+
+    editor.redo()
+    expect(editor.canRedo).toBe(false)
+    expect(editor.canUndo).toBe(true)
+  })
+})
+
 describe('the release walks the tail to its own position', () => {
   function openBrush(size = 8) {
     const { editor } = openWith(raster('r'))

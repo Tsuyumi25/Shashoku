@@ -461,6 +461,28 @@ export const useEditorStore = defineStore('editor', () => {
   const canRedo = computed(() => redoStack.value.length > 0)
 
   /**
+   * How many strokes are between their press and the commit that either
+   * lands or throws. Counted rather than a single flag: a stroke's commit
+   * outlives its release, and a fast second press can open before the first
+   * one's has run — `useLayerBrush`'s own release queue is built around that
+   * same overlap.
+   *
+   * Undo and redo refuse outright while this is above zero. Measured on
+   * Photoshop by hand: Ctrl+Z mid-stroke does nothing at all, neither
+   * touching the stroke before it nor cancelling the one under way.
+   */
+  const strokesInFlight = ref(0)
+  const strokeInFlight = computed(() => strokesInFlight.value > 0)
+
+  function beginStroke() {
+    strokesInFlight.value += 1
+  }
+
+  function finishStroke() {
+    strokesInFlight.value = Math.max(0, strokesInFlight.value - 1)
+  }
+
+  /**
    * Where a freshly opened project starts: on this page, on its first object.
    *
    * Deliberately not named for turning a page, and deliberately not what
@@ -766,6 +788,7 @@ export const useEditorStore = defineStore('editor', () => {
    * leave the typing standing.
    */
   function undo() {
+    if (strokeInFlight.value) return
     commitTextEdit()
     const cmd = undoStack.value.at(-1)
     if (!cmd) return
@@ -776,6 +799,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** Typing after an undo ends the redo branch, as it does in any editor. */
   function redo() {
+    if (strokeInFlight.value) return
     commitTextEdit()
     const cmd = redoStack.value.at(-1)
     if (!cmd) return
@@ -2108,6 +2132,9 @@ export const useEditorStore = defineStore('editor', () => {
     rotateTo,
     canUndo,
     canRedo,
+    strokeInFlight,
+    beginStroke,
+    finishStroke,
     startOnPage,
     pageBy,
     selectLabelBy,
