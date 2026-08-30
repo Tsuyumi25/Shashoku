@@ -74,7 +74,7 @@ export function createBrushSampler(
 ): BrushSampler {
   let last: BrushSample | null = null
   let distanceToNextDab = 0
-  let lastValidPressure = 1
+  let lastValidPressure: number | null = null
 
   function spacingFor(radius: number): number {
     return Math.max(1, radius * 2 * spacingRatio)
@@ -89,14 +89,22 @@ export function createBrushSampler(
     }
   }
 
-  /** The Pointer Events spec fixes `pointerup.pressure` at `0`. */
+  /**
+   * The Pointer Events spec fixes `pointerup.pressure` at `0`, and a pen
+   * reports the same `0` at `pointerdown` — measured against real hardware,
+   * every opening sample of a stroke, before the tip's own force has been
+   * sampled. Mid-stroke, falling back to the last valid reading is right.
+   * At the opening there is no last reading to fall back to, so falling back
+   * to `0` there is what lets the first segment's interpolation taper the
+   * stroke up from nothing instead of starting at full force.
+   */
   function condition(sample: BrushSample): BrushSample {
     const p = sample.pressure
     if (Number.isFinite(p) && p > 0 && p <= 1) {
       lastValidPressure = p
       return sample
     }
-    return { ...sample, pressure: lastValidPressure }
+    return { ...sample, pressure: lastValidPressure ?? 0 }
   }
 
   function stabilize(sample: BrushSample): BrushSample {

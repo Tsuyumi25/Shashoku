@@ -219,6 +219,26 @@ describe('createBrushSampler', () => {
       for (const dab of dabs) expect(dab.radius).toBeCloseTo(20 * 0.8)
     })
 
+    it('does not open a stroke at full radius when the opening sample reports 0 pressure', () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      const [dab] = sampler.begin(sample(0, 0, 0))
+
+      expect(dab.radius).toBe(0)
+    })
+
+    it("carries the first segment's width up from the opening rather than starting at full", () => {
+      const sampler = createBrushSampler({ radius: 20, opacity: 1 })
+      sampler.begin(sample(0, 0, 0))
+      const dabs = sampler.push([sample(40, 0, 0.8)])
+
+      expect(dabs.length).toBeGreaterThan(1)
+      expect(dabs[0].radius).toBeLessThan(20 * 0.8)
+      for (let i = 1; i < dabs.length; i++) {
+        expect(dabs[i].radius).toBeGreaterThanOrEqual(dabs[i - 1].radius)
+      }
+      expect(dabs[dabs.length - 1].radius).toBeGreaterThan(dabs[0].radius)
+    })
+
     it('takes the last valid pressure for a release reporting 0, not 0 itself', () => {
       const sampler = createBrushSampler({ radius: 20, opacity: 1 })
       sampler.begin(sample(0, 0, 0.6))

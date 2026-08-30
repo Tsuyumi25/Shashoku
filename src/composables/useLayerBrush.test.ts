@@ -721,6 +721,19 @@ describe('the stroke as it is being drawn', () => {
   })
 
   /**
+   * A pen reports `pressure` 0 at `pointerdown` — measured against real
+   * hardware, not a placeholder like the mouse's 0.5 above — before its own
+   * contact force has been sampled at all.
+   */
+  it('does not paint a full-nominal-width dot at the press when a pen opens at pressure 0', () => {
+    const { brush } = open()
+    useSelectionStore().brushes.paint.size = 40
+    brush.onPointerDown(press(50, 50, { pointerType: 'pen', pressure: 0 }))
+
+    expect(shownAlpha(50, 50)).toBeFalsy()
+  })
+
+  /**
    * Which of the two directions a stroke is decides nothing about the coverage
    * and everything about how it meets the layer. These three operators are the
    * canvas's account of what the release will do.
