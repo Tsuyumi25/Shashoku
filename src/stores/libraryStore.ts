@@ -155,6 +155,16 @@ export const useLibraryStore = defineStore('library', () => {
     clearChoice()
   }
 
+  /**
+   * Re-reads whichever folder is currently stood in, without rescanning every
+   * declared workspace the way `refresh` does — for a change made to just
+   * this one book from outside the tree walk, such as a shelf gesture that
+   * reordered or inserted pages.
+   */
+  function reloadInside(): Promise<void> {
+    return loadInside(standingAt.value)
+  }
+
   const crumbs = computed(() =>
     standingAt.value === null
       ? []
@@ -382,5 +392,6 @@ export const useLibraryStore = defineStore('library', () => {
     addWorkspace,
     removeWorkspace,
     standAt,
+    reloadInside,
   }
 })

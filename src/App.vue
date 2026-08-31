@@ -85,6 +85,7 @@ import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useEditorStore } from '@/stores/editorStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -92,6 +93,7 @@ import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const library = useLibraryStore()
 const selection = useSelectionStore()
 const connect = useConnectStore()
 const preferences = usePreferencesStore()
@@ -156,6 +158,20 @@ useEventListener(window, 'keydown', (e) => {
     } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
       e.preventDefault()
       editor.redo()
+    }
+    return
+  }
+
+  // A shelf gesture pushes into whichever book it is standing on, open or
+  // not, so the undo it takes back is that book's too — not whatever the
+  // editor happens to have loaded.
+  if (ui.view === 'library') {
+    if (key === 'z' && !e.shiftKey) {
+      e.preventDefault()
+      editor.undo(library.standingAt)
+    } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+      e.preventDefault()
+      editor.redo(library.standingAt)
     }
     return
   }

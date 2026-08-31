@@ -440,15 +440,21 @@ async function makePage(
 }
 
 /**
- * One page, from one image in the project root, appended to whatever is already
- * there. Answers with the name it was given.
+ * One page, from one image in the project root. Answers with the name it was
+ * given, and nothing more — where it lands in `pages` is the caller's to
+ * decide and write, not this function's.
  *
  * One page per call rather than a batch: a chapter takes minutes, and the
  * caller is the one that can say how far it has got and stop when asked.
  *
- * Nothing is written to the page list here. The directories are enough — the
- * open that follows takes them in and the document catches up on the next save,
- * which is the same mechanism that survives a crash halfway through a run.
+ * Nothing is written to the page list here, on purpose: a directory this
+ * makes and a name written into `pages` are the same page from two different
+ * places, and only one of them can crash independently of the other.
+ * `reconcilePages` adopting an unlisted directory at the next open is what
+ * still happens if the caller's own write never lands — a page made and then
+ * lost to a crash before its name reaches `pages` is not invented by that
+ * adoption, only found by it, at the end of the order rather than wherever it
+ * was meant to land.
  */
 export async function createPage(rootPath: string, sourceName: string): Promise<string> {
   const pagesRoot = join(rootPath, SHASHOKU_DIR, DIR_PAGES);

@@ -110,8 +110,8 @@ export interface ShashokuApi {
   listInside(path: string): Promise<FolderContents>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
-   * One page, from one image in the project root, appended to the ones already
-   * there. Answers with the name it was given.
+   * One page, from one image in the project root. Answers with the name it
+   * was given; where that name lands in `pages` is the caller's to write.
    *
    * The one irreversible step and the only one that reads a source file: the
    * pixels are copied in, and from then on the project does not depend on the

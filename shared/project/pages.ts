@@ -120,3 +120,77 @@ export function reconcilePages(
   order.push(...adopted)
   return { order, missing, adopted }
 }
+
+// ── Dragging pages around ──────────────────────────────────────────────────
+//
+// Both functions below answer the same question — "what does `pages` become"
+// — for the two gestures a shelf can make: reordering pages already in the
+// chapter, and inserting pages that were just created. Reordering has to
+// exclude the pages it is moving before it can say where they land among the
+// rest; an insertion never does, because what it is inserting was never in
+// the list to begin with. Both hold every tombstoned name exactly where it
+// already sat — neither ever renumbers it out of its own slot, only shifts it
+// by however many names actually landed on one side of it.
+
+function visibleOnly(pages: readonly string[], deletedPages: readonly string[]): string[] {
+  const deleted = new Set(deletedPages)
+  return pages.filter((id) => !deleted.has(id))
+}
+
+/** `ids`, in whatever order `order` already holds them — never the order they were picked in. */
+export function naturalOrderOf(order: readonly string[], ids: readonly string[]): string[] {
+  const wanted = new Set(ids)
+  return order.filter((id) => wanted.has(id))
+}
+
+/**
+ * `items` spliced into the visible run of `pages` right before whichever
+ * visible page currently sits at `targetIndex`, or at the very end once
+ * `targetIndex` reaches past the last one. A tombstoned name never moves
+ * relative to the visible names on either side of it — it is simply carried
+ * along by whichever one of them the splice lands next to.
+ */
+export function insertPagesAt(
+  pages: readonly string[],
+  deletedPages: readonly string[],
+  items: readonly string[],
+  targetIndex: number,
+): string[] {
+  const visible = visibleOnly(pages, deletedPages)
+  const at = Math.max(0, Math.min(targetIndex, visible.length))
+  const beforeId = visible[at]
+  const spliceAt = beforeId === undefined ? pages.length : pages.indexOf(beforeId)
+  return [...pages.slice(0, spliceAt), ...items, ...pages.slice(spliceAt)]
+}
+
+/**
+ * `movedIds` relocated to `targetIndex` among the visible pages that are not
+ * themselves moving — SortableJS's MultiDrag coordinate system, the index a
+ * card's own drop point reads against once the batch being dragged is read
+ * out of the grid. A tombstoned page holds its absolute slot in `pages`
+ * throughout: only the values sitting in the *visible* slots are permuted,
+ * one available value per slot, front to back.
+ */
+export function reorderPages(
+  pages: readonly string[],
+  deletedPages: readonly string[],
+  movedIds: readonly string[],
+  targetIndex: number,
+): string[] {
+  const deleted = new Set(deletedPages)
+  const isVisible = (id: string) => !deleted.has(id)
+  const moved = new Set(movedIds)
+  const visible = pages.filter(isVisible)
+  const remaining = visible.filter((id) => !moved.has(id))
+  const movedNatural = naturalOrderOf(visible, movedIds)
+  const at = Math.max(0, Math.min(targetIndex, remaining.length))
+  const nextVisible = [...remaining.slice(0, at), ...movedNatural, ...remaining.slice(at)]
+
+  let cursor = 0
+  return pages.map((id) => {
+    if (!isVisible(id)) return id
+    const value = nextVisible[cursor]
+    cursor += 1
+    return value as string
+  })
+}

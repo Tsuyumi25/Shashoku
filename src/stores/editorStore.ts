@@ -10,6 +10,8 @@ import type {
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
 import { useZoomPan, type Size } from '@/composables/useZoomPan'
+import type { ProjectFile } from '@/types/project'
+import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { clamp, screenToPagePx } from '@/lib/coords'
@@ -861,10 +863,10 @@ export const useEditorStore = defineStore('editor', () => {
    * the stack has to run in the order things happened, or undoing a delete
    * after the text change it swallowed replays them the wrong way round.
    */
-  function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean }) {
+  function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean; book?: BookId }) {
     commitTextEdit()
     if (!opts?.alreadyApplied) cmd.do()
-    const book = currentBook.value
+    const book = opts?.book ?? currentBook.value
     cmd.book = book ?? undefined
     cmd.portable = cmd.portable ?? false
     const history = historyOf(book)
@@ -941,10 +943,16 @@ export const useEditorStore = defineStore('editor', () => {
    * Reading the stack first would reach past it to some earlier command and
    * leave the typing standing.
    */
-  function undo() {
+  /**
+   * `book` defaults to whichever project is open, which is right for every
+   * caller before this ticket — the editor only ever undoes its own book.
+   * The library passes the book it is standing in instead, since a shelf
+   * gesture can target a book that is not open, or open while a different
+   * one is.
+   */
+  function undo(book: BookId = currentBook.value) {
     if (strokeInFlight.value) return
     commitTextEdit()
-    const book = currentBook.value
     const history = historyOf(book)
     const cmd = history.undo.at(-1)
     if (!cmd) return
@@ -955,10 +963,9 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /** Typing after an undo ends the redo branch, as it does in any editor. */
-  function redo() {
+  function redo(book: BookId = currentBook.value) {
     if (strokeInFlight.value) return
     commitTextEdit()
-    const book = currentBook.value
     const history = historyOf(book)
     const cmd = history.redo.at(-1)
     if (!cmd) return
@@ -1009,6 +1016,82 @@ export const useEditorStore = defineStore('editor', () => {
       nextRedo = []
     }
     setHistory(book, { undo: nextUndo, redo: nextRedo })
+  }
+
+  /**
+   * Whether `book` is written to by reaching for the singleton `projectStore`
+   * — decided once, when the shelf lets go, and closed over rather than
+   * re-asked on every `do`/`undo`/`redo`. A book can open or close while a
+   * command sits on its stack, and asking again mid-life would route a single
+   * command's two ends through two different writers.
+   */
+  function bookWriter(book: string, openHere: boolean) {
+    const project = useProjectStore()
+    const bookMeta = useBookMetaStore()
+    return {
+      setOrder: (order: readonly string[]) =>
+        openHere ? project.setFullOrder(order) : bookMeta.setOrder(book, order),
+      insertPages: (entries: readonly ProjectFile[], order: readonly string[]) =>
+        openHere ? project.insertPages(entries, order) : bookMeta.setOrder(book, order),
+      tagDeleted: (ids: readonly string[]) =>
+        openHere ? project.tagPagesDeleted(ids) : bookMeta.tagDeleted(book, ids),
+      untagDeleted: (ids: readonly string[]) =>
+        openHere ? project.untagPagesDeleted(ids) : bookMeta.untagDeleted(book, ids),
+    }
+  }
+
+  /**
+   * A drag that reordered pages, `before` and `after` each a complete order —
+   * tombstoned pages included, so neither end has to depend on the selection
+   * or the drop point still meaning anything by the time it runs again.
+   *
+   * The first portable command: a book nobody has opened this session can
+   * still be reordered from the shelf, and undoing it later needs nothing but
+   * `book`'s own `project.json`.
+   */
+  function cmdSetPageOrder(book: BookId, before: readonly string[], after: readonly string[]) {
+    if (book === null || before.join('\u0000') === after.join('\u0000')) return
+    const openHere = useProjectStore().isOpenRoot(book)
+    const writer = bookWriter(book, openHere)
+    pushCommand(
+      {
+        label: `reorder-pages ${book}`,
+        portable: !openHere,
+        do: () => writer.setOrder(after),
+        undo: () => writer.setOrder(before),
+      },
+      { book },
+    )
+  }
+
+  /**
+   * Files dropped onto the page band: each is already a page on disk by the
+   * time this runs — `createPage` is irreversible and happens once, before
+   * the shelf pushes this — so `do`/`undo` only ever move `after`'s tombstone
+   * back and forth. The name is never taken out of `pages`, which is what
+   * lets the position it landed at survive being undone and redone.
+   */
+  function cmdImportPages(
+    book: BookId,
+    ids: readonly string[],
+    entries: readonly ProjectFile[],
+    after: readonly string[],
+  ) {
+    if (book === null || ids.length === 0) return
+    const openHere = useProjectStore().isOpenRoot(book)
+    const writer = bookWriter(book, openHere)
+    pushCommand(
+      {
+        label: `import-pages ${book} ${ids.length}`,
+        portable: !openHere,
+        do: () => {
+          writer.insertPages(entries, after)
+          writer.untagDeleted(ids)
+        },
+        undo: () => writer.tagDeleted(ids),
+      },
+      { book },
+    )
   }
 
   function cmdAddLabel(pageId: string, label: TextLayerEntry) {
@@ -2346,6 +2429,8 @@ export const useEditorStore = defineStore('editor', () => {
     redo,
     clearHistory,
     closeBook,
+    cmdSetPageOrder,
+    cmdImportPages,
     addLabelAt,
     addLabelAtViewCenter,
     deleteSelection,

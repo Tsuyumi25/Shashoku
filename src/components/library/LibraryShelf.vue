@@ -147,6 +147,7 @@
       </template>
 
       <div v-if="marqueeStyle" class="shelf-marquee" :style="marqueeStyle" />
+      <div v-if="dropLineStyle" class="shelf-drop-line" :style="dropLineStyle" />
     </div>
   </div>
 </template>
@@ -161,10 +162,12 @@ import type { DirEntry, ShelfLeaf } from '@shared/project/workspace'
 import LibraryCard from '@/components/library/LibraryCard.vue'
 import LibraryCrumbs from '@/components/library/LibraryCrumbs.vue'
 import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
+import { useLibraryPageOrder } from '@/composables/useLibraryPageOrder'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { marqueeRect } from '@/lib/selection/marquee'
 import type { Point, Rect } from '@/lib/selection/rect'
 import { routeShelfKey } from '@/lib/selection/shelfKeys'
+import { insertionIndexAt } from '@/lib/selection/shelfDrop'
 import {
   bandBoundary,
   clampToTerritory,
@@ -191,6 +194,7 @@ const library = useLibraryStore()
 const project = useProjectStore()
 const editor = useEditorStore()
 const ui = useUiStore()
+const order = useLibraryPageOrder()
 const { openPath, lastError } = useOpenProject()
 const toast = useToast()
 
@@ -278,14 +282,16 @@ function cards(): HTMLElement[] {
   return root ? [...root.querySelectorAll<HTMLElement>('.shelf-card')] : []
 }
 
-// ── Drag to select ───────────────────────────────────────────────────────
+// ── Drag to select, reorder, or import ─────────────────────────────────────
 //
-// One state machine serves both a click on a card and a marquee dragged
-// through the gaps between them, because one mousedown has to decide which
-// of the two it is turning into. Nothing about the selection changes until
-// either the drag threshold is crossed or the pointer comes back up — a
-// press on an already-chosen card must be free to become "drag this whole
-// batch" without collapsing it to one first.
+// One state machine serves a click on a card, a marquee dragged through the
+// grid, and a Ctrl+Drag that moves cards into the page band, because one
+// mousedown has to decide which it is turning into. Nothing about the
+// selection changes until either the drag threshold is crossed or the
+// pointer comes back up — a press on an already-chosen card must be free to
+// become "drag this whole batch" without collapsing it to one first. Once
+// the threshold is crossed, `pending` is spent: it becomes a `Framing` (plain
+// drag, from anywhere) or a `Sorting` (Ctrl+Drag from a card, inside a book).
 
 interface PendingCard {
   kind: 'card'
@@ -293,7 +299,6 @@ interface PendingCard {
   key: string
   region: ShelfRegion
   start: Point
-  moved: boolean
 }
 
 interface PendingGap {
@@ -319,9 +324,31 @@ interface Framing {
   raf: number
 }
 
+/**
+ * A Ctrl+Drag let go from a card: everything selected travels together — or
+ * just the one card, if it was not part of the selection when the press
+ * landed — to the page band's `targetIndex`. `targetCards` is read once, when
+ * the drag opens, the same way `Framing.cardBoxes` is: nothing here is
+ * virtualized, so the grid does not reflow mid-drag.
+ */
+interface Sorting {
+  pointerId: number
+  book: string
+  kind: 'reorder' | 'import'
+  /** Populated for `'reorder'`, natural (band) order — never selection order. */
+  pageIds: string[]
+  /** Populated for `'import'`, natural (band) order. */
+  sourceNames: string[]
+  targetCards: CardBox[]
+  lastClient: Point
+  targetIndex: number
+}
+
 let pending: PendingCard | PendingGap | null = null
 let framing: Framing | null = null
+let sorting: Sorting | null = null
 const marqueeStyle = ref<Record<string, string> | null>(null)
+const dropLineStyle = ref<Record<string, string> | null>(null)
 
 function scrollerFrame(el: HTMLElement, rect: DOMRect) {
   return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
@@ -368,7 +395,7 @@ function currentRect(f: Framing, el: HTMLElement, rect: DOMRect): Rect {
 }
 
 function onShelfPointerDown(e: PointerEvent) {
-  if (e.button !== 0 || pending !== null || framing !== null) return
+  if (e.button !== 0 || pending !== null || framing !== null || sorting !== null) return
   const el = scroller.value
   if (el === null) return
   const start = { x: e.clientX, y: e.clientY }
@@ -377,7 +404,7 @@ function onShelfPointerDown(e: PointerEvent) {
   if (key !== undefined) {
     const region = library.regionOf(key)
     if (region === null) return
-    pending = { kind: 'card', pointerId: e.pointerId, key, region, start, moved: false }
+    pending = { kind: 'card', pointerId: e.pointerId, key, region, start }
     return
   }
   const rect = el.getBoundingClientRect()
@@ -393,6 +420,98 @@ function onShelfPointerDown(e: PointerEvent) {
   }
 }
 
+/**
+ * Opens a marquee wherever it is asked to — the gap branch already knows its
+ * origin and boundary from `pointerdown`; a plain drag that started on a card
+ * has to work them out fresh here, since the card branch never keeps them
+ * (Ctrl held on a card means something else entirely).
+ */
+function beginFraming(
+  pointerId: number,
+  region: ShelfRegion,
+  origin: Point,
+  boundary: number,
+  additive: boolean,
+  e: PointerEvent,
+): void {
+  const el = scroller.value
+  if (el === null) return
+  const rect = el.getBoundingClientRect()
+  framing = {
+    pointerId,
+    origin,
+    territory: region,
+    boundary,
+    base: library.chosenIn(region),
+    additive,
+    cardBoxes: cardBoxesIn(el, rect, region),
+    lastClient: { x: e.clientX, y: e.clientY },
+    lastTick: null,
+    zoneEnteredAt: null,
+    raf: 0,
+  }
+  framing.raf = requestAnimationFrame(frameTick)
+}
+
+/**
+ * A page or a file card dragged past the threshold with Ctrl held, inside a
+ * book — the one place a page band exists to drop into. `false` for every
+ * other case leaves the caller to treat the press as a no-op drag, same as
+ * before this gesture existed.
+ */
+function beginSorting(p: PendingCard, e: PointerEvent): boolean {
+  const book = library.standingAt
+  if (!library.inside.book || book === null) return false
+  const el = scroller.value
+  if (el === null) return false
+  const rect = el.getBoundingClientRect()
+
+  const movingKeys = new Set(
+    library.isChosen(p.key) ? library.chosenIn(p.region) : [p.key],
+  )
+  const source = p.region === 'project' ? library.projectItems : library.fileItems
+  const moving = source.filter((item) => movingKeys.has(item.key))
+  if (moving.length === 0) return false
+
+  const pageBoxes = cardBoxesIn(el, rect, 'project')
+  const excluded = p.region === 'project' ? movingKeys : new Set<string>()
+
+  sorting = {
+    pointerId: p.pointerId,
+    book,
+    kind: p.region === 'project' ? 'reorder' : 'import',
+    pageIds: moving.flatMap((item) => (item.kind === 'page' ? [item.page.id] : [])),
+    sourceNames: moving.flatMap((item) => (item.kind === 'entry' ? [item.entry.name] : [])),
+    targetCards: pageBoxes.filter((c) => !excluded.has(c.key)),
+    lastClient: { x: e.clientX, y: e.clientY },
+    targetIndex: 0,
+  }
+  updateSortingPreview()
+  return true
+}
+
+/** Where `sorting`'s cards land, and the thin line drawn to show it. */
+function updateSortingPreview(): void {
+  const s = sorting
+  const el = scroller.value
+  if (s === null || el === null) return
+  const rect = el.getBoundingClientRect()
+  const point = clientToContent(s.lastClient.x, s.lastClient.y, scrollerFrame(el, rect))
+  s.targetIndex = insertionIndexAt(s.targetCards, point)
+
+  // A line drawn at the leading edge of whichever card the drop lands
+  // before, or trailing the last card once the drop is past all of them.
+  const before = s.targetCards[s.targetIndex]
+  if (before) {
+    dropLineStyle.value = { left: `${before.box.x - 2}px`, top: `${before.box.y}px`, height: `${before.box.h}px` }
+    return
+  }
+  const after = s.targetCards[s.targetCards.length - 1]
+  dropLineStyle.value = after
+    ? { left: `${after.box.x + after.box.w}px`, top: `${after.box.y}px`, height: `${after.box.h}px` }
+    : null
+}
+
 function onShelfPointerMove(e: PointerEvent) {
   if (framing !== null) {
     if (e.pointerId !== framing.pointerId) return
@@ -400,30 +519,45 @@ function onShelfPointerMove(e: PointerEvent) {
     framing.additive = e.ctrlKey || e.metaKey
     return
   }
+  if (sorting !== null) {
+    if (e.pointerId !== sorting.pointerId) return
+    sorting.lastClient = { x: e.clientX, y: e.clientY }
+    updateSortingPreview()
+    return
+  }
   if (pending === null || e.pointerId !== pending.pointerId) return
   if (Math.hypot(e.clientX - pending.start.x, e.clientY - pending.start.y) < DRAG_THRESHOLD_PX) return
   if (pending.kind === 'card') {
-    pending.moved = true
+    const ctrl = e.ctrlKey || e.metaKey
+    if (ctrl) {
+      // Consumes the gesture either way: a card+Ctrl drag outside a book has
+      // nowhere defined to land, and is a no-op rather than falling back to
+      // a marquee — Ctrl already means something else on a card.
+      beginSorting(pending, e)
+      pending = null
+      return
+    }
+    const el = scroller.value
+    if (el === null) {
+      pending = null
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    const origin = clientToContent(pending.start.x, pending.start.y, scrollerFrame(el, rect))
+    const boundary = territoryBoundary(el, rect)
+    beginFraming(pending.pointerId, pending.region, origin, boundary, false, e)
+    pending = null
     return
   }
-  const el = scroller.value
-  if (el === null) return
-  const rect = el.getBoundingClientRect()
-  framing = {
-    pointerId: pending.pointerId,
-    origin: pending.origin,
-    territory: pending.region,
-    boundary: pending.boundary,
-    base: library.chosenIn(pending.region),
-    additive: e.ctrlKey || e.metaKey,
-    cardBoxes: cardBoxesIn(el, rect, pending.region),
-    lastClient: { x: e.clientX, y: e.clientY },
-    lastTick: null,
-    zoneEnteredAt: null,
-    raf: 0,
-  }
+  beginFraming(
+    pending.pointerId,
+    pending.region,
+    pending.origin,
+    pending.boundary,
+    e.ctrlKey || e.metaKey,
+    e,
+  )
   pending = null
-  framing.raf = requestAnimationFrame(frameTick)
 }
 
 /**
@@ -478,16 +612,43 @@ function endFraming() {
   marqueeStyle.value = null
 }
 
+/**
+ * Where letting go actually pushes the command — the gesture itself only
+ * ever previewed a target index. `reorderPagesTo`/`importFilesAt` each build
+ * one `Command` for the whole batch, so `Ctrl+Z` takes it all back in one
+ * step regardless of how many cards were dragged.
+ */
+function endSorting(): void {
+  const s = sorting
+  sorting = null
+  dropLineStyle.value = null
+  if (s === null) return
+  const committed =
+    s.kind === 'reorder'
+      ? order.reorderPagesTo(s.book, s.pageIds, s.targetIndex)
+      : order.importFilesAt(s.book, s.sourceNames, s.targetIndex)
+  // The write is on disk by the time this resolves — see `flushBook` in
+  // `useLibraryPageOrder` — so the band the shelf shows can simply be
+  // re-read rather than reasoned about from here.
+  void committed.then(() => library.reloadInside())
+}
+
 function onShelfPointerUp(e: PointerEvent) {
   if (framing !== null && e.pointerId === framing.pointerId) {
     endFraming()
+    return
+  }
+  if (sorting !== null && e.pointerId === sorting.pointerId) {
+    endSorting()
     return
   }
   if (pending === null || e.pointerId !== pending.pointerId) return
   const done = pending
   pending = null
   if (done.kind === 'card') {
-    if (done.moved) return
+    // Reaching here at all means the press never crossed the drag threshold —
+    // once it does, `pending` is spent into a `Framing` or a `Sorting` and
+    // pointerup takes one of the branches above instead.
     if (e.shiftKey) library.extendTo(done.region, done.key)
     else if (e.ctrlKey || e.metaKey) library.toggle(done.region, done.key)
     else library.only(done.region, done.key)
@@ -501,6 +662,11 @@ function onShelfPointerUp(e: PointerEvent) {
 function onShelfPointerCancel(e: PointerEvent) {
   if (framing !== null && e.pointerId === framing.pointerId) {
     endFraming()
+    return
+  }
+  if (sorting !== null && e.pointerId === sorting.pointerId) {
+    sorting = null
+    dropLineStyle.value = null
     return
   }
   if (pending !== null && e.pointerId === pending.pointerId) pending = null
@@ -674,6 +840,17 @@ onMounted(() => {
   z-index: 1;
   border: 1px solid var(--primary);
   background: color-mix(in oklch, var(--primary) 12%, transparent);
+  pointer-events: none;
+}
+/* Same coordinate system as `.shelf-marquee`, for the same reason — a
+   Ctrl+Drag's own position in the page band. */
+.shelf-drop-line {
+  position: absolute;
+  z-index: 2;
+  width: 3px;
+  margin-left: -1px;
+  border-radius: 1.5px;
+  background: var(--primary);
   pointer-events: none;
 }
 .band {

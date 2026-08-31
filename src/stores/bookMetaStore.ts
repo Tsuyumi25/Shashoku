@@ -123,6 +123,39 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   }
 
   /**
+   * Tombstones names in a cached session, the same way `projectStore.
+   * tagPagesDeleted` does for the book that is open — the name stays in
+   * `order`, only its visibility changes. Answers `false` under the same two
+   * conditions `setOrder` does.
+   */
+  function tagDeleted(rootPath: string, pageIds: readonly string[]): boolean {
+    if (useProjectStore().isOpenRoot(rootPath)) return false
+    const session = sessions.get(rootPath)
+    if (!session) return false
+    const marked = new Set(session.meta.deletedPages ?? [])
+    for (const id of pageIds) marked.add(id)
+    session.meta = { ...session.meta, deletedPages: [...marked] }
+    session.dirty = true
+    writerFor(rootPath).mark()
+    return true
+  }
+
+  /** Peels the tombstone back off, the mirror of `tagDeleted`. */
+  function untagDeleted(rootPath: string, pageIds: readonly string[]): boolean {
+    if (useProjectStore().isOpenRoot(rootPath)) return false
+    const session = sessions.get(rootPath)
+    if (!session) return false
+    const taking = new Set(pageIds)
+    session.meta = {
+      ...session.meta,
+      deletedPages: (session.meta.deletedPages ?? []).filter((id) => !taking.has(id)),
+    }
+    session.dirty = true
+    writerFor(rootPath).mark()
+    return true
+  }
+
+  /**
    * Drops a cached session — the library moved on to somewhere else, or the
    * book was just opened for real and `projectStore` is the writer now.
    */
@@ -132,5 +165,5 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
     writers.delete(rootPath)
   }
 
-  return { sessionFor, setOrder, flush, forget }
+  return { sessionFor, setOrder, tagDeleted, untagDeleted, flush, forget }
 })

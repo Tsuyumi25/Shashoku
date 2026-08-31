@@ -415,6 +415,72 @@ export const useProjectStore = defineStore('project', () => {
     return tagged
   }
 
+  /**
+   * Every page named in `order`, taken from `pool` — `allFiles` for a plain
+   * reorder, `allFiles` plus whatever just arrived for an import. `null`
+   * rather than a best effort when `order` and `pool` do not name exactly the
+   * same pages: a reorder command's `before`/`after` are evidence about the
+   * chapter as it stood at the drag, and a chapter that has since gained or
+   * lost a page makes both stale rather than partially right.
+   */
+  function orderedByIds(order: readonly string[], pool: readonly ProjectFile[]): ProjectFile[] | null {
+    const byId = new Map(pool.map((f) => [f.pageId, f]))
+    if (byId.size !== order.length || byId.size !== pool.length) return null
+    const out: ProjectFile[] = []
+    for (const id of order) {
+      const file = byId.get(id)
+      if (!file) return null
+      out.push(file)
+    }
+    return out
+  }
+
+  /**
+   * Replaces the chapter's order wholesale, tombstoned pages included — the
+   * `do`/`undo` of a drag that reordered pages, each holding a complete
+   * `string[]` rather than a delta so neither has to depend on where the
+   * selection or the drop point stood by the time it runs again.
+   */
+  function setFullOrder(order: readonly string[]): boolean {
+    const next = orderedByIds(order, allFiles.value)
+    if (next === null) return false
+    allFiles.value = next
+    markMetaDirty()
+    return true
+  }
+
+  /**
+   * Pages made from files dropped on the shelf join the chapter and land in
+   * `order` in the same step — an import's undo only ever tombstones them
+   * afterwards, so this is the one chance to put them where the drop asked.
+   */
+  function insertPages(entries: readonly ProjectFile[], order: readonly string[]): boolean {
+    const have = new Set(allFiles.value.map((f) => f.pageId))
+    const pool = [...allFiles.value, ...entries.filter((f) => !have.has(f.pageId))]
+    const next = orderedByIds(order, pool)
+    if (next === null) return false
+    allFiles.value = next
+    markMetaDirty()
+    return true
+  }
+
+  /**
+   * One page read fresh off disk, the same way `ingestProject` reads every
+   * page at open — for a page the shelf just made while this book is the one
+   * open in the editor, so it can join `allFiles` without a full reopen.
+   */
+  async function loadFreshPage(pageId: string, pageDir: string): Promise<ProjectFile> {
+    try {
+      const raw = await window.api.readPage(pageDir)
+      const page = repairPage(parseManifest(raw.manifestRaw)).manifest
+      const ocr = raw.ocrRaw === null ? defaultOcr(page.width, page.height) : parseOcr(raw.ocrRaw)
+      return { pageId, pageDir, page, ocr, badge: 'ok' }
+    } catch {
+      const page = unreadablePage(pageId)
+      return { pageId, pageDir, page, ocr: defaultOcr(page.width, page.height), badge: 'damaged' }
+    }
+  }
+
   /** Peels the mark off, which puts each page back where it never stopped being. */
   function untagPagesDeleted(pageIds: readonly string[]): void {
     const marked = projectMeta.value.deletedPages ?? []
@@ -1235,6 +1301,9 @@ export const useProjectStore = defineStore('project', () => {
     createPages,
     abandonCreating,
     movePageBefore,
+    setFullOrder,
+    insertPages,
+    loadFreshPage,
     tagPagesDeleted,
     untagPagesDeleted,
     flush,

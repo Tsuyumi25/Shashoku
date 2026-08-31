@@ -74,7 +74,17 @@ export function useOpenProject() {
   /** This folder is already a project; open it. */
   const openPicked = () => guard(() => project.openExisting())
 
-  const openPath = (path: string) => guard(() => project.openByPath(path))
+  /**
+   * A shelf gesture on this same book may have left a book-meta write still
+   * debounced — flushed first, since `openByPath` reads the file straight off
+   * disk and a write still in flight would lose the race, opening the book on
+   * whatever order stood before the gesture.
+   */
+  const openPath = (path: string) =>
+    guard(async () => {
+      await bookMeta.flush(path)
+      return project.openByPath(path)
+    })
 
   return { lastError, createHere, openPicked, openPath }
 }

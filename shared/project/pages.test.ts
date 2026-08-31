@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pageDirName, reconcilePages } from './pages'
+import { insertPagesAt, naturalOrderOf, pageDirName, reconcilePages, reorderPages } from './pages'
 
 const AT = new Date(2026, 7, 9, 14, 30)
 
@@ -137,5 +137,89 @@ describe('reconcilePages', () => {
 
   it('has nothing to say about an empty project', () => {
     expect(reconcilePages([], [])).toEqual({ order: [], missing: [], adopted: [] })
+  })
+})
+
+describe('naturalOrderOf', () => {
+  it('reads ids back in the order the list already holds them, not the order given', () => {
+    expect(naturalOrderOf(['a', 'b', 'c', 'd'], ['d', 'a'])).toEqual(['a', 'd'])
+  })
+})
+
+describe('insertPagesAt', () => {
+  it('splices in at the front', () => {
+    expect(insertPagesAt(['a', 'b'], [], ['x'], 0)).toEqual(['x', 'a', 'b'])
+  })
+
+  it('splices in at the end once the index reaches past the last visible page', () => {
+    expect(insertPagesAt(['a', 'b'], [], ['x'], 2)).toEqual(['a', 'b', 'x'])
+  })
+
+  it('splices in the middle', () => {
+    expect(insertPagesAt(['a', 'b', 'c'], [], ['x'], 1)).toEqual(['a', 'x', 'b', 'c'])
+  })
+
+  it('carries several new pages in as one connected run, in the order given', () => {
+    expect(insertPagesAt(['a', 'b'], [], ['x', 'y'], 1)).toEqual(['a', 'x', 'y', 'b'])
+  })
+
+  it('never needs to exclude anything, since a new page was never in the list', () => {
+    // Targeting the position a tombstoned page sits at does not collide with
+    // it — the index is counted over the *visible* pages only.
+    expect(insertPagesAt(['a', 'x', 'b'], ['x'], ['n'], 1)).toEqual(['a', 'x', 'n', 'b'])
+  })
+
+  it('clamps an out-of-range index rather than throwing', () => {
+    expect(insertPagesAt(['a'], [], ['x'], 99)).toEqual(['a', 'x'])
+    expect(insertPagesAt(['a'], [], ['x'], -5)).toEqual(['x', 'a'])
+  })
+})
+
+describe('reorderPages', () => {
+  it('collapses a sparse selection to a contiguous run at the drop point', () => {
+    // Pages 0, 2 and 4 dragged to the very front.
+    const out = reorderPages(['a', 'b', 'c', 'd', 'e'], [], ['a', 'c', 'e'], 0)
+    expect(out).toEqual(['a', 'c', 'e', 'b', 'd'])
+  })
+
+  it('keeps the moved pages in their own natural order, never promoting the dragged card', () => {
+    // Dragged starting from 'c', but 'a' and 'e' were selected too — natural
+    // order still reads a, c, e.
+    const out = reorderPages(['a', 'b', 'c', 'd', 'e'], [], ['e', 'a', 'c'], 0)
+    expect(out).toEqual(['a', 'c', 'e', 'b', 'd'])
+  })
+
+  it('moves a single page to the end', () => {
+    const out = reorderPages(['a', 'b', 'c'], [], ['a'], 2)
+    expect(out).toEqual(['b', 'c', 'a'])
+  })
+
+  it('leaves the order alone when the drop lands back where the run already was', () => {
+    const out = reorderPages(['a', 'b', 'c'], [], ['b'], 1)
+    expect(out).toEqual(['a', 'b', 'c'])
+  })
+
+  /**
+   * The spec's own worked example: [A, X̶, B, C] with X̶ tombstoned, C dragged
+   * to the front. The visible pages become [C, A, B] but X̶ never leaves slot
+   * 1 — it is simply carried along by whichever visible page the splice
+   * lands it next to.
+   */
+  it('holds a tombstoned page in its own slot while the pages around it reorder', () => {
+    const out = reorderPages(['A', 'X', 'B', 'C'], ['X'], ['C'], 0)
+    expect(out).toEqual(['C', 'X', 'A', 'B'])
+  })
+
+  it('holds several tombstones in place at once', () => {
+    const out = reorderPages(['A', 'X', 'B', 'Y', 'C'], ['X', 'Y'], ['C'], 0)
+    expect(out).toEqual(['C', 'X', 'A', 'Y', 'B'])
+  })
+
+  it('is a no-op batch, not a crash, when nothing is being moved', () => {
+    expect(reorderPages(['a', 'b'], [], [], 0)).toEqual(['a', 'b'])
+  })
+
+  it('clamps an out-of-range target index rather than throwing', () => {
+    expect(reorderPages(['a', 'b', 'c'], [], ['a'], 99)).toEqual(['b', 'c', 'a'])
   })
 })
