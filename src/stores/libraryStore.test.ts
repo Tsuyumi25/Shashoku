@@ -2,6 +2,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { DirEntry, FolderContents, ShelfLeaf } from '@shared/project/workspace'
 import { entryKey, pageKey, useLibraryStore } from './libraryStore'
+import { useBookMetaStore } from './bookMetaStore'
+import { useEditorStore } from './editorStore'
+import { useLibraryPageOrder } from '@/composables/useLibraryPageOrder'
+import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 
 function entry(path: string, overrides: Partial<DirEntry> = {}): DirEntry {
   return {
@@ -22,6 +26,7 @@ function leaf(id: string): ShelfLeaf {
 }
 
 const insideByPath = new Map<string, FolderContents>()
+const metaPages = new Map<string, string[]>()
 
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -30,6 +35,9 @@ function flushPromises(): Promise<void> {
 beforeAll(() => {
   vi.stubGlobal('window', {
     api: {
+      readProjectMeta: (path: string) =>
+        Promise.resolve(serializeProjectJson({ ...defaultProjectJson(), pages: metaPages.get(path) ?? [] })),
+      writeProjectMeta: () => Promise.resolve(),
       listInside: (path: string) =>
         Promise.resolve(insideByPath.get(path) ?? { book: false, pages: [], entries: [] }),
       scanWorkspaces: () => Promise.resolve({ roots: [], folders: [], books: [] }),
@@ -247,5 +255,81 @@ describe('the shelf keeps two selections apart', () => {
 
     expect(library.chosenItems).toHaveLength(0)
     expect(library.focus).toBe('file')
+  })
+})
+
+
+/**
+ * Ticket `10`: the shelf used to lay its cards out straight from the folder
+ * read, which knows nothing of a command that has just run in the renderer.
+ * An undo left the disk right and the cards where they were — indistinguishable
+ * from an undo that did nothing at all.
+ */
+describe('the cards follow the store that owns the book', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    insideByPath.clear()
+    metaPages.clear()
+  })
+
+  async function standInBook(pages: string[]): Promise<ReturnType<typeof useLibraryStore>> {
+    const library = useLibraryStore()
+    metaPages.set('/book', pages)
+    await enterFolder(library, '/book', {
+      book: true,
+      pages: pages.map(leaf),
+      entries: [],
+    })
+    return library
+  }
+
+  const shown = (library: ReturnType<typeof useLibraryStore>) =>
+    library.bandPages.map((p) => p.id)
+
+  it('moves the cards on an undo, with nobody re-reading the folder', async () => {
+    const library = await standInBook(['a', 'b', 'c'])
+    const editor = useEditorStore()
+
+    await useLibraryPageOrder().reorderPagesTo('/book', ['c'], 0)
+    expect(shown(library)).toEqual(['c', 'a', 'b'])
+
+    editor.undo('/book')
+    expect(shown(library)).toEqual(['a', 'b', 'c'])
+
+    editor.redo('/book')
+    expect(shown(library)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('takes a tombstoned page off the shelf without a fresh folder read', async () => {
+    const library = await standInBook(['x'])
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor('/book')
+
+    bookMeta.tagDeleted('/book', ['x'])
+    expect(shown(library)).toEqual([])
+
+    bookMeta.untagDeleted('/book', ['x'])
+    expect(shown(library)).toEqual(['x'])
+  })
+
+  /**
+   * A directory on disk the list has not caught up with. The shelf draws it —
+   * `listInside` reconciles — so it has to be one a drag can pick up and
+   * actually move.
+   */
+  it('lets a page the list never named be dragged like any other', async () => {
+    const library = useLibraryStore()
+    metaPages.set('/book', ['a', 'b'])
+    await enterFolder(library, '/book', {
+      book: true,
+      pages: [leaf('a'), leaf('b'), leaf('z')],
+      entries: [],
+    })
+    expect(shown(library)).toEqual(['a', 'b', 'z'])
+
+    await useLibraryPageOrder().reorderPagesTo('/book', ['z'], 0)
+
+    expect(shown(library)).toEqual(['z', 'a', 'b'])
+    expect((await useBookMetaStore().handleFor('/book'))?.order).toEqual(['z', 'a', 'b'])
   })
 })

@@ -2,6 +2,7 @@ import { insertPagesAt, reorderPages } from '@shared/project/pages'
 import { DIR_PAGES, SHASHOKU_DIR } from '@shared/ssk/constants'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useEditorStore } from '@/stores/editorStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -12,10 +13,10 @@ interface BookOrder {
 
 /**
  * Lands the write on disk before the gesture is considered done, and says so
- * when it does not. `listInside` — what the shelf re-reads to show the result
- * — is a main-process read of `project.json`, wholly unaware of the
- * renderer's in-memory store; without this, a reload run right after `do()`
- * would race the debounced autosave and show the order from before the drag.
+ * when it does not. The shelf shows the result from the store rather than
+ * from the folder, so this is not what makes the cards move — it is what
+ * makes the answer survive the next open, which reads `project.json` off disk
+ * and would otherwise find the order from before the drag.
  *
  * ⛔ Neither gesture below may reject. The shelf lets go of the promise they
  * return, so a rejection would go unhandled and the user would be told
@@ -33,20 +34,30 @@ async function settleBook(book: string): Promise<void> {
 }
 
 /**
- * A book's full page order and its tombstones, from whichever of the two
- * places holds them right now. `handleFor` already refuses a book the
- * editor has open — the `null` it answers with there is read as "ask
- * `projectStore` instead", the same door `bookMetaStore` itself points
- * callers through.
+ * A book's full page order and its tombstones, loading the handle first if
+ * this is the first gesture to reach that book.
+ *
+ * ⭐ Every card the shelf drew is taken in before anything is measured. A
+ * page directory the list does not name yet is one the shelf shows and a
+ * gesture could not see, so it could be picked up and not moved; and the
+ * order this gesture is about to write has to name it, or the write would
+ * quietly leave it out of the chapter altogether.
  */
 async function readBookOrder(book: string): Promise<BookOrder> {
-  const project = useProjectStore()
-  if (!project.isOpenRoot(book)) {
-    const handle = await useBookMetaStore().handleFor(book)
-    if (handle !== null) {
-      return { pages: [...handle.order], deletedPages: [...(handle.meta.deletedPages ?? [])] }
-    }
+  const bookMeta = useBookMetaStore()
+  await bookMeta.handleFor(book)
+  const library = useLibraryStore()
+  // Only the book the shelf is actually standing in: `bandPages` describes
+  // that one folder, and it is the only book a gesture can start from.
+  if (library.standingAt === book) {
+    bookMeta.adopt(
+      book,
+      library.bandPages.map((leaf) => leaf.id),
+    )
   }
+  const order = bookMeta.orderOf(book)
+  if (order !== null) return order
+  const project = useProjectStore()
   return {
     pages: project.allFiles.map((f) => f.pageId),
     deletedPages: [...(project.projectMeta.deletedPages ?? [])],

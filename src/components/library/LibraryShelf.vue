@@ -1,5 +1,11 @@
 <template>
-  <div class="flex min-h-0 flex-1 flex-col">
+  <!--
+    Positioned, for the notice below: a refused undo in here has to be said
+    somewhere the reader is looking, and the same one line the canvas uses is
+    the whole of it — a second way of saying "that did not happen" would be a
+    second thing to keep in step.
+  -->
+  <div class="relative flex min-h-0 flex-1 flex-col">
     <div class="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1">
       <LibraryCrumbs />
 
@@ -149,6 +155,8 @@
       <div v-if="marqueeStyle" class="shelf-marquee" :style="marqueeStyle" />
       <div v-if="dropLineStyle" class="shelf-drop-line" :style="dropLineStyle" />
     </div>
+
+    <Notice />
   </div>
 </template>
 
@@ -162,6 +170,7 @@ import type { DirEntry, ShelfLeaf } from '@shared/project/workspace'
 import LibraryCard from '@/components/library/LibraryCard.vue'
 import LibraryCrumbs from '@/components/library/LibraryCrumbs.vue'
 import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
+import Notice from '@/components/Notice.vue'
 import { useLibraryPageOrder } from '@/composables/useLibraryPageOrder'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { marqueeRect } from '@/lib/selection/marquee'
@@ -623,14 +632,16 @@ function endSorting(): void {
   sorting = null
   dropLineStyle.value = null
   if (s === null) return
-  const committed =
-    s.kind === 'reorder'
-      ? order.reorderPagesTo(s.book, s.pageIds, s.targetIndex)
-      : order.importFilesAt(s.book, s.sourceNames, s.targetIndex)
-  // The write is on disk by the time this resolves — see `flushBook` in
-  // `useLibraryPageOrder` — so the band the shelf shows can simply be
-  // re-read rather than reasoned about from here.
-  void committed.then(() => library.reloadInside())
+  if (s.kind === 'reorder') {
+    // No reload: the band is laid out from the store that owns the book, so
+    // it has already moved. Re-reading the folder is what an undo cannot do
+    // and must not have to.
+    void order.reorderPagesTo(s.book, s.pageIds, s.targetIndex)
+    return
+  }
+  // An import is the one case that does need the folder read again — its
+  // pages have no card yet, and their names and covers are on disk.
+  void order.importFilesAt(s.book, s.sourceNames, s.targetIndex).then(() => library.reloadInside())
 }
 
 function onShelfPointerUp(e: PointerEvent) {

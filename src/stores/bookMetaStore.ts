@@ -1,8 +1,9 @@
+import { reactive } from 'vue'
 import { defineStore } from 'pinia'
 import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { ProjectJson } from '@shared/project/types'
 import { SHASHOKU_DIR } from '@shared/ssk/constants'
-import { applyPageOrderSnapshot } from '@shared/project/pages'
+import { applyPageOrderSnapshot, reconcilePages } from '@shared/project/pages'
 import { createAutosave, type Autosave } from '@/lib/autosave'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -53,7 +54,14 @@ function handleFrom(raw: string | null): BookHandle {
  * current state on the way out rather than the state a mark closed over.
  */
 export const useBookMetaStore = defineStore('bookMeta', () => {
-  const handles = new Map<string, BookHandle>()
+  /**
+   * Reactive, and deeply so: the shelf reads a book's order straight out of
+   * here to lay its cards out, so an undo that rewrites `order` has to be
+   * something a `computed` notices. Without that the disk would be right and
+   * the screen would still be showing the order from before the key was
+   * pressed — which reads as the undo having done nothing at all.
+   */
+  const handles = reactive(new Map<string, BookHandle>())
   const writers = new Map<string, Autosave>()
   const loading = new Map<string, Promise<BookHandle>>()
 
@@ -105,6 +113,50 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
     } finally {
       loading.delete(rootPath)
     }
+  }
+
+  /**
+   * A book's full page order and its tombstones, read from whichever store
+   * owns that book right now — no disk read, and no `await`.
+   *
+   * ⭐ The one place anything asks "what order are this book's pages in".
+   * The shelf lays its cards out from it and the drag gestures measure against
+   * it, so the pages a reader can see and the pages a gesture can move are the
+   * same pages, and an undo moves the cards without anyone re-reading the
+   * folder. `null` for a book nobody has read and nobody has open.
+   */
+  function orderOf(rootPath: string): { pages: string[]; deletedPages: string[] } | null {
+    const project = useProjectStore()
+    if (project.isOpenRoot(rootPath)) {
+      return {
+        pages: project.allFiles.map((f) => f.pageId),
+        deletedPages: [...(project.projectMeta.deletedPages ?? [])],
+      }
+    }
+    const handle = handles.get(rootPath)
+    if (!handle) return null
+    return { pages: [...handle.order], deletedPages: [...(handle.meta.deletedPages ?? [])] }
+  }
+
+  /**
+   * Takes in page directories `found` on disk that the handle's list does not
+   * name yet, at the end, by `reconcilePages`' own rule.
+   *
+   * The list a book was opened with is reconciled against its directories by
+   * the main process; a handle is the raw `pages` field and is not. That gap
+   * is what let the shelf draw a card the drag gestures could not see — and a
+   * gesture cannot move a page the list it is rewriting has never heard of, so
+   * this runs before one measures anything.
+   */
+  function adopt(rootPath: string, found: readonly string[]): void {
+    if (useProjectStore().isOpenRoot(rootPath)) return
+    const handle = handles.get(rootPath)
+    if (!handle) return
+    const { order } = reconcilePages(handle.order, found)
+    if (order.length === handle.order.length) return
+    handle.order = order
+    handle.dirty = true
+    writerFor(rootPath).mark()
   }
 
   /**
@@ -252,6 +304,8 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
 
   return {
     handleFor,
+    orderOf,
+    adopt,
     applyOrderSnapshot,
     placePages,
     tagDeleted,

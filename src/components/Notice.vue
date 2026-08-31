@@ -1,16 +1,16 @@
 <template>
   <!--
-    Above everything the canvas draws and below nothing, but taking no pointer:
-    it sits over the artwork it is talking about, and a gesture aimed through it
-    must still land.
+    Above everything the view draws and below nothing, but taking no pointer:
+    it sits over the very thing it is talking about, and a gesture aimed
+    through it must still land. Wants a positioned ancestor.
   -->
   <Transition name="notice">
-    <div v-if="notices.notice" class="canvas-notice pointer-events-none absolute">
+    <div v-if="notices.notice" class="notice-box pointer-events-none absolute">
       <!--
         Keyed on the sequence rather than the text, so a refusal repeated
         replays the entrance instead of sitting there looking unchanged.
       -->
-      <span :key="notices.notice.seq" class="canvas-notice-line">
+      <span :key="notices.notice.seq" class="notice-line">
         {{ notices.notice.text }}
       </span>
     </div>
@@ -25,12 +25,13 @@ const notices = useNoticeStore()
 
 <style scoped>
 /*
- * Centred across, a quarter down. The middle of the canvas is where the artwork
- * and the selection are, so a message parked there covers exactly what the
- * refused gesture was aimed at; a quarter down is still in the reading path and
- * clear of the tool rail on one side and the panels on the other.
+ * Centred across, a quarter down. The middle of a view is where the work is —
+ * the artwork and the selection on the canvas, the cards on the shelf — so a
+ * message parked there covers exactly what the refused gesture was aimed at;
+ * a quarter down is still in the reading path and clear of the rails on either
+ * side.
  */
-.canvas-notice {
+.notice-box {
   top: 22%;
   left: 50%;
   transform: translateX(-50%);
@@ -40,11 +41,11 @@ const notices = useNoticeStore()
 /*
  * A fixed dark plate with light text rather than the theme's card colours. This
  * is drawn over artwork whose colour nobody knows — a light page under the
- * light theme would swallow `bg-card` whole. The brush ring on this same canvas
- * is black under a white halo for the same reason: what floats over the page
- * has to read against the page, not against the chrome.
+ * light theme would swallow `bg-card` whole. The brush ring on the canvas is
+ * black under a white halo for the same reason: what floats over the page has
+ * to read against the page, not against the chrome.
  */
-.canvas-notice-line {
+.notice-line {
   display: block;
   padding: 0.5rem 0.875rem;
   border-radius: 0.5rem;
@@ -80,7 +81,7 @@ const notices = useNoticeStore()
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .canvas-notice-line {
+  .notice-line {
     animation: none;
   }
   .notice-enter-active,

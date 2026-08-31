@@ -8,6 +8,7 @@ import {
   type LibraryNode,
   type ShelfLeaf,
 } from '@shared/project/workspace'
+import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /** Names beside covers, or covers with names under them. */
@@ -178,7 +179,39 @@ export const useLibraryStore = defineStore('library', () => {
 
   const home = computed<DirEntry[]>(() => roots.value.map(entryOf))
 
-  const bandPages = computed<ShelfLeaf[]>(() => inside.value.pages)
+  /**
+   * The cards come off the disk; the order and what is hidden come from the
+   * store that owns the book.
+   *
+   * ⭐ This is what makes an undo show. `listInside` is a main-process read of
+   * a folder and knows nothing of a command that has just run in here, so a
+   * shelf laid out straight from it stayed on the order from before the key
+   * was pressed while the disk underneath it was already right — which reads
+   * exactly like an undo that did nothing. Deriving instead of re-reading also
+   * means no gesture has to remember to ask for a rescan afterwards.
+   *
+   * Falls back to the folder read whole for a book nothing has a handle on
+   * yet, and carries a page the order has not heard of at the end, where
+   * `reconcilePages` would put it.
+   */
+  const bandPages = computed<ShelfLeaf[]>(() => {
+    const found = inside.value.pages
+    const at = standingAt.value
+    if (!inside.value.book || at === null) return found
+    const order = useBookMetaStore().orderOf(at)
+    if (order === null) return found
+    const deleted = new Set(order.deletedPages)
+    const left = new Map(found.map((leaf) => [leaf.id, leaf]))
+    const out: ShelfLeaf[] = []
+    for (const id of order.pages) {
+      const leaf = left.get(id)
+      if (leaf === undefined) continue
+      left.delete(id)
+      if (!deleted.has(id)) out.push(leaf)
+    }
+    for (const leaf of found) if (left.has(leaf.id)) out.push(leaf)
+    return out
+  })
   const bandProjects = computed<DirEntry[]>(() =>
     inside.value.book ? [] : inside.value.entries.filter((entry) => entry.book),
   )

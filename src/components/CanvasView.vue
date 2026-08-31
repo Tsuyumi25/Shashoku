@@ -267,14 +267,14 @@
       Outside the page's branch: a refusal is worth saying whether or not there
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
-    <CanvasNotice />
+    <Notice />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
-import CanvasNotice from '@/components/CanvasNotice.vue'
+import Notice from '@/components/Notice.vue'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
