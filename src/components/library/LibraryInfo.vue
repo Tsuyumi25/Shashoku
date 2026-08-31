@@ -7,11 +7,7 @@
     </div>
 
     <div v-else-if="leaf" class="min-h-0 flex-1 overflow-y-auto p-3">
-      <div class="mx-auto w-32">
-        <LibraryCover :cover="leaf.cover" />
-      </div>
-
-      <p class="mt-3 text-sm break-words">{{ leaf.name }}</p>
+      <p class="text-sm break-words">{{ leaf.name }}</p>
       <p class="mt-0.5 text-xs text-muted-foreground">頁面</p>
 
       <dl class="mt-3">
@@ -27,14 +23,12 @@
           <span>在編輯器打開這一頁</span>
         </button>
       </div>
+
+      <LibraryCover class="mt-4" :cover="leaf.cover" natural />
     </div>
 
     <div v-else-if="entry" class="min-h-0 flex-1 overflow-y-auto p-3">
-      <div class="mx-auto w-32">
-        <LibraryCover :cover="entry.cover" :empty="emptyIcon" />
-      </div>
-
-      <p class="mt-3 text-sm break-words">{{ entry.name }}</p>
+      <p class="text-sm break-words">{{ entry.name }}</p>
       <p class="mt-0.5 text-xs text-muted-foreground">{{ kindLabel }}</p>
 
       <dl class="mt-3 space-y-2">
@@ -69,6 +63,7 @@
         </button>
       </div>
 
+      <LibraryCover class="mt-4" :cover="entry.cover" :empty="emptyIcon" natural />
     </div>
   </div>
 </template>
