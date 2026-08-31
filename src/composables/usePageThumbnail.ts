@@ -25,13 +25,9 @@ export function usePageThumbnail(
   const problem = ref<string | null>(null)
   const seen = ref(false)
 
-  useIntersectionObserver(
-    cell,
-    ([entry]) => {
-      if (entry.isIntersecting) seen.value = true
-    },
-    { rootMargin: '400px' },
-  )
+  useIntersectionObserver(cell, ([entry]) => {
+    if (entry.isIntersecting) seen.value = true
+  })
 
   let url: string | null = null
   /** Which load the pending work belongs to, so a stale one cannot land. */

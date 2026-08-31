@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
-import { useElementSize } from '@vueuse/core'
+import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { ImageOff } from '@lucide/vue'
 import type { ScannedCover } from '@shared/project/workspace'
 import { inRenderSlot, renderFitted, sourceKey, THUMBNAIL_EDGE } from '@/lib/pageThumbnail'
@@ -58,6 +58,11 @@ const TYPES: Record<string, string> = {
 const root = ref<HTMLElement | null>(null)
 const { width } = useElementSize(computed(() => (props.natural ? root.value : null)))
 
+const seen = ref(false)
+useIntersectionObserver(root, ([entry]) => {
+  if (entry.isIntersecting) seen.value = true
+})
+
 const thumbnail = ref<string | null>(null)
 const whole = ref<string | null>(null)
 const src = computed(() => whole.value ?? thumbnail.value)
@@ -75,7 +80,7 @@ let showing: ScannedCover | null = null
 type Source = 'unknown' | 'thumbnail' | 'whole'
 
 const wanted = computed<Source>(() => {
-  if (props.cover === null) return 'unknown'
+  if (props.cover === null || !seen.value) return 'unknown'
   if (!props.natural) return 'thumbnail'
   if (width.value === 0) return 'unknown'
   return width.value * window.devicePixelRatio <= THUMBNAIL_EDGE ? 'thumbnail' : 'whole'

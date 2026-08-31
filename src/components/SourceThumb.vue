@@ -62,13 +62,9 @@ const src = ref<string | null>(null)
 const problem = ref(false)
 const seen = ref(false)
 
-useIntersectionObserver(
-  cellRef,
-  ([entry]) => {
-    if (entry.isIntersecting) seen.value = true
-  },
-  { rootMargin: '400px' },
-)
+useIntersectionObserver(cellRef, ([entry]) => {
+  if (entry.isIntersecting) seen.value = true
+})
 
 let url: string | null = null
 /** Which load the pending work belongs to, so a stale one cannot land. */
