@@ -51,9 +51,6 @@
       ref="scroller"
       class="shelf-scroll"
       @pointerdown="onShelfPointerDown"
-      @pointermove="onShelfPointerMove"
-      @pointerup="onShelfPointerUp"
-      @pointercancel="onShelfPointerCancel"
     >
       <p v-if="isEmpty" class="px-2 py-8 text-center text-sm text-muted-foreground">
         {{ emptyText }}
@@ -374,7 +371,6 @@ function onShelfPointerDown(e: PointerEvent) {
   if (e.button !== 0 || pending !== null || framing !== null) return
   const el = scroller.value
   if (el === null) return
-  el.setPointerCapture(e.pointerId)
   const start = { x: e.clientX, y: e.clientY }
   const cardEl = (e.target as HTMLElement).closest<HTMLElement>('.shelf-card')
   const key = cardEl?.dataset.key
@@ -483,9 +479,6 @@ function endFraming() {
 }
 
 function onShelfPointerUp(e: PointerEvent) {
-  const el = scroller.value
-  if (el !== null && el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
-
   if (framing !== null && e.pointerId === framing.pointerId) {
     endFraming()
     return
@@ -512,6 +505,13 @@ function onShelfPointerCancel(e: PointerEvent) {
   }
   if (pending !== null && e.pointerId === pending.pointerId) pending = null
 }
+
+// On the window rather than the scroller, and without pointer capture:
+// capturing retargets the compatibility mouse events too, which takes the
+// double click that opens a card away from the card.
+useEventListener(window, 'pointermove', onShelfPointerMove)
+useEventListener(window, 'pointerup', onShelfPointerUp)
+useEventListener(window, 'pointercancel', onShelfPointerCancel)
 
 /**
  * Where an arrow lands, read off the boxes on screen rather than off the list.
