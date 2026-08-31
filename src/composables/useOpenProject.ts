@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -18,29 +19,48 @@ export function useOpenProject() {
   const library = useLibraryStore()
   const selection = useSelectionStore()
   const cards = useCardStore()
+  const bookMeta = useBookMetaStore()
 
   /** What went wrong last, in the user's language, for the caller to show. */
   const lastError = ref<string | null>(null)
 
-  async function settle(): Promise<void> {
-    // The history belongs to the project that made it; a redo across a switch
-    // would replay one project's command against another's pages. A selection
-    // goes the same way, since two projects can hold a page of the same name.
-    editor.clearHistory()
-    selection.reset()
+  /**
+   * `leaving` is whichever book was open before this call, or `null` on the
+   * first open of a session — read before `open()` runs, since by the time it
+   * resolves `projectStore` already names the book being switched to.
+   *
+   * A book's undo history is no longer cleared on a switch; it survives being
+   * switched away from and back to, which is the point of filing it under the
+   * book rather than under the workbench. What still has to happen here is
+   * closing the book being left: its selection dies with it — the engine's
+   * mask registry is a singleton, and `maskReset` clears it whichever book's
+   * journals were in there — and any command left on its stack that still
+   * names one of those journals has to be cut, along with any session-bound
+   * command that reached for the singleton `projectStore` this call is about
+   * to hand to a different book.
+   */
+  async function settle(leaving: string | null): Promise<void> {
+    const strandedMasks = selection.reset()
+    if (strandedMasks.length > 0) editor.forgetJournals(strandedMasks, 'mask', leaving)
     // Where a card was dragged to is this session's, and the session ends here.
     // The placement is deterministic, so every card comes back where it was.
     cards.reset()
     editor.startOnPage(project.files[0]?.pageId ?? null)
+    if (leaving !== null && leaving !== project.rootPath) editor.closeBook(leaving)
+    // The book just opened has exactly one writer from now on: this store's
+    // own autosave. A cached lightweight session for it would be stale the
+    // moment that autosave writes, so it goes rather than risk being read.
+    if (project.rootPath !== null) bookMeta.forget(project.rootPath)
     await library.refresh()
   }
 
   async function guard(open: () => Promise<string | null>): Promise<boolean> {
     lastError.value = null
+    const leaving = project.rootPath
     try {
       const opened = await open()
       if (opened === null) return false
-      await settle()
+      await settle(leaving)
       return true
     } catch (err) {
       lastError.value = err instanceof Error ? err.message : String(err)

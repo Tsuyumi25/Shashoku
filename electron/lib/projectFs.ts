@@ -637,3 +637,21 @@ export async function writeProjectMeta(
 ): Promise<void> {
   await writeFileAtomic(join(shashokuDir, PROJECT_JSON_FILENAME), projectMetaRaw);
 }
+
+/**
+ * A book's `project.json`, read on its own rather than through `openProject`
+ * — for a caller that wants a book's page order and tags without taking on
+ * everything opening does: reading every manifest, reconciling the page
+ * list, sweeping orphan layers.
+ *
+ * null rather than thrown for a book that has never been saved, or whose
+ * file cannot be read — the caller already knows how to start one from
+ * `defaultProjectJson()`, the same way a fresh project does.
+ */
+export async function readProjectMeta(rootPath: string): Promise<string | null> {
+  try {
+    return await readFile(join(rootPath, SHASHOKU_DIR, PROJECT_JSON_FILENAME), "utf8");
+  } catch {
+    return null;
+  }
+}

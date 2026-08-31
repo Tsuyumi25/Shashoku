@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { isSelectionTool, maskBrushModeOf, UNDO_LIMIT, useEditorStore } from './editorStore'
+import {
+  isSelectionTool,
+  maskBrushModeOf,
+  maskJournal,
+  MAX_TRACKED_BOOKS,
+  UNDO_LIMIT,
+  useEditorStore,
+} from './editorStore'
 import { useProjectStore } from './projectStore'
 import type { ProjectFile } from '@/types/project'
 import type {
@@ -601,6 +608,164 @@ describe('steps that depend on more than one registry', () => {
     editor.forgetJournals(['j1'])
 
     expect(forgotten).toEqual([])
+    expect(editor.canUndo).toBe(true)
+  })
+})
+
+describe('one stack per book', () => {
+  it('keeps two books’ histories separate while work on them interleaves', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+
+    project.rootPath = '/book-a'
+    const doneA: string[] = []
+    editor.pushCommand({ label: 'a1', do: () => {}, undo: () => doneA.push('undo-a1') })
+
+    project.rootPath = '/book-b'
+    const doneB: string[] = []
+    editor.pushCommand({ label: 'b1', do: () => {}, undo: () => doneB.push('undo-b1') })
+    editor.pushCommand({ label: 'b2', do: () => {}, undo: () => doneB.push('undo-b2') })
+
+    // Undoing on B must never reach A's command.
+    editor.undo()
+    expect(doneB).toEqual(['undo-b2'])
+    expect(doneA).toEqual([])
+
+    // Coming back to A finds its one step untouched by anything done on B.
+    project.rootPath = '/book-a'
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(doneA).toEqual(['undo-a1'])
+    expect(editor.canUndo).toBe(false)
+
+    // B still has its remaining step, exactly where it was left.
+    project.rootPath = '/book-b'
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(doneB).toEqual(['undo-b2', 'undo-b1'])
+  })
+
+  it('lets forgetJournals cut a book that is not the one open right now', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+
+    project.rootPath = '/book-a'
+    const forgotten: string[] = []
+    editor.pushCommand({
+      label: 'masked',
+      journals: [maskJournal('m1')],
+      do: () => {},
+      undo: () => {},
+      forget: () => forgotten.push('m1'),
+    })
+
+    // A project switch reads the outgoing book before projectStore moves on.
+    project.rootPath = '/book-b'
+    editor.forgetJournals(['m1'], 'mask', '/book-a')
+
+    expect(forgotten).toEqual(['m1'])
+    project.rootPath = '/book-a'
+    expect(editor.canUndo).toBe(false)
+  })
+})
+
+describe('closing a book', () => {
+  it('cuts a stack at its newest session-bound command, keeping only the portable run above it', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = '/book-a'
+
+    const undone: string[] = []
+    editor.pushCommand({ label: 'session-1', do: () => {}, undo: () => undone.push('session-1') })
+    editor.pushCommand({
+      label: 'portable-1',
+      portable: true,
+      do: () => {},
+      undo: () => undone.push('portable-1'),
+    })
+    editor.pushCommand({
+      label: 'portable-2',
+      portable: true,
+      do: () => {},
+      undo: () => undone.push('portable-2'),
+    })
+
+    editor.closeBook('/book-a')
+
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    editor.undo()
+    expect(undone).toEqual(['portable-2', 'portable-1'])
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('wipes a stack outright when every command on it is session-bound', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = '/book-a'
+
+    editor.pushCommand({ label: 'session-1', do: () => {}, undo: () => {} })
+    editor.pushCommand({ label: 'session-2', do: () => {}, undo: () => {} })
+
+    editor.closeBook('/book-a')
+
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('leaves a stack whole when nothing on it was ever session-bound', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = '/shelf-only'
+
+    const undone: string[] = []
+    editor.pushCommand({
+      label: 'p1',
+      portable: true,
+      do: () => {},
+      undo: () => undone.push('p1'),
+    })
+    editor.pushCommand({
+      label: 'p2',
+      portable: true,
+      do: () => {},
+      undo: () => undone.push('p2'),
+    })
+
+    // Closed, as it would be on switching away, then switched back to.
+    editor.closeBook('/shelf-only')
+    project.rootPath = '/elsewhere'
+    project.rootPath = '/shelf-only'
+
+    editor.undo()
+    editor.undo()
+    expect(undone).toEqual(['p2', 'p1'])
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('does nothing to a book that never had a stack', () => {
+    const editor = useEditorStore()
+    expect(() => editor.closeBook('/never-touched')).not.toThrow()
+  })
+})
+
+describe('how many books keep a stack at once', () => {
+  it('drops the least recently touched book once the count passes the bound', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+
+    // One portable step per book, so closing leaves something behind to check.
+    for (let i = 0; i <= MAX_TRACKED_BOOKS; i += 1) {
+      project.rootPath = `/book-${i}`
+      editor.pushCommand({ label: 'p', portable: true, do: () => {}, undo: () => {} })
+      editor.closeBook(`/book-${i}`)
+    }
+
+    // The very first book touched is now the least recently touched one.
+    project.rootPath = '/book-0'
+    expect(editor.canUndo).toBe(false)
+
+    // Every book touched since is still there.
+    project.rootPath = `/book-${MAX_TRACKED_BOOKS}`
     expect(editor.canUndo).toBe(true)
   })
 })

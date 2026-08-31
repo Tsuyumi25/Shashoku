@@ -10,10 +10,12 @@ import {
   createProject,
   deleteLayerParts,
   openProject,
+  readProjectMeta,
   writePage,
+  writeProjectMeta,
 } from "./projectFs";
 import { parseManifest } from "@shared/page/schema";
-import { parseProjectJson, serializeProjectJson } from "@shared/project/schema";
+import { defaultProjectJson, parseProjectJson, serializeProjectJson } from "@shared/project/schema";
 import {
   DIR_LAYERS,
   DIR_PAGES,
@@ -354,5 +356,34 @@ describe("dropping a layer file a flush has superseded", () => {
     await expect(deleteLayerParts(pageDir, ["../../etc/passwd"])).rejects.toThrow();
     await expect(deleteLayerParts(pageDir, [".."])).rejects.toThrow();
     expect(await layerNames(pageDir)).toEqual(["a.png"]);
+  });
+});
+
+/**
+ * The lightweight read a caller reaches for instead of `openProject` when it
+ * only wants a book's `project.json` — the library, working on a book that is
+ * not the one loaded in the editor.
+ */
+describe("reading a book's project.json on its own", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "shashoku-meta-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("answers null for a folder that was never made into a project", async () => {
+    expect(await readProjectMeta(root)).toBeNull();
+  });
+
+  it("hands back exactly what was written, with no detour through openProject", async () => {
+    await createProject(root);
+    const written = serializeProjectJson({ ...defaultProjectJson(), pages: ["p1", "p2"] });
+    await writeProjectMeta(join(root, SHASHOKU_DIR), written);
+
+    expect(await readProjectMeta(root)).toBe(written);
   });
 });

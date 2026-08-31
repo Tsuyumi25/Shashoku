@@ -11,6 +11,7 @@ import {
   listSources,
   openProject,
   readPage,
+  readProjectMeta,
   resolveExportFolder,
   scanLibrary,
   scanRoot,
@@ -73,6 +74,7 @@ export function registerShashokuProjectHandlers(): void {
     createPage(rootPath, sourceName),
   );
   ipcMain.handle(CHANNELS.openProject, (_e, rootPath: string) => openProject(rootPath));
+  ipcMain.handle(CHANNELS.readProjectMeta, (_e, rootPath: string) => readProjectMeta(rootPath));
   ipcMain.handle(CHANNELS.readPage, (_e, pageDir: string) => readPage(pageDir));
   ipcMain.handle(CHANNELS.deleteLayerParts, (_e, pageDir: string, filenames: string[]) =>
     deleteLayerParts(pageDir, filenames),

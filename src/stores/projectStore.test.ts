@@ -306,6 +306,26 @@ describe('deleting pages', () => {
   })
 })
 
+describe('isOpenRoot', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('answers only for the book currently held open', () => {
+    const project = useProjectStore()
+    project.rootPath = ROOT
+
+    expect(project.isOpenRoot(ROOT)).toBe(true)
+    expect(project.isOpenRoot('/elsewhere')).toBe(false)
+  })
+
+  it('answers false for every book before anything is open', () => {
+    const project = useProjectStore()
+
+    expect(project.isOpenRoot(ROOT)).toBe(false)
+  })
+})
+
 describe('saving', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

@@ -14,6 +14,7 @@ export const CHANNELS = {
   createProject: "shashoku:create-project",
   createPage: "shashoku:create-page",
   openProject: "shashoku:open-project",
+  readProjectMeta: "shashoku:read-project-meta",
   readPage: "shashoku:read-page",
   writePage: "shashoku:write-page",
   deleteLayerParts: "shashoku:delete-layer-parts",
@@ -122,6 +123,12 @@ export interface ShashokuApi {
    */
   createPage(rootPath: string, sourceName: string): Promise<string>;
   openProject(rootPath: string): Promise<OpenProjectResult>;
+  /**
+   * A book's `project.json` on its own, for a caller working on a book that
+   * is not the one loaded in the editor — the library, reading a book's page
+   * order without opening it. null when the book has never been saved.
+   */
+  readProjectMeta(rootPath: string): Promise<string | null>;
   readPage(pageDir: string): Promise<PageRawData>;
   writePage(pageDir: string, input: WritePageInput): Promise<void>;
   /**

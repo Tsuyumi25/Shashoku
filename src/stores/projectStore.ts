@@ -127,6 +127,18 @@ export const useProjectStore = defineStore('project', () => {
 
   const isOpen = computed(() => rootPath.value !== null)
   const folderPath = computed(() => rootPath.value)
+
+  /**
+   * Whether `path` names the book this store already holds open.
+   *
+   * The one door a second writer has to check before touching a book's
+   * `project.json`: this store's autosave is the only writer for the book it
+   * holds, and a lightweight session working on a book from the library has
+   * to back off rather than race it the moment the two name the same book.
+   */
+  function isOpenRoot(path: string): boolean {
+    return rootPath.value === path
+  }
   const header = computed<ProjectHeader>(() => ({
     tags: projectMeta.value.tags,
     seedStyle: projectMeta.value.seedStyle,
@@ -1202,8 +1214,9 @@ export const useProjectStore = defineStore('project', () => {
     files,
     allFiles,
     dirtyPageIds,
-    
+
     folderPath,
+    isOpenRoot,
     header,
     dirty,
     isOpen,

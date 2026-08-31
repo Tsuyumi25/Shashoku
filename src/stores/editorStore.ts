@@ -87,7 +87,10 @@ export interface Command {
   journals?: readonly JournalDependency[]
   /**
    * Which book this command belongs to — the project whose pages it changed.
-   * Absent for every command today; nothing in this ticket reads it yet.
+   * Stamped by `pushCommand` from whichever project was open when the command
+   * was pushed; a command never sets this itself. It is what routes an undo
+   * or a redo to the right book's stack rather than to whatever project
+   * happens to be loaded when the key is pressed.
    */
   book?: string
   /**
@@ -97,7 +100,10 @@ export interface Command {
    * made it.
    *
    * Every command today is session-bound; nothing sets this yet. The first
-   * portable command is the page-order one, added separately.
+   * portable command is the page-order one, added in a later ticket. Closing
+   * a book cuts its stack at the newest session-bound command, the same
+   * linear barrier `forgetJournals` already applies to a lost journal — what
+   * survives is whichever portable run sits above it.
    */
   portable?: boolean
   /**
@@ -133,8 +139,30 @@ export interface TurnedLabel {
  * A count and not a byte budget: a command is a pair of closures, and there is
  * nothing here to measure. What this bounds is how many of them are kept, which
  * is enough to stop the stack being the thing that grows for ever.
+ *
+ * ⚠️ Per book, not per app. A stack now survives switching away from its book,
+ * so this reads as "100 steps each" rather than "100 steps total" — the number
+ * of books that keep a stack around at once is bounded separately, by
+ * `MAX_TRACKED_BOOKS`.
  */
 export const UNDO_LIMIT = 100
+
+/**
+ * How many books keep a stack around at once before the least-recently
+ * touched one is dropped entirely, its commands' `forget` called the same as
+ * any other eviction.
+ *
+ * Closing a book already cuts every session-bound command from its stack —
+ * today that is every command there is, so a closed book's entry is empty the
+ * moment it is dropped and this bound never fires. It exists for the portable
+ * run a later ticket adds: paging through the library and dragging pages
+ * around in book after book, without ever opening one in the editor, must not
+ * accumulate one live entry here per book it ever glanced at. Twenty is
+ * generous against that — a session working steadily in one book keeps that
+ * book at the most-recently-touched end for as long as it stays open, so the
+ * bound only ever prunes books nothing has touched in a while.
+ */
+export const MAX_TRACKED_BOOKS = 20
 
 /**
  * Sticky, as in Photoshop: the text tool stays until V takes it back. The
@@ -509,10 +537,64 @@ export const useEditorStore = defineStore('editor', () => {
     return { page, w: size.w, h: size.h }
   })
 
-  const undoStack = shallowRef<Command[]>([])
-  const redoStack = shallowRef<Command[]>([])
-  const canUndo = computed(() => undoStack.value.length > 0)
-  const canRedo = computed(() => redoStack.value.length > 0)
+  /**
+   * A project's `rootPath`, or `null` before anything has ever been opened —
+   * the key a book's undo history is filed under.
+   *
+   * Read from `projectStore` rather than tracked by hand: the singleton it
+   * names is exactly what a session-bound command's closure reaches for, so
+   * the book a freshly pushed command belongs to is whichever one that store
+   * currently holds. Anything held separately here could drift out of step
+   * with it; this cannot.
+   */
+  type BookId = string | null
+  const currentBook = computed<BookId>(() => useProjectStore().rootPath)
+
+  interface BookHistory {
+    undo: Command[]
+    redo: Command[]
+  }
+  const EMPTY_HISTORY: BookHistory = { undo: [], redo: [] }
+
+  /**
+   * Every book that currently holds a stack, oldest-touched first — a plain
+   * `Map` keeps insertion order for free, and `setHistory` re-inserting a key
+   * on every touch is what keeps that order meaning "least recently touched
+   * first" rather than "first ever touched first".
+   *
+   * Reassigned rather than mutated in place, like the single stack this
+   * replaced: a `shallowRef` only notices the top-level value changing.
+   */
+  const histories = shallowRef<Map<BookId, BookHistory>>(new Map())
+
+  function historyOf(book: BookId): BookHistory {
+    return histories.value.get(book) ?? EMPTY_HISTORY
+  }
+
+  /**
+   * Writes a book's history back, bumping it to the most-recently-touched end
+   * of the map and evicting the least-recently-touched book once the count
+   * passes `MAX_TRACKED_BOOKS`. An empty history is dropped outright rather
+   * than kept as an empty entry — indistinguishable from absence in
+   * `historyOf`, and keeping it would waste a slot in the bound above on
+   * every book that was ever merely closed.
+   */
+  function setHistory(book: BookId, next: BookHistory) {
+    const map = new Map(histories.value)
+    map.delete(book)
+    if (next.undo.length > 0 || next.redo.length > 0) map.set(book, next)
+    while (map.size > MAX_TRACKED_BOOKS) {
+      const oldest = map.keys().next().value
+      if (oldest === undefined) break
+      const gone = map.get(oldest)
+      if (gone) for (const cmd of [...gone.undo, ...gone.redo]) cmd.forget?.()
+      map.delete(oldest)
+    }
+    histories.value = map
+  }
+
+  const canUndo = computed(() => historyOf(currentBook.value).undo.length > 0)
+  const canRedo = computed(() => historyOf(currentBook.value).redo.length > 0)
 
   /**
    * How many strokes are between their press and the commit that either
@@ -792,19 +874,22 @@ export const useEditorStore = defineStore('editor', () => {
   function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean }) {
     commitTextEdit()
     if (!opts?.alreadyApplied) cmd.do()
-    const next = [...undoStack.value, cmd]
+    const book = currentBook.value
+    cmd.book = book ?? undefined
+    cmd.portable = cmd.portable ?? false
+    const history = historyOf(book)
+    const next = [...history.undo, cmd]
     // The oldest goes, as in any editor: what falls off the bottom is the work
     // furthest from where you are. Redo needs no bound of its own, since it can
     // only ever hold what this stack handed it.
     const over = next.length - UNDO_LIMIT
+    let kept = next
     if (over > 0) {
       for (const gone of next.slice(0, over)) gone.forget?.()
-      undoStack.value = next.slice(over)
-    } else {
-      undoStack.value = next
+      kept = next.slice(over)
     }
-    for (const gone of redoStack.value) gone.forget?.()
-    redoStack.value = []
+    for (const gone of history.redo) gone.forget?.()
+    setHistory(book, { undo: kept, redo: [] })
   }
 
   /** Whether a command names one of the given journals, in the given registry. */
@@ -826,21 +911,38 @@ export const useEditorStore = defineStore('editor', () => {
    * The bound itself lives wherever the record does — the engine's raster
    * registry for a raster journal, this store's own tally of live mask
    * journals for a mask one. This is the stack following either.
+   *
+   * `book` defaults to whichever project is open now, which is right for
+   * every caller before this ticket: a raster release or a quota trim can
+   * only ever happen to the book currently loaded. The one caller that names
+   * a book explicitly is a project switch stranding the outgoing book's mask
+   * journals — by the time it runs, `currentBook` already names the book
+   * being switched to, not the one that lost them.
    */
-  function forgetJournals(names: readonly string[], kind: JournalKind = 'raster') {
+  function forgetJournals(
+    names: readonly string[],
+    kind: JournalKind = 'raster',
+    book: BookId = currentBook.value,
+  ) {
     if (names.length === 0) return
     const gone = new Set(names)
+    const history = historyOf(book)
     let cut = -1
-    undoStack.value.forEach((cmd, at) => {
+    history.undo.forEach((cmd, at) => {
       if (dependsOnJournal(cmd, kind, gone)) cut = at
     })
+    let nextUndo = history.undo
     if (cut >= 0) {
-      for (const dropped of undoStack.value.slice(0, cut + 1)) dropped.forget?.()
-      undoStack.value = undoStack.value.slice(cut + 1)
+      for (const dropped of history.undo.slice(0, cut + 1)) dropped.forget?.()
+      nextUndo = history.undo.slice(cut + 1)
     }
-    if (redoStack.value.some((cmd) => dependsOnJournal(cmd, kind, gone))) {
-      for (const dropped of redoStack.value) dropped.forget?.()
-      redoStack.value = []
+    let nextRedo = history.redo
+    if (history.redo.some((cmd) => dependsOnJournal(cmd, kind, gone))) {
+      for (const dropped of history.redo) dropped.forget?.()
+      nextRedo = []
+    }
+    if (nextUndo !== history.undo || nextRedo !== history.redo) {
+      setHistory(book, { undo: nextUndo, redo: nextRedo })
     }
   }
 
@@ -853,33 +955,72 @@ export const useEditorStore = defineStore('editor', () => {
   function undo() {
     if (strokeInFlight.value) return
     commitTextEdit()
-    const cmd = undoStack.value.at(-1)
+    const book = currentBook.value
+    const history = historyOf(book)
+    const cmd = history.undo.at(-1)
     if (!cmd) return
-    undoStack.value = undoStack.value.slice(0, -1)
+    setHistory(book, { undo: history.undo.slice(0, -1), redo: history.redo })
     cmd.undo()
-    redoStack.value = [...redoStack.value, cmd]
+    const after = historyOf(book)
+    setHistory(book, { undo: after.undo, redo: [...after.redo, cmd] })
   }
 
   /** Typing after an undo ends the redo branch, as it does in any editor. */
   function redo() {
     if (strokeInFlight.value) return
     commitTextEdit()
-    const cmd = redoStack.value.at(-1)
+    const book = currentBook.value
+    const history = historyOf(book)
+    const cmd = history.redo.at(-1)
     if (!cmd) return
-    redoStack.value = redoStack.value.slice(0, -1)
+    setHistory(book, { undo: history.undo, redo: history.redo.slice(0, -1) })
     cmd.do()
-    undoStack.value = [...undoStack.value, cmd]
+    const after = historyOf(book)
+    setHistory(book, { undo: [...after.undo, cmd], redo: after.redo })
   }
 
-  
+  /** Wipes the current book's stack — nothing else's. */
   function clearHistory() {
-    for (const gone of [...undoStack.value, ...redoStack.value]) gone.forget?.()
-    undoStack.value = []
-    redoStack.value = []
+    const book = currentBook.value
+    const history = historyOf(book)
+    for (const gone of [...history.undo, ...history.redo]) gone.forget?.()
+    setHistory(book, { undo: [], redo: [] })
     pendingTextEdit.value = null
   }
 
-  
+  /**
+   * Closes a book: cuts its stack at the newest session-bound command, the
+   * same linear rule `forgetJournals` applies to a lost journal. A command
+   * that reaches for the singleton `useProjectStore()` cannot be trusted once
+   * that store no longer holds this book, so it and everything under it goes;
+   * what survives is whichever portable run sits above it, kept exactly as it
+   * was for the next time this book is opened.
+   *
+   * Redo is cut the same way `forgetJournals` cuts it: any branch that still
+   * needs a session-bound step to replay is dropped whole, not trimmed.
+   *
+   * A no-op for a book with no entry — every book the app has never touched,
+   * and every book already closed with nothing portable left to keep.
+   */
+  function closeBook(book: BookId) {
+    const history = histories.value.get(book)
+    if (!history) return
+    let cut = -1
+    history.undo.forEach((cmd, at) => {
+      if (!cmd.portable) cut = at
+    })
+    let nextUndo = history.undo
+    if (cut >= 0) {
+      for (const dropped of history.undo.slice(0, cut + 1)) dropped.forget?.()
+      nextUndo = history.undo.slice(cut + 1)
+    }
+    let nextRedo = history.redo
+    if (history.redo.some((cmd) => !cmd.portable)) {
+      for (const dropped of history.redo) dropped.forget?.()
+      nextRedo = []
+    }
+    setHistory(book, { undo: nextUndo, redo: nextRedo })
+  }
 
   function cmdAddLabel(pageId: string, label: TextLayerEntry) {
     const project = useProjectStore()
@@ -2215,6 +2356,7 @@ export const useEditorStore = defineStore('editor', () => {
     undo,
     redo,
     clearHistory,
+    closeBook,
     addLabelAt,
     addLabelAtViewCenter,
     deleteSelection,
