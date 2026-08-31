@@ -379,6 +379,18 @@ describe("reading a book's project.json on its own", () => {
     expect(await readProjectMeta(root)).toBeNull();
   });
 
+  /**
+   * Anything but the file being absent is raised. A caller told null takes the
+   * book for a fresh one and starts it from `defaultProjectJson()` — which,
+   * for a book whose file was merely unreadable, writes those defaults back
+   * over the tags, glossary and export profiles still sitting on the disk.
+   */
+  it("raises a read that failed for a reason other than the file being absent", async () => {
+    await mkdir(join(root, SHASHOKU_DIR, PROJECT_JSON_FILENAME), { recursive: true });
+
+    await expect(readProjectMeta(root)).rejects.toThrow();
+  });
+
   it("hands back exactly what was written, with no detour through openProject", async () => {
     await createProject(root);
     const written = serializeProjectJson({ ...defaultProjectJson(), pages: ["p1", "p2"] });

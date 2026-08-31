@@ -650,14 +650,17 @@ export async function writeProjectMeta(
  * everything opening does: reading every manifest, reconciling the page
  * list, sweeping orphan layers.
  *
- * null rather than thrown for a book that has never been saved, or whose
- * file cannot be read — the caller already knows how to start one from
- * `defaultProjectJson()`, the same way a fresh project does.
+ * null for a book that has never been saved, and only for that — the caller
+ * starts one from `defaultProjectJson()`, the same way a fresh project does.
+ * A permission or I/O error answered the same way would have it take a book
+ * that has tags, a glossary and export profiles for a new one, and write
+ * those defaults back over them.
  */
 export async function readProjectMeta(rootPath: string): Promise<string | null> {
   try {
     return await readFile(join(rootPath, SHASHOKU_DIR, PROJECT_JSON_FILENAME), "utf8");
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
 }
