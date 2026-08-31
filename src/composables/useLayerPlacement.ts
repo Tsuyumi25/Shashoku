@@ -243,7 +243,7 @@ export function useLayerPlacement(
        */
       const raster = useRasterStore()
       await raster.flush()
-      raster.release(target.id)
+      editor.forgetJournals(raster.release(target.id))
 
       /*
        * Read again, because settling is what changed it. The write puts the

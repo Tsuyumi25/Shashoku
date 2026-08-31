@@ -47,6 +47,10 @@ beforeAll(() => {
       writeManifest: () => Promise.resolve(),
       deleteLayerParts: () => Promise.resolve(),
     },
+    engine: {
+      rasterTake: () => {},
+      rasterRelease: (): string[] => [],
+    },
   })
 })
 
@@ -174,6 +178,34 @@ describe('letting go of a moved layer', () => {
 
     expect(placed).not.toHaveBeenCalled()
     expect(placement.held.value).toBeNull()
+  })
+
+  /**
+   * The bug this guards: letting a layer go used to drop its journals without
+   * a word, so a command whose undo half depended on one stayed on the stack
+   * pointing at pixels the engine no longer had.
+   */
+  it('cuts the undo stack where the released layer took its journals with it', async () => {
+    const { editor } = open(raster())
+    const raster2 = useRasterStore()
+    await raster2.take(raster(), PAGE_ID, '/root/shashoku/pages/x/layers', `/root/shashoku/pages/${PAGE_ID}`)
+    window.engine.rasterRelease = (): string[] => ['j1']
+    const forgotten: string[] = []
+    editor.pushCommand({
+      label: 'fill j1',
+      journal: 'j1',
+      do: () => {},
+      undo: () => {},
+      forget: () => forgotten.push('j1'),
+    })
+    const placement = useLayerPlacement(bitmaps)
+    const entry = { ...raster() }
+    settlesTo({ file: 'r.9f3c1a.png', w: 60, h: 60 })
+
+    placement.moveBy('r', { dx: 25, dy: 0 })
+    await placement.commit(entry)
+
+    expect(forgotten).toEqual(['j1'])
   })
 })
 

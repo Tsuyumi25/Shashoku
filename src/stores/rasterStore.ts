@@ -302,21 +302,29 @@ export const useRasterStore = defineStore('raster', () => {
     return encodePng(layer.canvas)
   }
 
-  function release(id: string): void {
-    if (!held.value.delete(id)) return
-    window.engine.rasterRelease(id)
+  /**
+   * Lets a layer go. Names the journals the engine dropped with it, so a
+   * caller can cut the undo stack where the pixels they speak for stopped
+   * existing — the same duty {@link window.engine.rasterTrimHistory}'s
+   * callers already carry.
+   */
+  function release(id: string): string[] {
+    if (!held.value.delete(id)) return []
+    const dropped = window.engine.rasterRelease(id)
     // The count goes with it. A layer nobody holds is read from its file again,
     // and the file's own name is what says which pixels those are.
     writes.delete(id)
     revision.value++
+    return dropped
   }
 
-  function releaseAll(): void {
-    if (held.value.size === 0) return
+  function releaseAll(): string[] {
+    if (held.value.size === 0) return []
     held.value.clear()
-    window.engine.rasterReleaseAll()
+    const dropped = window.engine.rasterReleaseAll()
     writes.clear()
     revision.value++
+    return dropped
   }
 
   /**
@@ -338,9 +346,11 @@ export const useRasterStore = defineStore('raster', () => {
         .map(([id]) => id)
       if (leaving.length === 0) return
       void pixels.flush().finally(() => {
+        const dropped: string[] = []
         for (const id of leaving) {
-          if (held.value.get(id)?.owes === false) release(id)
+          if (held.value.get(id)?.owes === false) dropped.push(...release(id))
         }
+        useEditorStore().forgetJournals(dropped)
       })
     },
   )

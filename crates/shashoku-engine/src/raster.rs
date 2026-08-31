@@ -866,21 +866,33 @@ pub fn read(id: &str, at: Rect) -> Result<Vec<u8>, String> {
 }
 
 /// Lets a layer go, along with every journal that speaks for it — a record of
-/// pixels nobody holds any more cannot be applied to anything.
-pub fn release(id: &str) {
+/// pixels nobody holds any more cannot be applied to anything. Names what it
+/// dropped, so a caller can cut its own undo stack at the same point.
+pub fn release(id: &str) -> Vec<String> {
     let mut held = registry();
     held.layers.remove(id);
-    held.journals.retain(|_, journal| journal.layer != id);
+    let mut dropped = Vec::new();
+    held.journals.retain(|name, journal| {
+        if journal.layer == id {
+            dropped.push(name.clone());
+            false
+        } else {
+            true
+        }
+    });
     let kept: Vec<String> = held.journals.keys().cloned().collect();
     held.order.retain(|name| kept.contains(name));
+    dropped
 }
 
-/// Lets go of everything. Turning the page.
-pub fn release_all() {
+/// Lets go of everything. Turning the page. Names what it dropped.
+pub fn release_all() -> Vec<String> {
     let mut held = registry();
     held.layers.clear();
+    let dropped: Vec<String> = held.journals.keys().cloned().collect();
     held.journals.clear();
     held.order.clear();
+    dropped
 }
 
 /// What pixel history is holding in memory right now.
@@ -1592,7 +1604,7 @@ mod tests {
         let _alone = alone();
         take("a", &[0, 0, 0, 0], frame(0, 0, 1, 1)).expect("a well-formed layer");
         assert!(holds("a"));
-        release("a");
+        assert_eq!(release("a"), Vec::<String>::new());
         assert!(!holds("a"));
     }
 
@@ -1605,7 +1617,7 @@ mod tests {
             .expect("something to fill");
         assert!(apply_journal(&name).is_some());
 
-        release("b");
+        assert_eq!(release("b"), vec![name.clone()]);
         assert!(apply_journal(&name).is_none());
     }
 
@@ -1710,6 +1722,14 @@ mod tests {
     fn a_floor_above_what_history_holds_trims_nothing() {
         let (_alone, _names) = three_records();
         assert!(trim_history(10, 0).is_empty());
+    }
+
+    #[test]
+    fn release_all_names_every_record_it_dropped() {
+        let (_alone, names) = three_records();
+        let dropped: HashSet<String> = release_all().into_iter().collect();
+        assert_eq!(dropped, names.into_iter().collect());
+        assert_eq!(history_bytes(), 0);
     }
 
     #[test]

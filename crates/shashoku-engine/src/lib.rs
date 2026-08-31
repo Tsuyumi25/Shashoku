@@ -594,15 +594,17 @@ pub fn raster_holds(id: String) -> bool {
     raster::holds(&id)
 }
 
+/// Lets a layer go, along with every journal that speaks for it. Names what it
+/// dropped, so the caller can cut its own undo stack at the same point.
 #[napi]
-pub fn raster_release(id: String) {
-    raster::release(&id);
+pub fn raster_release(id: String) -> Vec<String> {
+    raster::release(&id)
 }
 
-/// Lets go of every held layer. Turning the page.
+/// Lets go of every held layer. Turning the page. Names what it dropped.
 #[napi]
-pub fn raster_release_all() {
-    raster::release_all();
+pub fn raster_release_all() -> Vec<String> {
+    raster::release_all()
 }
 
 /// Fills the covered part of `mask` with `color` on a held layer.

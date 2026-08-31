@@ -389,9 +389,15 @@ export interface ShashokuEngineApi {
    */
   rasterTake(id: string, rgba: Uint8Array, frame: EngineLayerFrame): void;
   rasterHolds(id: string): boolean;
-  rasterRelease(id: string): void;
-  /** Lets go of every held layer. Turning the page. */
-  rasterReleaseAll(): void;
+  /**
+   * Lets a layer go, along with every journal that speaks for it — a record
+   * of pixels nobody holds any more cannot be applied to anything. Names what
+   * it dropped, so the caller can cut its own undo stack at the same point,
+   * the way {@link rasterTrimHistory} already does.
+   */
+  rasterRelease(id: string): string[];
+  /** Lets go of every held layer. Turning the page. Names what it dropped. */
+  rasterReleaseAll(): string[];
   /**
    * Fills the covered part of `mask` with `color` on a held layer, in one
    * transaction against its tiles.
