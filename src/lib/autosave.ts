@@ -106,16 +106,15 @@ export function createAutosave(write: () => Promise<void>, opts: AutosaveOptions
 
   async function flush() {
     clearTimers()
-    failure = null
+    // A write that threw left what it was carrying still unwritten, and nothing
+    // is scheduled to try again. Whoever calls this is asking whether the bytes
+    // are on disk, so it goes again rather than reading the quiet as a yes.
+    if (failure !== null) pending = true
     while (pending || inflight) {
       if (inflight) await inflight
       else run()
     }
-    if (failure !== null) {
-      const err = failure
-      failure = null
-      throw err
-    }
+    if (failure !== null) throw failure
   }
 
   function cancel() {

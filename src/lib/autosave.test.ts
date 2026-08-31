@@ -166,7 +166,7 @@ describe('createAutosave', () => {
     await expect(autosave.flush()).rejects.toBe(boom)
   })
 
-  it('does not hand an old failure to a later flush that had nothing to write', async () => {
+  it('goes again on the next flush rather than carrying the old failure forward', async () => {
     const write = vi.fn().mockRejectedValueOnce(new Error('disk gone')).mockResolvedValue(undefined)
     const autosave = createAutosave(write, { onError: vi.fn() })
 
@@ -174,6 +174,40 @@ describe('createAutosave', () => {
     await expect(autosave.flush()).rejects.toThrow('disk gone')
 
     await expect(autosave.flush()).resolves.toBeUndefined()
+    expect(write).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * The failure arrived with nobody waiting on it, so nothing was scheduled to
+   * try again and nothing was left pending. A flush that read that quiet as a
+   * yes is how a project switch, a handle's retirement and the close flow each
+   * came to believe a change was on disk when it was not.
+   */
+  it('does not call a write that already failed in the background landed', async () => {
+    const write = vi.fn().mockRejectedValue(new Error('disk full'))
+    const autosave = createAutosave(write, { onError: vi.fn() })
+
+    autosave.mark()
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(write).toHaveBeenCalledOnce()
+
+    await expect(autosave.flush()).rejects.toThrow('disk full')
+    expect(write).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps going again for as long as the write keeps failing', async () => {
+    const write = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValue(undefined)
+    const autosave = createAutosave(write, { onError: vi.fn() })
+
+    autosave.mark()
+    await expect(autosave.flush()).rejects.toThrow('disk full')
+    await expect(autosave.flush()).rejects.toThrow('disk full')
+    await expect(autosave.flush()).resolves.toBeUndefined()
+    expect(write).toHaveBeenCalledTimes(3)
   })
 
   it('forgets pending work on cancel', () => {
