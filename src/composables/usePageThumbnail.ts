@@ -97,7 +97,7 @@ export function usePageThumbnail(
     try {
       const bytes = await bytesFor(of)
       if (mine !== generation || bytes === null) return
-      url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
+      url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/webp' }))
       src.value = url
     } catch (err) {
       if (mine !== generation) return

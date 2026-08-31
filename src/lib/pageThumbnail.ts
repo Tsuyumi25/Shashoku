@@ -65,8 +65,8 @@ export async function inRenderSlot<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function encodePng(canvas: OffscreenCanvas): Promise<Uint8Array> {
-  const blob = await canvas.convertToBlob({ type: 'image/png' })
+async function encodeThumbnail(canvas: OffscreenCanvas): Promise<Uint8Array> {
+  const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 })
   return new Uint8Array(await blob.arrayBuffer())
 }
 
@@ -129,7 +129,7 @@ export async function renderFitted(
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(bitmap, 0, 0, size.w, size.h)
-    return encodePng(canvas)
+    return encodeThumbnail(canvas)
   } finally {
     bitmap.close()
   }
@@ -150,5 +150,5 @@ export async function renderThumbnail(
     loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
   })
   const size = fitWithin({ w: full.width, h: full.height }, edge)
-  return encodePng(resizeCanvas(full, size.w, size.h))
+  return encodeThumbnail(resizeCanvas(full, size.w, size.h))
 }

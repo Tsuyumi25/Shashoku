@@ -104,7 +104,7 @@ async function load() {
   try {
     const bytes = await bytesFor()
     if (mine !== generation) return
-    url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
+    url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/webp' }))
     src.value = url
   } catch {
     // A file that went away between the scan and the read is not a fault to

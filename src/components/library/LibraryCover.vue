@@ -117,16 +117,19 @@ async function fetchOne(cover: ScannedCover, source: 'thumbnail' | 'whole'): Pro
       return { bytes: await window.api.readImage(cover.dir, cover.file), type, kind: 'whole' }
     }
   }
-  return { bytes: await bytesFor(cover), type: 'image/png', kind: 'thumbnail' }
+  return { bytes: await bytesFor(cover), type: 'image/webp', kind: 'thumbnail' }
 }
 
-/** Out of the IHDR every PNG opens with, which is what the cache writes. */
-function isStrip(png: Uint8Array): boolean {
-  if (png.length < 24) return false
-  const head = new DataView(png.buffer, png.byteOffset, png.byteLength)
-  if (head.getUint32(0) !== 0x89504e47) return false
-  const w = head.getUint32(16)
-  return w > 0 && head.getUint32(20) / w > STRIP_RATIO
+async function isStrip(bytes: Uint8Array, type: string): Promise<boolean> {
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type }))
+  } catch {
+    return false
+  }
+  const { width, height } = bitmap
+  bitmap.close()
+  return width > 0 && height / width > STRIP_RATIO
 }
 
 async function fetchInto(cover: ScannedCover, source: 'thumbnail' | 'whole'): Promise<void> {
@@ -137,10 +140,14 @@ async function fetchInto(cover: ScannedCover, source: 'thumbnail' | 'whole'): Pr
     if (mine !== generation) return
     // The cache bounds the long edge, so a strip is starved on its short one:
     // 1512x19999 comes back 48 across, unreadable at any panel width.
-    if (got.kind === 'thumbnail' && props.natural && isStrip(got.bytes)) {
-      loading = 'whole'
-      got = await fetchOne(cover, 'whole')
+    if (got.kind === 'thumbnail' && props.natural) {
+      const strip = await isStrip(got.bytes, got.type)
       if (mine !== generation) return
+      if (strip) {
+        loading = 'whole'
+        got = await fetchOne(cover, 'whole')
+        if (mine !== generation) return
+      }
     }
     const url = URL.createObjectURL(new Blob([got.bytes as BlobPart], { type: got.type }))
     urls.push(url)
