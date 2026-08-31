@@ -124,7 +124,6 @@ const isMac = navigator.platform.startsWith('Mac')
 
 const FACES: { view: AppView; title: string }[] = [
   { view: 'editor', title: '編輯器' },
-  { view: 'pages', title: '頁面' },
   { view: 'export', title: '匯出' },
 ]
 

@@ -7,7 +7,6 @@ export const CHANNELS = {
   pickWorkspace: "shashoku:pick-workspace",
   pickFontFolder: "fonts:pick-folder",
   scanRoot: "shashoku:scan-root",
-  listSources: "shashoku:list-sources",
   scanLibrary: "shashoku:scan-library",
   scanWorkspaces: "shashoku:scan-workspaces",
   listInside: "shashoku:list-inside",
@@ -49,21 +48,6 @@ export interface ScanRootResult {
   hasSentinel: boolean;
 }
 
-/**
- * One image sitting in the project folder, as the folder answers for it right
- * now. Nothing is kept between one of these and the next: this is a mirror of a
- * directory, so what it says goes stale the moment it is read and is re-read
- * rather than maintained.
- *
- * The write time and the size ride along because a thumbnail is keyed by them —
- * a file replaced under the same name has to stop showing the old picture.
- */
-export interface SourceImage {
-  name: string;
-  /** Last write time, in milliseconds. */
-  modified: number;
-  size: number;
-}
 
 /**
  * Named one by one rather than lumped into "openable or not", because each has
@@ -100,12 +84,6 @@ export interface ShashokuApi {
   pickWorkspace(): Promise<string | null>;
   pickFontFolder(): Promise<string | null>;
   scanRoot(rootPath: string): Promise<ScanRootResult>;
-  /**
-   * Every image directly in the project folder. Deliberately not recursive: a
-   * finished page written into a subfolder must never be offered back as
-   * something to make a page from.
-   */
-  listSources(rootPath: string): Promise<SourceImage[]>;
   /** What each scan point holds today, sentinel-bearing children only. */
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;

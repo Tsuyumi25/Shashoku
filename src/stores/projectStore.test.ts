@@ -88,20 +88,6 @@ describe('reading a project back off disk', () => {
   // the manifest naming them leaves the autosave queue. Reversing these two is
   // not a slow save, it is deleted work — so the order is what gets pinned
   // here rather than any one function's behaviour.
-  it('owes nothing to disk by the time the sweep runs', async () => {
-    const project = useProjectStore()
-    openOnePage(project)
-    const trace = stubApi(project)
-
-    project.addLabel(PAGE_ID, label('t1'))
-    expect(project.dirty).toBe(true)
-
-    await project.createPages(['a.jpg'])
-
-    expect(trace.oweAtSweep).toBe(false)
-    expect(trace.calls.indexOf('writePage')).toBeLessThan(trace.calls.indexOf('openProject'))
-  })
-
   it('banks the outgoing project before opening another one', async () => {
     const project = useProjectStore()
     openOnePage(project)

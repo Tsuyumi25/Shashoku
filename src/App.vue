@@ -19,7 +19,6 @@
             <TranslateSidebar />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
-          <SourcePanel v-if="ui.view === 'pages'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
 
@@ -48,11 +47,8 @@
                 </SplitterPanel>
               </SplitterGroup>
             </div>
-            <div v-if="ui.view === 'pages'" class="absolute inset-0">
-              <ProjectManagerMode tab="source" />
-            </div>
             <div v-if="ui.view === 'export'" class="absolute inset-0">
-              <ProjectManagerMode tab="export" />
+              <ProjectManagerMode />
             </div>
           </div>
         </SplitterPanel>
@@ -72,7 +68,6 @@ import LibraryShelf from '@/components/library/LibraryShelf.vue'
 import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
-import SourcePanel from '@/components/SourcePanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
@@ -108,8 +103,6 @@ const closing = useCloseSettle()
 /** Comfortably inside the silence the window tolerates, which is three seconds. */
 const CLOSE_BEAT_MS = 1000
 
-// The window holds itself open until this answers, so every path out of it has
-// to reach the release.
 /**
  * The window holds itself open for this, and the beat is what tells it the
  * hold is a renderer still working rather than one that has stopped answering.
@@ -162,7 +155,7 @@ useEventListener(window, 'keydown', (e) => {
     if (isTypingSurface(document.activeElement)) return
     e.preventDefault()
     if (e.repeat) return
-    if (ui.view === 'pages' || ui.view === 'export') exportSelection.selectAll()
+    if (ui.view === 'export') exportSelection.selectAll()
     else if (ui.view === 'editor' && editor.maskTarget) selection.selectAll(editor.maskTarget)
     return
   }
@@ -171,10 +164,10 @@ useEventListener(window, 'keydown', (e) => {
   // earlier command while the half-typed line sat there untouched.
   if (isTypingSurface(document.activeElement)) return
 
-  // One stack for the whole project, so the page grid answers these too — a
+  // One stack for the whole project, so the export grid answers these too — a
   // page dropped in the wrong place is the easiest thing here to do by accident
   // and the hardest to notice.
-  if (ui.view === 'pages' || ui.view === 'export') {
+  if (ui.view === 'export') {
     if (key === 'z' && !e.shiftKey) {
       e.preventDefault()
       editor.undo()

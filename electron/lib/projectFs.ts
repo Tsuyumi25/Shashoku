@@ -20,7 +20,6 @@ import type {
   PageEntry,
   PageRawData,
   ScanRootResult,
-  SourceImage,
   WritePageInput,
 } from "@shared/ipc/channels";
 import {
@@ -62,17 +61,6 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-async function listImages(folderPath: string): Promise<string[]> {
-  try {
-    const entries = await readdir(folderPath, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isFile() && IMAGE_EXTENSIONS.includes(extname(e.name).toLowerCase()))
-      .map((e) => e.name)
-      .sort(collator.compare);
-  } catch {
-    return [];
-  }
-}
 
 async function listPageDirs(pagesRoot: string): Promise<string[]> {
   try {
@@ -351,29 +339,6 @@ export async function scanRoot(rootPath: string): Promise<ScanRootResult> {
   return { hasShashokuDir, hasSentinel };
 }
 
-/**
- * The project folder as it stands, images only and one level deep.
- *
- * Costs one readdir plus a stat per file — a fifth of a millisecond for a real
- * two-hundred-page chapter, because none of it touches file contents. That is
- * what lets the panel showing this keep nothing and simply ask again.
- */
-export async function listSources(rootPath: string): Promise<SourceImage[]> {
-  const names = await listImages(rootPath);
-  const found = await Promise.all(
-    names.map(async (name): Promise<SourceImage | null> => {
-      try {
-        const s = await stat(join(rootPath, name));
-        return { name, modified: s.mtimeMs, size: s.size };
-      } catch {
-        // Listed a moment ago and gone now, which is the ordinary race a mirror
-        // of a directory lives with. It is simply not in this answer.
-        return null;
-      }
-    }),
-  );
-  return found.filter((s): s is SourceImage => s !== null);
-}
 
 /**
  * The project's pages, in the order the document gives and with what the disk
@@ -583,9 +548,9 @@ export async function writePage(pageDir: string, input: WritePageInput): Promise
 /**
  * One delivered page.
  *
- * Never the project root, and not for tidiness: listImages reads the root
- * without recursing, so a finished page written beside the source images would
- * be offered back as a source to make a page from — and making one would
+ * Never the project root, and not for tidiness: the shelf draws every image
+ * lying in a folder as a card, so a finished page written beside the source
+ * images would be one a drag could make a page out of — and making one would
  * typeset the text a second time onto text already burnt in. Any subfolder is
  * safe, which is why every profile has one.
  */

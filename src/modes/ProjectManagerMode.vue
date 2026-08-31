@@ -59,20 +59,10 @@
 
       <span class="bar-head">
         專案頁面
-        <span v-if="tab === 'export'" class="bar-count">
+        <span class="bar-count">
           ({{ exportSelection.selectedPages.length }}/{{ project.files.length }})
         </span>
       </span>
-
-      <button
-        v-if="tab === 'source'"
-        class="bar-button bar-button-danger ml-auto"
-        :disabled="exportSelection.selectedPages.length === 0"
-        @click="remove"
-      >
-        <Trash2 :size="13" />
-        <span>刪除 {{ exportSelection.selectedPages.length }} 頁</span>
-      </button>
     </div>
   </div>
 </template>
@@ -80,7 +70,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import Draggable from 'vuedraggable'
-import { Check, Trash2 } from '@lucide/vue'
+import { Check } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import PageThumb from '@/components/PageThumb.vue'
 import { loadFontCatalog } from '@/lib/fontCatalog'
@@ -88,14 +78,6 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useExportStore } from '@/stores/exportStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
-
-/**
- * The finished pages, whichever tab is up. What the bar underneath offers is
- * what the column beside them is for: making pages out of a folder means being
- * able to unmake them too, while a delivery has nothing to say about which
- * pages exist.
- */
-const props = defineProps<{ tab: 'source' | 'export' }>()
 
 const project = useProjectStore()
 const preferences = usePreferencesStore()
@@ -124,21 +106,5 @@ function onPick(pageId: string, e: MouseEvent) {
 function onDropped(e: { moved?: { element: ProjectFile; newIndex: number } }) {
   if (!e.moved) return
   editor.cmdMovePage(e.moved.element.pageId, e.moved.newIndex)
-}
-
-/**
- * Deletes what is picked, at once and without asking. Ctrl+Z is the answer to
- * a misclick, the same as it is everywhere else in the program — a dialog in
- * front of an undoable act only teaches people to click through dialogs.
- */
-function remove() {
-  const wasOn = editor.currentPageId
-  const deleted = editor.cmdDeletePages(exportSelection.selectedPages.map((f) => f.pageId))
-  // The workbench may have been standing on one of them. Undo does not send it
-  // back here afterwards: what a command restores is the document, not where
-  // you were standing when you ran it.
-  if (wasOn !== null && deleted.includes(wasOn)) {
-    editor.startOnPage(project.files[0]?.pageId ?? null)
-  }
 }
 </script>

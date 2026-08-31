@@ -8,7 +8,6 @@ import {
   createPage,
   deleteLayerParts,
   listInside,
-  listSources,
   openProject,
   readPage,
   readProjectMeta,
@@ -65,7 +64,6 @@ export function registerShashokuProjectHandlers(): void {
     return pickFontFolder(win);
   });
   ipcMain.handle(CHANNELS.scanRoot, (_e, rootPath: string) => scanRoot(rootPath));
-  ipcMain.handle(CHANNELS.listSources, (_e, rootPath: string) => listSources(rootPath));
   ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
   ipcMain.handle(CHANNELS.scanWorkspaces, (_e, roots: string[]) => scanWorkspaces(roots));
   ipcMain.handle(CHANNELS.listInside, (_e, path: string) => listInside(path));

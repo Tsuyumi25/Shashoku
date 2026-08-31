@@ -18,7 +18,6 @@ const api: ShashokuApi = {
   pickWorkspace: () => ipcRenderer.invoke(CHANNELS.pickWorkspace),
   pickFontFolder: () => ipcRenderer.invoke(CHANNELS.pickFontFolder),
   scanRoot: (rootPath) => ipcRenderer.invoke(CHANNELS.scanRoot, rootPath),
-  listSources: (rootPath) => ipcRenderer.invoke(CHANNELS.listSources, rootPath),
   scanLibrary: (scanPoints) => ipcRenderer.invoke(CHANNELS.scanLibrary, scanPoints),
   scanWorkspaces: (roots) => ipcRenderer.invoke(CHANNELS.scanWorkspaces, roots),
   listInside: (path) => ipcRenderer.invoke(CHANNELS.listInside, path),
