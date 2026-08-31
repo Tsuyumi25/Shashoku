@@ -33,6 +33,26 @@ export interface ShelfLeaf {
   page: boolean;
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  folder: boolean;
+  /** A directory carrying the sentinel. */
+  book: boolean;
+  /** Shashoku's own folder, sitting inside a book. */
+  own: boolean;
+  cover: ScannedCover | null;
+  pageCount: number | null;
+  /** Null wherever nothing walked far enough to count them. */
+  books: number | null;
+}
+
+export interface FolderContents {
+  book: boolean;
+  pages: ShelfLeaf[];
+  entries: DirEntry[];
+}
+
 export interface BookNode {
   kind: "book";
   path: string;
@@ -121,17 +141,19 @@ export function nodeAt(nodes: readonly LibraryNode[], path: string): LibraryNode
   return null;
 }
 
-export function trailTo(nodes: readonly LibraryNode[], path: string): LibraryNode[] {
-  for (const node of nodes) {
-    if (node.path === path) return [node];
-    if (node.kind !== "folder") continue;
-    const below = trailTo(node.children, path);
-    if (below.length > 0) return [node, ...below];
+export function crumbsFor(
+  roots: readonly string[],
+  path: string,
+): Array<{ name: string; path: string }> {
+  const declared = new Set(roots);
+  const chain: string[] = [];
+  let at = path;
+  for (;;) {
+    chain.unshift(at);
+    if (declared.has(at)) break;
+    const up = parentFolder(at);
+    if (up === at) break;
+    at = up;
   }
-  return [];
-}
-
-export function booksUnder(node: LibraryNode): BookNode[] {
-  if (node.kind === "book") return [node];
-  return node.children.flatMap(booksUnder);
+  return chain.map((each) => ({ path: each, name: folderName(each) }));
 }

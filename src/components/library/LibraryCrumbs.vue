@@ -1,17 +1,21 @@
 <template>
   <div class="flex min-w-0 items-center gap-0.5 overflow-hidden text-xs">
-    <button class="crumb" :class="library.standingAt === null && 'crumb-here'" @click="library.standAt(null)">
+    <button
+      class="crumb"
+      :class="library.standingAt === null && 'crumb-here'"
+      @click="library.standAt(null)"
+    >
       全部
     </button>
-    <template v-for="node in library.trail" :key="node.path">
+    <template v-for="crumb in library.crumbs" :key="crumb.path">
       <ChevronRight :size="12" class="shrink-0 text-muted-foreground" />
       <button
         class="crumb"
-        :class="node.path === library.standingAt && 'crumb-here'"
-        :title="node.path"
-        @click="onPick(node)"
+        :class="crumb.path === library.standingAt && 'crumb-here'"
+        :title="crumb.path"
+        @click="library.standAt(crumb.path)"
       >
-        {{ node.name }}
+        {{ crumb.name }}
       </button>
     </template>
   </div>
@@ -19,15 +23,9 @@
 
 <script setup lang="ts">
 import { ChevronRight } from '@lucide/vue'
-import type { LibraryNode } from '@shared/project/workspace'
 import { useLibraryStore } from '@/stores/libraryStore'
 
 const library = useLibraryStore()
-
-function onPick(node: LibraryNode) {
-  library.pick(node.path)
-  library.standAt(node.path)
-}
 </script>
 
 <style scoped>

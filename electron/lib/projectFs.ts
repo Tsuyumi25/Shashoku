@@ -6,6 +6,8 @@ import { mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
+  DirEntry,
+  FolderContents,
   ScannedBook,
   ScannedCover,
   ScannedFolder,
@@ -181,17 +183,81 @@ async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
   return { cover: null, pageCount: live.length };
 }
 
-export async function listInside(path: string): Promise<ShelfLeaf[]> {
-  if (await isProject(path)) return await pagesInside(path);
-  const names = await listImages(path);
-  return await Promise.all(
-    names.map(async (name) => ({
-      id: name,
-      name,
-      cover: await coverAt(path, name),
-      page: false,
-    })),
+export async function listInside(path: string): Promise<FolderContents> {
+  const book = await isProject(path);
+  const [pages, entries] = await Promise.all([
+    book ? pagesInside(path) : Promise.resolve<ShelfLeaf[]>([]),
+    entriesInside(path),
+  ]);
+  return { book, pages, entries };
+}
+
+async function entriesInside(path: string): Promise<DirEntry[]> {
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const entries = await Promise.all(
+    dirents.map(async (e): Promise<DirEntry> => {
+      const child = join(path, e.name);
+      if (!e.isDirectory()) {
+        const image = IMAGE_EXTENSIONS.includes(extname(e.name).toLowerCase());
+        return {
+          name: e.name,
+          path: child,
+          folder: false,
+          book: false,
+          own: false,
+          cover: image ? await coverAt(path, e.name) : null,
+          pageCount: null,
+          books: null,
+        };
+      }
+      const book = await isProject(child);
+      const read = book ? await readBook(child) : null;
+      return {
+        name: e.name,
+        path: child,
+        folder: true,
+        book,
+        own: e.name === SHASHOKU_DIR,
+        cover: read ? read.cover : await firstPictureIn(child),
+        pageCount: read ? read.pageCount : null,
+        books: null,
+      };
+    }),
   );
+  return entries.sort((a, b) => {
+    if (a.folder !== b.folder) return a.folder ? -1 : 1;
+    return collator.compare(a.name, b.name);
+  });
+}
+
+async function firstPictureIn(dir: string): Promise<ScannedCover | null> {
+  if (await isProject(dir)) return (await readBook(dir)).cover;
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const images = dirents
+    .filter((e) => e.isFile() && IMAGE_EXTENSIONS.includes(extname(e.name).toLowerCase()))
+    .map((e) => e.name)
+    .sort(collator.compare);
+  if (images.length > 0) return await coverAt(dir, images[0]);
+
+  const below = dirents
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort(collator.compare);
+  for (const name of below) {
+    const found = await firstPictureIn(join(dir, name));
+    if (found) return found;
+  }
+  return null;
 }
 
 async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {

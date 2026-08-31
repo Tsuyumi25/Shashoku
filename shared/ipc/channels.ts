@@ -1,5 +1,5 @@
 import type { ScannedScanPoint } from "../project/library";
-import type { ShelfLeaf, WorkspaceScan } from "../project/workspace";
+import type { FolderContents, WorkspaceScan } from "../project/workspace";
 import type { McpQuery, McpReply } from "../mcp/types";
 
 export const CHANNELS = {
@@ -106,7 +106,7 @@ export interface ShashokuApi {
   /** What each scan point holds today, sentinel-bearing children only. */
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;
-  listInside(path: string): Promise<ShelfLeaf[]>;
+  listInside(path: string): Promise<FolderContents>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
    * One page, from one image in the project root, appended to the ones already

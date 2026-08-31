@@ -27,38 +27,38 @@
       </div>
 
       <p
-        v-if="library.roots.length === 0"
+        v-if="library.home.length === 0"
         class="px-2 py-3 text-center text-xs text-muted-foreground"
       >
         還沒有工作區。用上面的「加入工作區」把一個裝著書的資料夾放進來——它可以有幾層都行。
       </p>
 
-      <ContextMenuRoot v-for="node in library.roots" :key="node.path">
+      <ContextMenuRoot v-for="entry in library.home" :key="entry.path">
         <ContextMenuTrigger as-child>
           <div
             class="lib-row"
             :class="{
-              'lib-row-on': node.path === library.insideWorkspace || node.path === library.picked,
-              'lib-row-open': node.path === project.folderPath,
+              'lib-row-on': entry.path === library.insideWorkspace,
+              'lib-row-open': entry.path === project.folderPath,
             }"
-            :title="node.path"
-            @click="onClick(node)"
+            :title="entry.path"
+            @click="library.standAt(entry.path)"
           >
-            <Book v-if="node.kind === 'book'" :size="15" class="shrink-0 text-muted-foreground" />
+            <Book v-if="entry.book" :size="15" class="shrink-0 text-muted-foreground" />
             <FolderTree v-else :size="15" class="shrink-0 text-primary" />
-            <span class="min-w-0 flex-1 truncate">{{ node.name }}</span>
-            <span class="lib-count">{{ node.kind === 'book' ? node.pageCount : node.books }}</span>
+            <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+            <span class="lib-count">{{ entry.pageCount ?? entry.books ?? '' }}</span>
           </div>
         </ContextMenuTrigger>
 
         <ContextMenuPortal>
           <ContextMenuContent class="dropdown-content" :collision-padding="8">
-            <ContextMenuItem class="dropdown-item" @select="reveal(node.path)">
+            <ContextMenuItem class="dropdown-item" @select="reveal(entry.path)">
               <FolderSearch :size="14" />
               <span>在檔案管理員中顯示</span>
             </ContextMenuItem>
             <ContextMenuSeparator class="dropdown-separator" />
-            <ContextMenuItem class="dropdown-item" @select="library.removeWorkspace(node.path)">
+            <ContextMenuItem class="dropdown-item" @select="library.removeWorkspace(entry.path)">
               <FolderX :size="14" />
               <span>從書庫移除</span>
             </ContextMenuItem>
@@ -89,7 +89,6 @@ import {
   ContextMenuTrigger,
 } from 'reka-ui'
 import { useToast } from 'vue-toastification'
-import type { LibraryNode } from '@shared/project/workspace'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -98,13 +97,8 @@ const project = useProjectStore()
 const toast = useToast()
 
 const totalBooks = computed(() =>
-  library.roots.reduce((total, node) => total + (node.kind === 'folder' ? node.books : 1), 0),
+  library.home.reduce((total, entry) => total + (entry.books ?? 1), 0),
 )
-
-function onClick(node: LibraryNode) {
-  library.pick(node.path)
-  library.standAt(node.path)
-}
 
 async function reveal(path: string) {
   const reason = await window.api.openProjectFolder(path)
