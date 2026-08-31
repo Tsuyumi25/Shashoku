@@ -47,12 +47,19 @@
       </a>
     </nav>
 
-    <div ref="scroller" class="shelf-scroll">
+    <div
+      ref="scroller"
+      class="shelf-scroll"
+      @pointerdown="onShelfPointerDown"
+      @pointermove="onShelfPointerMove"
+      @pointerup="onShelfPointerUp"
+      @pointercancel="onShelfPointerCancel"
+    >
       <p v-if="isEmpty" class="px-2 py-8 text-center text-sm text-muted-foreground">
         {{ emptyText }}
       </p>
 
-      <div v-else-if="library.standingAt === null" :class="gridClass">
+      <div v-else-if="library.standingAt === null" data-region="project" :class="gridClass">
         <LibraryCard
           v-for="entry in library.home"
           :key="entry.path"
@@ -62,7 +69,6 @@
           :view="library.view"
           :picked="library.isChosen(entryKey(entry))"
           :open="entry.path === project.folderPath"
-          @pick="onPick('project', entryKey(entry), $event)"
           @enter="library.standAt(entry.path)"
         />
       </div>
@@ -71,6 +77,7 @@
         <section
           v-if="library.bandPages.length > 0"
           id="library-band-pages"
+          data-region="project"
           class="band band-document"
           :class="[flashing === 'pages' && 'band-arrived', library.focus === 'project' && 'band-focused']"
         >
@@ -86,7 +93,6 @@
               :leaf="leaf"
               :view="library.view"
               :picked="library.isChosen(pageKey(leaf))"
-              @pick="onPick('project', pageKey(leaf), $event)"
               @enter="openLeaf(leaf)"
             />
           </div>
@@ -95,6 +101,7 @@
         <section
           v-if="library.bandProjects.length > 0"
           id="library-band-projects"
+          data-region="project"
           class="band band-document"
           :class="[flashing === 'projects' && 'band-arrived', library.focus === 'project' && 'band-focused']"
         >
@@ -111,7 +118,6 @@
               :view="library.view"
               :picked="library.isChosen(entryKey(entry))"
               :open="entry.path === project.folderPath"
-              @pick="onPick('project', entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
@@ -120,6 +126,7 @@
         <section
           v-if="library.bandFiles.length > 0"
           id="library-band-files"
+          data-region="file"
           class="band"
           :class="[flashing === 'files' && 'band-arrived', library.focus === 'file' && 'band-focused']"
         >
@@ -136,12 +143,13 @@
               :view="library.view"
               :picked="library.isChosen(entryKey(entry))"
               :open="false"
-              @pick="onPick('file', entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
         </section>
       </template>
+
+      <div v-if="marqueeStyle" class="shelf-marquee" :style="marqueeStyle" />
     </div>
   </div>
 </template>
@@ -157,6 +165,24 @@ import LibraryCard from '@/components/library/LibraryCard.vue'
 import LibraryCrumbs from '@/components/library/LibraryCrumbs.vue'
 import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
+import { marqueeRect } from '@/lib/selection/marquee'
+import type { Point, Rect } from '@/lib/selection/rect'
+import {
+  bandBoundary,
+  clampToTerritory,
+  clientToContent,
+  DRAG_THRESHOLD_PX,
+  edgeDistance,
+  edgeDistanceFactor,
+  edgeScrollSpeed,
+  edgeTimeFactor,
+  resolveFrame,
+  scrollEdgeFor,
+  scrollZoneDepth,
+  territoryAt,
+  touchedKeys,
+  type CardBox,
+} from '@/lib/selection/shelfMarquee'
 import { isTypingSurface } from '@/lib/typingSurface'
 import { useEditorStore } from '@/stores/editorStore'
 import { entryKey, pageKey, type ShelfRegion, useLibraryStore } from '@/stores/libraryStore'
@@ -246,17 +272,244 @@ onBeforeUnmount(() => {
   window.clearTimeout(settleTimer)
   window.clearTimeout(disarmTimer)
   window.clearTimeout(flashTimer)
+  if (framing !== null) cancelAnimationFrame(framing.raf)
 })
-
-function onPick(region: ShelfRegion, key: string, event: MouseEvent) {
-  if (event.shiftKey) library.extendTo(region, key)
-  else if (event.ctrlKey || event.metaKey) library.toggle(region, key)
-  else library.only(region, key)
-}
 
 function cards(): HTMLElement[] {
   const root = scroller.value
   return root ? [...root.querySelectorAll<HTMLElement>('.shelf-card')] : []
+}
+
+// ── Drag to select ───────────────────────────────────────────────────────
+//
+// One state machine serves both a click on a card and a marquee dragged
+// through the gaps between them, because one mousedown has to decide which
+// of the two it is turning into. Nothing about the selection changes until
+// either the drag threshold is crossed or the pointer comes back up — a
+// press on an already-chosen card must be free to become "drag this whole
+// batch" without collapsing it to one first.
+
+interface PendingCard {
+  kind: 'card'
+  pointerId: number
+  key: string
+  region: ShelfRegion
+  start: Point
+  moved: boolean
+}
+
+interface PendingGap {
+  kind: 'gap'
+  pointerId: number
+  region: ShelfRegion
+  boundary: number
+  origin: Point
+  start: Point
+}
+
+interface Framing {
+  pointerId: number
+  origin: Point
+  territory: ShelfRegion
+  boundary: number
+  base: string[]
+  additive: boolean
+  cardBoxes: CardBox[]
+  lastClient: Point
+  lastTick: number | null
+  zoneEnteredAt: number | null
+  raf: number
+}
+
+let pending: PendingCard | PendingGap | null = null
+let framing: Framing | null = null
+const marqueeStyle = ref<Record<string, string> | null>(null)
+
+function scrollerFrame(el: HTMLElement, rect: DOMRect) {
+  return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
+}
+
+/**
+ * Where the line between the two bands sits, in content coordinates. Read
+ * off the DOM once per gesture rather than kept as layout state: nothing
+ * here is virtualized, so the two band containers are simply asked where
+ * they are.
+ */
+function territoryBoundary(el: HTMLElement, rect: DOMRect): number {
+  const toContentY = (clientY: number) => clientY - rect.top + el.scrollTop
+  const project = el.querySelector<HTMLElement>('[data-region="project"]')
+  const file = el.querySelector<HTMLElement>('[data-region="file"]')
+  return bandBoundary(
+    project ? toContentY(project.getBoundingClientRect().bottom) : null,
+    file ? toContentY(file.getBoundingClientRect().top) : null,
+  )
+}
+
+/**
+ * Every card's box in one territory, taken once when a drag opens rather
+ * than every frame it runs — the grid does not reflow while a marquee is
+ * live, only the scroll position and the box being tested against it do.
+ */
+function cardBoxesIn(el: HTMLElement, rect: DOMRect, territory: ShelfRegion): CardBox[] {
+  const frame = scrollerFrame(el, rect)
+  const out: CardBox[] = []
+  for (const cardEl of cards()) {
+    const key = cardEl.dataset.key
+    if (key === undefined || library.regionOf(key) !== territory) continue
+    const box = cardEl.getBoundingClientRect()
+    const at = clientToContent(box.left, box.top, frame)
+    out.push({ key, box: { x: at.x, y: at.y, w: box.width, h: box.height } })
+  }
+  return out
+}
+
+function currentRect(f: Framing, el: HTMLElement, rect: DOMRect): Rect {
+  const at = clientToContent(f.lastClient.x, f.lastClient.y, scrollerFrame(el, rect))
+  const raw = marqueeRect({ origin: f.origin, current: at, constrain: false, fromCenter: false })
+  return clampToTerritory(raw, f.territory, f.boundary)
+}
+
+function onShelfPointerDown(e: PointerEvent) {
+  if (e.button !== 0 || pending !== null || framing !== null) return
+  const el = scroller.value
+  if (el === null) return
+  el.setPointerCapture(e.pointerId)
+  const start = { x: e.clientX, y: e.clientY }
+  const cardEl = (e.target as HTMLElement).closest<HTMLElement>('.shelf-card')
+  const key = cardEl?.dataset.key
+  if (key !== undefined) {
+    const region = library.regionOf(key)
+    if (region === null) return
+    pending = { kind: 'card', pointerId: e.pointerId, key, region, start, moved: false }
+    return
+  }
+  const rect = el.getBoundingClientRect()
+  const origin = clientToContent(e.clientX, e.clientY, scrollerFrame(el, rect))
+  const boundary = territoryBoundary(el, rect)
+  pending = {
+    kind: 'gap',
+    pointerId: e.pointerId,
+    region: territoryAt(origin.y, boundary),
+    boundary,
+    origin,
+    start,
+  }
+}
+
+function onShelfPointerMove(e: PointerEvent) {
+  if (framing !== null) {
+    if (e.pointerId !== framing.pointerId) return
+    framing.lastClient = { x: e.clientX, y: e.clientY }
+    framing.additive = e.ctrlKey || e.metaKey
+    return
+  }
+  if (pending === null || e.pointerId !== pending.pointerId) return
+  if (Math.hypot(e.clientX - pending.start.x, e.clientY - pending.start.y) < DRAG_THRESHOLD_PX) return
+  if (pending.kind === 'card') {
+    pending.moved = true
+    return
+  }
+  const el = scroller.value
+  if (el === null) return
+  const rect = el.getBoundingClientRect()
+  framing = {
+    pointerId: pending.pointerId,
+    origin: pending.origin,
+    territory: pending.region,
+    boundary: pending.boundary,
+    base: library.chosenIn(pending.region),
+    additive: e.ctrlKey || e.metaKey,
+    cardBoxes: cardBoxesIn(el, rect, pending.region),
+    lastClient: { x: e.clientX, y: e.clientY },
+    lastTick: null,
+    zoneEnteredAt: null,
+    raf: 0,
+  }
+  pending = null
+  framing.raf = requestAnimationFrame(frameTick)
+}
+
+/**
+ * The auto-scroll loop. Not driven by `pointermove`, which stops arriving
+ * the moment the pointer holds still at the edge — this runs every frame
+ * regardless, measuring distance, turning it into a speed, scrolling, and
+ * only then re-reading the content point the scroll just moved underneath
+ * the pointer.
+ */
+function frameTick(now: number) {
+  const f = framing
+  const el = scroller.value
+  if (f === null || el === null) return
+  const rect = el.getBoundingClientRect()
+  const dt = f.lastTick === null ? 0 : now - f.lastTick
+  f.lastTick = now
+
+  const viewportTop = el.scrollTop
+  const viewportBottom = el.scrollTop + rect.height
+  const before = currentRect(f, el, rect)
+  const edge = scrollEdgeFor(before, viewportTop, viewportBottom)
+  const zoneDepth = scrollZoneDepth(rect.height)
+  const distance = edgeDistance(edge, f.lastClient.y, rect.top, rect.bottom)
+  const factor = edgeDistanceFactor(distance, zoneDepth)
+
+  if (edge !== null && factor > 0) {
+    if (f.zoneEnteredAt === null) f.zoneEnteredAt = now
+    const speed = edgeScrollSpeed(factor, edgeTimeFactor(now - f.zoneEnteredAt))
+    const delta = (speed * dt) / 1000
+    el.scrollTop += edge === 'down' ? delta : -delta
+  } else {
+    f.zoneEnteredAt = null
+  }
+
+  const clamped = currentRect(f, el, rect)
+  marqueeStyle.value = {
+    left: `${clamped.x}px`,
+    top: `${clamped.y}px`,
+    width: `${clamped.w}px`,
+    height: `${clamped.h}px`,
+  }
+  const hits = touchedKeys(f.cardBoxes, clamped)
+  library.frameSelect(f.territory, resolveFrame(f.base, hits, f.additive))
+
+  f.raf = requestAnimationFrame(frameTick)
+}
+
+function endFraming() {
+  if (framing === null) return
+  cancelAnimationFrame(framing.raf)
+  framing = null
+  marqueeStyle.value = null
+}
+
+function onShelfPointerUp(e: PointerEvent) {
+  const el = scroller.value
+  if (el !== null && el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+
+  if (framing !== null && e.pointerId === framing.pointerId) {
+    endFraming()
+    return
+  }
+  if (pending === null || e.pointerId !== pending.pointerId) return
+  const done = pending
+  pending = null
+  if (done.kind === 'card') {
+    if (done.moved) return
+    if (e.shiftKey) library.extendTo(done.region, done.key)
+    else if (e.ctrlKey || e.metaKey) library.toggle(done.region, done.key)
+    else library.only(done.region, done.key)
+    return
+  }
+  // A gap press that never crossed the threshold is a click on empty space:
+  // an empty marquee, which hits nothing and so clears the band it landed in.
+  library.frameSelect(done.region, [])
+}
+
+function onShelfPointerCancel(e: PointerEvent) {
+  if (framing !== null && e.pointerId === framing.pointerId) {
+    endFraming()
+    return
+  }
+  if (pending !== null && e.pointerId === pending.pointerId) pending = null
 }
 
 /**
@@ -410,6 +663,7 @@ onMounted(() => {
 }
 
 .shelf-scroll {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -417,6 +671,18 @@ onMounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem;
+  user-select: none;
+}
+
+/* A child of the scroller it is positioned against, so its `left`/`top` are
+   the same content coordinates the drag itself is tracked in — no further
+   projection needed, and it scrolls with the cards rather than over them. */
+.shelf-marquee {
+  position: absolute;
+  z-index: 1;
+  border: 1px solid var(--primary);
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  pointer-events: none;
 }
 .band {
   padding: 0.5rem;

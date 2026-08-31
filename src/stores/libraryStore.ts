@@ -244,8 +244,12 @@ export const useLibraryStore = defineStore('library', () => {
   function touch(region: ShelfRegion): void {
     focus.value = region
     const other = region === 'project' ? 'file' : 'project'
-    chosenOf(other).value = []
-    anchorOf(other).value = null
+    // Guarded rather than unconditional: a marquee drag calls this every
+    // frame, and a fresh empty array is still a fresh reference — writing it
+    // over an already-empty one would re-trigger every reactive dependent on
+    // the untouched band for as long as the drag lasted.
+    if (chosenOf(other).value.length > 0) chosenOf(other).value = []
+    if (anchorOf(other).value !== null) anchorOf(other).value = null
   }
 
   const chosenItems = computed<ShelfItem[]>(() => [
@@ -291,6 +295,38 @@ export const useLibraryStore = defineStore('library', () => {
   /** Whichever band currently holds focus, all of it. */
   function chooseAll(): void {
     chosenOf(focus.value).value = itemsOf(focus.value).map((item) => item.key)
+  }
+
+  /** A snapshot a marquee drag can start from and recompute against. */
+  function chosenIn(region: ShelfRegion): string[] {
+    return [...chosenOf(region).value]
+  }
+
+  function sameOrder(a: readonly string[], b: readonly string[]): boolean {
+    return a.length === b.length && a.every((key, at) => key === b[at])
+  }
+
+  /**
+   * What a marquee drag replaces a band's selection with, every frame. Band
+   * order rather than hit order — a rectangle sweeping the grid touches cards
+   * in whatever order its edge happens to cross them in, and that is not a
+   * fact about the selection.
+   *
+   * Guarded the same way `touch` is: most frames of a held drag touch exactly
+   * the same cards as the frame before, and writing an equal array over
+   * itself would still be a fresh reference.
+   */
+  function frameSelect(region: ShelfRegion, keys: string[]): void {
+    touch(region)
+    const ordered = itemsOf(region)
+      .map((item) => item.key)
+      .filter((key) => keys.includes(key))
+    const chosen = chosenOf(region)
+    if (!sameOrder(chosen.value, ordered)) chosen.value = ordered
+    const anchorKey = ordered[0] ?? null
+    const anchor = anchorOf(region)
+    if (anchor.value !== anchorKey) anchor.value = anchorKey
+    if (cursor.value !== anchorKey) cursor.value = anchorKey
   }
 
   /** Both bands, since only one is ever non-empty. Focus does not move. */
@@ -340,6 +376,8 @@ export const useLibraryStore = defineStore('library', () => {
     extendTo,
     chooseAll,
     clearChoice,
+    chosenIn,
+    frameSelect,
     refresh,
     addWorkspace,
     removeWorkspace,

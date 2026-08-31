@@ -7,7 +7,6 @@
       entry.own && 'opacity-70',
     ]"
     :title="entry.path"
-    @click="emit('pick', $event)"
     @dblclick="emit('enter')"
   >
     <div class="shrink-0" :class="view === 'thumbnail' ? 'w-full' : 'w-10'">
@@ -45,7 +44,7 @@ const props = defineProps<{
   open: boolean
 }>()
 
-const emit = defineEmits<{ pick: [MouseEvent]; enter: [] }>()
+const emit = defineEmits<{ enter: [] }>()
 
 const note = computed(() => {
   const entry = props.entry
