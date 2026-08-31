@@ -2878,14 +2878,37 @@ describe('reordering the chapter', () => {
 describe('a refused write does not advance the stack', () => {
   const BOOK = '/library/book-a'
 
-  function stubBookApi(pages: string[]) {
+  function stubBookApi(pages: string[], onWrite: () => void = () => {}) {
     vi.stubGlobal('window', {
       api: {
         readProjectMeta: async () => serializeProjectJson({ ...defaultProjectJson(), pages }),
-        writeProjectMeta: async () => {},
+        writeProjectMeta: async () => onWrite(),
       },
     })
   }
+
+  /**
+   * The undo itself went back — the order in memory is the old one. What did
+   * not happen is the write, and nothing was waiting on it: a scheduled write
+   * reports through `onError`, which is the console. The next open would have
+   * shown the order this key press took away.
+   */
+  it('says so when the write behind an undo does not reach the disk', async () => {
+    stubBookApi(['a', 'b'], () => {
+      throw new Error('disk full')
+    })
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(BOOK)
+
+    editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
+    useNoticeStore().dismiss()
+
+    editor.undo(BOOK)
+    await vi.waitFor(() => expect(useNoticeStore().notice?.text).toContain('沒有存進磁碟'))
+
+    expect(bookMeta.orderOf(BOOK)?.pages).toEqual(['a', 'b'])
+  })
 
   afterEach(() => {
     vi.unstubAllGlobals()

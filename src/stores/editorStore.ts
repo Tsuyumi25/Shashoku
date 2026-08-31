@@ -995,6 +995,28 @@ export const useEditorStore = defineStore('editor', () => {
    * precondition before it writes (every one here does) never leaves
    * anything to put back in the first place.
    */
+  /**
+   * A step that went back leaves a write behind it, and nothing was waiting on
+   * that write: a `mark` reports through `onError`, which is the console. So
+   * an undo whose bytes never reached the disk looked exactly like one whose
+   * did, and the next open would show the order it had taken back.
+   *
+   * ⛔ Only for a step that carries its book's `project.json` and nothing else.
+   * `projectStore.flush` settles pixels first — a whole layer encoded per
+   * keystroke, which is the cost `PIXEL_DEBOUNCE_MS` exists to spread out.
+   */
+  function settleBook(cmd: Command, book: BookId): void {
+    if (cmd.portable !== true || book === null) return
+    const project = useProjectStore()
+    const landed = project.isOpenRoot(book)
+      ? project.flushManifest()
+      : useBookMetaStore().flush(book)
+    void landed.catch((err) => {
+      console.error('undo write failed', err)
+      useNoticeStore().say('這一步撤銷了，但沒有存進磁碟')
+    })
+  }
+
   function undo(book: BookId = currentBook.value) {
     if (strokeInFlight.value) return
     commitTextEdit()
@@ -1010,6 +1032,7 @@ export const useEditorStore = defineStore('editor', () => {
       undo: after.undo.filter((c) => c !== cmd),
       redo: [...after.redo, cmd],
     })
+    settleBook(cmd, book)
   }
 
   /**
@@ -1034,6 +1057,7 @@ export const useEditorStore = defineStore('editor', () => {
       undo: [...after.undo, cmd],
       redo: after.redo.filter((c) => c !== cmd),
     })
+    settleBook(cmd, book)
   }
 
   /** Wipes the current book's stack — nothing else's. */
