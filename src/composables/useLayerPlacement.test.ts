@@ -5,7 +5,7 @@ import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
-import { useEditorStore } from '@/stores/editorStore'
+import { rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 
@@ -193,7 +193,7 @@ describe('letting go of a moved layer', () => {
     const forgotten: string[] = []
     editor.pushCommand({
       label: 'fill j1',
-      journal: 'j1',
+      journals: [rasterJournal('j1')],
       do: () => {},
       undo: () => {},
       forget: () => forgotten.push('j1'),

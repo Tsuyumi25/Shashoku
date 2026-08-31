@@ -5,6 +5,7 @@ import {
   maskBrushModeOf,
   maskJournal,
   MAX_TRACKED_BOOKS,
+  rasterJournal,
   UNDO_LIMIT,
   useEditorStore,
 } from './editorStore'
@@ -447,7 +448,7 @@ describe('steps whose pixels the engine let go', () => {
   function pixelStep(editor: ReturnType<typeof useEditorStore>, journal: string, forgotten: string[]) {
     editor.pushCommand({
       label: `fill ${journal}`,
-      journal,
+      journals: [rasterJournal(journal)],
       do: () => {},
       undo: () => {},
       forget: () => forgotten.push(journal),
@@ -588,7 +589,7 @@ describe('steps that depend on more than one registry', () => {
     const forgotten: string[] = []
     editor.pushCommand({
       label: 'fill j1',
-      journal: 'j1',
+      journals: [rasterJournal('j1')],
       do: () => {},
       undo: () => {},
       forget: () => forgotten.push('j1'),

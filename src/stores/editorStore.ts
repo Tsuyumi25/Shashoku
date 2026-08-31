@@ -66,21 +66,11 @@ export interface Command {
   do(): void
   undo(): void
   /**
-   * The engine record this command is the manifest half of, when it has one.
+   * Every external record this command needs in order to be undone.
    *
-   * A pixel step is two things kept in step: a record of tiles the engine holds
-   * and a frame the manifest holds. This names the first so the stack can be
-   * cut where the engine says its pixels are gone.
-   *
-   * ⚠️ A single raster name, kept for the commands already written against it.
-   * Anything that depends on more than one record, or on a mask journal rather
-   * than a raster one, declares `journals` instead — the two are read
-   * together, never one replacing the other.
-   */
-  journal?: string
-  /**
-   * Every external record this command needs in order to be undone, beyond
-   * the single raster one `journal` already names. A command can hold several
+   * A pixel step is two things kept in step: a record the engine holds and a
+   * frame the manifest holds. These name the engine's half, so the stack can
+   * be cut where the engine says that half is gone. A command can hold several
    * — a selection gesture that first put the old mask away and then wrote the
    * new one needs both back to undo either.
    */
@@ -894,7 +884,6 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** Whether a command names one of the given journals, in the given registry. */
   function dependsOnJournal(cmd: Command, kind: JournalKind, gone: ReadonlySet<string>): boolean {
-    if (kind === 'raster' && cmd.journal !== undefined && gone.has(cmd.journal)) return true
     return cmd.journals?.some((dep) => dep.kind === kind && gone.has(dep.name)) ?? false
   }
 
