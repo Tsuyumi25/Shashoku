@@ -2892,33 +2892,36 @@ describe('a refused write does not advance the stack', () => {
     vi.unstubAllGlobals()
   })
 
-  it('refuses an undo once the book has since been opened, and says so', async () => {
+  /**
+   * "Reorder → open → undo", the sequence that used to do nothing at all.
+   * The command holds the book's path, not the writer that was live when the
+   * shelf let go, so opening the book moves the undo onto `projectStore`
+   * rather than stranding it on a session the open had just deleted.
+   */
+  it('undoes through projectStore once the book has since been opened', async () => {
     stubBookApi(['a', 'b'])
     const project = useProjectStore()
     const editor = useEditorStore()
     const bookMeta = useBookMetaStore()
-    await bookMeta.sessionFor(BOOK)
+    await bookMeta.handleFor(BOOK)
 
     editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
 
-    // The book is opened after the drag, the way "reorder → open → undo" in
-    // the spec plays out — the command's own writer stays the one it was
-    // pushed with, but `bookMeta.setOrder` still checks itself fresh.
     project.rootPath = BOOK
-    expect(editor.canUndo).toBe(true)
+    project.allFiles = [pageOf('b', []), pageOf('a', [])]
 
     editor.undo()
 
-    expect(editor.canUndo).toBe(true)
-    expect(useNoticeStore().notice?.text).toBeTruthy()
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'b'])
+    expect(editor.canUndo).toBe(false)
   })
 
-  it('refuses an undo once the session has been forgotten, and says so', async () => {
+  it('refuses an undo once the handle has been forgotten, and says so', async () => {
     stubBookApi(['a', 'b'])
     const project = useProjectStore()
     const editor = useEditorStore()
     const bookMeta = useBookMetaStore()
-    await bookMeta.sessionFor(BOOK)
+    await bookMeta.handleFor(BOOK)
 
     editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
 

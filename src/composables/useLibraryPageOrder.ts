@@ -24,7 +24,7 @@ async function flushBook(book: string): Promise<void> {
 
 /**
  * A book's full page order and its tombstones, from whichever of the two
- * places holds them right now. `sessionFor` already refuses a book the
+ * places holds them right now. `handleFor` already refuses a book the
  * editor has open — the `null` it answers with there is read as "ask
  * `projectStore` instead", the same door `bookMetaStore` itself points
  * callers through.
@@ -32,9 +32,9 @@ async function flushBook(book: string): Promise<void> {
 async function readBookOrder(book: string): Promise<BookOrder> {
   const project = useProjectStore()
   if (!project.isOpenRoot(book)) {
-    const session = await useBookMetaStore().sessionFor(book)
-    if (session !== null) {
-      return { pages: [...session.order], deletedPages: [...(session.meta.deletedPages ?? [])] }
+    const handle = await useBookMetaStore().handleFor(book)
+    if (handle !== null) {
+      return { pages: [...handle.order], deletedPages: [...(handle.meta.deletedPages ?? [])] }
     }
   }
   return {

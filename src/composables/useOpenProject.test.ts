@@ -1,24 +1,48 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useOpenProject } from './useOpenProject'
+import { useLibraryPageOrder } from './useLibraryPageOrder'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
+import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
+import { SHASHOKU_DIR } from '@shared/ssk/constants'
+
+/**
+ * One `project.json` per book, written and read back the way the two writers
+ * both really reach it — the shelf through `writeProjectMeta`, an open through
+ * `openProject`. A handover that lets the lightweight writer land after the
+ * open has read shows up here as an order the editor never saw.
+ */
+const disk = new Map<string, string[]>()
+
+function rootOfShashokuDir(dir: string): string {
+  return dir.slice(0, -(SHASHOKU_DIR.length + 1))
+}
+
+function metaRawOf(root: string): string {
+  return serializeProjectJson({ ...defaultProjectJson(), pages: disk.get(root) ?? [] })
+}
 
 function stubWindow(opts?: { onReadProjectMeta?: (rootPath: string) => void }) {
   vi.stubGlobal('window', {
     api: {
       scanRoot: async () => ({ hasShashokuDir: true, hasSentinel: true }),
-      openProject: async () => ({
-        projectMetaRaw: serializeProjectJson(defaultProjectJson()),
-        pages: [],
+      openProject: async (root: string) => ({
+        projectMetaRaw: metaRawOf(root),
+        pages: (disk.get(root) ?? []).map((pageId) => ({
+          pageId,
+          pageDir: `${root}/${SHASHOKU_DIR}/pages/${pageId}`,
+          badge: 'ok' as const,
+        })),
       }),
       readProjectMeta: async (rootPath: string) => {
         opts?.onReadProjectMeta?.(rootPath)
-        return serializeProjectJson(defaultProjectJson())
+        return metaRawOf(rootPath)
       },
-      writeProjectMeta: async () => {},
+      writeProjectMeta: async (shashokuDir: string, raw: string) => {
+        disk.set(rootOfShashokuDir(shashokuDir), parseProjectJson(raw).pages)
+      },
       readPage: async () => ({ manifestRaw: '', ocrRaw: null }),
       scanWorkspaces: async () => ({ roots: [], folders: [], books: [] }),
       listInside: async () => ({ book: false, pages: [], entries: [] }),
@@ -32,6 +56,7 @@ function stubWindow(opts?: { onReadProjectMeta?: (rootPath: string) => void }) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  disk.clear()
 })
 
 afterEach(() => {
@@ -84,26 +109,113 @@ describe('switching between books', () => {
 
     expect(editor.canUndo).toBe(false)
   })
+})
+
+/**
+ * The two sequences that were silently doing nothing: a reorder made from the
+ * shelf froze the writer it was pushed with, and opening the book destroyed
+ * exactly that writer. Both undo through whichever authority owns the book at
+ * the moment the key is pressed.
+ */
+describe('undoing a shelf reorder after the book has been opened', () => {
+  it('takes the order back while that book is the one open in the editor', async () => {
+    stubWindow()
+    disk.set('/book-a', ['a', 'b', 'c'])
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    const order = useLibraryPageOrder()
+
+    await order.reorderPagesTo('/book-a', ['c'], 0)
+    expect(disk.get('/book-a')).toEqual(['c', 'a', 'b'])
+
+    expect(await useOpenProject().openPath('/book-a')).toBe(true)
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['c', 'a', 'b'])
+
+    editor.undo('/book-a')
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('takes it back from the shelf after that book has been left again', async () => {
+    stubWindow()
+    disk.set('/book-a', ['a', 'b', 'c'])
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    const opener = useOpenProject()
+
+    await useLibraryPageOrder().reorderPagesTo('/book-a', ['c'], 0)
+    await opener.openPath('/book-a')
+    await opener.openPath('/book-b')
+
+    editor.undo('/book-a')
+    await bookMeta.flush('/book-a')
+
+    expect(disk.get('/book-a')).toEqual(['a', 'b', 'c'])
+  })
 
   /**
-   * The book just opened has exactly one writer, `projectStore`'s own
-   * autosave — a book-meta session cached from before it was opened would be
-   * stale the moment that autosave writes, so opening it drops the cache.
+   * The order the shelf left debounced has to be on disk before the open
+   * reads the file. Landing afterwards would put the editor's `allFiles` an
+   * edit behind, and its own autosave would then write that back over the top.
    */
-  it('forgets a book-meta session once the editor opens that same book', async () => {
+  it('lands the shelf’s pending write before the open reads the file', async () => {
+    stubWindow()
+    disk.set('/book-a', ['a', 'b', 'c'])
+    const project = useProjectStore()
+    const bookMeta = useBookMetaStore()
+
+    // Marked and left debounced — no `flush`, which is what the gesture that
+    // owns this write would normally have awaited before letting go.
+    await bookMeta.handleFor('/book-a')
+    expect(bookMeta.setOrder('/book-a', ['c', 'a', 'b'])).toBe(true)
+    expect(disk.get('/book-a')).toEqual(['a', 'b', 'c'])
+
+    await useOpenProject().openPath('/book-a')
+
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['c', 'a', 'b'])
+  })
+})
+
+describe('the handle a book is held by', () => {
+  /**
+   * Opening the book no longer throws its handle away — the history pointing
+   * at it outlives the editor session, so the handle has to as well.
+   */
+  it('survives the editor opening and leaving that same book', async () => {
     let reads = 0
     stubWindow({ onReadProjectMeta: () => reads++ })
     const bookMeta = useBookMetaStore()
     const open = useOpenProject()
 
-    await bookMeta.sessionFor('/book-a')
+    disk.set('/book-a', ['a', 'b'])
+    await bookMeta.handleFor('/book-a')
     expect(reads).toBe(1)
 
     await open.openPath('/book-a')
-    // Left again, so the library could ask for a fresh session once more.
     await open.openPath('/book-b')
 
-    await bookMeta.sessionFor('/book-a')
-    expect(reads).toBe(2)
+    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['a', 'b'])
+    expect(reads).toBe(1)
+  })
+
+  /**
+   * A book reordered from the shelf while it was the open one never had a
+   * handle — `projectStore` answered every read. Leaving it is the moment
+   * that command's writer changes, so it is the moment the handle is made.
+   */
+  it('is made on the way out for a book that never had one', async () => {
+    stubWindow()
+    disk.set('/book-a', ['a', 'b', 'c'])
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    const opener = useOpenProject()
+
+    await opener.openPath('/book-a')
+    await useLibraryPageOrder().reorderPagesTo('/book-a', ['c'], 0)
+    await opener.openPath('/book-b')
+
+    editor.undo('/book-a')
+    await bookMeta.flush('/book-a')
+
+    expect(disk.get('/book-a')).toEqual(['a', 'b', 'c'])
   })
 })

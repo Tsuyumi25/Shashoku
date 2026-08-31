@@ -34,24 +34,24 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('sessionFor', () => {
-  it('starts a session from what is on disk', async () => {
+describe('handleFor', () => {
+  it('starts a handle from what is on disk', async () => {
     stubApi()
     const bookMeta = useBookMetaStore()
 
-    const session = await bookMeta.sessionFor(ROOT)
+    const handle = await bookMeta.handleFor(ROOT)
 
-    expect(session?.order).toEqual(['a', 'b'])
-    expect(session?.dirty).toBe(false)
+    expect(handle?.order).toEqual(['a', 'b'])
+    expect(handle?.dirty).toBe(false)
   })
 
   it('starts from defaults when the book has never been saved', async () => {
     stubApi({ meta: null })
     const bookMeta = useBookMetaStore()
 
-    const session = await bookMeta.sessionFor(ROOT)
+    const handle = await bookMeta.handleFor(ROOT)
 
-    expect(session?.order).toEqual([])
+    expect(handle?.order).toEqual([])
   })
 
   it('reads a book once and serves the cache after that', async () => {
@@ -59,8 +59,8 @@ describe('sessionFor', () => {
     stubApi({ onRead: () => reads++ })
     const bookMeta = useBookMetaStore()
 
-    await bookMeta.sessionFor(ROOT)
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
+    await bookMeta.handleFor(ROOT)
 
     expect(reads).toBe(1)
   })
@@ -70,7 +70,7 @@ describe('sessionFor', () => {
     stubApi({ onRead: () => reads++ })
     const bookMeta = useBookMetaStore()
 
-    const [a, b] = await Promise.all([bookMeta.sessionFor(ROOT), bookMeta.sessionFor(ROOT)])
+    const [a, b] = await Promise.all([bookMeta.handleFor(ROOT), bookMeta.handleFor(ROOT)])
 
     expect(reads).toBe(1)
     expect(a).toBe(b)
@@ -87,13 +87,13 @@ describe('sessionFor', () => {
     useProjectStore().rootPath = ROOT
     const bookMeta = useBookMetaStore()
 
-    expect(await bookMeta.sessionFor(ROOT)).toBeNull()
+    expect(await bookMeta.handleFor(ROOT)).toBeNull()
     expect(reads).toBe(0)
   })
 })
 
 describe('setOrder', () => {
-  it('refuses a book that has not been read into a session yet', () => {
+  it('refuses a book that has not been read into a handle yet', () => {
     stubApi()
     const bookMeta = useBookMetaStore()
 
@@ -103,7 +103,7 @@ describe('setOrder', () => {
   it('refuses the book the editor already has open', async () => {
     stubApi()
     const bookMeta = useBookMetaStore()
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
     useProjectStore().rootPath = ROOT
 
     expect(bookMeta.setOrder(ROOT, ['b', 'a'])).toBe(false)
@@ -118,7 +118,7 @@ describe('setOrder', () => {
     const writes: string[][] = []
     stubApi({ onWrite: (_dir, raw) => writes.push(parseProjectJson(raw).pages) })
     const bookMeta = useBookMetaStore()
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
 
     bookMeta.setOrder(ROOT, ['b', 'a']) // do
     bookMeta.setOrder(ROOT, ['a', 'b']) // undo
@@ -132,7 +132,7 @@ describe('setOrder', () => {
     let writes = 0
     stubApi({ onWrite: () => writes++ })
     const bookMeta = useBookMetaStore()
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
 
     await bookMeta.flush(ROOT)
 
@@ -141,15 +141,119 @@ describe('setOrder', () => {
 })
 
 describe('forget', () => {
-  it('drops the cached session, so the next read goes to disk again', async () => {
+  it('drops the cached handle, so the next read goes to disk again', async () => {
     let reads = 0
     stubApi({ onRead: () => reads++ })
     const bookMeta = useBookMetaStore()
 
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
     bookMeta.forget(ROOT)
-    await bookMeta.sessionFor(ROOT)
+    await bookMeta.handleFor(ROOT)
 
     expect(reads).toBe(2)
+  })
+})
+
+describe('handBack', () => {
+  /**
+   * The book was the open one, so `handleFor` refused it and there is no
+   * handle at all — until the editor lets go of it, which is the moment
+   * anything still pointing at that book starts needing one.
+   */
+  it('makes a handle for a book that never had one', async () => {
+    let reads = 0
+    stubApi({ onRead: () => reads++ })
+    const bookMeta = useBookMetaStore()
+
+    bookMeta.handBack(ROOT, { ...defaultProjectJson(), pages: ['b', 'a'] }, ['b', 'a'])
+
+    expect((await bookMeta.handleFor(ROOT))?.order).toEqual(['b', 'a'])
+    expect(reads).toBe(0)
+  })
+
+  it('replaces what a stale handle held with the order the editor is holding', async () => {
+    stubApi()
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+
+    bookMeta.handBack(ROOT, { ...defaultProjectJson(), pages: ['a', 'b', 'c'] }, ['a', 'b', 'c'])
+
+    expect((await bookMeta.handleFor(ROOT))?.order).toEqual(['a', 'b', 'c'])
+  })
+
+  /** A write already scheduled is still owed; taking the book back is not paying it. */
+  it('keeps a write that was already scheduled', async () => {
+    const writes: string[][] = []
+    stubApi({ onWrite: (_dir, raw) => writes.push(parseProjectJson(raw).pages) })
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+    bookMeta.setOrder(ROOT, ['b', 'a'])
+
+    bookMeta.handBack(ROOT, { ...defaultProjectJson(), pages: ['b', 'a'] }, ['b', 'a'])
+    await bookMeta.flush(ROOT)
+
+    expect(writes).toEqual([['b', 'a']])
+  })
+})
+
+describe('flushAll', () => {
+  it('lands every book that has a write still pending', async () => {
+    const written = new Map<string, string[]>()
+    stubApi({ onWrite: (dir, raw) => written.set(dir, parseProjectJson(raw).pages) })
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor('/one')
+    await bookMeta.handleFor('/two')
+    bookMeta.setOrder('/one', ['b', 'a'])
+    bookMeta.setOrder('/two', ['a'])
+
+    await bookMeta.flushAll()
+
+    expect([...written.values()]).toEqual([['b', 'a'], ['a']])
+  })
+})
+
+describe('retire', () => {
+  it('lets a clean handle go, so the next read goes to disk again', async () => {
+    let reads = 0
+    stubApi({ onRead: () => reads++ })
+    const bookMeta = useBookMetaStore()
+
+    await bookMeta.handleFor(ROOT)
+    await bookMeta.retire(ROOT)
+    await bookMeta.handleFor(ROOT)
+
+    expect(reads).toBe(2)
+  })
+
+  it('writes what a dirty handle was holding before letting it go', async () => {
+    const writes: string[][] = []
+    stubApi({ onWrite: (_dir, raw) => writes.push(parseProjectJson(raw).pages) })
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+    bookMeta.setOrder(ROOT, ['b', 'a'])
+
+    await bookMeta.retire(ROOT)
+
+    expect(writes).toEqual([['b', 'a']])
+  })
+
+  /**
+   * The one way a change already accepted from the user could disappear with
+   * nothing saying so. A handle whose write did not land stays put, still
+   * holding it, for whoever flushes next.
+   */
+  it('keeps a handle whose write failed', async () => {
+    stubApi({
+      onWrite: () => {
+        throw new Error('disk full')
+      },
+    })
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+    bookMeta.setOrder(ROOT, ['b', 'a'])
+
+    await bookMeta.retire(ROOT)
+
+    expect((await bookMeta.handleFor(ROOT))?.order).toEqual(['b', 'a'])
   })
 })

@@ -72,10 +72,10 @@ describe('reordering a book nobody has open', () => {
     const bookMeta = useBookMetaStore()
 
     await order.reorderPagesTo('/book-a', ['b', 'd'], 0)
-    expect((await bookMeta.sessionFor('/book-a'))?.order).toEqual(['b', 'd', 'a', 'c'])
+    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['b', 'd', 'a', 'c'])
 
     editor.undo('/book-a')
-    expect((await bookMeta.sessionFor('/book-a'))?.order).toEqual(['a', 'b', 'c', 'd'])
+    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['a', 'b', 'c', 'd'])
   })
 
   it('does not land in whichever book happens to be open in the editor', async () => {
@@ -101,9 +101,9 @@ describe('importing files onto a book nobody has open', () => {
 
     await order.importFilesAt('/book-b', ['a.png', 'b.png'], 1)
 
-    const session = await bookMeta.sessionFor('/book-b')
-    expect(session?.order).toEqual(['x', 'p1', 'p2'])
-    expect(session?.meta.deletedPages ?? []).toEqual([])
+    const handle = await bookMeta.handleFor('/book-b')
+    expect(handle?.order).toEqual(['x', 'p1', 'p2'])
+    expect(handle?.meta.deletedPages ?? []).toEqual([])
   })
 
   it('undoes by tombstoning, never by taking the name out of the order', async () => {
@@ -115,12 +115,12 @@ describe('importing files onto a book nobody has open', () => {
     await order.importFilesAt('/book-b', ['a.png'], 1)
     editor.undo('/book-b')
 
-    const session = await bookMeta.sessionFor('/book-b')
-    expect(session?.order).toEqual(['x', 'p1'])
-    expect(session?.meta.deletedPages).toEqual(['p1'])
+    const handle = await bookMeta.handleFor('/book-b')
+    expect(handle?.order).toEqual(['x', 'p1'])
+    expect(handle?.meta.deletedPages).toEqual(['p1'])
 
     editor.redo('/book-b')
-    const after = await bookMeta.sessionFor('/book-b')
+    const after = await bookMeta.handleFor('/book-b')
     expect(after?.meta.deletedPages ?? []).toEqual([])
   })
 })

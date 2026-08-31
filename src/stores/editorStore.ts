@@ -108,11 +108,15 @@ export interface Command {
    * singleton store or an engine resource and only runs in the session that
    * made it.
    *
-   * Every command today is session-bound; nothing sets this yet. The first
-   * portable command is the page-order one, added in a later ticket. Closing
-   * a book cuts its stack at the newest session-bound command, the same
-   * linear barrier `forgetJournals` already applies to a lost journal — what
-   * survives is whichever portable run sits above it.
+   * ⛔ Decided by what the command depends on, never by which store happened
+   * to be writing when it was pushed. A page-order command needs only its
+   * book's `project.json` and is portable wherever the user was standing;
+   * reading it off the writer of the moment made the same gesture survive a
+   * close or not according to an accident of where they were.
+   *
+   * Closing a book cuts its stack at the newest session-bound command, the
+   * same linear barrier `forgetJournals` already applies to a lost journal —
+   * what survives is whichever portable run sits above it.
    */
   portable?: boolean
   /**
@@ -161,11 +165,10 @@ export const UNDO_LIMIT = 100
  * touched one is dropped entirely, its commands' `forget` called the same as
  * any other eviction.
  *
- * Closing a book already cuts every session-bound command from its stack —
- * today that is every command there is, so a closed book's entry is empty the
- * moment it is dropped and this bound never fires. It exists for the portable
- * run a later ticket adds: paging through the library and dragging pages
- * around in book after book, without ever opening one in the editor, must not
+ * Closing a book cuts every session-bound command from its stack, so a book
+ * only ever edited in the editor leaves nothing behind. What this bounds is
+ * the portable run: paging through the library and dragging pages around in
+ * book after book, without ever opening one in the editor, must not
  * accumulate one live entry here per book it ever glanced at. Twenty is
  * generous against that — a session working steadily in one book keeps that
  * book at the most-recently-touched end for as long as it stays open, so the
@@ -587,17 +590,26 @@ export const useEditorStore = defineStore('editor', () => {
    * than kept as an empty entry — indistinguishable from absence in
    * `historyOf`, and keeping it would waste a slot in the bound above on
    * every book that was ever merely closed.
+   *
+   * A book that loses its history here also loses the handle it was held by:
+   * the two are bounded together, so paging through the library dragging
+   * pages about cannot leave one live `project.json` in memory per book it
+   * ever touched. `retire` is what keeps that from throwing away a write that
+   * has not landed yet.
    */
   function setHistory(book: BookId, next: BookHistory) {
     const map = new Map(histories.value)
+    const had = map.has(book)
     map.delete(book)
     if (next.undo.length > 0 || next.redo.length > 0) map.set(book, next)
+    else if (had && book !== null) void useBookMetaStore().retire(book)
     while (map.size > MAX_TRACKED_BOOKS) {
       const oldest = map.keys().next().value
       if (oldest === undefined) break
       const gone = map.get(oldest)
       if (gone) for (const cmd of [...gone.undo, ...gone.redo]) cmd.forget?.()
       map.delete(oldest)
+      if (oldest !== null) void useBookMetaStore().retire(oldest)
     }
     histories.value = map
   }
@@ -1068,24 +1080,31 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Whether `book` is written to by reaching for the singleton `projectStore`
-   * — decided once, when the shelf lets go, and closed over rather than
-   * re-asked on every `do`/`undo`/`redo`. A book can open or close while a
-   * command sits on its stack, and asking again mid-life would route a single
-   * command's two ends through two different writers.
+   * Where a write to `book` goes, asked afresh on every `do`/`undo`/`redo`.
+   *
+   * ⭐ Which authority owns a book changes underneath a command that is
+   * already on the stack — opening it hands the book to `projectStore`,
+   * leaving it hands the book back — and the command outlives every one of
+   * those handovers. Deciding once, when the shelf let go, is what made a
+   * reorder followed by an open silently do nothing: the writer it had closed
+   * over was the very thing the open took away.
+   *
+   * The book's path is what the command holds instead, and the routing here
+   * is what turns that path into whoever is writing the file right now.
    */
-  function bookWriter(book: string, openHere: boolean) {
+  function bookWriter(book: string) {
     const project = useProjectStore()
     const bookMeta = useBookMetaStore()
+    const openHere = () => project.isOpenRoot(book)
     return {
       setOrder: (order: readonly string[]) =>
-        openHere ? project.setFullOrder(order) : bookMeta.setOrder(book, order),
+        openHere() ? project.setFullOrder(order) : bookMeta.setOrder(book, order),
       insertPages: (entries: readonly ProjectFile[], order: readonly string[]) =>
-        openHere ? project.insertPages(entries, order) : bookMeta.setOrder(book, order),
+        openHere() ? project.insertPages(entries, order) : bookMeta.setOrder(book, order),
       tagDeleted: (ids: readonly string[]) =>
-        openHere ? project.tagPagesDeleted(ids) : bookMeta.tagDeleted(book, ids),
+        openHere() ? project.tagPagesDeleted(ids) : bookMeta.tagDeleted(book, ids),
       untagDeleted: (ids: readonly string[]) =>
-        openHere ? project.untagPagesDeleted(ids) : bookMeta.untagDeleted(book, ids),
+        openHere() ? project.untagPagesDeleted(ids) : bookMeta.untagDeleted(book, ids),
     }
   }
 
@@ -1094,18 +1113,20 @@ export const useEditorStore = defineStore('editor', () => {
    * tombstoned pages included, so neither end has to depend on the selection
    * or the drop point still meaning anything by the time it runs again.
    *
-   * The first portable command: a book nobody has opened this session can
-   * still be reordered from the shelf, and undoing it later needs nothing but
-   * `book`'s own `project.json`.
+   * The first portable command, and portable whether or not that book happens
+   * to be open: what makes a command portable is what it depends on, and this
+   * one depends on nothing but `book`'s own `project.json`. Reading it off
+   * whichever store was writing at the time would have made the same gesture
+   * survive a close or not according to where the user happened to be
+   * standing when they made it.
    */
   function cmdSetPageOrder(book: BookId, before: readonly string[], after: readonly string[]) {
     if (book === null || before.join('\u0000') === after.join('\u0000')) return
-    const openHere = useProjectStore().isOpenRoot(book)
-    const writer = bookWriter(book, openHere)
+    const writer = bookWriter(book)
     pushCommand(
       {
         label: `reorder-pages ${book}`,
-        portable: !openHere,
+        portable: true,
         do: () => writer.setOrder(after),
         undo: () => writer.setOrder(before),
       },
@@ -1127,12 +1148,11 @@ export const useEditorStore = defineStore('editor', () => {
     after: readonly string[],
   ) {
     if (book === null || ids.length === 0) return
-    const openHere = useProjectStore().isOpenRoot(book)
-    const writer = bookWriter(book, openHere)
+    const writer = bookWriter(book)
     pushCommand(
       {
         label: `import-pages ${book} ${ids.length}`,
-        portable: !openHere,
+        portable: true,
         // Checked before the second write runs, not after: `insertPages` and
         // `untagDeleted` are refused by the same two preconditions — the
         // book being written some other way, or a session that is gone — so

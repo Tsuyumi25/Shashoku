@@ -47,17 +47,40 @@ export function useOpenProject() {
     cards.reset()
     editor.startOnPage(project.files[0]?.pageId ?? null)
     if (leaving !== null && leaving !== project.rootPath) editor.closeBook(leaving)
-    // The book just opened has exactly one writer from now on: this store's
-    // own autosave. A cached lightweight session for it would be stale the
-    // moment that autosave writes, so it goes rather than risk being read.
-    if (project.rootPath !== null) bookMeta.forget(project.rootPath)
     await library.refresh()
+  }
+
+  /**
+   * The handover, run before the open rather than after it, because both
+   * halves of it are only possible while the singleton still names the book
+   * being left.
+   *
+   * Handing back first: `projectStore` holds the newest order for the outgoing
+   * book, and once the open resolves that store describes somewhere else. Any
+   * page-order command left on the outgoing book's stack routes to its handle
+   * from now on, and this is what leaves that handle something current.
+   *
+   * Flushing second, and every book rather than the one being opened: an open
+   * reads `project.json` straight off disk, so a lightweight write still
+   * debounced anywhere would land after that read and be overwritten by an
+   * editor autosave that never saw it.
+   */
+  async function handOver(leaving: string | null): Promise<void> {
+    if (leaving !== null) {
+      bookMeta.handBack(
+        leaving,
+        project.projectMeta,
+        project.allFiles.map((f) => f.pageId),
+      )
+    }
+    await bookMeta.flushAll()
   }
 
   async function guard(open: () => Promise<string | null>): Promise<boolean> {
     lastError.value = null
     const leaving = project.rootPath
     try {
+      await handOver(leaving)
       const opened = await open()
       if (opened === null) return false
       await settle(leaving)
@@ -74,17 +97,8 @@ export function useOpenProject() {
   /** This folder is already a project; open it. */
   const openPicked = () => guard(() => project.openExisting())
 
-  /**
-   * A shelf gesture on this same book may have left a book-meta write still
-   * debounced — flushed first, since `openByPath` reads the file straight off
-   * disk and a write still in flight would lose the race, opening the book on
-   * whatever order stood before the gesture.
-   */
-  const openPath = (path: string) =>
-    guard(async () => {
-      await bookMeta.flush(path)
-      return project.openByPath(path)
-    })
+  /** This folder is a project and its path is already known; open it. */
+  const openPath = (path: string) => guard(() => project.openByPath(path))
 
   return { lastError, createHere, openPicked, openPath }
 }
