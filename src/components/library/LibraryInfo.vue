@@ -1,6 +1,33 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col border-l border-border bg-card">
-    <div v-if="!entry && !leaf" class="flex flex-1 items-center justify-center p-6">
+    <div v-if="many.length > 1" class="min-h-0 flex-1 overflow-y-auto p-3">
+      <p class="text-sm">選了 {{ many.length }} 個</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">{{ tally }}</p>
+
+      <dl class="mt-3">
+        <dt class="text-xs text-muted-foreground">位置</dt>
+        <dd class="mt-0.5 rounded bg-muted px-2 py-1 font-mono text-[0.6875rem] break-all select-text">
+          {{ library.standingAt ?? '書庫' }}
+        </dd>
+      </dl>
+
+      <div class="stack mt-5">
+        <div
+          v-for="(item, at) in stacked"
+          :key="item.key"
+          class="stack-card"
+          :style="{ zIndex: stacked.length - at, transform: shift(at) }"
+        >
+          <LibraryCover :cover="item.kind === 'page' ? item.page.cover : item.entry.cover" />
+        </div>
+      </div>
+
+      <p v-if="many.length > stacked.length" class="mt-3 text-center text-xs text-muted-foreground">
+        還有 {{ many.length - stacked.length }} 個沒畫出來
+      </p>
+    </div>
+
+    <div v-else-if="!entry && !leaf" class="flex flex-1 items-center justify-center p-6">
       <p class="max-w-[14rem] text-center text-sm text-muted-foreground">
         挑一本書、一個資料夾或一張圖，這裡就講它的事。
       </p>
@@ -90,6 +117,35 @@ const toast = useToast()
 const entry = computed(() => library.picked)
 const leaf = computed(() => library.pickedLeaf)
 
+const many = computed(() => library.chosenItems)
+
+/** Enough to read as a pile without asking for a decode per card. */
+const STACKED = 4
+
+const stacked = computed(() => many.value.slice(0, STACKED))
+
+function shift(at: number): string {
+  return `translate(${at * 9}px, ${at * 7}px) rotate(${at * 1.6}deg)`
+}
+
+const tally = computed(() => {
+  let pages = 0
+  let books = 0
+  let rest = 0
+  for (const item of many.value) {
+    if (item.kind === 'page') pages++
+    else if (item.entry.book) books++
+    else rest++
+  }
+  return [
+    pages > 0 ? `${pages} 頁` : '',
+    books > 0 ? `${books} 本書` : '',
+    rest > 0 ? `${rest} 個檔案或資料夾` : '',
+  ]
+    .filter(Boolean)
+    .join('、')
+})
+
 const isOpenProject = computed(() => entry.value?.path === project.folderPath)
 
 const kindLabel = computed(() => {
@@ -165,5 +221,21 @@ async function reveal() {
 .info-btn:hover {
   background: var(--secondary);
   color: var(--foreground);
+}
+
+.stack {
+  position: relative;
+  width: 62%;
+  margin-inline: auto;
+  aspect-ratio: 3 / 4;
+}
+.stack-card {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--card);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.18);
 }
 </style>

@@ -138,7 +138,7 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     if (e.repeat) return
     if (ui.view === 'pages' || ui.view === 'export') exportSelection.selectAll()
-    else if (editor.maskTarget) selection.selectAll(editor.maskTarget)
+    else if (ui.view === 'editor' && editor.maskTarget) selection.selectAll(editor.maskTarget)
     return
   }
 

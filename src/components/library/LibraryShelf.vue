@@ -56,11 +56,13 @@
         <LibraryCard
           v-for="entry in library.home"
           :key="entry.path"
+          class="shelf-card"
+          :data-key="entryKey(entry)"
           :entry="entry"
           :view="library.view"
-          :picked="entry.path === library.picked?.path"
+          :picked="library.isChosen(entryKey(entry))"
           :open="entry.path === project.folderPath"
-          @pick="library.pickEntry(entry)"
+          @pick="onPick(entryKey(entry), $event)"
           @enter="library.standAt(entry.path)"
         />
       </div>
@@ -79,10 +81,12 @@
             <LibraryLeafCard
               v-for="leaf in library.bandPages"
               :key="leaf.id"
+              class="shelf-card"
+              :data-key="pageKey(leaf)"
               :leaf="leaf"
               :view="library.view"
-              :picked="leaf.id === library.pickedLeaf?.id"
-              @pick="library.pickLeaf(leaf)"
+              :picked="library.isChosen(pageKey(leaf))"
+              @pick="onPick(pageKey(leaf), $event)"
               @enter="openLeaf(leaf)"
             />
           </div>
@@ -101,11 +105,13 @@
             <LibraryCard
               v-for="entry in library.bandProjects"
               :key="entry.path"
+              class="shelf-card"
+              :data-key="entryKey(entry)"
               :entry="entry"
               :view="library.view"
-              :picked="entry.path === library.picked?.path"
+              :picked="library.isChosen(entryKey(entry))"
               :open="entry.path === project.folderPath"
-              @pick="library.pickEntry(entry)"
+              @pick="onPick(entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
@@ -124,11 +130,13 @@
             <LibraryCard
               v-for="entry in library.bandFiles"
               :key="entry.path"
+              class="shelf-card"
+              :data-key="entryKey(entry)"
               :entry="entry"
               :view="library.view"
-              :picked="entry.path === library.picked?.path"
+              :picked="library.isChosen(entryKey(entry))"
               :open="false"
-              @pick="library.pickEntry(entry)"
+              @pick="onPick(entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
@@ -149,8 +157,9 @@ import LibraryCard from '@/components/library/LibraryCard.vue'
 import LibraryCrumbs from '@/components/library/LibraryCrumbs.vue'
 import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
+import { isTypingSurface } from '@/lib/typingSurface'
 import { useEditorStore } from '@/stores/editorStore'
-import { useLibraryStore } from '@/stores/libraryStore'
+import { entryKey, pageKey, useLibraryStore } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -237,6 +246,100 @@ onBeforeUnmount(() => {
   window.clearTimeout(settleTimer)
   window.clearTimeout(disarmTimer)
   window.clearTimeout(flashTimer)
+})
+
+function onPick(key: string, event: MouseEvent) {
+  if (event.shiftKey) library.extendTo(key)
+  else if (event.ctrlKey || event.metaKey) library.toggle(key)
+  else library.only(key)
+}
+
+function cards(): HTMLElement[] {
+  const root = scroller.value
+  return root ? [...root.querySelectorAll<HTMLElement>('.shelf-card')] : []
+}
+
+/**
+ * Where an arrow lands, read off the boxes on screen rather than off the list.
+ * The grid wraps at whatever width the panel happens to be and its rows are
+ * broken by the band headings, so the row above is a question only the layout
+ * can answer.
+ */
+function step(across: number, down: number): string | null {
+  const els = cards()
+  if (els.length === 0) return null
+  const at = els.findIndex((el) => el.dataset.key === library.cursor)
+  if (at === -1) return els[0].dataset.key ?? null
+  if (across !== 0) return (els[at + across] ?? els[at]).dataset.key ?? null
+
+  const from = els[at].getBoundingClientRect()
+  const middle = from.left + from.width / 2
+  let best: HTMLElement | null = null
+  let nearest = Infinity
+  for (const el of els) {
+    const box = el.getBoundingClientRect()
+    const away = down > 0 ? box.top - from.top : from.top - box.top
+    if (away <= 1) continue
+    const reach = away * 10000 + Math.abs(box.left + box.width / 2 - middle)
+    if (reach < nearest) {
+      nearest = reach
+      best = el
+    }
+  }
+  return best?.dataset.key ?? library.cursor
+}
+
+function walk(across: number, down: number, extend: boolean) {
+  const key = step(across, down)
+  if (key === null) return
+  if (extend) library.extendTo(key)
+  else library.only(key)
+  // Against the stylesheet's smooth scrolling, which is there for the band
+  // links: an arrow key has already moved the cursor, and animating after it
+  // shows the wrong card for as long as the animation lasts.
+  cards()
+    .find((el) => el.dataset.key === key)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+}
+
+function activate() {
+  const item = library.items.find((each) => each.key === library.cursor)
+  if (item === undefined) return
+  if (item.kind === 'page') void openLeaf(item.page)
+  else enter(item.entry)
+}
+
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+  if (ui.settingsOpen || ui.view !== 'library') return
+  if (isTypingSurface(document.activeElement)) return
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault()
+    library.chooseAll()
+    return
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  switch (e.key) {
+    case 'ArrowLeft':
+      e.preventDefault()
+      return walk(-1, 0, e.shiftKey)
+    case 'ArrowRight':
+      e.preventDefault()
+      return walk(1, 0, e.shiftKey)
+    case 'ArrowUp':
+      e.preventDefault()
+      return walk(0, -1, e.shiftKey)
+    case 'ArrowDown':
+      e.preventDefault()
+      return walk(0, 1, e.shiftKey)
+    case 'Enter':
+      e.preventDefault()
+      return activate()
+    case 'Escape':
+      e.preventDefault()
+      return library.clearChoice()
+  }
 })
 
 function enter(entry: DirEntry) {

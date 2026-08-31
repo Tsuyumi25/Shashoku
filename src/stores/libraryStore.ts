@@ -13,6 +13,31 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 /** Names beside covers, or covers with names under them. */
 export type LibraryView = 'list' | 'thumbnail'
 
+/**
+ * One card, whichever band drew it. Two kinds sit in one list because a
+ * selection reaches across them, while the key keeps them apart: a page is
+ * named inside its book, a file by where it lies.
+ */
+export type ShelfItem =
+  | { kind: 'page'; key: string; page: ShelfLeaf }
+  | { kind: 'entry'; key: string; entry: DirEntry }
+
+export function pageKey(page: ShelfLeaf): string {
+  return `page:${page.id}`
+}
+
+export function entryKey(entry: DirEntry): string {
+  return `entry:${entry.path}`
+}
+
+function pageItem(page: ShelfLeaf): ShelfItem {
+  return { kind: 'page', key: pageKey(page), page }
+}
+
+function entryItem(entry: DirEntry): ShelfItem {
+  return { kind: 'entry', key: entryKey(entry), entry }
+}
+
 function empty(): FolderContents {
   return { book: false, pages: [], entries: [] }
 }
@@ -37,9 +62,6 @@ export const useLibraryStore = defineStore('library', () => {
   const standingAt = ref<string | null>(null)
   const inside = ref<FolderContents>(empty())
   const insideLoading = ref(false)
-
-  const picked = ref<DirEntry | null>(null)
-  const pickedLeaf = ref<ShelfLeaf | null>(null)
 
   const view = ref<LibraryView>('thumbnail')
 
@@ -119,18 +141,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   function standAt(path: string | null): void {
     standingAt.value = path
-    picked.value = null
-    pickedLeaf.value = null
-  }
-
-  function pickEntry(entry: DirEntry): void {
-    picked.value = entry
-    pickedLeaf.value = null
-  }
-
-  function pickLeaf(leaf: ShelfLeaf): void {
-    pickedLeaf.value = leaf
-    picked.value = null
+    clearChoice()
   }
 
   const crumbs = computed(() =>
@@ -162,6 +173,78 @@ export const useLibraryStore = defineStore('library', () => {
       ).length,
   )
 
+  /**
+   * Every card on the shelf, in the order they are read. A range runs along
+   * this list and not along any one band, because a drag does not stop at a
+   * heading and neither does Shift.
+   */
+  const items = computed<ShelfItem[]>(() => {
+    if (standingAt.value === null) return home.value.map(entryItem)
+    return [
+      ...bandPages.value.map(pageItem),
+      ...bandProjects.value.map(entryItem),
+      ...bandFiles.value.map(entryItem),
+    ]
+  })
+
+  const chosen = ref<string[]>([])
+  /** Where a Shift reach measures its run from. */
+  const anchor = ref<string | null>(null)
+  /** What the arrow keys are standing on, which need not be selected. */
+  const cursor = ref<string | null>(null)
+
+  const chosenKeys = computed(() => new Set(chosen.value))
+  const chosenItems = computed(() => items.value.filter((item) => chosenKeys.value.has(item.key)))
+
+  function isChosen(key: string): boolean {
+    return chosenKeys.value.has(key)
+  }
+
+  function only(key: string): void {
+    chosen.value = [key]
+    anchor.value = key
+    cursor.value = key
+  }
+
+  function toggle(key: string): void {
+    const at = chosen.value.indexOf(key)
+    if (at === -1) chosen.value.push(key)
+    else chosen.value.splice(at, 1)
+    anchor.value = key
+    cursor.value = key
+  }
+
+  /** The run from the anchor to here, and nothing else — as a file manager does. */
+  function extendTo(key: string): void {
+    const keys = items.value.map((item) => item.key)
+    const from = anchor.value === null ? 0 : keys.indexOf(anchor.value)
+    const to = keys.indexOf(key)
+    if (from === -1 || to === -1) return only(key)
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    chosen.value = keys.slice(lo, hi + 1)
+    cursor.value = key
+  }
+
+  function chooseAll(): void {
+    chosen.value = items.value.map((item) => item.key)
+  }
+
+  function clearChoice(): void {
+    chosen.value = []
+    anchor.value = null
+    cursor.value = null
+  }
+
+  const picked = computed<DirEntry | null>(() => {
+    const one = chosenItems.value
+    return one.length === 1 && one[0].kind === 'entry' ? one[0].entry : null
+  })
+
+  const pickedLeaf = computed<ShelfLeaf | null>(() => {
+    const one = chosenItems.value
+    return one.length === 1 && one[0].kind === 'page' ? one[0].page : null
+  })
+
   return {
     roots,
     scanning,
@@ -178,11 +261,19 @@ export const useLibraryStore = defineStore('library', () => {
     bandProjects,
     bandFiles,
     bandCount,
+    items,
+    chosen,
+    chosenItems,
+    cursor,
+    isChosen,
+    only,
+    toggle,
+    extendTo,
+    chooseAll,
+    clearChoice,
     refresh,
     addWorkspace,
     removeWorkspace,
     standAt,
-    pickEntry,
-    pickLeaf,
   }
 })

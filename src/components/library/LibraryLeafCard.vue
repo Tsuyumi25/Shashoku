@@ -6,7 +6,7 @@
       view === 'thumbnail' ? 'flex flex-col gap-1' : 'flex items-center gap-2',
     ]"
     :title="leaf.name"
-    @click="emit('pick')"
+    @click="emit('pick', $event)"
     @dblclick="emit('enter')"
   >
     <div class="shrink-0" :class="view === 'thumbnail' ? 'w-full' : 'w-10'">
@@ -25,5 +25,5 @@ import type { LibraryView } from '@/stores/libraryStore'
 
 defineProps<{ leaf: ShelfLeaf; view: LibraryView; picked: boolean }>()
 
-const emit = defineEmits<{ pick: []; enter: [] }>()
+const emit = defineEmits<{ pick: [MouseEvent]; enter: [] }>()
 </script>
