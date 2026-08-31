@@ -50,6 +50,8 @@ const api: ShashokuApi = {
     ipcRenderer.on(CHANNELS.windowWillClose, () => handler());
   },
   windowCloseReady: () => ipcRenderer.send(CHANNELS.windowCloseReady),
+  windowCloseBusy: () => ipcRenderer.send(CHANNELS.windowCloseBusy),
+  windowCloseFailed: () => ipcRenderer.invoke(CHANNELS.windowCloseFailed),
   onMcpQuery: (handler) => {
     ipcRenderer.on(CHANNELS.mcpQuery, (_e, query) => handler(query));
   },

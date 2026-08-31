@@ -49,11 +49,11 @@ describe('settling before the window closes', () => {
   })
 
   /**
-   * The window holds itself open until the caller answers. A write that
-   * throws costs that one write, not the reply — each scheduler has already
-   * reported its own failure by the time this resolves.
+   * Answering the window at all is what lets it close, so resolving on a write
+   * that threw closed it over work that was never written — with nothing on
+   * screen to say so. The caller now has something to put to the user.
    */
-  it('still resolves when one of the writes throws', async () => {
+  it('raises a write that did not land', async () => {
     stubWindow({
       onWrite: () => {
         throw new Error('read-only file system')
@@ -63,6 +63,29 @@ describe('settling before the window closes', () => {
     await bookMeta.handleFor(ROOT)
     bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])
 
-    await expect(useCloseSettle().settle()).resolves.toBeUndefined()
+    await expect(useCloseSettle().settle()).rejects.toThrow('read-only file system')
+  })
+
+  /**
+   * Every scheduler still gets its turn. Stopping at the first to throw would
+   * leave the others holding bytes nobody asks for again — the window is on
+   * its way out, and there is no later.
+   */
+  it('gives the writes that can still land their turn', async () => {
+    let attempts = 0
+    stubWindow({
+      onWrite: () => {
+        attempts += 1
+        throw new Error('read-only file system')
+      },
+    })
+    const bookMeta = useBookMetaStore()
+    for (const root of [ROOT, '/library/book-b']) {
+      await bookMeta.handleFor(root)
+      bookMeta.applyOrderSnapshot(root, ['b', 'a'])
+    }
+
+    await expect(useCloseSettle().settle()).rejects.toThrow()
+    expect(attempts).toBe(2)
   })
 })

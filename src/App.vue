@@ -105,10 +105,34 @@ const merge = useMergeLayers()
 const pixels = useSelectionPixels()
 const closing = useCloseSettle()
 
+/** Comfortably inside the silence the window tolerates, which is three seconds. */
+const CLOSE_BEAT_MS = 1000
+
 // The window holds itself open until this answers, so every path out of it has
 // to reach the release.
+/**
+ * The window holds itself open for this, and the beat is what tells it the
+ * hold is a renderer still working rather than one that has stopped answering.
+ * A write that will not land is put to the user rather than closed over: only
+ * they can say whether it is worth trying again.
+ */
 window.api.onWillClose(() => {
-  void closing.settle().then(() => window.api.windowCloseReady())
+  void (async () => {
+    const beating = window.setInterval(() => window.api.windowCloseBusy(), CLOSE_BEAT_MS)
+    try {
+      for (;;) {
+        try {
+          await closing.settle()
+          return
+        } catch {
+          if ((await window.api.windowCloseFailed()) === 'discard') return
+        }
+      }
+    } finally {
+      window.clearInterval(beating)
+      window.api.windowCloseReady()
+    }
+  })()
 })
 
 // All three listeners stand down while the settings panel is up: these keys

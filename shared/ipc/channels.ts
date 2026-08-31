@@ -37,6 +37,8 @@ export const CHANNELS = {
   windowSetOverlay: "window:set-overlay",
   windowWillClose: "window:will-close",
   windowCloseReady: "window:close-ready",
+  windowCloseBusy: "window:close-busy",
+  windowCloseFailed: "window:close-failed",
   mcpQuery: "mcp:query",
   mcpReply: "mcp:reply",
   mcpReady: "mcp:ready",
@@ -181,6 +183,18 @@ export interface ShashokuApi {
    */
   onWillClose(handler: () => void): void;
   windowCloseReady(): void;
+  /**
+   * Still writing. The window's patience is a dead man's switch rather than a
+   * deadline: a renderer that is wedged or gone must not hold a window open,
+   * but one that is four seconds into a write on a slow disk is neither, and
+   * a fixed grace period cannot tell those apart.
+   */
+  windowCloseBusy(): void;
+  /**
+   * The last writes did not land. Answers with what the user chose — `retry`
+   * to go round again, `discard` to leave without them.
+   */
+  windowCloseFailed(): Promise<"retry" | "discard">;
   /**
    * The MCP endpoint asking the renderer, where the open project actually
    * lives. Answers go back through mcpReply carrying the question's id.

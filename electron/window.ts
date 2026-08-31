@@ -1,14 +1,16 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import { CHANNELS } from "@shared/ipc/channels";
 import { forgetReady } from "./mcp/bridge";
 
 /**
- * How long the window waits for the renderer to say its last writes have
- * landed. A renderer that is wedged or gone must not be able to keep a window
- * on screen that the user has asked to close, so the wait has an end.
+ * How long the window waits to hear anything at all from the renderer while
+ * it settles its last writes. Restarted by every `windowCloseBusy`, so this is
+ * how long silence is tolerated rather than how long the work may take: a
+ * renderer that is wedged or gone must not hold a window open, and one four
+ * seconds into a write on a slow disk is neither of those.
  */
-const CLOSE_GRACE_MS = 3000;
+const CLOSE_SILENCE_MS = 3000;
 
 /** Must match the title bar's rendered height, or the buttons sit off-row. */
 export const OVERLAY_HEIGHT = 36;
@@ -84,9 +86,31 @@ export function createWindow(): BrowserWindow {
     e.preventDefault();
     if (closing) return;
     closing = true;
-    const giveUp = setTimeout(closeForReal, CLOSE_GRACE_MS);
+    let giveUp = setTimeout(closeForReal, CLOSE_SILENCE_MS);
+    const heard = () => {
+      clearTimeout(giveUp);
+      giveUp = setTimeout(closeForReal, CLOSE_SILENCE_MS);
+    };
+    ipcMain.on(CHANNELS.windowCloseBusy, heard);
+    // Asking the user is the one wait with no end: the window stays until they
+    // answer, however long that is.
+    ipcMain.handle(CHANNELS.windowCloseFailed, async () => {
+      clearTimeout(giveUp);
+      const { response } = await dialog.showMessageBox(win, {
+        type: "warning",
+        buttons: ["再試一次", "不儲存就離開"],
+        defaultId: 0,
+        cancelId: 0,
+        message: "有變更沒有存進磁碟",
+        detail: "離開的話那些變更就沒了。",
+      });
+      heard();
+      return response === 1 ? "discard" : "retry";
+    });
     ipcMain.once(CHANNELS.windowCloseReady, () => {
       clearTimeout(giveUp);
+      ipcMain.off(CHANNELS.windowCloseBusy, heard);
+      ipcMain.removeHandler(CHANNELS.windowCloseFailed);
       closeForReal();
     });
     win.webContents.send(CHANNELS.windowWillClose);

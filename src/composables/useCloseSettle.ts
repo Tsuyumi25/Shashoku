@@ -10,9 +10,11 @@ import { useProjectStore } from '@/stores/projectStore'
  * open. An undo made on the shelf writes through that book's own handle on a
  * debounce of its own, and quitting straight after one used to leave it there.
  *
- * `allSettled` rather than `all`: the window holds itself open until the
- * caller answers, so a write that throws must cost that one write and not the
- * reply. Each scheduler has already reported its own failure by then.
+ * `allSettled` rather than `all`, and then raised: every scheduler gets its
+ * turn even after one of them throws — `all` would leave the others holding
+ * bytes nobody ever asked for again — but the throw still comes back out.
+ * Swallowing it was how a full disk closed the window on work it had not
+ * written, with nothing on screen either way.
  */
 export function useCloseSettle() {
   const editor = useEditorStore()
@@ -22,7 +24,13 @@ export function useCloseSettle() {
 
   async function settle(): Promise<void> {
     editor.flushTextEdit()
-    await Promise.allSettled([project.flush(), bookMeta.flushAll(), preferences.flush()])
+    const tried = await Promise.allSettled([
+      project.flush(),
+      bookMeta.flushAll(),
+      preferences.flush(),
+    ])
+    const refused = tried.find((one) => one.status === 'rejected')
+    if (refused) throw refused.reason
   }
 
   return { settle }
