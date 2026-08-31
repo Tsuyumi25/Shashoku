@@ -3,20 +3,9 @@
     <div class="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1">
       <LibraryCrumbs />
 
-      <div class="ml-auto flex shrink-0 items-center gap-1">
-        <button class="shelf-btn" title="把一個含有原圖的資料夾建成書" @click="create">
-          <FilePlus :size="13" />
-          <span>新增</span>
-        </button>
-        <button class="shelf-btn" title="開啟一本已經做過的書" @click="openPicked">
-          <FolderOpen :size="13" />
-          <span>開啟</span>
-        </button>
-      </div>
-
       <ToggleGroupRoot
         type="single"
-        class="seg shrink-0"
+        class="seg ml-auto shrink-0"
         :model-value="library.view"
         @update:model-value="onView"
       >
@@ -152,10 +141,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { FilePlus, FolderOpen, LayoutGrid, List } from '@lucide/vue'
+import { LayoutGrid, List } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { useToast } from 'vue-toastification'
-import { nodeAt, type DirEntry, type ShelfLeaf } from '@shared/project/workspace'
+import type { DirEntry, ShelfLeaf } from '@shared/project/workspace'
 import LibraryCard from '@/components/library/LibraryCard.vue'
 import LibraryCrumbs from '@/components/library/LibraryCrumbs.vue'
 import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
@@ -169,7 +158,7 @@ const library = useLibraryStore()
 const project = useProjectStore()
 const editor = useEditorStore()
 const ui = useUiStore()
-const { createHere, openPicked: pickAndOpen, openPath, lastError } = useOpenProject()
+const { openPath, lastError } = useOpenProject()
 const toast = useToast()
 
 const gridClass = 'grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] items-start gap-2'
@@ -250,29 +239,6 @@ onBeforeUnmount(() => {
   window.clearTimeout(flashTimer)
 })
 
-function noticeIfOutside(path: string) {
-  if (nodeAt(library.roots, path) !== null) return
-  toast.info('這本書不在任何工作區底下,書庫看不到它。要的話把它上面某一層加成工作區。')
-}
-
-async function create() {
-  if (!(await createHere())) {
-    if (lastError.value) toast.error(lastError.value)
-    return
-  }
-  if (project.folderPath) noticeIfOutside(project.folderPath)
-  ui.setView('pages')
-}
-
-async function openPicked() {
-  if (!(await pickAndOpen())) {
-    if (lastError.value) toast.error(lastError.value)
-    return
-  }
-  if (project.folderPath) noticeIfOutside(project.folderPath)
-  ui.setView('editor')
-}
-
 function enter(entry: DirEntry) {
   if (entry.folder) library.standAt(entry.path)
 }
@@ -294,21 +260,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.shelf-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  height: 1.625rem;
-  padding: 0 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-}
-.shelf-btn:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
 .shelf-view-item {
   display: flex;
   align-items: center;
