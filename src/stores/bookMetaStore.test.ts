@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { watchEffect } from 'vue'
 import { useBookMetaStore } from './bookMetaStore'
 import { useProjectStore } from './projectStore'
 import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
@@ -212,6 +213,35 @@ describe('flushAll', () => {
       ['b', 'a'],
       ['b', 'a'],
     ])
+  })
+})
+
+/**
+ * The shelf lays its cards out from `orderOf`, so an undo that rewrites a
+ * handle has to be something a `computed` notices. A plain `Map` behind the
+ * handles would leave the disk right and the cards showing the order from
+ * before the key was pressed — which reads as the undo having done nothing.
+ *
+ * ⭐ Subscribing first is the whole point: reading `orderOf` twice passes
+ * either way, because the second read recomputes from scratch.
+ */
+describe('the shelf watching a handle', () => {
+  it('wakes a subscriber when an order it is already watching is rewritten', async () => {
+    stubApi()
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+
+    const seen: string[][] = []
+    const stop = watchEffect(() => {
+      seen.push(bookMeta.orderOf(ROOT)?.pages ?? [])
+    })
+
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])
+    await Promise.resolve()
+    stop()
+
+    expect(seen.at(-1)).toEqual(['b', 'a'])
+    expect(seen).toHaveLength(2)
   })
 })
 
