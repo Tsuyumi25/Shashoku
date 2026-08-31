@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   isSelectionTool,
@@ -10,6 +10,8 @@ import {
   useEditorStore,
 } from './editorStore'
 import { useProjectStore } from './projectStore'
+import { useBookMetaStore } from './bookMetaStore'
+import { useNoticeStore } from './noticeStore'
 import type { ProjectFile } from '@/types/project'
 import type {
   GroupLayerEntry,
@@ -26,6 +28,7 @@ import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { blankTextObject, emptyBody } from '@shared/page/schema'
 import { offeredReadings } from '@shared/ocr/offer'
+import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 
 const PAGE = 'p001.png'
 
@@ -417,7 +420,7 @@ describe('the undo stack is bounded', () => {
     const editor = useEditorStore()
     const undone: number[] = []
     for (let i = 0; i < UNDO_LIMIT + 3; i += 1) {
-      editor.pushCommand({ label: `step ${i}`, do: () => {}, undo: () => undone.push(i) })
+      editor.pushCommand({ label: `step ${i}`, do: () => {}, undo: () => { undone.push(i) } })
     }
 
     while (editor.canUndo) editor.undo()
@@ -432,7 +435,13 @@ describe('the undo stack is bounded', () => {
     const editor = useEditorStore()
     const done: number[] = []
     for (let i = 0; i < UNDO_LIMIT + 3; i += 1) {
-      editor.pushCommand({ label: `step ${i}`, do: () => done.push(i), undo: () => {} })
+      editor.pushCommand({
+        label: `step ${i}`,
+        do: () => {
+          done.push(i)
+        },
+        undo: () => {},
+      })
     }
     done.length = 0
 
@@ -469,7 +478,7 @@ describe('steps whose pixels the engine let go', () => {
 
     expect(forgotten).toEqual(['j1', 'j2'])
     const undone: string[] = []
-    editor.pushCommand({ label: 'mark', do: () => {}, undo: () => undone.push('mark') })
+    editor.pushCommand({ label: 'mark', do: () => {}, undo: () => { undone.push('mark') } })
     while (editor.canUndo) editor.undo()
     expect(forgotten).toEqual(['j1', 'j2'])
     expect(undone).toEqual(['mark'])
@@ -481,9 +490,9 @@ describe('steps whose pixels the engine let go', () => {
     const editor = useEditorStore()
     const forgotten: string[] = []
     const undone: string[] = []
-    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => undone.push('rename') })
+    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => { undone.push('rename') } })
     pixelStep(editor, 'j1', forgotten)
-    editor.pushCommand({ label: 'move', do: () => {}, undo: () => undone.push('move') })
+    editor.pushCommand({ label: 'move', do: () => {}, undo: () => { undone.push('move') } })
 
     editor.forgetJournals(['j1'])
     while (editor.canUndo) editor.undo()
@@ -569,9 +578,9 @@ describe('steps that depend on more than one registry', () => {
     const editor = useEditorStore()
     const forgotten: string[] = []
     const undone: string[] = []
-    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => undone.push('rename') })
+    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => { undone.push('rename') } })
     maskStep(editor, 'm1', forgotten)
-    editor.pushCommand({ label: 'move', do: () => {}, undo: () => undone.push('move') })
+    editor.pushCommand({ label: 'move', do: () => {}, undo: () => { undone.push('move') } })
 
     editor.forgetJournals(['m1'], 'mask')
     while (editor.canUndo) editor.undo()
@@ -620,12 +629,12 @@ describe('one stack per book', () => {
 
     project.rootPath = '/book-a'
     const doneA: string[] = []
-    editor.pushCommand({ label: 'a1', do: () => {}, undo: () => doneA.push('undo-a1') })
+    editor.pushCommand({ label: 'a1', do: () => {}, undo: () => { doneA.push('undo-a1') } })
 
     project.rootPath = '/book-b'
     const doneB: string[] = []
-    editor.pushCommand({ label: 'b1', do: () => {}, undo: () => doneB.push('undo-b1') })
-    editor.pushCommand({ label: 'b2', do: () => {}, undo: () => doneB.push('undo-b2') })
+    editor.pushCommand({ label: 'b1', do: () => {}, undo: () => { doneB.push('undo-b1') } })
+    editor.pushCommand({ label: 'b2', do: () => {}, undo: () => { doneB.push('undo-b2') } })
 
     // Undoing on B must never reach A's command.
     editor.undo()
@@ -677,18 +686,18 @@ describe('closing a book', () => {
     project.rootPath = '/book-a'
 
     const undone: string[] = []
-    editor.pushCommand({ label: 'session-1', do: () => {}, undo: () => undone.push('session-1') })
+    editor.pushCommand({ label: 'session-1', do: () => {}, undo: () => { undone.push('session-1') } })
     editor.pushCommand({
       label: 'portable-1',
       portable: true,
       do: () => {},
-      undo: () => undone.push('portable-1'),
+      undo: () => { undone.push('portable-1') },
     })
     editor.pushCommand({
       label: 'portable-2',
       portable: true,
       do: () => {},
-      undo: () => undone.push('portable-2'),
+      undo: () => { undone.push('portable-2') },
     })
 
     editor.closeBook('/book-a')
@@ -723,13 +732,13 @@ describe('closing a book', () => {
       label: 'p1',
       portable: true,
       do: () => {},
-      undo: () => undone.push('p1'),
+      undo: () => { undone.push('p1') },
     })
     editor.pushCommand({
       label: 'p2',
       portable: true,
       do: () => {},
-      undo: () => undone.push('p2'),
+      undo: () => { undone.push('p2') },
     })
 
     // Closed, as it would be on switching away, then switched back to.
@@ -2857,6 +2866,126 @@ describe('reordering the chapter', () => {
     const { project, editor } = openPages(['a', 'b'])
     editor.cmdMovePage('b', 0)
     expect(project.metaDirty).toBe(true)
+  })
+})
+
+/**
+ * `cmdSetPageOrder` and `cmdImportPages` are the first commands whose writer
+ * can refuse — a book that is open elsewhere, a session the library dropped,
+ * or a chapter that no longer matches the order a stale command remembers.
+ * Each of the three has to leave the stack exactly where it was and say so,
+ * rather than advancing past a write that never happened.
+ */
+describe('a refused write does not advance the stack', () => {
+  const BOOK = '/library/book-a'
+
+  function stubBookApi(pages: string[]) {
+    vi.stubGlobal('window', {
+      api: {
+        readProjectMeta: async () => serializeProjectJson({ ...defaultProjectJson(), pages }),
+        writeProjectMeta: async () => {},
+      },
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('refuses an undo once the book has since been opened, and says so', async () => {
+    stubBookApi(['a', 'b'])
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    await bookMeta.sessionFor(BOOK)
+
+    editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
+
+    // The book is opened after the drag, the way "reorder → open → undo" in
+    // the spec plays out — the command's own writer stays the one it was
+    // pushed with, but `bookMeta.setOrder` still checks itself fresh.
+    project.rootPath = BOOK
+    expect(editor.canUndo).toBe(true)
+
+    editor.undo()
+
+    expect(editor.canUndo).toBe(true)
+    expect(useNoticeStore().notice?.text).toBeTruthy()
+  })
+
+  it('refuses an undo once the session has been forgotten, and says so', async () => {
+    stubBookApi(['a', 'b'])
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    await bookMeta.sessionFor(BOOK)
+
+    editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
+
+    // Read with the book open, since `canUndo` only ever answers for
+    // whichever book is current — the check itself does not open it.
+    project.rootPath = BOOK
+    expect(editor.canUndo).toBe(true)
+    project.rootPath = null
+
+    bookMeta.forget(BOOK)
+    editor.undo(BOOK)
+
+    project.rootPath = BOOK
+    expect(editor.canUndo).toBe(true)
+    expect(useNoticeStore().notice?.text).toBeTruthy()
+  })
+
+  it('refuses an undo once the chapter no longer matches the order it remembers', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = BOOK
+    project.allFiles = [pageOf('a', []), pageOf('b', [])]
+
+    editor.cmdSetPageOrder(BOOK, ['a', 'b'], ['b', 'a'])
+    expect(project.files.map((f) => f.pageId)).toEqual(['b', 'a'])
+
+    // A page arrived from outside this command — an import committed after
+    // the drag — so `before` is no longer an exact permutation of the pool.
+    project.allFiles = [...project.allFiles, pageOf('c', [])]
+
+    editor.undo()
+
+    expect(project.files.map((f) => f.pageId)).toEqual(['b', 'a', 'c'])
+    expect(editor.canUndo).toBe(true)
+    expect(useNoticeStore().notice?.text).toBeTruthy()
+  })
+
+  /**
+   * `cmdImportPages`'s `do` is two writes — land the pages, then peel their
+   * tombstone back off. Redoing it after the chapter has moved on must not
+   * let the first succeed and the second never run while looking like
+   * nothing happened: the pages stay hidden, and the stack stays put.
+   */
+  it('verifies before either half of a redone import runs, rather than landing pages still tombstoned', () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = BOOK
+    project.allFiles = [pageOf('a', [])]
+
+    editor.cmdImportPages(BOOK, ['p'], [pageOf('p', [])], ['p', 'a'])
+    expect(project.files.map((f) => f.pageId)).toEqual(['p', 'a'])
+
+    editor.undo()
+    expect(project.projectMeta.deletedPages).toEqual(['p'])
+    expect(editor.canRedo).toBe(true)
+
+    // A page arrived from outside this command between the undo and the
+    // redo, so the import's own `after` no longer names every page in the
+    // pool.
+    project.allFiles = [...project.allFiles, pageOf('q', [])]
+
+    editor.redo()
+
+    // Still tombstoned: the second write never ran once the first refused.
+    expect(project.projectMeta.deletedPages).toEqual(['p'])
+    expect(editor.canRedo).toBe(true)
+    expect(useNoticeStore().notice?.text).toBeTruthy()
   })
 })
 

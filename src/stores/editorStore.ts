@@ -13,6 +13,7 @@ import { useZoomPan, type Size } from '@/composables/useZoomPan'
 import type { ProjectFile } from '@/types/project'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
+import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
 import { clamp, screenToPagePx } from '@/lib/coords'
 import { blankTextObject, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
@@ -62,11 +63,27 @@ export function maskJournal(name: string): JournalDependency {
   return { kind: 'mask', name }
 }
 
+/**
+ * What a step answers about itself. `false`, and only `false`, means it was
+ * refused and nothing changed; anything else — `true`, or nothing at all —
+ * means it went through. Most commands can never be refused, and a plain
+ * `void` return is what lets them stay exactly as simple as a command that
+ * cannot fail has any reason to be.
+ */
+export type CommandResult = boolean | void
+
 export interface Command {
 
   label: string
-  do(): void
-  undo(): void
+  /**
+   * Applies the step. A `false` back means the write was refused — checked
+   * before anything was touched, the same way every writer behind this
+   * already checks its own precondition before it mutates — so refused and
+   * unapplied are the same fact told once.
+   */
+  do(): CommandResult
+  /** The same contract as `do`, backwards. */
+  undo(): CommandResult
   /**
    * Every external record this command needs in order to be undone.
    *
@@ -862,10 +879,18 @@ export const useEditorStore = defineStore('editor', () => {
    * Every command lands here, so this is where an open text edit is closed:
    * the stack has to run in the order things happened, or undoing a delete
    * after the text change it swallowed replays them the wrong way round.
+   *
+   * Answers whether the command joined the stack. A command that is not
+   * `alreadyApplied` runs its own `do()` right here, and a `false` back from
+   * that means the write was refused — nothing is pushed, since there is
+   * nothing yet to undo.
    */
-  function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean; book?: BookId }) {
+  function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean; book?: BookId }): boolean {
     commitTextEdit()
-    if (!opts?.alreadyApplied) cmd.do()
+    if (!opts?.alreadyApplied && cmd.do() === false) {
+      useNoticeStore().say('這個操作沒有套用')
+      return false
+    }
     const book = opts?.book ?? currentBook.value
     cmd.book = book ?? undefined
     cmd.portable = cmd.portable ?? false
@@ -882,6 +907,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     for (const gone of history.redo) gone.forget?.()
     setHistory(book, { undo: kept, redo: [] })
+    return true
   }
 
   /** Whether a command names one of the given journals, in the given registry. */
@@ -949,6 +975,13 @@ export const useEditorStore = defineStore('editor', () => {
    * The library passes the book it is standing in instead, since a shelf
    * gesture can target a book that is not open, or open while a different
    * one is.
+   *
+   * The stack does not move until the step is known to have gone back.
+   * Taking `cmd` off the top first and putting it back on a refusal would
+   * assume that restoring its place on the stack is the same thing as
+   * restoring the data — it is not, and a step that verifies its own
+   * precondition before it writes (every one here does) never leaves
+   * anything to put back in the first place.
    */
   function undo(book: BookId = currentBook.value) {
     if (strokeInFlight.value) return
@@ -956,23 +989,39 @@ export const useEditorStore = defineStore('editor', () => {
     const history = historyOf(book)
     const cmd = history.undo.at(-1)
     if (!cmd) return
-    setHistory(book, { undo: history.undo.slice(0, -1), redo: history.redo })
-    cmd.undo()
+    if (cmd.undo() === false) {
+      useNoticeStore().say('撤銷失敗，這一步沒有生效')
+      return
+    }
     const after = historyOf(book)
-    setHistory(book, { undo: after.undo, redo: [...after.redo, cmd] })
+    setHistory(book, {
+      undo: after.undo.filter((c) => c !== cmd),
+      redo: [...after.redo, cmd],
+    })
   }
 
-  /** Typing after an undo ends the redo branch, as it does in any editor. */
+  /**
+   * Typing after an undo ends the redo branch, as it does in any editor.
+   *
+   * The same order as `undo`: `cmd.do()` runs before the stack moves, and a
+   * `false` back leaves the redo branch exactly as it was rather than
+   * discarding the step that refused to replay.
+   */
   function redo(book: BookId = currentBook.value) {
     if (strokeInFlight.value) return
     commitTextEdit()
     const history = historyOf(book)
     const cmd = history.redo.at(-1)
     if (!cmd) return
-    setHistory(book, { undo: history.undo, redo: history.redo.slice(0, -1) })
-    cmd.do()
+    if (cmd.do() === false) {
+      useNoticeStore().say('重做失敗，這一步沒有生效')
+      return
+    }
     const after = historyOf(book)
-    setHistory(book, { undo: [...after.undo, cmd], redo: after.redo })
+    setHistory(book, {
+      undo: [...after.undo, cmd],
+      redo: after.redo.filter((c) => c !== cmd),
+    })
   }
 
   /** Wipes the current book's stack — nothing else's. */
@@ -1084,11 +1133,17 @@ export const useEditorStore = defineStore('editor', () => {
       {
         label: `import-pages ${book} ${ids.length}`,
         portable: !openHere,
+        // Checked before the second write runs, not after: `insertPages` and
+        // `untagDeleted` are refused by the same two preconditions — the
+        // book being written some other way, or a session that is gone — so
+        // a refusal on the first is a refusal on the second too, and this is
+        // what keeps a stale drop from landing the pages while leaving them
+        // tombstoned.
         do: () => {
-          writer.insertPages(entries, after)
-          writer.untagDeleted(ids)
+          if (!writer.insertPages(entries, after)) return false
+          return writer.untagDeleted(ids)
         },
-        undo: () => writer.tagDeleted(ids),
+        undo: () => writer.tagDeleted(ids) !== false,
       },
       { book },
     )
@@ -1691,7 +1746,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `dissolve-folder ${folderId}`,
-        do: () => project.dissolveFolder(pageId, folderId),
+        do: () => {
+          project.dissolveFolder(pageId, folderId)
+        },
         undo: () => project.restoreFolder(pageId, removed.path, removed.folder),
       },
       { alreadyApplied: true },
@@ -2236,7 +2293,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `draw-reading-edges ${taken.length}`,
-        do: () => project.addReadingEdges(pageId, taken),
+        do: () => {
+          project.addReadingEdges(pageId, taken)
+        },
         undo: () => project.removeReadingEdges(pageId, taken),
       },
       { alreadyApplied: true },
@@ -2253,7 +2312,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand({
       label: `erase-reading-edges ${going.length}`,
       do: () => project.removeReadingEdges(pageId, going),
-      undo: () => project.addReadingEdges(pageId, going),
+      undo: () => {
+        project.addReadingEdges(pageId, going)
+      },
     })
   }
 
@@ -2276,7 +2337,9 @@ export const useEditorStore = defineStore('editor', () => {
       {
         label: `add-tag ${name}`,
         do: () => project.insertTagAt(index, added),
-        undo: () => project.removeTagAt(index),
+        undo: () => {
+          project.removeTagAt(index)
+        },
       },
       { alreadyApplied: true },
     )
@@ -2295,7 +2358,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `remove-tag ${removed.name}`,
-        do: () => project.removeTagAt(index),
+        do: () => {
+          project.removeTagAt(index)
+        },
         undo: () => project.insertTagAt(index, removed),
       },
       { alreadyApplied: true },
@@ -2359,7 +2424,9 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `delete-pages ${deleted.length}`,
-        do: () => project.tagPagesDeleted(deleted),
+        do: () => {
+          project.tagPagesDeleted(deleted)
+        },
         undo: () => project.untagPagesDeleted(deleted),
       },
       { alreadyApplied: true },

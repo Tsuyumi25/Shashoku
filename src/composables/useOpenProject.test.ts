@@ -51,7 +51,9 @@ describe('switching between books', () => {
       label: 'portable-1',
       portable: true,
       do: () => {},
-      undo: () => undone.push('portable-1'),
+      undo: () => {
+        undone.push('portable-1')
+      },
     })
 
     expect(await open.openPath('/book-b')).toBe(true)

@@ -696,10 +696,22 @@ describe('reset', () => {
     const editor = useEditorStore()
 
     let beforeUndone = 0
-    editor.pushCommand({ label: 'before-mask', do: () => {}, undo: () => beforeUndone++ })
+    editor.pushCommand({
+      label: 'before-mask',
+      do: () => {},
+      undo: () => {
+        beforeUndone++
+      },
+    })
     select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
     let afterUndone = 0
-    editor.pushCommand({ label: 'after-mask', do: () => {}, undo: () => afterUndone++ })
+    editor.pushCommand({
+      label: 'after-mask',
+      do: () => {},
+      undo: () => {
+        afterUndone++
+      },
+    })
 
     const dropped = sel.reset()
     editor.forgetJournals(dropped, 'mask')
