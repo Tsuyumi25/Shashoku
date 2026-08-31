@@ -14,9 +14,16 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 export type LibraryView = 'list' | 'thumbnail'
 
 /**
- * One card, whichever band drew it. Two kinds sit in one list because a
- * selection reaches across them, while the key keeps them apart: a page is
- * named inside its book, a file by where it lies.
+ * The shelf's two bands. Each owns its own selection, anchor and hit-test
+ * list; touching one always empties the other. The upper band is always
+ * `project` — pages inside a book, or the books and folders inside a folder —
+ * and the lower one is always `file`, whatever is left lying beside them.
+ */
+export type ShelfRegion = 'project' | 'file'
+
+/**
+ * One card. A page is named inside its book, a file by where it lies — the
+ * same split `ShelfRegion` runs along.
  */
 export type ShelfItem =
   | { kind: 'page'; key: string; page: ShelfLeaf }
@@ -122,6 +129,7 @@ export const useLibraryStore = defineStore('library', () => {
     inside.value = empty()
     if (path === null) {
       insideLoading.value = false
+      resetFocus()
       return
     }
     insideLoading.value = true
@@ -133,7 +141,10 @@ export const useLibraryStore = defineStore('library', () => {
       if (mine !== insideGeneration) return
       inside.value = empty()
     } finally {
-      if (mine === insideGeneration) insideLoading.value = false
+      if (mine === insideGeneration) {
+        insideLoading.value = false
+        resetFocus()
+      }
     }
   }
 
@@ -174,64 +185,120 @@ export const useLibraryStore = defineStore('library', () => {
   )
 
   /**
-   * Every card on the shelf, in the order they are read. A range runs along
-   * this list and not along any one band, because a drag does not stop at a
-   * heading and neither does Shift.
+   * The project band: pages when standing inside a book, the books and
+   * folders when standing inside a folder, the declared workspaces at the
+   * root. `bandProjects` is empty exactly when `bandPages` is not, so this is
+   * never both at once.
    */
-  const items = computed<ShelfItem[]>(() => {
+  const projectItems = computed<ShelfItem[]>(() => {
     if (standingAt.value === null) return home.value.map(entryItem)
-    return [
-      ...bandPages.value.map(pageItem),
-      ...bandProjects.value.map(entryItem),
-      ...bandFiles.value.map(entryItem),
-    ]
+    if (inside.value.book) return bandPages.value.map(pageItem)
+    return bandProjects.value.map(entryItem)
   })
 
-  const chosen = ref<string[]>([])
-  /** Where a Shift reach measures its run from. */
-  const anchor = ref<string | null>(null)
+  /**
+   * The file band: whatever lies beside the books or the pages. The root has
+   * no such band — every declared workspace is a project, not a file lying
+   * loose beside one.
+   */
+  const fileItems = computed<ShelfItem[]>(() =>
+    standingAt.value === null ? [] : bandFiles.value.map(entryItem),
+  )
+
+  function itemsOf(region: ShelfRegion): ShelfItem[] {
+    return region === 'project' ? projectItems.value : fileItems.value
+  }
+
+  function regionOf(key: string): ShelfRegion | null {
+    if (projectItems.value.some((item) => item.key === key)) return 'project'
+    if (fileItems.value.some((item) => item.key === key)) return 'file'
+    return null
+  }
+
+  /**
+   * Always one of the two, never "wherever the keyboard happens to be": the
+   * left column is a list of places to go, not a third region.
+   */
+  const focus = ref<ShelfRegion>('project')
+
+  function resetFocus(): void {
+    focus.value = projectItems.value.length > 0 ? 'project' : 'file'
+  }
+
+  const projectChosen = ref<string[]>([])
+  /** Where a Shift reach measures its run from, one per band. */
+  const projectAnchor = ref<string | null>(null)
+  const fileChosen = ref<string[]>([])
+  const fileAnchor = ref<string | null>(null)
   /** What the arrow keys are standing on, which need not be selected. */
   const cursor = ref<string | null>(null)
 
-  const chosenKeys = computed(() => new Set(chosen.value))
-  const chosenItems = computed(() => items.value.filter((item) => chosenKeys.value.has(item.key)))
+  function chosenOf(region: ShelfRegion) {
+    return region === 'project' ? projectChosen : fileChosen
+  }
+
+  function anchorOf(region: ShelfRegion) {
+    return region === 'project' ? projectAnchor : fileAnchor
+  }
+
+  function touch(region: ShelfRegion): void {
+    focus.value = region
+    const other = region === 'project' ? 'file' : 'project'
+    chosenOf(other).value = []
+    anchorOf(other).value = null
+  }
+
+  const chosenItems = computed<ShelfItem[]>(() => [
+    ...projectItems.value.filter((item) => projectChosen.value.includes(item.key)),
+    ...fileItems.value.filter((item) => fileChosen.value.includes(item.key)),
+  ])
+  const chosenKeys = computed(() => new Set(chosenItems.value.map((item) => item.key)))
 
   function isChosen(key: string): boolean {
     return chosenKeys.value.has(key)
   }
 
-  function only(key: string): void {
-    chosen.value = [key]
-    anchor.value = key
+  function only(region: ShelfRegion, key: string): void {
+    touch(region)
+    chosenOf(region).value = [key]
+    anchorOf(region).value = key
     cursor.value = key
   }
 
-  function toggle(key: string): void {
+  function toggle(region: ShelfRegion, key: string): void {
+    touch(region)
+    const chosen = chosenOf(region)
     const at = chosen.value.indexOf(key)
     if (at === -1) chosen.value.push(key)
     else chosen.value.splice(at, 1)
-    anchor.value = key
+    anchorOf(region).value = key
     cursor.value = key
   }
 
-  /** The run from the anchor to here, and nothing else — as a file manager does. */
-  function extendTo(key: string): void {
-    const keys = items.value.map((item) => item.key)
+  /** The run from the anchor to here, and nothing else — as a file manager does. Never leaves the band. */
+  function extendTo(region: ShelfRegion, key: string): void {
+    touch(region)
+    const keys = itemsOf(region).map((item) => item.key)
+    const anchor = anchorOf(region)
     const from = anchor.value === null ? 0 : keys.indexOf(anchor.value)
     const to = keys.indexOf(key)
-    if (from === -1 || to === -1) return only(key)
+    if (from === -1 || to === -1) return only(region, key)
     const [lo, hi] = from <= to ? [from, to] : [to, from]
-    chosen.value = keys.slice(lo, hi + 1)
+    chosenOf(region).value = keys.slice(lo, hi + 1)
     cursor.value = key
   }
 
+  /** Whichever band currently holds focus, all of it. */
   function chooseAll(): void {
-    chosen.value = items.value.map((item) => item.key)
+    chosenOf(focus.value).value = itemsOf(focus.value).map((item) => item.key)
   }
 
+  /** Both bands, since only one is ever non-empty. Focus does not move. */
   function clearChoice(): void {
-    chosen.value = []
-    anchor.value = null
+    projectChosen.value = []
+    projectAnchor.value = null
+    fileChosen.value = []
+    fileAnchor.value = null
     cursor.value = null
   }
 
@@ -261,11 +328,13 @@ export const useLibraryStore = defineStore('library', () => {
     bandProjects,
     bandFiles,
     bandCount,
-    items,
-    chosen,
+    projectItems,
+    fileItems,
+    focus,
     chosenItems,
     cursor,
     isChosen,
+    regionOf,
     only,
     toggle,
     extendTo,

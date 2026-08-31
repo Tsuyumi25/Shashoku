@@ -128,22 +128,14 @@ function shift(at: number): string {
   return `translate(${at * 9}px, ${at * 7}px) rotate(${at * 1.6}deg)`
 }
 
+// A band never mixes kinds, so the whole pile answers to whatever its first
+// card is.
 const tally = computed(() => {
-  let pages = 0
-  let books = 0
-  let rest = 0
-  for (const item of many.value) {
-    if (item.kind === 'page') pages++
-    else if (item.entry.book) books++
-    else rest++
-  }
-  return [
-    pages > 0 ? `${pages} 頁` : '',
-    books > 0 ? `${books} 本書` : '',
-    rest > 0 ? `${rest} 個檔案或資料夾` : '',
-  ]
-    .filter(Boolean)
-    .join('、')
+  const list = many.value
+  const first = list[0]
+  if (first === undefined) return ''
+  if (first.kind === 'page') return `${list.length} 頁`
+  return first.entry.book ? `${list.length} 本書` : `${list.length} 個檔案或資料夾`
 })
 
 const isOpenProject = computed(() => entry.value?.path === project.folderPath)

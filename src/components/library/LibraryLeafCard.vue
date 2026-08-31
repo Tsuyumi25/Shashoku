@@ -1,8 +1,8 @@
 <template>
   <div
-    class="cursor-default rounded-[5px] border p-1 select-none"
+    class="cursor-default rounded-[5px] p-1 select-none"
     :class="[
-      picked ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-secondary',
+      picked ? 'bg-primary/20' : 'hover:bg-secondary',
       view === 'thumbnail' ? 'flex flex-col gap-1' : 'flex items-center gap-2',
     ]"
     :title="leaf.name"

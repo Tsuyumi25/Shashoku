@@ -1,8 +1,8 @@
 <template>
   <div
-    class="cursor-default rounded-[5px] border p-1 select-none"
+    class="cursor-default rounded-[5px] p-1 select-none"
     :class="[
-      picked ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-secondary',
+      picked ? 'bg-primary/20' : 'hover:bg-secondary',
       view === 'thumbnail' ? 'flex flex-col gap-1' : 'flex items-center gap-2',
       entry.own && 'opacity-70',
     ]"
@@ -21,11 +21,9 @@
     </div>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <span
-        class="min-w-0 truncate text-xs"
-        :class="open ? 'text-primary' : picked ? '' : 'text-muted-foreground'"
-      >
-        {{ entry.name }}<template v-if="entry.folder">/</template>
+      <span class="flex min-w-0 items-center gap-1 text-xs" :class="picked ? '' : 'text-muted-foreground'">
+        <span v-if="open" class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" title="開在編輯器裡" />
+        <span class="min-w-0 truncate">{{ entry.name }}<template v-if="entry.folder">/</template></span>
       </span>
       <span class="text-[0.6875rem] tabular-nums text-muted-foreground">{{ note }}</span>
     </div>

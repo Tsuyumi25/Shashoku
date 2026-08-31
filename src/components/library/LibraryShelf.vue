@@ -62,7 +62,7 @@
           :view="library.view"
           :picked="library.isChosen(entryKey(entry))"
           :open="entry.path === project.folderPath"
-          @pick="onPick(entryKey(entry), $event)"
+          @pick="onPick('project', entryKey(entry), $event)"
           @enter="library.standAt(entry.path)"
         />
       </div>
@@ -72,7 +72,7 @@
           v-if="library.bandPages.length > 0"
           id="library-band-pages"
           class="band band-document"
-          :class="flashing === 'pages' && 'band-arrived'"
+          :class="[flashing === 'pages' && 'band-arrived', library.focus === 'project' && 'band-focused']"
         >
           <p class="band-head">
             頁面 <span class="band-count">{{ library.bandPages.length }}</span>
@@ -86,7 +86,7 @@
               :leaf="leaf"
               :view="library.view"
               :picked="library.isChosen(pageKey(leaf))"
-              @pick="onPick(pageKey(leaf), $event)"
+              @pick="onPick('project', pageKey(leaf), $event)"
               @enter="openLeaf(leaf)"
             />
           </div>
@@ -96,7 +96,7 @@
           v-if="library.bandProjects.length > 0"
           id="library-band-projects"
           class="band band-document"
-          :class="flashing === 'projects' && 'band-arrived'"
+          :class="[flashing === 'projects' && 'band-arrived', library.focus === 'project' && 'band-focused']"
         >
           <p class="band-head">
             書 <span class="band-count">{{ library.bandProjects.length }}</span>
@@ -111,7 +111,7 @@
               :view="library.view"
               :picked="library.isChosen(entryKey(entry))"
               :open="entry.path === project.folderPath"
-              @pick="onPick(entryKey(entry), $event)"
+              @pick="onPick('project', entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
@@ -121,7 +121,7 @@
           v-if="library.bandFiles.length > 0"
           id="library-band-files"
           class="band"
-          :class="flashing === 'files' && 'band-arrived'"
+          :class="[flashing === 'files' && 'band-arrived', library.focus === 'file' && 'band-focused']"
         >
           <p class="band-head">
             檔案 <span class="band-count">{{ library.bandFiles.length }}</span>
@@ -136,7 +136,7 @@
               :view="library.view"
               :picked="library.isChosen(entryKey(entry))"
               :open="false"
-              @pick="onPick(entryKey(entry), $event)"
+              @pick="onPick('file', entryKey(entry), $event)"
               @enter="enter(entry)"
             />
           </div>
@@ -159,7 +159,7 @@ import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { isTypingSurface } from '@/lib/typingSurface'
 import { useEditorStore } from '@/stores/editorStore'
-import { entryKey, pageKey, useLibraryStore } from '@/stores/libraryStore'
+import { entryKey, pageKey, type ShelfRegion, useLibraryStore } from '@/stores/libraryStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -248,10 +248,10 @@ onBeforeUnmount(() => {
   window.clearTimeout(flashTimer)
 })
 
-function onPick(key: string, event: MouseEvent) {
-  if (event.shiftKey) library.extendTo(key)
-  else if (event.ctrlKey || event.metaKey) library.toggle(key)
-  else library.only(key)
+function onPick(region: ShelfRegion, key: string, event: MouseEvent) {
+  if (event.shiftKey) library.extendTo(region, key)
+  else if (event.ctrlKey || event.metaKey) library.toggle(region, key)
+  else library.only(region, key)
 }
 
 function cards(): HTMLElement[] {
@@ -292,8 +292,13 @@ function step(across: number, down: number): string | null {
 function walk(across: number, down: number, extend: boolean) {
   const key = step(across, down)
   if (key === null) return
-  if (extend) library.extendTo(key)
-  else library.only(key)
+  const region = library.regionOf(key)
+  if (region === null) return
+  // Shift reaches within the band it started in; a step that would leave it
+  // stops here instead of crossing, as a marquee's edge would.
+  if (extend && region !== library.focus) return
+  if (extend) library.extendTo(region, key)
+  else library.only(region, key)
   // Against the stylesheet's smooth scrolling, which is there for the band
   // links: an arrow key has already moved the cursor, and animating after it
   // shows the wrong card for as long as the animation lasts.
@@ -303,7 +308,11 @@ function walk(across: number, down: number, extend: boolean) {
 }
 
 function activate() {
-  const item = library.items.find((each) => each.key === library.cursor)
+  const key = library.cursor
+  if (key === null) return
+  const item =
+    library.projectItems.find((each) => each.key === key) ??
+    library.fileItems.find((each) => each.key === key)
   if (item === undefined) return
   if (item.kind === 'page') void openLeaf(item.page)
   else enter(item.entry)
@@ -430,12 +439,20 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* -1px and inset both answer the same 8px gap between bands (.shelf-scroll's
+   gap): an outward glow, or an outline drawn on the default outer edge,
+   would bleed into the band next door. */
+.band-focused {
+  outline: 1px solid color-mix(in oklch, var(--primary) 45%, transparent);
+  outline-offset: -1px;
+}
+
 @keyframes band-arrived {
   0% {
-    box-shadow: 0 0 0 2px var(--primary);
+    box-shadow: inset 0 0 24px 2px color-mix(in oklch, var(--primary) 40%, transparent);
   }
   100% {
-    box-shadow: 0 0 0 2px transparent;
+    box-shadow: inset 0 0 24px 2px transparent;
   }
 }
 
