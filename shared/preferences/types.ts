@@ -121,6 +121,10 @@ export interface Preferences {
    */
   scanPoints: string[];
   /**
+   * The folders the library is a view of. Allowed to overlap and to nest.
+   */
+  workspaces: string[];
+  /**
    * Splitter geometry, one entry per group keyed by its autoSaveId. reka-ui
    * owns both the keys and the serialized values; we only provide storage.
    */
@@ -163,6 +167,7 @@ export function defaultPreferences(): Preferences {
     missingGlyphMode: "tofu",
     markMissingGlyphs: true,
     scanPoints: [],
+    workspaces: [],
     panelLayout: {},
     // The reading, because a page is framed and typed before it is stacked.
     sidePanel: "labels",

@@ -7,12 +7,14 @@ import {
   createProject,
   createPage,
   deleteLayerParts,
+  listInside,
   listSources,
   openProject,
   readPage,
   resolveExportFolder,
   scanLibrary,
   scanRoot,
+  scanWorkspaces,
   writeExport,
   writePage,
   writeProjectMeta,
@@ -22,6 +24,16 @@ async function pickRoot(win: BrowserWindow | null): Promise<string | null> {
   if (!win) return null;
   const result = await dialog.showOpenDialog(win, {
     title: "選擇專案資料夾(內含原圖)",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+}
+
+async function pickWorkspace(win: BrowserWindow | null): Promise<string | null> {
+  if (!win) return null;
+  const result = await dialog.showOpenDialog(win, {
+    title: "選擇要加入書庫的資料夾",
     properties: ["openDirectory"],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -43,6 +55,10 @@ export function registerShashokuProjectHandlers(): void {
     const win = BrowserWindow.fromWebContents(e.sender);
     return pickRoot(win);
   });
+  ipcMain.handle(CHANNELS.pickWorkspace, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    return pickWorkspace(win);
+  });
   ipcMain.handle(CHANNELS.pickFontFolder, (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     return pickFontFolder(win);
@@ -50,6 +66,8 @@ export function registerShashokuProjectHandlers(): void {
   ipcMain.handle(CHANNELS.scanRoot, (_e, rootPath: string) => scanRoot(rootPath));
   ipcMain.handle(CHANNELS.listSources, (_e, rootPath: string) => listSources(rootPath));
   ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
+  ipcMain.handle(CHANNELS.scanWorkspaces, (_e, roots: string[]) => scanWorkspaces(roots));
+  ipcMain.handle(CHANNELS.listInside, (_e, path: string) => listInside(path));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));
   ipcMain.handle(CHANNELS.createPage, (_e, rootPath: string, sourceName: string) =>
     createPage(rootPath, sourceName),

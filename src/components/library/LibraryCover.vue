@@ -8,38 +8,22 @@
   -->
   <div class="aspect-[3/4] w-full overflow-hidden">
     <!-- Something to click, never something to drag out of the app. -->
-    <img
-      v-if="src"
-      :src="src"
-      class="h-full w-full object-cover"
-      alt=""
-      draggable="false"
-    />
+    <img v-if="src" :src="src" class="h-full w-full object-cover" alt="" draggable="false" />
     <div v-else class="flex h-full w-full items-center justify-center bg-muted/40">
-      <ImageOff :size="12" class="text-muted-foreground" />
+      <component :is="empty ?? ImageOff" :size="14" class="text-muted-foreground" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch, type Component } from 'vue'
 import { ImageOff } from '@lucide/vue'
-import { layerImageKey, inRenderSlot, renderFitted } from '@/lib/pageThumbnail'
+import type { ScannedCover } from '@shared/project/workspace'
+import { inRenderSlot, renderFitted, sourceKey } from '@/lib/pageThumbnail'
 
-/**
- * The bottom raster of a project's first page, read from inside the project
- * itself rather than from the folder its images came from — the same reason the
- * pixels were copied in at all: a project has to keep looking like itself after
- * someone tidies that folder away.
- *
- * Sized entirely by whoever places it, so the same component serves a row and
- * a grid cell without being told which it is in.
- */
-const props = defineProps<{
-  projectPath: string
-  /** Where the cover sits inside the project, or null when it has no page. */
-  cover: string | null
-}>()
+// No default through withDefaults: the value here is itself a component, and a
+// function-valued default is taken for a factory and called.
+const props = defineProps<{ cover: ScannedCover | null; empty?: Component }>()
 
 const src = ref<string | null>(null)
 let url: string | null = null
@@ -53,13 +37,17 @@ function revoke() {
   }
 }
 
-async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array> {
-  const key = await layerImageKey(projectPath, cover)
+async function bytesFor(cover: ScannedCover): Promise<Uint8Array> {
+  const key = await sourceKey(cover.dir, {
+    name: cover.file,
+    modified: cover.modified,
+    size: cover.size,
+  })
   const cached = await window.api.readThumbnail(key)
   if (cached) return cached
 
   return inRenderSlot(async () => {
-    const bytes = await window.api.readImage(projectPath, cover)
+    const bytes = await window.api.readImage(cover.dir, cover.file)
     const png = await renderFitted(bytes)
     // Failing to cache costs the next draw, not this one.
     void window.api.writeThumbnail(key, png).catch(() => {})
@@ -68,20 +56,20 @@ async function bytesFor(projectPath: string, cover: string): Promise<Uint8Array>
 }
 
 watch(
-  () => [props.projectPath, props.cover] as const,
-  async ([projectPath, cover]) => {
+  () => props.cover,
+  async (cover) => {
     const mine = ++generation
     revoke()
     src.value = null
     if (!cover) return
     try {
-      const bytes = await bytesFor(projectPath, cover)
+      const bytes = await bytesFor(cover)
       if (mine !== generation) return
       url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
       src.value = url
     } catch {
       // A cover that will not read is a missing cover, not a failure worth
-      // interrupting a list of projects for.
+      // interrupting a shelf of books for.
     }
   },
   { immediate: true },

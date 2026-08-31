@@ -11,14 +11,14 @@
           class="flex min-w-0 flex-col border-r border-border bg-card"
         >
           <!--
-            The sidebar and the library stay mounted rather than swapping: the
-            library holds a scan that is not worth doing again for a trip to
-            the other side.
+            The sidebar and the library tree stay mounted rather than swapping:
+            the tree holds a walk of the disk that is not worth doing again for
+            a trip to the other side.
           -->
           <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
             <TranslateSidebar />
           </div>
-          <ProjectLibrary v-show="ui.view === 'library'" />
+          <LibraryTree v-show="ui.view === 'library'" />
           <SourcePanel v-if="ui.view === 'pages'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -37,8 +37,16 @@
             <div v-show="ui.view === 'editor'" class="absolute inset-0">
               <TranslateMode />
             </div>
-            <div v-if="ui.view === 'library'" class="absolute inset-0 flex flex-col">
-              <Bookshelf />
+            <div v-if="ui.view === 'library'" class="absolute inset-0">
+              <SplitterGroup direction="horizontal" class="h-full">
+                <SplitterPanel :order="1" :default-size="70" :min-size="40" class="flex min-w-0 flex-col">
+                  <LibraryShelf />
+                </SplitterPanel>
+                <ResizeHandle />
+                <SplitterPanel :order="2" :default-size="30" :min-size="15" class="flex min-w-0 flex-col">
+                  <LibraryInfo />
+                </SplitterPanel>
+              </SplitterGroup>
             </div>
             <div v-if="ui.view === 'pages'" class="absolute inset-0">
               <ProjectManagerMode tab="source" />
@@ -58,9 +66,10 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
-import Bookshelf from '@/components/Bookshelf.vue'
 import ExportPanel from '@/components/ExportPanel.vue'
-import ProjectLibrary from '@/components/ProjectLibrary.vue'
+import LibraryInfo from '@/components/library/LibraryInfo.vue'
+import LibraryShelf from '@/components/library/LibraryShelf.vue'
+import LibraryTree from '@/components/library/LibraryTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import SourcePanel from '@/components/SourcePanel.vue'

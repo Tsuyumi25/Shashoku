@@ -110,6 +110,17 @@ export const usePreferencesStore = defineStore('preferences', () => {
     if (at !== -1) prefs.scanPoints.splice(at, 1)
   }
 
+  function addWorkspace(path: string): boolean {
+    if (!path || prefs.workspaces.includes(path)) return false
+    prefs.workspaces.push(path)
+    return true
+  }
+
+  function removeWorkspace(path: string) {
+    const at = prefs.workspaces.indexOf(path)
+    if (at !== -1) prefs.workspaces.splice(at, 1)
+  }
+
   function setFontSampleVertical(vertical: boolean) {
     prefs.fontSampleVertical = vertical
   }
@@ -161,6 +172,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     removeFontFolder,
     addScanPoint,
     removeScanPoint,
+    addWorkspace,
+    removeWorkspace,
     setDefaultFontFamily,
     setMissingGlyphMode,
     setMarkMissingGlyphs,

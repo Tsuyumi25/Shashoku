@@ -1,12 +1,16 @@
 import type { ScannedScanPoint } from "../project/library";
+import type { ShelfLeaf, WorkspaceScan } from "../project/workspace";
 import type { McpQuery, McpReply } from "../mcp/types";
 
 export const CHANNELS = {
   pickRoot: "shashoku:pick-root",
+  pickWorkspace: "shashoku:pick-workspace",
   pickFontFolder: "fonts:pick-folder",
   scanRoot: "shashoku:scan-root",
   listSources: "shashoku:list-sources",
   scanLibrary: "shashoku:scan-library",
+  scanWorkspaces: "shashoku:scan-workspaces",
+  listInside: "shashoku:list-inside",
   createProject: "shashoku:create-project",
   createPage: "shashoku:create-page",
   openProject: "shashoku:open-project",
@@ -90,6 +94,7 @@ export interface WritePageInput {
 
 export interface ShashokuApi {
   pickRoot(): Promise<string | null>;
+  pickWorkspace(): Promise<string | null>;
   pickFontFolder(): Promise<string | null>;
   scanRoot(rootPath: string): Promise<ScanRootResult>;
   /**
@@ -100,6 +105,8 @@ export interface ShashokuApi {
   listSources(rootPath: string): Promise<SourceImage[]>;
   /** What each scan point holds today, sentinel-bearing children only. */
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
+  scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;
+  listInside(path: string): Promise<ShelfLeaf[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
    * One page, from one image in the project root, appended to the ones already
@@ -141,9 +148,9 @@ export interface ShashokuApi {
    */
   openExportFolder(rootPath: string, profileFolder: string): Promise<string>;
   /**
-   * Shows the project's own folder — where its source images live — in the
-   * desktop's file manager. Resolves to "" on success, or to the platform's
-   * reason for refusing.
+   * Shows a folder in the desktop's file manager — a project's own, where its
+   * source images live, or any folder the library tree is standing on.
+   * Resolves to "" on success, or to the platform's reason for refusing.
    */
   openProjectFolder(rootPath: string): Promise<string>;
   readImage(folder: string, name: string): Promise<Uint8Array>;

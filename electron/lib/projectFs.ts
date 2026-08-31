@@ -3,8 +3,15 @@
 
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
+import type {
+  ScannedBook,
+  ScannedCover,
+  ScannedFolder,
+  ShelfLeaf,
+  WorkspaceScan,
+} from "@shared/project/workspace";
 import type {
   OpenProjectResult,
   PageBadge,
@@ -115,31 +122,49 @@ async function projectsUnder(folderPath: string): Promise<ScannedProject[]> {
       .filter((e) => e.isDirectory())
       .map(async (e): Promise<ScannedProject | null> => {
         const path = join(folderPath, e.name);
-        if (!(await exists(join(path, SHASHOKU_DIR, SENTINEL_FILENAME)))) return null;
-        return { path, cover: await coverOf(path) };
+        if (!(await isProject(path))) return null;
+        return { path, cover: (await readBook(path)).cover?.file ?? null };
       }),
   );
   return found.filter((p): p is ScannedProject => p !== null);
 }
 
-/**
- * The artwork of the project's first readable page, relative to the project
- * folder. Composited covers are deliberately not an option: the sidebar would
- * have to open every project it lists to read their labels.
- */
-async function coverOf(rootPath: string): Promise<string | null> {
+async function isProject(path: string): Promise<boolean> {
+  return await exists(join(path, SHASHOKU_DIR, SENTINEL_FILENAME));
+}
+
+async function coverAt(dir: string, file: string): Promise<ScannedCover | null> {
+  try {
+    const s = await stat(join(dir, file));
+    return { dir, file, modified: s.mtimeMs, size: s.size };
+  } catch {
+    return null;
+  }
+}
+
+async function livePages(rootPath: string): Promise<{ pagesRoot: string; live: string[] }> {
   const shashokuDir = join(rootPath, SHASHOKU_DIR);
   const pagesRoot = join(shashokuDir, DIR_PAGES);
   let listed: string[] = [];
+  let deleted = new Set<string>();
   try {
     const raw = await readFile(join(shashokuDir, PROJECT_JSON_FILENAME), "utf8");
-    listed = parseProjectJson(raw).pages;
+    const meta = parseProjectJson(raw);
+    listed = meta.pages;
+    deleted = new Set(meta.deletedPages ?? []);
   } catch {
-    // A project whose document will not parse still shows in the sidebar, so
-    // that opening it is how the user finds out rather than its disappearance.
   }
   const { order } = reconcilePages(listed, await listPageDirs(pagesRoot));
-  for (const pageId of order) {
+  return { pagesRoot, live: order.filter((pageId) => !deleted.has(pageId)) };
+}
+
+function artworkPath(pageId: string, file: string): string {
+  return `${SHASHOKU_DIR}/${DIR_PAGES}/${pageId}/${DIR_LAYERS}/${file}`;
+}
+
+async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
+  const { pagesRoot, live } = await livePages(rootPath);
+  for (const pageId of live) {
     let layers;
     try {
       const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
@@ -149,10 +174,108 @@ async function coverOf(rootPath: string): Promise<string | null> {
     }
     const bottom = pageArtwork(layers);
     if (bottom) {
-      return `${SHASHOKU_DIR}/${DIR_PAGES}/${pageId}/${DIR_LAYERS}/${bottom.file}`;
+      const cover = await coverAt(rootPath, artworkPath(pageId, bottom.file));
+      return { cover, pageCount: live.length };
     }
   }
-  return null;
+  return { cover: null, pageCount: live.length };
+}
+
+export async function listInside(path: string): Promise<ShelfLeaf[]> {
+  if (await isProject(path)) return await pagesInside(path);
+  const names = await listImages(path);
+  return await Promise.all(
+    names.map(async (name) => ({
+      id: name,
+      name,
+      cover: await coverAt(path, name),
+      page: false,
+    })),
+  );
+}
+
+async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {
+  const { pagesRoot, live } = await livePages(rootPath);
+  return await Promise.all(
+    live.map(async (pageId): Promise<ShelfLeaf> => {
+      try {
+        const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
+        const manifest = parseManifest(raw);
+        const bottom = pageArtwork(manifest.layers);
+        return {
+          id: pageId,
+          name: manifest.name,
+          cover: bottom ? await coverAt(rootPath, artworkPath(pageId, bottom.file)) : null,
+          page: true,
+        };
+      } catch {
+        return { id: pageId, name: pageId, cover: null, page: true };
+      }
+    }),
+  );
+}
+
+/**
+ * ⚠️ `Dirent.isDirectory` answers false for a link to a directory, so the
+ * filter below is what keeps the walk out of a cycle.
+ */
+export async function scanWorkspaces(roots: readonly string[]): Promise<WorkspaceScan> {
+  const seen = new Map<string, ScannedCover | null>();
+  const folders: ScannedFolder[] = [];
+  const books: ScannedBook[] = [];
+  const kept: string[] = [];
+  for (const root of roots) {
+    const path = resolve(root);
+    if (seen.has(path)) continue;
+    kept.push(path);
+    await walkInto(path, seen, folders, books);
+  }
+  return { roots: kept, folders, books };
+}
+
+async function walkInto(
+  path: string,
+  seen: Map<string, ScannedCover | null>,
+  folders: ScannedFolder[],
+  books: ScannedBook[],
+): Promise<ScannedCover | null> {
+  const already = seen.get(path);
+  if (already !== undefined) return already;
+  seen.set(path, null);
+
+  if (await isProject(path)) {
+    const book: ScannedBook = { path, ...(await readBook(path)) };
+    books.push(book);
+    seen.set(path, book.cover);
+    return book.cover;
+  }
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(path, { withFileTypes: true });
+  } catch {
+    folders.push({ path, cover: null });
+    return null;
+  }
+
+  const images = entries
+    .filter((e) => e.isFile() && IMAGE_EXTENSIONS.includes(extname(e.name).toLowerCase()))
+    .map((e) => e.name)
+    .sort(collator.compare);
+  let cover = images.length > 0 ? await coverAt(path, images[0]) : null;
+
+  const below = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort(collator.compare);
+  const covers = await Promise.all(
+    below.map((name) => walkInto(join(path, name), seen, folders, books)),
+  );
+  if (cover === null) cover = covers.find((c) => c !== null) ?? null;
+
+  folders.push({ path, cover });
+  seen.set(path, cover);
+  return cover;
 }
 
 export async function scanRoot(rootPath: string): Promise<ScanRootResult> {
