@@ -15,11 +15,14 @@
       </button>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto p-1">
+    <div ref="rows" class="min-h-0 flex-1 overflow-y-auto p-1" @keydown="onRowKeydown">
       <div
         class="lib-row"
+        data-lib-row
+        tabindex="0"
         :class="{ 'lib-row-on': library.standingAt === null }"
         @click="library.standAt(null)"
+        @keydown.enter="library.standAt(null)"
       >
         <LibraryBig :size="15" class="shrink-0 text-muted-foreground" />
         <span class="min-w-0 flex-1 truncate">全部</span>
@@ -37,15 +40,18 @@
         <ContextMenuTrigger as-child>
           <div
             class="lib-row"
+            data-lib-row
+            tabindex="0"
             :class="{
               'lib-row-on': entry.path === library.insideWorkspace,
               'lib-row-open': entry.path === project.folderPath,
             }"
             :title="entry.path"
             @click="library.standAt(entry.path)"
+            @keydown.enter="library.standAt(entry.path)"
           >
             <Book v-if="entry.book" :size="15" class="shrink-0 text-muted-foreground" />
-            <FolderTree v-else :size="15" class="shrink-0 text-primary" />
+            <Folder v-else :size="15" class="shrink-0 text-primary" />
             <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
             <span class="lib-count">{{ entry.pageCount ?? entry.books ?? '' }}</span>
           </div>
@@ -70,12 +76,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   Book,
+  Folder,
   FolderPlus,
   FolderSearch,
-  FolderTree,
   FolderX,
   LibraryBig,
   RefreshCw,
@@ -103,6 +109,17 @@ const totalBooks = computed(() =>
 async function reveal(path: string) {
   const reason = await window.api.openProjectFolder(path)
   if (reason) toast.error(`開不了資料夾:${reason}`)
+}
+
+const rows = ref<HTMLElement | null>(null)
+
+function onRowKeydown(e: KeyboardEvent) {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+  e.preventDefault()
+  const els = rows.value ? [...rows.value.querySelectorAll<HTMLElement>('[data-lib-row]')] : []
+  const at = els.indexOf(e.target as HTMLElement)
+  if (at === -1) return
+  els[at + (e.key === 'ArrowDown' ? 1 : -1)]?.focus()
 }
 
 onMounted(() => {

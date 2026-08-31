@@ -167,6 +167,7 @@ import LibraryLeafCard from '@/components/library/LibraryLeafCard.vue'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { marqueeRect } from '@/lib/selection/marquee'
 import type { Point, Rect } from '@/lib/selection/rect'
+import { routeShelfKey } from '@/lib/selection/shelfKeys'
 import {
   bandBoundary,
   clampToTerritory,
@@ -571,36 +572,27 @@ function activate() {
   else enter(item.entry)
 }
 
+function workspaceRowFocused(): boolean {
+  return document.activeElement?.closest('[data-lib-row]') != null
+}
+
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (ui.settingsOpen || ui.view !== 'library') return
   if (isTypingSurface(document.activeElement)) return
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-    e.preventDefault()
-    library.chooseAll()
-    return
-  }
-  if (e.ctrlKey || e.metaKey || e.altKey) return
+  const action = routeShelfKey(e, workspaceRowFocused())
+  if (action === null) return
+  e.preventDefault()
 
-  switch (e.key) {
-    case 'ArrowLeft':
-      e.preventDefault()
-      return walk(-1, 0, e.shiftKey)
-    case 'ArrowRight':
-      e.preventDefault()
-      return walk(1, 0, e.shiftKey)
-    case 'ArrowUp':
-      e.preventDefault()
-      return walk(0, -1, e.shiftKey)
-    case 'ArrowDown':
-      e.preventDefault()
-      return walk(0, 1, e.shiftKey)
-    case 'Enter':
-      e.preventDefault()
-      return activate()
-    case 'Escape':
-      e.preventDefault()
+  switch (action.type) {
+    case 'chooseAll':
+      return library.chooseAll()
+    case 'clear':
       return library.clearChoice()
+    case 'walk':
+      return walk(action.across, action.down, action.extend)
+    case 'activate':
+      return activate()
   }
 })
 

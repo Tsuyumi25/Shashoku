@@ -18,7 +18,7 @@
           <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
             <TranslateSidebar />
           </div>
-          <LibraryTree v-show="ui.view === 'library'" />
+          <LibraryWorkspaces v-show="ui.view === 'library'" />
           <SourcePanel v-if="ui.view === 'pages'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -69,7 +69,7 @@ import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
-import LibraryTree from '@/components/library/LibraryTree.vue'
+import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
