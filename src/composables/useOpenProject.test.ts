@@ -219,3 +219,37 @@ describe('the handle a book is held by', () => {
     expect(disk.get('/book-a')).toEqual(['a', 'b', 'c'])
   })
 })
+
+/**
+ * The barrier ticket `09` asks for: a flush that answers "landed" when it did
+ * not is how an open goes on to read the old file and drop the session that
+ * held the change nobody saved.
+ */
+describe('a write that will not land stops the open', () => {
+  it('refuses to open and says why, leaving the change still in hand', async () => {
+    stubWindow()
+    disk.set('/book-a', ['a', 'b', 'c'])
+    const project = useProjectStore()
+    const bookMeta = useBookMetaStore()
+
+    await bookMeta.handleFor('/book-a')
+    bookMeta.applyOrderSnapshot('/book-a', ['c', 'a', 'b'])
+    vi.stubGlobal('window', {
+      ...window,
+      api: {
+        ...window.api,
+        writeProjectMeta: async () => {
+          throw new Error('read-only file system')
+        },
+      },
+    })
+
+    const opener = useOpenProject()
+    expect(await opener.openPath('/book-a')).toBe(false)
+    expect(opener.lastError.value).toBeTruthy()
+    expect(project.rootPath).toBeNull()
+
+    // Still held, still owed — nothing was quietly dropped on the way past.
+    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['c', 'a', 'b'])
+  })
+})

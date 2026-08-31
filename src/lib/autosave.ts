@@ -26,7 +26,15 @@ export const PIXEL_MAX_WAIT_MS = 30000
 export interface Autosave {
   /** Something changed. The write follows once the burst settles. */
   mark(): void
-  /** Write now, and resolve once nothing is left pending or in flight. */
+  /**
+   * Write now, and resolve once nothing is left pending or in flight.
+   *
+   * ⛔ Rejects with whatever the write threw. A `mark` has nobody waiting on
+   * it and reports through `onError`, but whoever awaits this is asking
+   * whether the bytes reached the disk — and something that answers yes to a
+   * write that failed is how a change already accepted from the user
+   * disappears with nothing saying so.
+   */
   flush(): Promise<void>
   /** Drop what is pending without writing it. */
   cancel(): void
@@ -56,6 +64,12 @@ export function createAutosave(write: () => Promise<void>, opts: AutosaveOptions
   let inflight: Promise<void> | null = null
   let quietTimer: ReturnType<typeof setTimeout> | null = null
   let ceilingTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * What the newest write threw, for `flush` to answer with. Cleared by a
+   * write that succeeds: the writer reads current state on the way out, so one
+   * that lands has written whatever the failed one was carrying.
+   */
+  let failure: unknown = null
 
   function clearTimers() {
     if (quietTimer !== null) clearTimeout(quietTimer)
@@ -71,7 +85,9 @@ export function createAutosave(write: () => Promise<void>, opts: AutosaveOptions
     const started = (async () => {
       try {
         await write()
+        failure = null
       } catch (err) {
+        failure = err
         opts.onError?.(err)
       } finally {
         inflight = null
@@ -90,9 +106,15 @@ export function createAutosave(write: () => Promise<void>, opts: AutosaveOptions
 
   async function flush() {
     clearTimers()
+    failure = null
     while (pending || inflight) {
       if (inflight) await inflight
       else run()
+    }
+    if (failure !== null) {
+      const err = failure
+      failure = null
+      throw err
     }
   }
 

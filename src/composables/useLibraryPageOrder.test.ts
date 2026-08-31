@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useLibraryPageOrder } from './useLibraryPageOrder'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useEditorStore } from '@/stores/editorStore'
+import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
 import type { ProjectFile } from '@/types/project'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
@@ -223,5 +224,79 @@ describe('the same gestures on the book open in the editor', () => {
     editor.undo()
     expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'p1'])
     expect(project.projectMeta.deletedPages).toEqual(['p1'])
+  })
+})
+
+/**
+ * Nothing the user has already given up may vanish quietly. Each of these is a
+ * write that failed somewhere the failure used to be swallowed whole.
+ */
+describe('a write that did not land', () => {
+  it('settles the pages a half-failed batch did make, and says the rest did not', async () => {
+    seed('/book-e', ['x'])
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+    let made = 0
+    vi.stubGlobal('window', {
+      api: {
+        ...window.api,
+        createPage: async () => {
+          made += 1
+          if (made === 2) throw new Error('no space left on device')
+          return `p${made}`
+        },
+      },
+    })
+
+    await useLibraryPageOrder().importFilesAt('/book-e', ['a.png', 'b.png', 'c.png'], 1)
+
+    // The one page that was made is in the chapter, at the drop point, and on
+    // the stack — not left on disk for a later open to adopt at the end.
+    const handle = await bookMeta.handleFor('/book-e')
+    expect(handle?.order).toEqual(['x', 'p1'])
+    expect(useNoticeStore().notice?.text).toContain('1')
+
+    editor.undo('/book-e')
+    expect((await bookMeta.handleFor('/book-e'))?.meta.deletedPages).toEqual(['p1'])
+  })
+
+  it('says so when the first file of a batch could not be made at all', async () => {
+    seed('/book-f', ['x'])
+    vi.stubGlobal('window', {
+      api: {
+        ...window.api,
+        createPage: async () => {
+          throw new Error('no space left on device')
+        },
+      },
+    })
+
+    await useLibraryPageOrder().importFilesAt('/book-f', ['a.png'], 1)
+
+    expect((await useBookMetaStore().handleFor('/book-f'))?.order).toEqual(['x'])
+    expect(useNoticeStore().notice?.text).toBeTruthy()
+  })
+
+  /**
+   * The shelf lets go of the promise these return, so a rejection would reach
+   * nobody at all. The reorder itself stands; what is said is that the disk
+   * does not have it yet.
+   */
+  it('tells the user when the order changed but the write did not land', async () => {
+    seed('/book-g', ['a', 'b'])
+    vi.stubGlobal('window', {
+      api: {
+        ...window.api,
+        writeProjectMeta: async () => {
+          throw new Error('read-only file system')
+        },
+      },
+    })
+
+    await expect(
+      useLibraryPageOrder().reorderPagesTo('/book-g', ['b'], 0),
+    ).resolves.toBeUndefined()
+
+    expect(useNoticeStore().notice?.text).toBeTruthy()
   })
 })

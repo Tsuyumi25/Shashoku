@@ -74,6 +74,7 @@ import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import SourcePanel from '@/components/SourcePanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
@@ -102,14 +103,12 @@ const ui = useUiStore()
 const fill = useFillSelection()
 const merge = useMergeLayers()
 const pixels = useSelectionPixels()
+const closing = useCloseSettle()
 
 // The window holds itself open until this answers, so every path out of it has
-// to reach the release — a failed write loses that one write, not the reply.
+// to reach the release.
 window.api.onWillClose(() => {
-  editor.flushTextEdit()
-  void Promise.allSettled([project.flush(), preferences.flush()]).then(() =>
-    window.api.windowCloseReady(),
-  )
+  void closing.settle().then(() => window.api.windowCloseReady())
 })
 
 // All three listeners stand down while the settings panel is up: these keys

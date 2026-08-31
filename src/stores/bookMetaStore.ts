@@ -238,7 +238,14 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
    */
   async function retire(rootPath: string): Promise<void> {
     if (!handles.has(rootPath)) return
-    await flush(rootPath)
+    // Swallowed rather than raised: nobody asked for this write, the eviction
+    // it belongs to did. `onError` has already said so, and what matters here
+    // is that a handle still owing one is left where it is.
+    try {
+      await flush(rootPath)
+    } catch {
+      return
+    }
     if (handles.get(rootPath)?.dirty) return
     forget(rootPath)
   }

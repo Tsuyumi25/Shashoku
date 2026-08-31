@@ -145,12 +145,35 @@ describe('createAutosave', () => {
     const autosave = createAutosave(write, { onError })
 
     autosave.mark()
-    await autosave.flush()
+    await expect(autosave.flush()).rejects.toThrow('disk gone')
     expect(onError).toHaveBeenCalledOnce()
 
     autosave.mark()
     await autosave.flush()
     expect(write).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * Whoever awaits a flush is asking whether the bytes are on disk. Answering
+   * yes to a write that failed is how a change already accepted from the user
+   * disappears with nothing saying so.
+   */
+  it('hands the write’s own error to whoever awaited the flush', async () => {
+    const boom = new Error('read-only file system')
+    const autosave = createAutosave(vi.fn().mockRejectedValue(boom), { onError: vi.fn() })
+
+    autosave.mark()
+    await expect(autosave.flush()).rejects.toBe(boom)
+  })
+
+  it('does not hand an old failure to a later flush that had nothing to write', async () => {
+    const write = vi.fn().mockRejectedValueOnce(new Error('disk gone')).mockResolvedValue(undefined)
+    const autosave = createAutosave(write, { onError: vi.fn() })
+
+    autosave.mark()
+    await expect(autosave.flush()).rejects.toThrow('disk gone')
+
+    await expect(autosave.flush()).resolves.toBeUndefined()
   })
 
   it('forgets pending work on cancel', () => {

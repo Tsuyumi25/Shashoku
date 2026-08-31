@@ -345,13 +345,20 @@ export const useRasterStore = defineStore('raster', () => {
         .filter(([, layer]) => layer.pageId === before)
         .map(([id]) => id)
       if (leaving.length === 0) return
-      void pixels.flush().finally(() => {
-        const dropped: string[] = []
-        for (const id of leaving) {
-          if (held.value.get(id)?.owes === false) dropped.push(...release(id))
-        }
-        useEditorStore().forgetJournals(dropped)
-      })
+      // A write that failed leaves its layer still owing, so the guard below
+      // holds on to it rather than letting go of the only copy of what it
+      // has — which is why nothing is done with the rejection here beyond
+      // keeping it from going unhandled. The scheduler's `onError` reports it.
+      void pixels
+        .flush()
+        .catch(() => {})
+        .then(() => {
+          const dropped: string[] = []
+          for (const id of leaving) {
+            if (held.value.get(id)?.owes === false) dropped.push(...release(id))
+          }
+          useEditorStore().forgetJournals(dropped)
+        })
     },
   )
 
