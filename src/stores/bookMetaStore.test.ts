@@ -92,12 +92,12 @@ describe('handleFor', () => {
   })
 })
 
-describe('setOrder', () => {
+describe('applyOrderSnapshot', () => {
   it('refuses a book that has not been read into a handle yet', () => {
     stubApi()
     const bookMeta = useBookMetaStore()
 
-    expect(bookMeta.setOrder(ROOT, ['a'])).toBe(false)
+    expect(bookMeta.applyOrderSnapshot(ROOT, ['a'])).toBe(false)
   })
 
   it('refuses the book the editor already has open', async () => {
@@ -106,7 +106,7 @@ describe('setOrder', () => {
     await bookMeta.handleFor(ROOT)
     useProjectStore().rootPath = ROOT
 
-    expect(bookMeta.setOrder(ROOT, ['b', 'a'])).toBe(false)
+    expect(bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])).toBe(false)
   })
 
   /**
@@ -120,9 +120,9 @@ describe('setOrder', () => {
     const bookMeta = useBookMetaStore()
     await bookMeta.handleFor(ROOT)
 
-    bookMeta.setOrder(ROOT, ['b', 'a']) // do
-    bookMeta.setOrder(ROOT, ['a', 'b']) // undo
-    bookMeta.setOrder(ROOT, ['b', 'a']) // redo
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a']) // do
+    bookMeta.applyOrderSnapshot(ROOT, ['a', 'b']) // undo
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a']) // redo
     await bookMeta.flush(ROOT)
 
     expect(writes).toEqual([['b', 'a']])
@@ -187,7 +187,7 @@ describe('handBack', () => {
     stubApi({ onWrite: (_dir, raw) => writes.push(parseProjectJson(raw).pages) })
     const bookMeta = useBookMetaStore()
     await bookMeta.handleFor(ROOT)
-    bookMeta.setOrder(ROOT, ['b', 'a'])
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])
 
     bookMeta.handBack(ROOT, { ...defaultProjectJson(), pages: ['b', 'a'] }, ['b', 'a'])
     await bookMeta.flush(ROOT)
@@ -203,12 +203,15 @@ describe('flushAll', () => {
     const bookMeta = useBookMetaStore()
     await bookMeta.handleFor('/one')
     await bookMeta.handleFor('/two')
-    bookMeta.setOrder('/one', ['b', 'a'])
-    bookMeta.setOrder('/two', ['a'])
+    bookMeta.applyOrderSnapshot('/one', ['b', 'a'])
+    bookMeta.applyOrderSnapshot('/two', ['b', 'a'])
 
     await bookMeta.flushAll()
 
-    expect([...written.values()]).toEqual([['b', 'a'], ['a']])
+    expect([...written.values()]).toEqual([
+      ['b', 'a'],
+      ['b', 'a'],
+    ])
   })
 })
 
@@ -230,7 +233,7 @@ describe('retire', () => {
     stubApi({ onWrite: (_dir, raw) => writes.push(parseProjectJson(raw).pages) })
     const bookMeta = useBookMetaStore()
     await bookMeta.handleFor(ROOT)
-    bookMeta.setOrder(ROOT, ['b', 'a'])
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])
 
     await bookMeta.retire(ROOT)
 
@@ -250,7 +253,7 @@ describe('retire', () => {
     })
     const bookMeta = useBookMetaStore()
     await bookMeta.handleFor(ROOT)
-    bookMeta.setOrder(ROOT, ['b', 'a'])
+    bookMeta.applyOrderSnapshot(ROOT, ['b', 'a'])
 
     await bookMeta.retire(ROOT)
 

@@ -166,7 +166,7 @@ describe('undoing a shelf reorder after the book has been opened', () => {
     // Marked and left debounced — no `flush`, which is what the gesture that
     // owns this write would normally have awaited before letting go.
     await bookMeta.handleFor('/book-a')
-    expect(bookMeta.setOrder('/book-a', ['c', 'a', 'b'])).toBe(true)
+    expect(bookMeta.applyOrderSnapshot('/book-a', ['c', 'a', 'b'])).toBe(true)
     expect(disk.get('/book-a')).toEqual(['a', 'b', 'c'])
 
     await useOpenProject().openPath('/book-a')

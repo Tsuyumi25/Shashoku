@@ -2871,10 +2871,9 @@ describe('reordering the chapter', () => {
 
 /**
  * `cmdSetPageOrder` and `cmdImportPages` are the first commands whose writer
- * can refuse — a book that is open elsewhere, a session the library dropped,
- * or a chapter that no longer matches the order a stale command remembers.
- * Each of the three has to leave the stack exactly where it was and say so,
- * rather than advancing past a write that never happened.
+ * can refuse — a handle that is gone, or a chapter that has since gained a
+ * page the snapshot never saw. Each has to leave the stack exactly where it
+ * was and say so, rather than advancing past a write that never happened.
  */
 describe('a refused write does not advance the stack', () => {
   const BOOK = '/library/book-a'
@@ -2960,12 +2959,12 @@ describe('a refused write does not advance the stack', () => {
   })
 
   /**
-   * `cmdImportPages`'s `do` is two writes — land the pages, then peel their
-   * tombstone back off. Redoing it after the chapter has moved on must not
-   * let the first succeed and the second never run while looking like
-   * nothing happened: the pages stay hidden, and the stack stays put.
+   * A redo of an import lifts the tombstone and does nothing else. Its `after`
+   * describes the chapter as it stood at the drop, and a page that arrived
+   * since is not something that snapshot can speak for — replaying it would
+   * put the newcomer wherever the old order left a slot going spare.
    */
-  it('verifies before either half of a redone import runs, rather than landing pages still tombstoned', () => {
+  it('redoes an import by lifting its tombstone, leaving a page that arrived since where it is', () => {
     const project = useProjectStore()
     const editor = useEditorStore()
     project.rootPath = BOOK
@@ -2976,19 +2975,15 @@ describe('a refused write does not advance the stack', () => {
 
     editor.undo()
     expect(project.projectMeta.deletedPages).toEqual(['p'])
-    expect(editor.canRedo).toBe(true)
 
-    // A page arrived from outside this command between the undo and the
-    // redo, so the import's own `after` no longer names every page in the
-    // pool.
+    // A page arrived from outside this command between the undo and the redo.
     project.allFiles = [...project.allFiles, pageOf('q', [])]
 
     editor.redo()
 
-    // Still tombstoned: the second write never ran once the first refused.
-    expect(project.projectMeta.deletedPages).toEqual(['p'])
-    expect(editor.canRedo).toBe(true)
-    expect(useNoticeStore().notice?.text).toBeTruthy()
+    expect(project.projectMeta.deletedPages).toEqual([])
+    expect(project.files.map((f) => f.pageId)).toEqual(['p', 'a', 'q'])
+    expect(editor.canRedo).toBe(false)
   })
 })
 

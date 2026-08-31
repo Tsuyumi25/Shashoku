@@ -137,6 +137,47 @@ function visibleOnly(pages: readonly string[], deletedPages: readonly string[]):
   return pages.filter((id) => !deleted.has(id))
 }
 
+/**
+ * `pages` with the names `snapshot` covers permuted into `snapshot`'s order,
+ * every name it does not cover holding the absolute slot it already sat in.
+ *
+ * ⛔ Not a wholesale replacement. A `before`/`after` pair is evidence about
+ * the pages that existed when a drag happened, and an import between then and
+ * now widens the set: undoing the import tombstones the new page but leaves
+ * its name in the list, so by the time the reorder is undone the snapshot
+ * covers less than the chapter holds. Overwriting with it would take that name
+ * out of `pages` altogether, and the next open would find the page's directory
+ * unlisted and adopt it back at the end — an import already undone, returned
+ * to a place the user never put it.
+ *
+ * This is the rule tombstones already follow when pages are reordered, said
+ * once more for the undoing of a reorder: only the values sitting in the
+ * covered slots are permuted, one per slot, front to back.
+ *
+ * `null` when a page the snapshot does not cover is one the reader can see.
+ * That is a chapter which has gained a page since, and carrying it silently
+ * along would be this function deciding what the snapshot meant about
+ * something it never saw.
+ */
+export function applyPageOrderSnapshot(
+  pages: readonly string[],
+  deletedPages: readonly string[],
+  snapshot: readonly string[],
+): string[] | null {
+  const present = new Set(pages)
+  const covered = new Set(snapshot.filter((id) => present.has(id)))
+  const deleted = new Set(deletedPages)
+  if (pages.some((id) => !covered.has(id) && !deleted.has(id))) return null
+  const filling = snapshot.filter((id) => covered.has(id))
+  let cursor = 0
+  return pages.map((id) => {
+    if (!covered.has(id)) return id
+    const value = filling[cursor]
+    cursor += 1
+    return value as string
+  })
+}
+
 /** `ids`, in whatever order `order` already holds them — never the order they were picked in. */
 export function naturalOrderOf(order: readonly string[], ids: readonly string[]): string[] {
   const wanted = new Set(ids)

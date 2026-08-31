@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { ProjectJson } from '@shared/project/types'
 import { SHASHOKU_DIR } from '@shared/ssk/constants'
+import { applyPageOrderSnapshot } from '@shared/project/pages'
 import { createAutosave, type Autosave } from '@/lib/autosave'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -9,7 +10,7 @@ import { useProjectStore } from '@/stores/projectStore'
  * A book's `project.json`, held in memory under the book's own path.
  *
  * `order` is kept apart from `meta` even though it is `meta.pages`: the
- * page-order command swaps this wholesale, the same before/after `string[]`
+ * page-order command hands over a whole `string[]`, the same before/after
  * pair the pixel side already uses, and folding it into a patch of `meta`
  * would make that command's `do`/`undo` reach into an object to change one
  * field of it instead of handing over a value.
@@ -107,12 +108,35 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   }
 
   /**
-   * Replaces a handle's page order and schedules the write. Answers `false`
-   * without touching anything for a book the editor has open, or one
-   * `handleFor` has not loaded yet — the caller reads a handle before it can
-   * change one.
+   * Puts the pages `snapshot` covers back into its order and schedules the
+   * write, every page it does not cover holding its own slot. Answers `false`
+   * without touching anything for a book the editor has open, one `handleFor`
+   * has not loaded yet — the caller reads a handle before it can change one —
+   * or a snapshot that conflicts with a page the reader can see.
    */
-  function setOrder(rootPath: string, order: readonly string[]): boolean {
+  function applyOrderSnapshot(rootPath: string, snapshot: readonly string[]): boolean {
+    if (useProjectStore().isOpenRoot(rootPath)) return false
+    const handle = handles.get(rootPath)
+    if (!handle) return false
+    const next = applyPageOrderSnapshot(handle.order, handle.meta.deletedPages ?? [], snapshot)
+    if (next === null) return false
+    handle.order = next
+    handle.dirty = true
+    writerFor(rootPath).mark()
+    return true
+  }
+
+  /**
+   * The one write that widens a book's page list: names that were not in it
+   * before, at the slots `order` puts them.
+   *
+   * Separate from `applyOrderSnapshot` because it is the opposite operation —
+   * that one permutes the slots a chapter already has and can never add to
+   * them. Called once, when the drop lands, on an `order` worked out from the
+   * list as it stands at that moment; a redo of the same import lifts the
+   * tombstone instead, and never comes back through here.
+   */
+  function placePages(rootPath: string, order: readonly string[]): boolean {
     if (useProjectStore().isOpenRoot(rootPath)) return false
     const handle = handles.get(rootPath)
     if (!handle) return false
@@ -221,7 +245,8 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
 
   return {
     handleFor,
-    setOrder,
+    applyOrderSnapshot,
+    placePages,
     tagDeleted,
     untagDeleted,
     flush,

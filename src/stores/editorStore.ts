@@ -1097,10 +1097,12 @@ export const useEditorStore = defineStore('editor', () => {
     const bookMeta = useBookMetaStore()
     const openHere = () => project.isOpenRoot(book)
     return {
-      setOrder: (order: readonly string[]) =>
-        openHere() ? project.setFullOrder(order) : bookMeta.setOrder(book, order),
-      insertPages: (entries: readonly ProjectFile[], order: readonly string[]) =>
-        openHere() ? project.insertPages(entries, order) : bookMeta.setOrder(book, order),
+      applyOrderSnapshot: (snapshot: readonly string[]) =>
+        openHere()
+          ? project.applyOrderSnapshot(snapshot)
+          : bookMeta.applyOrderSnapshot(book, snapshot),
+      placePages: (entries: readonly ProjectFile[], order: readonly string[]) =>
+        openHere() ? project.insertPages(entries, order) : bookMeta.placePages(book, order),
       tagDeleted: (ids: readonly string[]) =>
         openHere() ? project.tagPagesDeleted(ids) : bookMeta.tagDeleted(book, ids),
       untagDeleted: (ids: readonly string[]) =>
@@ -1127,8 +1129,8 @@ export const useEditorStore = defineStore('editor', () => {
       {
         label: `reorder-pages ${book}`,
         portable: true,
-        do: () => writer.setOrder(after),
-        undo: () => writer.setOrder(before),
+        do: () => writer.applyOrderSnapshot(after),
+        undo: () => writer.applyOrderSnapshot(before),
       },
       { book },
     )
@@ -1137,9 +1139,15 @@ export const useEditorStore = defineStore('editor', () => {
   /**
    * Files dropped onto the page band: each is already a page on disk by the
    * time this runs — `createPage` is irreversible and happens once, before
-   * the shelf pushes this — so `do`/`undo` only ever move `after`'s tombstone
-   * back and forth. The name is never taken out of `pages`, which is what
-   * lets the position it landed at survive being undone and redone.
+   * the shelf pushes this — so undo only ever tombstones them. The name is
+   * never taken out of `pages`, which is what lets the position it landed at
+   * survive being undone and redone.
+   *
+   * ⛔ The two halves of `do` are not the same operation, and only the first
+   * run does both. Placing widens the page list; a redo must not, because
+   * `after` describes the chapter as it stood at the drop and the chapter may
+   * have gained tombstoned pages since — re-applying it would speak for slots
+   * it never saw. Everything a redo has to undo is the tombstone.
    */
   function cmdImportPages(
     book: BookId,
@@ -1149,19 +1157,16 @@ export const useEditorStore = defineStore('editor', () => {
   ) {
     if (book === null || ids.length === 0) return
     const writer = bookWriter(book)
+    let placed = false
     pushCommand(
       {
         label: `import-pages ${book} ${ids.length}`,
         portable: true,
-        // Checked before the second write runs, not after: `insertPages` and
-        // `untagDeleted` are refused by the same two preconditions — the
-        // book being written some other way, or a session that is gone — so
-        // a refusal on the first is a refusal on the second too, and this is
-        // what keeps a stale drop from landing the pages while leaving them
-        // tombstoned.
         do: () => {
-          if (!writer.insertPages(entries, after)) return false
-          return writer.untagDeleted(ids)
+          if (placed) return writer.untagDeleted(ids)
+          if (!writer.placePages(entries, after)) return false
+          placed = true
+          return true
         },
         undo: () => writer.tagDeleted(ids) !== false,
       },

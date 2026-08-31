@@ -55,6 +55,7 @@ import {
   type ReadingEdge,
 } from '@shared/page/readingGraph'
 import { parentFolder } from '@shared/project/library'
+import { applyPageOrderSnapshot } from '@shared/project/pages'
 import { assertDistinctFolders } from '@shared/export/profile'
 import type { ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -436,15 +437,25 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * Replaces the chapter's order wholesale, tombstoned pages included — the
-   * `do`/`undo` of a drag that reordered pages, each holding a complete
-   * `string[]` rather than a delta so neither has to depend on where the
-   * selection or the drop point stood by the time it runs again.
+   * Puts the chapter back into the order `snapshot` remembers — the `do`/
+   * `undo` of a drag that reordered pages, each holding a complete `string[]`
+   * rather than a delta so neither has to depend on where the selection or the
+   * drop point stood by the time it runs again.
+   *
+   * ⛔ Only the pages the snapshot covers move. A page imported after the drag
+   * and since undone still has its name in the chapter, and a snapshot taken
+   * before it existed says nothing about where it goes; `applyPageOrderSnapshot`
+   * is what holds it in its own slot rather than letting this decide.
    */
-  function setFullOrder(order: readonly string[]): boolean {
-    const next = orderedByIds(order, allFiles.value)
-    if (next === null) return false
-    allFiles.value = next
+  function applyOrderSnapshot(snapshot: readonly string[]): boolean {
+    const ids = applyPageOrderSnapshot(
+      allFiles.value.map((f) => f.pageId),
+      [...deletedPageIds.value],
+      snapshot,
+    )
+    if (ids === null) return false
+    const byId = new Map(allFiles.value.map((f) => [f.pageId, f]))
+    allFiles.value = ids.map((id) => byId.get(id) as ProjectFile)
     markMetaDirty()
     return true
   }
@@ -1301,7 +1312,7 @@ export const useProjectStore = defineStore('project', () => {
     createPages,
     abandonCreating,
     movePageBefore,
-    setFullOrder,
+    applyOrderSnapshot,
     insertPages,
     loadFreshPage,
     tagPagesDeleted,

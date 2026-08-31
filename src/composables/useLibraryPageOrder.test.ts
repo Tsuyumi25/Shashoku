@@ -125,6 +125,74 @@ describe('importing files onto a book nobody has open', () => {
   })
 })
 
+/**
+ * `[a,b] → [b,a] → import p → undo the import → undo the reorder`. The last
+ * step applies a snapshot taken before `p` existed, and `p` is tombstoned by
+ * then but still named in `pages`. Both writers have to reach the same answer:
+ * the pages the snapshot covers go back, `p` holds the slot it landed in.
+ */
+describe('undoing a reorder that an import has since widened', () => {
+  it('leaves the tombstoned import in its own slot, on a book nobody has open', async () => {
+    seed('/book-c', ['a', 'b'])
+    const order = useLibraryPageOrder()
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+
+    await order.reorderPagesTo('/book-c', ['b'], 0)
+    await order.importFilesAt('/book-c', ['p.png'], 1)
+    expect((await bookMeta.handleFor('/book-c'))?.order).toEqual(['b', 'p1', 'a'])
+
+    editor.undo('/book-c') // the import
+    editor.undo('/book-c') // the reorder
+
+    const handle = await bookMeta.handleFor('/book-c')
+    expect(handle?.order).toEqual(['a', 'p1', 'b'])
+    expect(handle?.meta.deletedPages).toEqual(['p1'])
+  })
+
+  it('reaches the same order on the book the editor has open', async () => {
+    const project = useProjectStore()
+    const editor = useEditorStore()
+    project.rootPath = '/open-book-3'
+    project.allFiles = [pageOf('a'), pageOf('b')]
+
+    const order = useLibraryPageOrder()
+    await order.reorderPagesTo('/open-book-3', ['b'], 0)
+    await order.importFilesAt('/open-book-3', ['p.png'], 1)
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['b', 'p1', 'a'])
+
+    editor.undo()
+    editor.undo()
+
+    expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'p1', 'b'])
+    expect(project.projectMeta.deletedPages).toEqual(['p1'])
+  })
+
+  /**
+   * A redo lifts the tombstone and nothing else. Re-applying the order it was
+   * imported under would speak for `q`, a page that landed afterwards and was
+   * itself undone — and put it back where the first import's snapshot had a
+   * slot going spare.
+   */
+  it('redoes an import by lifting its tombstone, not by replaying its order', async () => {
+    seed('/book-d', ['x'])
+    const order = useLibraryPageOrder()
+    const editor = useEditorStore()
+    const bookMeta = useBookMetaStore()
+
+    await order.importFilesAt('/book-d', ['p.png'], 1)
+    await order.importFilesAt('/book-d', ['q.png'], 2)
+    editor.undo('/book-d') // q, tombstoned but still named
+    editor.undo('/book-d') // p, likewise
+
+    editor.redo('/book-d') // p again
+
+    const handle = await bookMeta.handleFor('/book-d')
+    expect(handle?.order).toEqual(['x', 'p1', 'p2'])
+    expect(handle?.meta.deletedPages).toEqual(['p2'])
+  })
+})
+
 describe('the same gestures on the book open in the editor', () => {
   it('reorders projectStore.allFiles instead of a book-meta session, and undoes through the editor', async () => {
     const project = useProjectStore()

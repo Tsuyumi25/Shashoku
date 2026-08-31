@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { insertPagesAt, naturalOrderOf, pageDirName, reconcilePages, reorderPages } from './pages'
+import {
+  applyPageOrderSnapshot,
+  insertPagesAt,
+  naturalOrderOf,
+  pageDirName,
+  reconcilePages,
+  reorderPages,
+} from './pages'
 
 const AT = new Date(2026, 7, 9, 14, 30)
 
@@ -135,6 +142,21 @@ describe('reconcilePages', () => {
     expect(out.order).toEqual(['a', 'b'])
   })
 
+  /**
+   * The undone import, one step on: its name never left `pages`, so the
+   * directory it left on disk is not one "nobody listed". Taking the name out
+   * instead would make rule ② adopt the page straight back, at the end of the
+   * chapter rather than where it was dropped — an import already undone,
+   * returned to a place the user never chose.
+   */
+  it('does not adopt a page whose name is still listed, however it is hidden', () => {
+    expect(reconcilePages(['a', 'p', 'b'], ['a', 'p', 'b'])).toEqual({
+      order: ['a', 'p', 'b'],
+      missing: [],
+      adopted: [],
+    })
+  })
+
   it('has nothing to say about an empty project', () => {
     expect(reconcilePages([], [])).toEqual({ order: [], missing: [], adopted: [] })
   })
@@ -221,5 +243,56 @@ describe('reorderPages', () => {
 
   it('clamps an out-of-range target index rather than throwing', () => {
     expect(reorderPages(['a', 'b', 'c'], [], ['a'], 99)).toEqual(['b', 'c', 'a'])
+  })
+})
+
+describe('applyPageOrderSnapshot', () => {
+  /**
+   * The sequence the whole-overwrite reading got wrong: `[a,b]` reordered to
+   * `[b,a]`, `p` imported, the import undone, and then the reorder undone.
+   * `p` is tombstoned by that point but its name is still in the list, so the
+   * snapshot the reorder captured no longer covers everything there is.
+   */
+  it('puts the pages it covers back in its own order and leaves the rest alone', () => {
+    expect(applyPageOrderSnapshot(['b', 'p', 'a'], ['p'], ['a', 'b'])).toEqual(['a', 'p', 'b'])
+  })
+
+  it('is an ordinary permutation when it covers every page there is', () => {
+    expect(applyPageOrderSnapshot(['b', 'a'], [], ['a', 'b'])).toEqual(['a', 'b'])
+  })
+
+  it('holds a tombstone in the slot it already sat in', () => {
+    expect(applyPageOrderSnapshot(['a', 'x', 'b'], ['x'], ['b', 'a'])).toEqual(['b', 'x', 'a'])
+  })
+
+  it('changes nothing when the snapshot is the order already there', () => {
+    expect(applyPageOrderSnapshot(['a', 'x', 'b'], ['x'], ['a', 'b'])).toEqual(['a', 'x', 'b'])
+  })
+
+  /**
+   * A name only ever leaves `pages` through a repair, never through an undo.
+   * Skipping it permutes what is actually there rather than writing the name
+   * back in, which would resurrect a page the list no longer has.
+   */
+  it('skips a page the snapshot names that the list no longer holds', () => {
+    expect(applyPageOrderSnapshot(['b', 'a'], [], ['a', 'gone', 'b'])).toEqual(['a', 'b'])
+  })
+
+  /**
+   * A visible page the snapshot never saw is a conflict, not something to
+   * quietly carry along: the snapshot is evidence about a chapter that has
+   * since gained a page somebody can see, and there is no answer here that is
+   * better than saying so.
+   */
+  it('refuses when a page it does not cover is one the reader can see', () => {
+    expect(applyPageOrderSnapshot(['b', 'a', 'q'], [], ['a', 'b'])).toBeNull()
+  })
+
+  it('refuses on a visible page even when a tombstone is also uncovered', () => {
+    expect(applyPageOrderSnapshot(['b', 'p', 'a', 'q'], ['p'], ['a', 'b'])).toBeNull()
+  })
+
+  it('has nothing to do for an empty chapter', () => {
+    expect(applyPageOrderSnapshot([], [], [])).toEqual([])
   })
 })
