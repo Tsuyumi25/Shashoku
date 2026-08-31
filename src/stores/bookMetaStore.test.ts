@@ -259,4 +259,25 @@ describe('retire', () => {
 
     expect((await bookMeta.handleFor(ROOT))?.order).toEqual(['b', 'a'])
   })
+
+  /**
+   * `dirty` answers whether a write is owed, not whether anything still holds
+   * the book. The eviction decided while nothing did; by the time it has
+   * waited out the write, a gesture has taken the handle again and the write
+   * it waited for has left the handle clean. Letting go on that would take
+   * away the handle a live command is going to write through.
+   */
+  it('keeps a handle that something reached for while the eviction waited', async () => {
+    let reads = 0
+    stubApi({ onRead: () => reads++ })
+    const bookMeta = useBookMetaStore()
+    await bookMeta.handleFor(ROOT)
+
+    const retiring = bookMeta.retire(ROOT)
+    await bookMeta.handleFor(ROOT)
+    await retiring
+
+    expect(bookMeta.orderOf(ROOT)).not.toBeNull()
+    expect(reads).toBe(1)
+  })
 })

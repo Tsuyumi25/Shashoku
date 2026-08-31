@@ -65,7 +65,25 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   const writers = new Map<string, Autosave>()
   const loading = new Map<string, Promise<BookHandle>>()
 
+  /**
+   * How many times anything has taken hold of a book's handle.
+   *
+   * `retire` reads it before waiting for the write it owes and again after: an
+   * eviction decided while nothing named the book must not take away a handle
+   * a command has written through in the meantime. `dirty` cannot answer that
+   * — an autosave landing during the wait clears it while the history that
+   * made it stands.
+   */
+  const claims = new Map<string, number>()
+
+  /**
+   * Every write to a handle comes through here, which is why the claim is
+   * taken here rather than at each of them. `flush` deliberately does not —
+   * it reads `writers` directly, so owing a write is not itself a reason to
+   * stay.
+   */
   function writerFor(rootPath: string): Autosave {
+    claims.set(rootPath, (claims.get(rootPath) ?? 0) + 1)
     const existing = writers.get(rootPath)
     if (existing) return existing
     const writer = createAutosave(() => flushNow(rootPath), {
@@ -97,6 +115,7 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
    */
   async function handleFor(rootPath: string): Promise<BookHandle | null> {
     if (useProjectStore().isOpenRoot(rootPath)) return null
+    claims.set(rootPath, (claims.get(rootPath) ?? 0) + 1)
     const cached = handles.get(rootPath)
     if (cached) return cached
     const already = loading.get(rootPath)
@@ -231,6 +250,7 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
    * should land.
    */
   function handBack(rootPath: string, meta: ProjectJson, order: readonly string[]): void {
+    claims.set(rootPath, (claims.get(rootPath) ?? 0) + 1)
     handles.set(rootPath, {
       meta: { ...meta },
       order: [...order],
@@ -274,6 +294,7 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   /** Drops a handle outright, whatever it was still holding. */
   function forget(rootPath: string): void {
     handles.delete(rootPath)
+    claims.delete(rootPath)
     writers.get(rootPath)?.cancel()
     writers.delete(rootPath)
   }
@@ -290,6 +311,7 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
    */
   async function retire(rootPath: string): Promise<void> {
     if (!handles.has(rootPath)) return
+    const held = claims.get(rootPath) ?? 0
     // Swallowed rather than raised: nobody asked for this write, the eviction
     // it belongs to did. `onError` has already said so, and what matters here
     // is that a handle still owing one is left where it is.
@@ -299,6 +321,7 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
       return
     }
     if (handles.get(rootPath)?.dirty) return
+    if ((claims.get(rootPath) ?? 0) !== held) return
     forget(rootPath)
   }
 

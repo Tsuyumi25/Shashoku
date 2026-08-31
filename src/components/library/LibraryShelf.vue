@@ -469,6 +469,7 @@ function beginFraming(
  * before this gesture existed.
  */
 function beginSorting(p: PendingCard, e: PointerEvent): boolean {
+  if (settling > 0) return false
   const book = library.standingAt
   if (!library.inside.book || book === null) return false
   const el = scroller.value
@@ -627,21 +628,37 @@ function endFraming() {
  * one `Command` for the whole batch, so `Ctrl+Z` takes it all back in one
  * step regardless of how many cards were dragged.
  */
+/**
+ * How many drops are still on their way to disk. A gesture measures its drop
+ * index against the cards as they stand, so one begun while the last is still
+ * landing would be read against a grid that is about to move under it. The
+ * queue in `useLibraryPageOrder` is what keeps the orders correct; this is
+ * what keeps the pointer from aiming at a layout that has not settled.
+ */
+let settling = 0
+
 function endSorting(): void {
   const s = sorting
   sorting = null
   dropLineStyle.value = null
   if (s === null) return
+  settling++
+  const done = () => {
+    settling--
+  }
   if (s.kind === 'reorder') {
     // No reload: the band is laid out from the store that owns the book, so
     // it has already moved. Re-reading the folder is what an undo cannot do
     // and must not have to.
-    void order.reorderPagesTo(s.book, s.pageIds, s.targetIndex)
+    void order.reorderPagesTo(s.book, s.pageIds, s.targetIndex).then(done, done)
     return
   }
   // An import is the one case that does need the folder read again — its
   // pages have no card yet, and their names and covers are on disk.
-  void order.importFilesAt(s.book, s.sourceNames, s.targetIndex).then(() => library.reloadInside())
+  void order
+    .importFilesAt(s.book, s.sourceNames, s.targetIndex)
+    .then(() => library.reloadInside())
+    .then(done, done)
 }
 
 function onShelfPointerUp(e: PointerEvent) {

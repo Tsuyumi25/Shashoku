@@ -65,6 +65,28 @@ async function readBookOrder(book: string): Promise<BookOrder> {
 }
 
 /**
+ * One gesture per book at a time.
+ *
+ * Both gestures read the book's order, work the next one out from it, and push
+ * a command carrying both ends. Two of them overlapping would each read the
+ * order that stood before either ran, so the second would compute its `after`
+ * — and the `before` its own undo restores — against an order already gone.
+ *
+ * Outside the composable: the queue belongs to the book, and every caller has
+ * to join the same one.
+ */
+const turns = new Map<string, Promise<unknown>>()
+
+function inTurn<T>(book: string, work: () => Promise<T>): Promise<T> {
+  const queued = (turns.get(book) ?? Promise.resolve()).then(work, work)
+  turns.set(
+    book,
+    queued.catch(() => {}),
+  )
+  return queued
+}
+
+/**
  * The two gestures Ctrl+Drag makes on the page band: reordering pages
  * already in the chapter, and turning dropped files into new ones inserted
  * where the pointer let go. Both end in one call to `editorStore` — the
@@ -80,22 +102,24 @@ export function useLibraryPageOrder() {
    * excluded — the coordinate system a drop point is read against once the
    * cards being dragged are read out of the grid.
    */
-  async function reorderPagesTo(
+  function reorderPagesTo(
     book: string,
     movedIds: readonly string[],
     targetIndex: number,
   ): Promise<void> {
-    if (movedIds.length === 0) return
-    try {
-      const { pages, deletedPages } = await readBookOrder(book)
-      const after = reorderPages(pages, deletedPages, movedIds, targetIndex)
-      editor.cmdSetPageOrder(book, pages, after)
-    } catch (err) {
-      console.error('reorder failed', err)
-      useNoticeStore().say('頁面順序沒有改成功')
-      return
-    }
-    await settleBook(book)
+    if (movedIds.length === 0) return Promise.resolve()
+    return inTurn(book, async () => {
+      try {
+        const { pages, deletedPages } = await readBookOrder(book)
+        const after = reorderPages(pages, deletedPages, movedIds, targetIndex)
+        editor.cmdSetPageOrder(book, pages, after)
+      } catch (err) {
+        console.error('reorder failed', err)
+        useNoticeStore().say('頁面順序沒有改成功')
+        return
+      }
+      await settleBook(book)
+    })
   }
 
   /**
@@ -110,12 +134,20 @@ export function useLibraryPageOrder() {
    * where nothing on the stack can take them back. Whatever was made goes in
    * at the drop point and onto the stack, and the failure is said out loud.
    */
-  async function importFilesAt(
+  function importFilesAt(
     book: string,
     sourceNames: readonly string[],
     targetIndex: number,
   ): Promise<void> {
-    if (sourceNames.length === 0) return
+    if (sourceNames.length === 0) return Promise.resolve()
+    return inTurn(book, () => importNow(book, sourceNames, targetIndex))
+  }
+
+  async function importNow(
+    book: string,
+    sourceNames: readonly string[],
+    targetIndex: number,
+  ): Promise<void> {
     const ids: string[] = []
     let failed: unknown = null
     for (const name of sourceNames) {

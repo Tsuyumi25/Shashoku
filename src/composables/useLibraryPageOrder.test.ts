@@ -92,6 +92,25 @@ describe('reordering a book nobody has open', () => {
     // The book the editor would undo by default has no such command.
     expect(editor.canUndo).toBe(false)
   })
+
+  /**
+   * A gesture reads the order, works the next one out from it, and pushes a
+   * command carrying both ends. Two of them left to overlap each read the
+   * order that stood before either ran, so the second writes an `after` — and
+   * an undo that restores a `before` — measured against an order already gone.
+   */
+  it('takes a second drag against what the first one left, not against what it started from', async () => {
+    seed('/book-a', ['a', 'b', 'c'])
+    const order = useLibraryPageOrder()
+    const bookMeta = useBookMetaStore()
+
+    await Promise.all([
+      order.reorderPagesTo('/book-a', ['b'], 0),
+      order.reorderPagesTo('/book-a', ['c'], 0),
+    ])
+
+    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['c', 'b', 'a'])
+  })
 })
 
 describe('importing files onto a book nobody has open', () => {
