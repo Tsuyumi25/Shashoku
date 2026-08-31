@@ -29,7 +29,7 @@ import {
   surfaceHolding,
   type StrokeSurface,
 } from '@/lib/selection/strokeSurface'
-import { maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
+import { maskBrushModeOf, rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -544,7 +544,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     editor.pushCommand(
       {
         label: `${s.mode === 'erase' ? 'erase' : 'paint'}-layer ${s.entry.id}`,
-        journal: patch.journal,
+        journals: [rasterJournal(patch.journal)],
         do: swap,
         undo: swap,
         forget: () => window.engine.rasterDropJournal(patch.journal),

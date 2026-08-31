@@ -9,7 +9,7 @@ import { hugContent } from '@/lib/layerTransform'
 import { context2d, encodePng } from '@/lib/pageComposite'
 import { maskPixels } from '@/lib/selection/fill'
 import { isEmptyRect, type Rect } from '@/lib/selection/rect'
-import { useEditorStore } from '@/stores/editorStore'
+import { rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
@@ -95,7 +95,7 @@ export function useSelectionPixels() {
     editor.pushCommand(
       {
         label: `erase-selection ${entry.id}`,
-        journal: patch.journal,
+        journals: [rasterJournal(patch.journal)],
         do: swap,
         undo: swap,
         forget: () => window.engine.rasterDropJournal(patch.journal),

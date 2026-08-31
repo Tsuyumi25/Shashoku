@@ -33,6 +33,33 @@ import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 
+/**
+ * Which registry an external record a command depends on lives in.
+ *
+ * Raster and mask journals are each named by their own counter in the
+ * engine (`j1, j2, ...` and `m1, m2, ...`), in two separate registries — nothing
+ * stops the same string appearing in both. Tagging every dependency with the
+ * registry it names, rather than trusting the two never collide, is what
+ * keeps a raster cut from ever reaching into the mask stack or back.
+ */
+export type JournalKind = 'raster' | 'mask'
+
+/** One external record a command needs in order to be undone. */
+export interface JournalDependency {
+  kind: JournalKind
+  name: string
+}
+
+/** A raster journal dependency, for a command that swaps a layer's pixels. */
+export function rasterJournal(name: string): JournalDependency {
+  return { kind: 'raster', name }
+}
+
+/** A mask journal dependency, for a command that swaps a selection's bytes. */
+export function maskJournal(name: string): JournalDependency {
+  return { kind: 'mask', name }
+}
+
 export interface Command {
 
   label: string
@@ -44,8 +71,35 @@ export interface Command {
    * A pixel step is two things kept in step: a record of tiles the engine holds
    * and a frame the manifest holds. This names the first so the stack can be
    * cut where the engine says its pixels are gone.
+   *
+   * ⚠️ A single raster name, kept for the commands already written against it.
+   * Anything that depends on more than one record, or on a mask journal rather
+   * than a raster one, declares `journals` instead — the two are read
+   * together, never one replacing the other.
    */
   journal?: string
+  /**
+   * Every external record this command needs in order to be undone, beyond
+   * the single raster one `journal` already names. A command can hold several
+   * — a selection gesture that first put the old mask away and then wrote the
+   * new one needs both back to undo either.
+   */
+  journals?: readonly JournalDependency[]
+  /**
+   * Which book this command belongs to — the project whose pages it changed.
+   * Absent for every command today; nothing in this ticket reads it yet.
+   */
+  book?: string
+  /**
+   * Whether this command needs nothing but its book's `project.json` to run,
+   * so it stays reachable with that book closed — or whether it captured a
+   * singleton store or an engine resource and only runs in the session that
+   * made it.
+   *
+   * Every command today is session-bound; nothing sets this yet. The first
+   * portable command is the page-order one, added separately.
+   */
+  portable?: boolean
   /**
    * Called once, when this command leaves the stack for good — not when it is
    * merely undone. Whatever it holds outside the store is let go here.
@@ -753,29 +807,38 @@ export const useEditorStore = defineStore('editor', () => {
     redoStack.value = []
   }
 
+  /** Whether a command names one of the given journals, in the given registry. */
+  function dependsOnJournal(cmd: Command, kind: JournalKind, gone: ReadonlySet<string>): boolean {
+    if (kind === 'raster' && cmd.journal !== undefined && gone.has(cmd.journal)) return true
+    return cmd.journals?.some((dep) => dep.kind === kind && gone.has(dep.name)) ?? false
+  }
+
   /**
-   * Cuts the stack where the engine says a step's pixels are gone.
+   * Cuts the stack where the engine says a step's record is gone — a raster
+   * journal by default, since every caller before this one only ever lost
+   * those; a mask journal when a caller names `'mask'`.
    *
    * Everything at or below the newest of these goes, not just the named steps:
    * history is linear, and a step you cannot replay is one nothing under it can
    * be reached past. Redo goes entirely, since a branch that outlived its own
-   * pixels can no longer be replayed either.
+   * record can no longer be replayed either.
    *
-   * The bound itself lives in the engine, which is the only place that can see
-   * a block shared between two records as one. This is the stack following it.
+   * The bound itself lives wherever the record does — the engine's raster
+   * registry for a raster journal, this store's own tally of live mask
+   * journals for a mask one. This is the stack following either.
    */
-  function forgetJournals(names: readonly string[]) {
+  function forgetJournals(names: readonly string[], kind: JournalKind = 'raster') {
     if (names.length === 0) return
     const gone = new Set(names)
     let cut = -1
     undoStack.value.forEach((cmd, at) => {
-      if (cmd.journal !== undefined && gone.has(cmd.journal)) cut = at
+      if (dependsOnJournal(cmd, kind, gone)) cut = at
     })
     if (cut >= 0) {
       for (const dropped of undoStack.value.slice(0, cut + 1)) dropped.forget?.()
       undoStack.value = undoStack.value.slice(cut + 1)
     }
-    if (redoStack.value.some((cmd) => cmd.journal !== undefined && gone.has(cmd.journal))) {
+    if (redoStack.value.some((cmd) => dependsOnJournal(cmd, kind, gone))) {
       for (const dropped of redoStack.value) dropped.forget?.()
       redoStack.value = []
     }

@@ -531,6 +531,80 @@ describe('steps whose pixels the engine let go', () => {
   })
 })
 
+describe('steps that depend on more than one registry', () => {
+  /** A step whose undo depends on a journal outside the raster registry. */
+  function maskStep(editor: ReturnType<typeof useEditorStore>, name: string, forgotten: string[]) {
+    editor.pushCommand({
+      label: `select ${name}`,
+      journals: [{ kind: 'mask', name }],
+      do: () => {},
+      undo: () => {},
+      forget: () => forgotten.push(name),
+    })
+  }
+
+  it('cuts the stack on a `journals` entry the same way it does the legacy `journal` field', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    maskStep(editor, 'm1', forgotten)
+    editor.pushCommand({ label: 'plain', do: () => {}, undo: () => {} })
+
+    editor.forgetJournals(['m1'], 'mask')
+
+    expect(forgotten).toEqual(['m1'])
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(editor.canUndo).toBe(false)
+  })
+
+  it('takes plain steps under a lost mask journal, same as it does for a raster one', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    const undone: string[] = []
+    editor.pushCommand({ label: 'rename', do: () => {}, undo: () => undone.push('rename') })
+    maskStep(editor, 'm1', forgotten)
+    editor.pushCommand({ label: 'move', do: () => {}, undo: () => undone.push('move') })
+
+    editor.forgetJournals(['m1'], 'mask')
+    while (editor.canUndo) editor.undo()
+
+    expect(undone).toEqual(['move'])
+  })
+
+  /**
+   * The two registries are tagged rather than sharing a namespace, so a name
+   * that happens to match across them is not a collision — a raster cut must
+   * never reach a mask-only step, or the other way round.
+   */
+  it('does not let a mask cut touch a step that only names a raster journal of the same name', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    editor.pushCommand({
+      label: 'fill j1',
+      journal: 'j1',
+      do: () => {},
+      undo: () => {},
+      forget: () => forgotten.push('j1'),
+    })
+
+    editor.forgetJournals(['j1'], 'mask')
+
+    expect(forgotten).toEqual([])
+    expect(editor.canUndo).toBe(true)
+  })
+
+  it('does not let a raster cut touch a step that only names a mask journal of the same name', () => {
+    const editor = useEditorStore()
+    const forgotten: string[] = []
+    maskStep(editor, 'j1', forgotten)
+
+    editor.forgetJournals(['j1'])
+
+    expect(forgotten).toEqual([])
+    expect(editor.canUndo).toBe(true)
+  })
+})
+
 describe('pending text edit', () => {
   it('turns one editing session into one undo entry', () => {
     const { project, editor } = openOnePage([label('a', 'before')])

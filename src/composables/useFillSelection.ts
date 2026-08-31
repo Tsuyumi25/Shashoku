@@ -2,7 +2,7 @@ import { computed } from 'vue'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { isEmptyRect } from '@/lib/selection/rect'
-import { useEditorStore } from '@/stores/editorStore'
+import { rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -111,7 +111,7 @@ export function useFillSelection() {
     editor.pushCommand(
       {
         label: `fill-layer ${entry.id}`,
-        journal: patch.journal,
+        journals: [rasterJournal(patch.journal)],
         do: swap,
         undo: swap,
         // Only when this step leaves the stack for good. The ceiling bounds

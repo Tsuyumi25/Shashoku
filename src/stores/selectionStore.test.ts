@@ -671,6 +671,46 @@ describe('reset', () => {
     expect(sel.heldPage()).toBeNull()
     expect(sel.quickMask).toBe(false)
   })
+
+  it('reports the mask journals it strands', () => {
+    const sel = useSelectionStore()
+    select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
+    const dropped = sel.reset()
+    expect(dropped.length).toBeGreaterThan(0)
+  })
+
+  it('reports nothing when there was no selection to strand', () => {
+    const sel = useSelectionStore()
+    expect(sel.reset()).toEqual([])
+  })
+
+  /**
+   * The scenario the ticket exists for: a project switch clears the engine's
+   * mask registry out from under any command that still names one of its
+   * journals. Feeding what `reset` dropped to `forgetJournals` has to turn
+   * that command, and everything under it, into a barrier nothing can reach
+   * past — the same linear cut a released raster layer already gets.
+   */
+  it('turns a command that depended on the mask into a barrier once fed to forgetJournals', () => {
+    const sel = useSelectionStore()
+    const editor = useEditorStore()
+
+    let beforeUndone = 0
+    editor.pushCommand({ label: 'before-mask', do: () => {}, undo: () => beforeUndone++ })
+    select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
+    let afterUndone = 0
+    editor.pushCommand({ label: 'after-mask', do: () => {}, undo: () => afterUndone++ })
+
+    const dropped = sel.reset()
+    editor.forgetJournals(dropped, 'mask')
+
+    expect(editor.canUndo).toBe(true)
+    editor.undo()
+    expect(afterUndone).toBe(1)
+    expect(editor.canUndo).toBe(false)
+    editor.undo()
+    expect(beforeUndone).toBe(0)
+  })
 })
 
 describe('outlines', () => {

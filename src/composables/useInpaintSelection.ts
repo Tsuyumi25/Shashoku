@@ -3,7 +3,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { compositeLayerAlone, context2d, encodePng } from '@/lib/pageComposite'
 import { isEmptyRect, type Rect } from '@/lib/selection/rect'
-import { useEditorStore } from '@/stores/editorStore'
+import { rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -195,7 +195,7 @@ export function useInpaintSelection() {
     editor.pushCommand(
       {
         label: `inpaint-selection ${entry.id}`,
-        journal: patch.journal,
+        journals: [rasterJournal(patch.journal)],
         do: swap,
         undo: swap,
         forget: () => window.engine.rasterDropJournal(patch.journal),

@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import { useEditorStore } from '@/stores/editorStore'
+import { maskJournal, useEditorStore } from '@/stores/editorStore'
 import {
   DEFAULT_BRUSH_HARDNESS,
   DEFAULT_BRUSH_OPACITY,
@@ -128,6 +128,17 @@ export const useSelectionStore = defineStore('selection', () => {
   /** Mirrored from the engine after every change, never written to directly. */
   let held: MaskTarget | null = null
 
+  /**
+   * Every mask journal some command on the undo/redo stack still needs, so
+   * `reset` can say what it is about to strand — `window.engine.maskReset()`
+   * itself answers nothing back, unlike the raster registry's `release`.
+   *
+   * Added to whenever a command is given journals to hold, removed from
+   * exactly where the command's own `forget` drops them, so a journal a
+   * command let go of on its own is never reported as reset's doing.
+   */
+  const liveMaskJournals = new Set<string>()
+
   const bounds = ref<Rect | null>(null)
   /** Bumped whenever what should be on screen changed, gestures included. */
   const revision = ref(0)
@@ -224,13 +235,18 @@ export const useSelectionStore = defineStore('selection', () => {
     }
     const forwards = [...journals]
     const backwards = [...journals].reverse()
+    for (const journal of journals) liveMaskJournals.add(journal)
     useEditorStore().pushCommand(
       {
         label,
+        journals: journals.map(maskJournal),
         do: () => run(forwards),
         undo: () => run(backwards),
         forget: () => {
-          for (const journal of journals) window.engine.maskDropJournal(journal)
+          for (const journal of journals) {
+            window.engine.maskDropJournal(journal)
+            liveMaskJournals.delete(journal)
+          }
         },
       },
       { alreadyApplied: true },
@@ -854,15 +870,24 @@ export const useSelectionStore = defineStore('selection', () => {
   /**
    * The history belongs to the project that made it, and so does the selection:
    * two projects can hold a page of the same name.
+   *
+   * Returns every mask journal this strands, the way `rasterStore.release`
+   * and `rasterTrimHistory` already do for the raster side — a caller that
+   * still has a stack to cut feeds this straight to `forgetJournals`. Read
+   * before the engine call, since `maskReset` clears its own registry with
+   * nothing to say about what was in it.
    */
-  function reset(): void {
+  function reset(): string[] {
+    const dropped = [...liveMaskJournals]
     window.engine.maskReset()
+    liveMaskJournals.clear()
     held = null
     stroke = null
     gesture.value = null
     bounds.value = null
     quickMask.value = false
     revision.value++
+    return dropped
   }
 
   return {
