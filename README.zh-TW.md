@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="build/icon.svg" alt="Shashoku" width="128">
+</p>
+
 # Shashoku 写植
 
 [English](README.md)
