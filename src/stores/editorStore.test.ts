@@ -2661,6 +2661,101 @@ describe('tagging a partly tagged selection', () => {
   })
 })
 
+describe('spraying tags with the brush', () => {
+  function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
+    const entry = label(id)
+    entry.tags = tags
+    entry.translation.style = { ...DEFAULT_TEXT_STYLE, ...style }
+    return entry
+  }
+
+  function openSprayed(labels: TextLayerEntry[]) {
+    const { project, editor } = openOnePage(labels)
+    project.addTag('outside')
+    project.addTag('emphasis')
+    return { project, editor }
+  }
+
+  const tagsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+    project.labelById(PAGE, id)!.tags
+
+  it('replaces the meaning an object carried rather than joining it', () => {
+    const { project, editor } = openSprayed([styled('a', ['emphasis'], {})])
+
+    editor.cmdPaintTags(['a'], ['outside'])
+
+    expect(tagsOf(project, 'a')).toEqual(['outside'])
+  })
+
+  it('takes a meaning away when nothing is loaded', () => {
+    const { project, editor } = openSprayed([styled('a', ['outside', 'emphasis'], {})])
+
+    editor.cmdPaintTags(['a'], [])
+
+    expect(tagsOf(project, 'a')).toEqual([])
+  })
+
+  /** One sweep is one thing that happened, however many objects it crossed. */
+  it('puts a whole sweep back in one undo', () => {
+    const { project, editor } = openSprayed([
+      styled('a', [], {}),
+      styled('b', ['emphasis'], {}),
+      styled('c', [], {}),
+    ])
+
+    editor.cmdPaintTags(['a', 'b', 'c'], ['outside'])
+    editor.undo()
+
+    expect(tagsOf(project, 'a')).toEqual([])
+    expect(tagsOf(project, 'b')).toEqual(['emphasis'])
+    expect(tagsOf(project, 'c')).toEqual([])
+  })
+
+  it('gives a sprayed object the style its new meaning already has', () => {
+    const { project, editor } = openSprayed([
+      styled('new', [], { fontFamily: 'Seed' }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        styled(`s${i}`, ['outside'], { fontFamily: 'Mincho' }),
+      ),
+    ])
+
+    editor.cmdPaintTags(['new'], ['outside'])
+
+    expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Mincho')
+
+    editor.undo()
+
+    expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Seed')
+  })
+
+  /** A list holding a group says something about it without taking it over. */
+  it('toggles a tag on named objects without touching the selection', () => {
+    const { project, editor } = openSprayed([
+      styled('a', [], {}),
+      styled('b', [], {}),
+      styled('held', [], {}),
+    ])
+    editor.selectOnly('held')
+
+    editor.cmdToggleTagOnObjects(['a', 'b'], 'outside')
+
+    expect(tagsOf(project, 'a')).toEqual(['outside'])
+    expect(tagsOf(project, 'b')).toEqual(['outside'])
+    expect(tagsOf(project, 'held')).toEqual([])
+    expect([...editor.selectedIds]).toEqual(['held'])
+  })
+
+  /** Nothing changed is nothing to undo — a sweep over what already says this. */
+  it('records nothing when every object already carries the load', () => {
+    const { editor } = openSprayed([styled('a', ['outside'], {})])
+    while (editor.canUndo) editor.undo()
+
+    editor.cmdPaintTags(['a'], ['outside'])
+
+    expect(editor.canUndo).toBe(false)
+  })
+})
+
 describe('drawing lines between text objects', () => {
   const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
     project.pageById(PAGE)?.page.readingEdges ?? []

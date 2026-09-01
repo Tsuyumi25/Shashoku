@@ -5,25 +5,48 @@
     the window during capture — a menu that only closed when something inside it
     was pressed is one a reader has to dismiss before they can do anything else.
   -->
-  <div v-if="at" ref="menuEl" class="menu" :style="{ left: `${at.x}px`, top: `${at.y}px` }">
+  <!--
+    Out to the body, because a menu placed where it was asked for would
+    otherwise answer to whichever ancestor happens to clip or transform: fixed
+    coordinates stop being the viewport's the moment one of those is overhead,
+    and a panel that scrolls its own content is one of them.
+  -->
+  <Teleport to="body">
+  <div v-if="at" ref="menuEl" class="menu" :style="{ left: `${x}px`, top: `${y}px` }">
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
       class="menu-item"
+      :class="item.checked !== undefined && 'menu-item-state'"
       @click="emit('pick', item.id)"
     >
+      <span
+        v-if="item.checked !== undefined"
+        class="menu-mark"
+        :class="item.checked && 'menu-mark-on'"
+        :style="item.color ? { color: item.color } : undefined"
+      />
       {{ item.label }}
     </button>
   </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, useTemplateRef, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 
 export interface MenuItem {
   id: string
   label: string
+  /**
+   * A state rather than an act, drawn with a mark that is there or not. Absent
+   * on an item that does something, which is what keeps a menu of acts from
+   * reserving room for marks none of them will ever wear.
+   */
+  checked?: boolean
+  /** Drawn beside the label — a tag's own colour, where an item names one. */
+  color?: string
 }
 
 const props = defineProps<{
@@ -35,6 +58,35 @@ const props = defineProps<{
 const emit = defineEmits<{ pick: [id: string]; close: [] }>()
 
 const menuEl = useTemplateRef<HTMLElement>('menuEl')
+
+/** How close to an edge it is allowed to stand. */
+const EDGE = 8
+
+const x = ref(0)
+const y = ref(0)
+
+/**
+ * Where it actually stands, which is where it was asked for until that would
+ * put an edge off screen.
+ *
+ * ⚠️ Measured rather than worked out from the item count: the width is the
+ * longest label's and a tag can be named anything, so neither side is known
+ * before it is drawn. It is placed once unclamped and read back on the same
+ * tick, so nothing is painted at the asking point.
+ */
+async function place() {
+  const at = props.at
+  if (at === null) return
+  x.value = at.x
+  y.value = at.y
+  await nextTick()
+  const box = menuEl.value?.getBoundingClientRect()
+  if (box === undefined) return
+  x.value = Math.max(EDGE, Math.min(at.x, window.innerWidth - box.width - EDGE))
+  y.value = Math.max(EDGE, Math.min(at.y, window.innerHeight - box.height - EDGE))
+}
+
+watch(() => props.at, place, { immediate: true })
 
 /**
  * ⚠️ A press inside the menu is not a press away, and saying so is what makes
@@ -94,5 +146,22 @@ onBeforeUnmount(() => listen(false))
 }
 .menu-item:hover {
   background: var(--secondary);
+}
+
+.menu-item-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.menu-mark {
+  height: 0.75rem;
+  width: 0.75rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  color: var(--muted-foreground);
+}
+.menu-mark-on {
+  background: currentColor;
 }
 </style>

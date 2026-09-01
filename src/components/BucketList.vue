@@ -57,9 +57,24 @@
       </p>
 
       <div v-for="group in groups" :key="group.key" class="mb-2">
+        <div class="flex w-full min-w-0 items-center gap-1 rounded hover:bg-secondary/50">
+        <!--
+          Loading the brush rather than taking hold of anything. A bucket in the
+          series scope reaches chapters that are not open, so its objects cannot
+          be selected — but a meaning is only a set of names, and that crosses a
+          chapter boundary where the objects do not.
+        -->
         <button
           type="button"
-          class="flex w-full min-w-0 items-center gap-2 rounded px-0.5 py-0.5 text-left text-xs hover:bg-secondary/50"
+          class="row-action"
+          :title="`用「${group.tags.join('、') || '未標記'}」裝上標記畫筆`"
+          @click="loadBrush(group.tags)"
+        >
+          <Palette :size="12" />
+        </button>
+        <button
+          type="button"
+          class="flex min-w-0 flex-1 items-center gap-2 rounded px-0.5 py-0.5 text-left text-xs"
           :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件`"
           @click="selectIds(group.buckets.flatMap((b) => b.ids))"
         >
@@ -86,6 +101,21 @@
           </span>
           <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{ group.count }}</span>
         </button>
+        <!--
+          Changing what a whole group means, from the row that already holds it.
+          One part of a meaning at a time is what this is for and the brush is
+          not: the brush carries a whole set, so aiming it at a group would
+          replace the meaning rather than adjust it.
+        -->
+        <button
+          type="button"
+          class="row-action"
+          title="調整這一組的標記"
+          @click="openMenu($event, group)"
+        >
+          <MoreHorizontal :size="12" />
+        </button>
+        </div>
 
         <template v-for="bucket in group.buckets" :key="bucket.key">
           <div
@@ -128,12 +158,15 @@
         </template>
       </div>
     </div>
+
+    <CanvasMenu :at="menuAt" :items="menuItems" @pick="onPick" @close="menuAt = null" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, RefreshCw } from '@lucide/vue'
+import { ChevronRight, MoreHorizontal, Palette, RefreshCw } from '@lucide/vue'
+import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { SKELETON_FIELDS } from '@shared/text-style/fields'
@@ -143,6 +176,7 @@ import {
   groupByValue,
   type BucketObject,
   type StyleBucket,
+  type TagGroup,
 } from '@/lib/valueBuckets'
 import { styleFieldText, TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
 import { useSeriesObjects } from '@/composables/useSeriesObjects'
@@ -247,8 +281,81 @@ function details(bucket: StyleBucket): string[] {
  * scope reaches into chapters that are not open, and selecting an id from one
  * of those would name something nothing on screen can show.
  */
+function loadBrush(tags: readonly string[]) {
+  editor.loadPaintTags(tags)
+  editor.setTool('tag-paint')
+}
+
+const menuAt = ref<{ x: number; y: number } | null>(null)
+const menuGroup = ref<TagGroup | null>(null)
+
+/**
+ * The registry, plus whatever this group carries that no entry names — a group
+ * standing on an unregistered tag has to be able to put it down again.
+ *
+ * ⭐ A group's identity is the exact set its members carry, so a tick is
+ * membership in that set and nothing has to be counted to know it.
+ */
+const menuItems = computed<MenuItem[]>(() => {
+  const group = menuGroup.value
+  if (group === null) return []
+  const registry = project.header.tags
+  const names = [
+    ...registry.map((entry) => entry.name),
+    ...group.tags.filter((tag) => !registry.some((entry) => entry.name === tag)),
+  ]
+  return names.map((name) => ({
+    id: name,
+    label: name,
+    checked: group.tags.includes(name),
+    color: tagColor(name, registry),
+  }))
+})
+
+function openMenu(e: MouseEvent, group: TagGroup) {
+  menuGroup.value = group
+  menuAt.value = { x: e.clientX, y: e.clientY }
+}
+
+/**
+ * Left standing after each tick: a group's tags are what a reader came here to
+ * put right, and that is rarely one of them.
+ *
+ * ⚠️ The group the menu was opened on is gone the moment its set changes, so
+ * the ids are taken once at the press and the menu goes on answering for them.
+ */
+function onPick(id: string) {
+  const group = menuGroup.value
+  if (group === null) return
+  const ids = group.buckets.flatMap((bucket) => bucket.ids)
+  editor.cmdToggleTagOnObjects(ids, id)
+  const moved = new Set(ids)
+  menuGroup.value =
+    groups.value.find((next) =>
+      next.buckets.some((bucket) => bucket.ids.some((objectId) => moved.has(objectId))),
+    ) ?? null
+  if (menuGroup.value === null) menuAt.value = null
+}
+
 function selectIds(ids: readonly string[]) {
   const here = new Set(chapterObjects.value.map((o) => o.id))
   editor.selectMany(ids.filter((id) => here.has(id)), false)
 }
 </script>
+
+<style scoped>
+.row-action {
+  display: flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: var(--muted-foreground);
+}
+.row-action:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+</style>

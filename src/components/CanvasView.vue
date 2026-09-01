@@ -150,8 +150,9 @@
             v-for="object in objects"
             :key="object.id"
             :pointer="framesTakePointer ? 'box' : 'none'"
-            :framed="connecting"
-            :handles="!connecting"
+            :framed="connecting || painting"
+            :handles="!connecting && !painting"
+            :captioned="painting"
             :text="object.text"
             :text-style="object.style"
             :effects="object.effects"
@@ -834,6 +835,26 @@ function sweepObjects() {
  */
 const connecting = computed(() => editor.tool === 'connect')
 
+/**
+ * Spraying meaning onto objects, which takes a press on one the way `connect`
+ * does: under this tool a press means paint that object, and taking hold of it
+ * is what the move tool is for.
+ */
+const painting = computed(() => editor.tool === 'tag-paint')
+
+/**
+ * The objects one gesture has already crossed. Held so that sweeping back over
+ * one does not ask twice, and so the whole sweep lands as a single command.
+ */
+const tagSpray = ref<Set<string> | null>(null)
+
+function sprayAt(p: Anchor) {
+  const spray = tagSpray.value
+  if (spray === null) return
+  const id = objectAt(p)
+  if (id !== null) spray.add(id)
+}
+
 const ARROW_HEADS = [
   { id: 'reading-arrow', fill: 'var(--primary)' },
   { id: 'reading-arrow-chosen', fill: 'var(--foreground)' },
@@ -1331,7 +1352,7 @@ const gestureArmed = computed(() => spaceDown.value || rDown.value)
  * running a line from one object to another.
  */
 const framesTakePointer = computed(
-  () => !gestureArmed.value && !selecting.value && !connecting.value,
+  () => !gestureArmed.value && !selecting.value && !connecting.value && !painting.value,
 )
 
 /**
@@ -1365,6 +1386,7 @@ const canvasCursor = computed(() => {
     editor.tool === 'text' ||
     editor.tool === 'select-text' ||
     connecting.value ||
+    painting.value ||
     selecting.value
   )
     return 'cursor-crosshair'
@@ -1445,6 +1467,13 @@ function onPointerDown(e: PointerEvent) {
     const rect = containerRef.value.getBoundingClientRect()
     const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
     objectMarquee.value = { origin: p, current: p, additive: e.shiftKey }
+    return
+  }
+  if (painting.value) {
+    el.setPointerCapture(e.pointerId)
+    const rect = containerRef.value.getBoundingClientRect()
+    tagSpray.value = new Set()
+    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
     return
   }
   if (connecting.value) {
@@ -1580,6 +1609,11 @@ function onPointerMove(e: PointerEvent) {
     )
     return
   }
+  if (tagSpray.value !== null && containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    return
+  }
   if (connecting.value && containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect()
     onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
@@ -1625,6 +1659,11 @@ function onPointerUp(e: PointerEvent) {
   if (objectMarquee.value !== null) {
     sweepObjects()
     objectMarquee.value = null
+    return
+  }
+  if (tagSpray.value !== null) {
+    editor.cmdPaintTags([...tagSpray.value], editor.paintTags)
+    tagSpray.value = null
     return
   }
   if (!rotating.value && !panning.value) {
@@ -1684,6 +1723,8 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool(e.shiftKey ? 'select-text' : 'select')
   } else if (key === 'c') {
     editor.setTool('connect')
+  } else if (key === 'k') {
+    editor.setTool('tag-paint')
   } else if (key === 'm') {
     // Shift on a tool key reaches the other tool behind it, as it does in
     // Photoshop, where one slot of the rail holds a pair.

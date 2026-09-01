@@ -32,7 +32,7 @@ import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
+import { normalizeTagSet, sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 
@@ -210,6 +210,7 @@ export type CanvasTool =
   | 'wand'
   | 'brush'
   | 'eraser'
+  | 'tag-paint'
 
 /** The tools whose drag builds a selection rather than acting on objects. */
 export const SELECTION_TOOLS = [
@@ -483,6 +484,16 @@ export const useEditorStore = defineStore('editor', () => {
   const collapsedLayerIds = ref<Set<string>>(new Set())
 
   const tool = ref<CanvasTool>('select')
+
+  /**
+   * What the tag brush is loaded with. Empty is a load like any other — it is
+   * how the brush takes a meaning away, so there is no second tool for that.
+   */
+  const paintTags = ref<string[]>([])
+
+  function loadPaintTags(tags: readonly string[]) {
+    paintTags.value = normalizeTagSet(tags)
+  }
 
   /**
    * Which of an object's two bodies everything is working on.
@@ -2292,8 +2303,34 @@ export const useEditorStore = defineStore('editor', () => {
    * casts a vote in the meaning it is in the middle of joining.
    */
   function cmdToggleTagOnSelection(tag: string) {
+    toggleTagOn(selectedTextObjects(), tag)
+  }
+
+  /**
+   * The same act aimed by name rather than by what is selected, for a list that
+   * already holds a group and would otherwise have to take the selection over
+   * to say anything about it.
+   */
+  function cmdToggleTagOnObjects(ids: readonly string[], tag: string) {
+    toggleTagOn(textObjectsByIds(ids), tag)
+  }
+
+  /** Every text object among these ids a change is allowed to reach. */
+  function textObjectsByIds(ids: readonly string[]): AppearanceTarget<TextLayerEntry>[] {
     const project = useProjectStore()
-    const targets = selectedTextObjects()
+    const out: AppearanceTarget<TextLayerEntry>[] = []
+    for (const id of ids) {
+      if (isLayerLocked(id)) continue
+      const pageId = project.pageOfEntry(id)
+      if (pageId === null) continue
+      const entry = project.entryById(id)
+      if (entry?.kind === 'text') out.push({ pageId, entry })
+    }
+    return out
+  }
+
+  function toggleTagOn(targets: AppearanceTarget<TextLayerEntry>[], tag: string) {
+    const project = useProjectStore()
     if (targets.length === 0) return
     const adding = !targets.every(({ entry }) => entry.tags.includes(tag))
     const before = targets.map(({ pageId, entry }) => ({
@@ -2317,6 +2354,50 @@ export const useEditorStore = defineStore('editor', () => {
     }
     pushCommand({
       label: `${adding ? 'tag' : 'untag'} ${tag} ${targets.length}`,
+      do: () => write(after),
+      undo: () => write(before),
+    })
+  }
+
+  /**
+   * A gesture's worth of spraying, however many objects it crossed — crossing
+   * five in one sweep is one thing that happened.
+   *
+   * The load replaces what an object carried rather than joining it. A brush
+   * holds a whole meaning, and adding would build combinations nobody chose,
+   * which is the drift the buckets exist to find; changing one part of a meaning
+   * an object already has is what ticking against a selection is for. Taking a
+   * meaning away is this same stroke with nothing loaded.
+   *
+   * The style follows on the terms `cmdToggleTagOnSelection` sets: derived from
+   * a sample read before anything is written, and in one command with the tags.
+   */
+  function cmdPaintTags(ids: readonly string[], tags: readonly string[]) {
+    const project = useProjectStore()
+    const wanted = normalizeTagSet(tags)
+    const targets = textObjectsByIds(ids).filter(
+      ({ entry }) => !sameTagSet(entry.tags, wanted),
+    )
+    if (targets.length === 0) return
+
+    const before = targets.map(({ pageId, entry }) => ({
+      pageId,
+      id: entry.id,
+      tags: [...entry.tags],
+      style: { ...entry.translation.style },
+    }))
+    const sample = chapterBucketObjects()
+    const { tags: registry, seedStyle } = project.header
+    const style = deriveStyle(sample, wanted, registry, seedStyle)
+    const after = before.map((entry) => ({ ...entry, tags: wanted, style }))
+    const write = (states: typeof before) => {
+      for (const state of states) {
+        project.setLabelTags(state.pageId, state.id, state.tags)
+        project.setLabelStyle(state.pageId, state.id, 'translation', state.style)
+      }
+    }
+    pushCommand({
+      label: `paint-tags ${targets.length}`,
       do: () => write(after),
       undo: () => write(before),
     })
@@ -2584,6 +2665,10 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyStyle,
     cmdApplyEffects,
     cmdToggleTagOnSelection,
+    cmdToggleTagOnObjects,
+    cmdPaintTags,
+    paintTags,
+    loadPaintTags,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
     cmdSetLabelTags,
