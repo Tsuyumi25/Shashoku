@@ -8,6 +8,7 @@ import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
   DirEntry,
   FolderContents,
+  RootScan,
   ScannedBook,
   ScannedCover,
   ScannedFolder,
@@ -274,17 +275,21 @@ async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {
  * filter below is what keeps the walk out of a cycle.
  */
 export async function scanWorkspaces(roots: readonly string[]): Promise<WorkspaceScan> {
-  const seen = new Map<string, ScannedCover | null>();
-  const folders: ScannedFolder[] = [];
-  const books: ScannedBook[] = [];
-  const kept: string[] = [];
+  const declared = new Set<string>();
+  const scans: RootScan[] = [];
   for (const root of roots) {
     const path = resolve(root);
-    if (seen.has(path)) continue;
-    kept.push(path);
-    await walkInto(path, seen, folders, books);
+    if (declared.has(path)) continue;
+    declared.add(path);
+    const folders: ScannedFolder[] = [];
+    const books: ScannedBook[] = [];
+    // A walk of its own: the map guards this one against cycles, and an entry
+    // point inside another one has to answer with its own subtree rather than
+    // find it already taken.
+    await walkInto(path, new Map(), folders, books);
+    scans.push({ root: path, folders, books });
   }
-  return { roots: kept, folders, books };
+  return { roots: scans };
 }
 
 async function walkInto(

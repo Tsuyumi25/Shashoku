@@ -26,7 +26,7 @@
       >
         <LibraryBig :size="15" class="shrink-0 text-muted-foreground" />
         <span class="min-w-0 flex-1 truncate">全部</span>
-        <span class="lib-count">{{ totalBooks }}</span>
+        <span class="lib-count">{{ library.bookTotal }}</span>
       </div>
 
       <p
@@ -76,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import {
   Book,
   Folder,
@@ -101,10 +101,6 @@ import { useProjectStore } from '@/stores/projectStore'
 const library = useLibraryStore()
 const project = useProjectStore()
 const toast = useToast()
-
-const totalBooks = computed(() =>
-  library.home.reduce((total, entry) => total + (entry.books ?? 1), 0),
-)
 
 async function reveal(path: string) {
   const reason = await window.api.openProjectFolder(path)

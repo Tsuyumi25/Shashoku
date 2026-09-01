@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import {
   buildWorkspaceTree,
   crumbsFor,
+  distinctBooks,
   type DirEntry,
   type FolderContents,
   type LibraryNode,
@@ -65,6 +66,12 @@ function entryOf(node: LibraryNode): DirEntry {
 
 export const useLibraryStore = defineStore('library', () => {
   const roots = ref<LibraryNode[]>([])
+  /**
+   * Books on the disk, not books summed over the entry points: two entry
+   * points that overlap both report what they reach, and adding those up
+   * counts the shared ones twice.
+   */
+  const bookTotal = ref(0)
   const scanning = ref(false)
 
   const standingAt = ref<string | null>(null)
@@ -97,6 +104,7 @@ export const useLibraryStore = defineStore('library', () => {
           // and says only that an object could not be cloned when it meets one.
           const scan = await window.api.scanWorkspaces([...preferences.prefs.workspaces])
           roots.value = buildWorkspaceTree(scan)
+          bookTotal.value = distinctBooks(scan)
         } finally {
           scanning.value = false
         }
@@ -398,6 +406,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   return {
     roots,
+    bookTotal,
     scanning,
     standingAt,
     inside,

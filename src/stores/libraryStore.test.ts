@@ -40,7 +40,7 @@ beforeAll(() => {
       writeProjectMeta: () => Promise.resolve(),
       listInside: (path: string) =>
         Promise.resolve(insideByPath.get(path) ?? { book: false, pages: [], entries: [] }),
-      scanWorkspaces: () => Promise.resolve({ roots: [], folders: [], books: [] }),
+      scanWorkspaces: () => Promise.resolve({ roots: [] }),
       pickWorkspace: () => Promise.resolve(null),
     },
   })

@@ -19,10 +19,20 @@ export interface ScannedBook {
   pageCount: number;
 }
 
-export interface WorkspaceScan {
-  roots: string[];
+/**
+ * What one declared entry point answers for. Each is walked for itself, so an
+ * entry point standing inside another one is scanned twice rather than folded
+ * into the outer one.
+ */
+export interface RootScan {
+  /** The declared path, resolved. */
+  root: string;
   folders: ScannedFolder[];
   books: ScannedBook[];
+}
+
+export interface WorkspaceScan {
+  roots: RootScan[];
 }
 
 export interface ShelfLeaf {
@@ -77,9 +87,25 @@ export type LibraryNode = FolderNode | BookNode;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
+/**
+ * One node per declared entry point, in the order they were declared.
+ *
+ * ⭐ An entry point is never filed under another. Declaring both `~/comics`
+ * and `~/comics/2026` leaves two ways in, and the same book reached through
+ * each of them is one book seen twice rather than a duplicate to resolve.
+ */
 export function buildWorkspaceTree(scan: WorkspaceScan): LibraryNode[] {
+  const declared = new Set(scan.roots.map((each) => each.root));
+  const out: LibraryNode[] = [];
+  for (const each of scan.roots) {
+    const node = treeFor(each, declared);
+    if (node !== null) out.push(node);
+  }
+  return out;
+}
+
+function treeFor(scan: RootScan, declared: ReadonlySet<string>): LibraryNode | null {
   const folders = new Map<string, FolderNode>();
-  const declared = new Set(scan.roots);
   for (const folder of scan.folders) {
     folders.set(folder.path, {
       kind: "folder",
@@ -92,11 +118,14 @@ export function buildWorkspaceTree(scan: WorkspaceScan): LibraryNode[] {
     });
   }
 
-  const tops: LibraryNode[] = [];
+  let top: LibraryNode | null = folders.get(scan.root) ?? null;
   function file(node: LibraryNode): void {
+    if (node.path === scan.root) {
+      top = node;
+      return;
+    }
     const parent = folders.get(parentFolder(node.path));
     if (parent && parent.path !== node.path) parent.children.push(node);
-    else tops.push(node);
   }
 
   for (const book of scan.books) {
@@ -113,15 +142,20 @@ export function buildWorkspaceTree(scan: WorkspaceScan): LibraryNode[] {
     if (node) file(node);
   }
 
-  const declaredAt = new Map(scan.roots.map((root, index) => [root, index]));
-  tops.sort((a, b) => {
-    const byRoot =
-      (declaredAt.get(a.path) ?? Number.MAX_SAFE_INTEGER) -
-      (declaredAt.get(b.path) ?? Number.MAX_SAFE_INTEGER);
-    return byRoot !== 0 ? byRoot : collator.compare(a.name, b.name);
-  });
-  for (const top of tops) countBooks(top);
-  return tops;
+  if (top === null) return null;
+  countBooks(top);
+  return top;
+}
+
+/**
+ * How many books all the entry points reach between them, counted once each.
+ * Overlapping entry points report the same book, and the shelf's own total is
+ * the answer for the disk rather than the sum of what each way in sees.
+ */
+export function distinctBooks(scan: WorkspaceScan): number {
+  const seen = new Set<string>();
+  for (const each of scan.roots) for (const book of each.books) seen.add(book.path);
+  return seen.size;
 }
 
 function countBooks(node: LibraryNode): number {
