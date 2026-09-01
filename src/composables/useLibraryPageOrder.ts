@@ -138,16 +138,37 @@ export function useLibraryPageOrder() {
     book: string,
     sourceNames: readonly string[],
     targetIndex: number,
+    create = false,
   ): Promise<void> {
     if (sourceNames.length === 0) return Promise.resolve()
-    return inTurn(book, () => importNow(book, sourceNames, targetIndex))
+    return inTurn(book, () => importNow(book, sourceNames, targetIndex, create))
+  }
+
+  /**
+   * ⛔ Asks the disk again rather than trusting the caller's answer:
+   * `createProject` writes a default `project.json`, so running it over one
+   * that is already there would take the tags, the glossary and the page order
+   * with it.
+   */
+  async function makeBook(book: string): Promise<boolean> {
+    try {
+      const scan = await window.api.scanRoot(book)
+      if (!scan.hasSentinel) await window.api.createProject(book)
+      return true
+    } catch (err) {
+      console.error('create book failed', err)
+      useNoticeStore().say('這個資料夾沒有變成書')
+      return false
+    }
   }
 
   async function importNow(
     book: string,
     sourceNames: readonly string[],
     targetIndex: number,
+    create: boolean,
   ): Promise<void> {
+    if (create && !(await makeBook(book))) return
     const ids: string[] = []
     let failed: unknown = null
     for (const name of sourceNames) {

@@ -15,10 +15,10 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 export type LibraryView = 'list' | 'thumbnail'
 
 /**
- * The shelf's two bands. Each owns its own selection, anchor and hit-test
- * list; touching one always empties the other. The upper band is always
- * `project` — pages inside a book, or the books and folders inside a folder —
- * and the lower one is always `file`, whatever is left lying beside them.
+ * The shelf's two territories. Each owns its own selection, anchor and
+ * hit-test list; touching one always empties the other. `project` covers the
+ * folder's pages and the books standing in it, drawn as two sections of one
+ * territory, and `file` is whatever is left lying beside them.
  */
 export type ShelfRegion = 'project' | 'file'
 
@@ -213,30 +213,35 @@ export const useLibraryStore = defineStore('library', () => {
     return out
   })
   const bandProjects = computed<DirEntry[]>(() =>
-    inside.value.book ? [] : inside.value.entries.filter((entry) => entry.book),
+    inside.value.entries.filter((entry) => entry.book),
   )
 
   const bandFiles = computed<DirEntry[]>(() =>
     inside.value.entries.filter((entry) => !entry.book),
   )
 
+  /**
+   * How many bands the shelf draws. The page band counts wherever one is stood
+   * in: with no pages it is the empty zone a folder is turned into a book
+   * through, which is a band to jump to like any other.
+   */
   const bandCount = computed(
     () =>
-      [bandPages.value.length, bandProjects.value.length, bandFiles.value.length].filter(
+      [standingAt.value === null ? 0 : 1, bandProjects.value.length, bandFiles.value.length].filter(
         (n) => n > 0,
       ).length,
   )
 
   /**
-   * The project band: pages when standing inside a book, the books and
-   * folders when standing inside a folder, the declared workspaces at the
-   * root. `bandProjects` is empty exactly when `bandPages` is not, so this is
-   * never both at once.
+   * The project band: the declared workspaces at the root, and below it the
+   * folder's own pages followed by the books standing in it. A folder holds
+   * both at once — being a book does not stop it from having books filed
+   * under it — so the two are one territory laid out in the order the shelf
+   * draws them.
    */
   const projectItems = computed<ShelfItem[]>(() => {
     if (standingAt.value === null) return home.value.map(entryItem)
-    if (inside.value.book) return bandPages.value.map(pageItem)
-    return bandProjects.value.map(entryItem)
+    return [...bandPages.value.map(pageItem), ...bandProjects.value.map(entryItem)]
   })
 
   /**

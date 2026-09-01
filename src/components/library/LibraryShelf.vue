@@ -28,12 +28,15 @@
          the accessibility tree, and every band here is on screen at once. -->
     <nav v-if="library.bandCount > 1" class="jump">
       <a
-        v-if="library.bandPages.length > 0"
+        v-if="library.standingAt !== null"
         class="jump-item"
         href="#library-band-pages"
         @click="flash('pages')"
       >
-        頁面 <span class="jump-count">{{ library.bandPages.length }}</span>
+        頁面
+        <span v-if="library.bandPages.length > 0" class="jump-count">
+          {{ library.bandPages.length }}
+        </span>
       </a>
       <a
         v-if="library.bandProjects.length > 0"
@@ -78,16 +81,18 @@
 
       <template v-else>
         <section
-          v-if="library.bandPages.length > 0"
           id="library-band-pages"
           data-region="project"
           class="band band-document"
           :class="[flashing === 'pages' && 'band-arrived', library.focus === 'project' && 'band-focused']"
         >
           <p class="band-head">
-            頁面 <span class="band-count">{{ library.bandPages.length }}</span>
+            頁面
+            <span v-if="library.bandPages.length > 0" class="band-count">
+              {{ library.bandPages.length }}
+            </span>
           </p>
-          <div :class="gridClass">
+          <div v-if="library.bandPages.length > 0" :class="gridClass">
             <LibraryLeafCard
               v-for="leaf in library.bandPages"
               :key="leaf.id"
@@ -99,6 +104,11 @@
               @enter="openLeaf(leaf)"
             />
           </div>
+          <p v-else class="page-drop" :class="dropping && 'page-drop-ready'">
+            <span>
+              用 Ctrl + 拖曳把下面的圖片放進來，在這個資料夾裡建立 Shashoku 專案
+            </span>
+          </p>
         </section>
 
         <section
@@ -214,17 +224,17 @@ const FLASH_MS = 1500
 const NO_SCROLL_MS = 120
 const ARMED_MS = 3000
 
-const isEmpty = computed(() => {
-  if (library.insideLoading) return false
-  if (library.standingAt === null) return library.home.length === 0
-  return library.bandCount === 0
-})
+// Only the root is ever empty now: every folder stood in draws a page band,
+// and an empty one is the zone a folder becomes a book through.
+const isEmpty = computed(
+  () => !library.insideLoading && library.standingAt === null && library.home.length === 0,
+)
 
-const emptyText = computed(() => {
-  if (library.roots.length === 0) return '左邊按「加入工作區」，把一個裝著書的資料夾放進來。'
-  if (library.standingAt === null) return '還沒有工作區。'
-  return '這個資料夾是空的。'
-})
+const emptyText = computed(() =>
+  library.roots.length === 0
+    ? '左邊按「加入工作區」，把一個裝著書的資料夾放進來。'
+    : '還沒有工作區。',
+)
 
 // A single-value toggle group can also clear itself, and there is no such thing
 // as showing the shelf in no view at all.
@@ -344,6 +354,8 @@ interface Sorting {
   pointerId: number
   book: string
   kind: 'reorder' | 'import'
+  /** The folder is not a book yet, so letting go has to make it one first. */
+  create: boolean
   /** Populated for `'reorder'`, natural (band) order — never selection order. */
   pageIds: string[]
   /** Populated for `'import'`, natural (band) order. */
@@ -358,6 +370,8 @@ let framing: Framing | null = null
 let sorting: Sorting | null = null
 const marqueeStyle = ref<Record<string, string> | null>(null)
 const dropLineStyle = ref<Record<string, string> | null>(null)
+/** Reactive where `sorting` is not: the empty page band lights up from it. */
+const dropping = ref(false)
 
 function scrollerFrame(el: HTMLElement, rect: DOMRect) {
   return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
@@ -371,7 +385,10 @@ function scrollerFrame(el: HTMLElement, rect: DOMRect) {
  */
 function territoryBoundary(el: HTMLElement, rect: DOMRect): number {
   const toContentY = (clientY: number) => clientY - rect.top + el.scrollTop
-  const project = el.querySelector<HTMLElement>('[data-region="project"]')
+  // The last of them: the project territory is drawn as a page section and a
+  // book section, and the line the file band starts after is below both.
+  const projects = el.querySelectorAll<HTMLElement>('[data-region="project"]')
+  const project = projects.length > 0 ? projects[projects.length - 1] : null
   const file = el.querySelector<HTMLElement>('[data-region="file"]')
   return bandBoundary(
     project ? toContentY(project.getBoundingClientRect().bottom) : null,
@@ -463,15 +480,18 @@ function beginFraming(
 }
 
 /**
- * A page or a file card dragged past the threshold with Ctrl held, inside a
- * book — the one place a page band exists to drop into. `false` for every
- * other case leaves the caller to treat the press as a no-op drag, same as
- * before this gesture existed.
+ * A page or a file card dragged past the threshold with Ctrl held. The page
+ * band it lands in exists in every folder, so a folder that is not a book yet
+ * is a target too — letting go there is what turns it into one.
+ *
+ * ⛔ Only a picture can become a page. The file band also carries folders and
+ * the book's own `shashoku/`, and a drop that took one of those would hand
+ * `createPage` a directory to read as an image.
  */
 function beginSorting(p: PendingCard, e: PointerEvent): boolean {
   if (settling > 0) return false
   const book = library.standingAt
-  if (!library.inside.book || book === null) return false
+  if (book === null) return false
   const el = scroller.value
   if (el === null) return false
   const rect = el.getBoundingClientRect()
@@ -483,19 +503,35 @@ function beginSorting(p: PendingCard, e: PointerEvent): boolean {
   const moving = source.filter((item) => movingKeys.has(item.key))
   if (moving.length === 0) return false
 
-  const pageBoxes = cardBoxesIn(el, rect, 'project')
-  const excluded = p.region === 'project' ? movingKeys : new Set<string>()
+  const pageIds = moving.flatMap((item) => (item.kind === 'page' ? [item.page.id] : []))
+  const sourceNames = moving.flatMap((item) =>
+    item.kind === 'entry' && !item.entry.folder && item.entry.cover !== null
+      ? [item.entry.name]
+      : [],
+  )
+  const kind = pageIds.length > 0 ? 'reorder' : 'import'
+  if (kind === 'import' && sourceNames.length === 0) return false
+
+  // Only the pages: the project territory draws the books standing in this
+  // folder beside them, and a drop lands among pages alone.
+  const pageKeys = new Set(library.bandPages.map(pageKey))
+  const excluded = kind === 'reorder' ? movingKeys : new Set<string>()
+  const pageBoxes = cardBoxesIn(el, rect, 'project').filter(
+    (c) => pageKeys.has(c.key) && !excluded.has(c.key),
+  )
 
   sorting = {
     pointerId: p.pointerId,
     book,
-    kind: p.region === 'project' ? 'reorder' : 'import',
-    pageIds: moving.flatMap((item) => (item.kind === 'page' ? [item.page.id] : [])),
-    sourceNames: moving.flatMap((item) => (item.kind === 'entry' ? [item.entry.name] : [])),
-    targetCards: pageBoxes.filter((c) => !excluded.has(c.key)),
+    kind,
+    create: !library.inside.book,
+    pageIds,
+    sourceNames,
+    targetCards: pageBoxes,
     lastClient: { x: e.clientX, y: e.clientY },
     targetIndex: 0,
   }
+  dropping.value = true
   updateSortingPreview()
   return true
 }
@@ -641,6 +677,7 @@ function endSorting(): void {
   const s = sorting
   sorting = null
   dropLineStyle.value = null
+  dropping.value = false
   if (s === null) return
   settling++
   const done = () => {
@@ -654,10 +691,12 @@ function endSorting(): void {
     return
   }
   // An import is the one case that does need the folder read again — its
-  // pages have no card yet, and their names and covers are on disk.
+  // pages have no card yet, and their names and covers are on disk. A folder
+  // that has just become a book needs the whole walk instead: the side column
+  // counts books, and one has appeared where there was none.
   void order
-    .importFilesAt(s.book, s.sourceNames, s.targetIndex)
-    .then(() => library.reloadInside())
+    .importFilesAt(s.book, s.sourceNames, s.targetIndex, s.create)
+    .then(() => (s.create ? library.refresh() : library.reloadInside()))
     .then(done, done)
 }
 
@@ -695,6 +734,7 @@ function onShelfPointerCancel(e: PointerEvent) {
   if (sorting !== null && e.pointerId === sorting.pointerId) {
     sorting = null
     dropLineStyle.value = null
+    dropping.value = false
     return
   }
   if (pending !== null && e.pointerId === pending.pointerId) pending = null
@@ -900,6 +940,33 @@ onMounted(() => {
   margin-left: 0.25rem;
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* Two cells of the grid above it — the same 9rem column at the 3/4 the covers
+   are drawn in — so an empty band reads as somewhere pages go rather than as
+   a gap. Capped against the viewport: a short window would otherwise have
+   nothing but this on screen. */
+.page-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(calc(2 * 9rem * 4 / 3 + 0.5rem), 40vh);
+  padding: 1rem;
+  border: 1px dashed color-mix(in oklch, var(--primary) 35%, transparent);
+  border-radius: 0.375rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.page-drop span {
+  max-width: 22rem;
+}
+.page-drop-ready {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  color: var(--foreground);
 }
 
 /* -1px and inset both answer the same 8px gap between bands (.shelf-scroll's
