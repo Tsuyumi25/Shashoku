@@ -16,7 +16,7 @@
             a trip to the other side.
           -->
           <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
-            <TranslateSidebar />
+            <ToolBoard />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <ExportPanel v-if="ui.view === 'export'" />
@@ -78,8 +78,8 @@ import { isTypingSurface, ownsKeyboard } from '@/lib/typingSurface'
 import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
+import ToolBoard from '@/modes/ToolBoard.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
-import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'

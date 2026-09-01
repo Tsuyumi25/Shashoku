@@ -32,9 +32,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /**
  * What a selection means, and what it looks like — the two questions a batch
- * pass moves between, stacked. Kept on the far side of the canvas from the
- * lists that build a selection, so that picking objects and deciding about them
- * are not the same corner of the screen fighting for room.
+ * pass moves between, stacked.
  *
  * The first is text's alone, since only text carries a meaning; the second
  * takes whatever is selected. That is not an inconsistency — how a node looks

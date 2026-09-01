@@ -159,7 +159,7 @@
         :min-size="12"
         class="flex min-w-0 flex-col border-l border-border bg-card"
       >
-        <ToolBoard />
+        <TranslateSidebar />
       </SplitterPanel>
     </SplitterGroup>
   </div>
@@ -184,7 +184,7 @@ import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import ToolRail from '@/components/ToolRail.vue'
-import ToolBoard from '@/modes/ToolBoard.vue'
+import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
