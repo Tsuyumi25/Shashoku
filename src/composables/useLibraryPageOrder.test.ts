@@ -12,6 +12,8 @@ import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 
 const metaByRoot = new Map<string, ProjectJson>()
 let pageCounter = 0
+const scanByRoot = new Map<string, { hasShashokuDir: boolean; hasSentinel: boolean }>()
+let created: string[] = []
 
 function seed(root: string, pages: string[]): void {
   metaByRoot.set(root, { ...defaultProjectJson(), pages })
@@ -30,6 +32,12 @@ function stubWindow() {
       createPage: async () => {
         pageCounter += 1
         return `p${pageCounter}`
+      },
+      scanRoot: async (root: string) =>
+        scanByRoot.get(root) ?? { hasShashokuDir: false, hasSentinel: false },
+      createProject: async (root: string) => {
+        created.push(root)
+        return { projectMetaRaw: serializeProjectJson(defaultProjectJson()), pages: [] }
       },
     },
   })
@@ -58,6 +66,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   metaByRoot.clear()
   pageCounter = 0
+  scanByRoot.clear()
+  created = []
   stubWindow()
 })
 
@@ -316,6 +326,40 @@ describe('a write that did not land', () => {
       useLibraryPageOrder().reorderPagesTo('/book-g', ['b'], 0),
     ).resolves.toBeUndefined()
 
+    expect(useNoticeStore().notice?.text).toBeTruthy()
+  })
+})
+
+describe('a drop that has to make the project first', () => {
+  it('builds one in a folder that holds nothing of ours, then imports', async () => {
+    await useLibraryPageOrder().importFilesAt('/fresh', ['a.png'], 0, true)
+
+    expect(created).toEqual(['/fresh'])
+    expect((await useBookMetaStore().handleFor('/fresh'))?.order).toEqual(['p1'])
+  })
+
+  it('leaves a folder that already carries the sentinel alone', async () => {
+    seed('/already', ['x'])
+    scanByRoot.set('/already', { hasShashokuDir: true, hasSentinel: true })
+
+    await useLibraryPageOrder().importFilesAt('/already', ['a.png'], 1, true)
+
+    expect(created).toEqual([])
+    expect((await useBookMetaStore().handleFor('/already'))?.order).toEqual(['x', 'p1'])
+  })
+
+  /**
+   * `createProject` writes a default `project.json` over whatever is there,
+   * so a missing sentinel beside a `shashoku/` full of work has to stop the
+   * drop rather than be read as an empty folder.
+   */
+  it('refuses a shashoku folder whose sentinel is gone, and says so', async () => {
+    scanByRoot.set('/wounded', { hasShashokuDir: true, hasSentinel: false })
+
+    await useLibraryPageOrder().importFilesAt('/wounded', ['a.png'], 0, true)
+
+    expect(created).toEqual([])
+    expect(pageCounter).toBe(0)
     expect(useNoticeStore().notice?.text).toBeTruthy()
   })
 })
