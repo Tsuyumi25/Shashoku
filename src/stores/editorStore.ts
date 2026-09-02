@@ -32,7 +32,7 @@ import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { normalizeTagSet, sameTagSet, withTag, withoutTag } from '@shared/tags/set'
+import { normalizeTagSet, sameTagSet, tagSetKey } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 
@@ -522,6 +522,22 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** What one stroke would do right now, switch and held key together. */
   const paintStrokeUpdatesStyle = computed(() => paintUpdatesStyle.value !== overrideHeld.value)
+
+  /**
+   * What a load aimed at the selection would land on: how many text objects,
+   * and how many meanings they hold between them.
+   *
+   * ⭐ The second number is the one worth showing. The act writes one meaning,
+   * so anything above one is being flattened — and a selection gathered by
+   * eye is exactly where that happens without being noticed.
+   */
+  const paintTargetScope = computed(() => {
+    const targets = selectedTextObjects()
+    return {
+      objects: targets.length,
+      meanings: new Set(targets.map(({ entry }) => tagSetKey(entry.tags))).size,
+    }
+  })
 
   /**
    * Which of an object's two bodies everything is working on.
@@ -2309,40 +2325,6 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
-  /**
-   * Turning a tag on for a selection that already partly carries it means
-   * putting it on the rest, not flipping each object separately: a control
-   * showing one state has to end in one state, or a second click would undo
-   * what the first appeared to do.
-   *
-   * The style follows the tags, taken from what the project already sets under
-   * the meaning each object ends up with, and it overwrites whatever was there.
-   * A deliberate pause rather than a settled trade: which edits should be
-   * protected from this is a question only a chapter that has actually been
-   * typeset can answer. What it costs is one undo — which is why the tags and
-   * the styles are one command and not two.
-   *
-   * What triggers it is the tag set changing, so an object already carrying the
-   * tag is left as it is: filling in the stragglers of a half-tagged selection
-   * would otherwise overwrite the ones that were already right.
-   *
-   * Everything is derived from a sample read before anything is written, so a
-   * batch lands the same way whatever order the objects come in, and no object
-   * casts a vote in the meaning it is in the middle of joining.
-   */
-  function cmdToggleTagOnSelection(tag: string) {
-    toggleTagOn(selectedTextObjects(), tag)
-  }
-
-  /**
-   * The same act aimed by name rather than by what is selected, for a list that
-   * already holds a group and would otherwise have to take the selection over
-   * to say anything about it.
-   */
-  function cmdToggleTagOnObjects(ids: readonly string[], tag: string) {
-    toggleTagOn(textObjectsByIds(ids), tag)
-  }
-
   /** Every text object among these ids a change is allowed to reach. */
   function textObjectsByIds(ids: readonly string[]): AppearanceTarget<TextLayerEntry>[] {
     const project = useProjectStore()
@@ -2357,48 +2339,20 @@ export const useEditorStore = defineStore('editor', () => {
     return out
   }
 
-  function toggleTagOn(targets: AppearanceTarget<TextLayerEntry>[], tag: string) {
-    const project = useProjectStore()
-    if (targets.length === 0) return
-    const adding = !targets.every(({ entry }) => entry.tags.includes(tag))
-    const before = targets.map(({ pageId, entry }) => ({
-      pageId,
-      id: entry.id,
-      tags: [...entry.tags],
-      style: { ...entry.translation.style },
-    }))
-    const sample = chapterBucketObjects()
-    const { tags: registry, seedStyle } = project.header
-    const after = before.map((entry) => {
-      const tags = adding ? withTag(entry.tags, tag) : withoutTag(entry.tags, tag)
-      if (sameTagSet(entry.tags, tags)) return entry
-      return { ...entry, tags, style: deriveStyle(sample, tags, registry, seedStyle) }
-    })
-    const write = (states: typeof before) => {
-      for (const { pageId, id, tags, style } of states) {
-        project.setLabelTags(pageId, id, tags)
-        project.setLabelStyle(pageId, id, 'translation', style)
-      }
-    }
-    pushCommand({
-      label: `${adding ? 'tag' : 'untag'} ${tag} ${targets.length}`,
-      do: () => write(after),
-      undo: () => write(before),
-    })
-  }
-
   /**
-   * A gesture's worth of spraying, however many objects it crossed — crossing
-   * five in one sweep is one thing that happened.
+   * One aim's worth of writing, however many objects it reaches — a sweep that
+   * crosses five, or a batch that lands on forty, is one thing that happened.
    *
    * The load replaces what an object carried rather than joining it. A brush
    * holds a whole meaning, and adding would build combinations nobody chose,
-   * which is the drift the buckets exist to find; changing one part of a meaning
-   * an object already has is what ticking against a selection is for. Taking a
-   * meaning away is this same stroke with nothing loaded.
+   * which is the drift the buckets exist to find. Taking a meaning away is the
+   * same act with nothing loaded, so there is no second tool for that. Changing
+   * one part of a meaning is composing the load and writing it again — what is
+   * shown is what will be written, where a diff would have to be worked out.
    *
-   * The style follows on the terms `cmdToggleTagOnSelection` sets: derived from
-   * a sample read before anything is written, and in one command with the tags.
+   * The style is derived from a sample read before anything is written, and it
+   * travels in one command with the tags: an undo that took back the meaning
+   * and left the look would leave a style nobody asked for standing.
    */
   function cmdPaintTags(
     ids: readonly string[],
@@ -2699,14 +2653,13 @@ export const useEditorStore = defineStore('editor', () => {
     appearanceKind,
     cmdApplyStyle,
     cmdApplyEffects,
-    cmdToggleTagOnSelection,
-    cmdToggleTagOnObjects,
     cmdPaintTags,
     paintTags,
     loadPaintTags,
     paintUpdatesStyle,
     overrideHeld,
     paintStrokeUpdatesStyle,
+    paintTargetScope,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
     cmdSetLabelTags,

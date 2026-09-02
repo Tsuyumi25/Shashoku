@@ -2497,170 +2497,6 @@ describe('moving through a narrowed list', () => {
   })
 })
 
-describe('tagging a selection', () => {
-  function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
-    const entry = label(id)
-    entry.tags = tags
-    entry.translation.style = { ...DEFAULT_TEXT_STYLE, ...style }
-    return entry
-  }
-
-  function many(n: number, from: number, tags: string[], style: Partial<TextStyle>) {
-    return Array.from({ length: n }, (_, i) => styled(`s${from + i}`, tags, style))
-  }
-
-  const SEED_FAMILY = 'Seed'
-
-  function openTagged(labels: TextLayerEntry[]) {
-    const { project, editor } = openOnePage(labels)
-    project.projectMeta.seedStyle = { ...DEFAULT_TEXT_STYLE, fontFamily: SEED_FAMILY }
-    project.addTag('outside')
-    project.addTag('emphasis')
-    return { project, editor }
-  }
-
-  const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-    project.labelById(PAGE, id)!.translation.style
-
-  const tagsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-    project.labelById(PAGE, id)!.tags
-
-  it('gives the object the style its new meaning already has', () => {
-    const { project, editor } = openTagged([
-      styled('new', [], { fontFamily: SEED_FAMILY }),
-      ...many(5, 1, ['outside'], { fontFamily: 'Mincho', color: '#112233' }),
-    ])
-    editor.selectOnly('new')
-
-    editor.cmdToggleTagOnSelection('outside')
-
-    expect(tagsOf(project, 'new')).toEqual(['outside'])
-    expect(styleOf(project, 'new')).toMatchObject({ fontFamily: 'Mincho', color: '#112233' })
-  })
-
-  /** One act: a tag that changed the look and an undo that took back only the
-   * tag would leave a style nobody asked for standing. */
-  it('takes back the tag and the style together', () => {
-    const { project, editor } = openTagged([
-      styled('new', [], { fontFamily: SEED_FAMILY }),
-      ...many(5, 1, ['outside'], { fontFamily: 'Mincho' }),
-    ])
-    editor.selectOnly('new')
-    editor.cmdToggleTagOnSelection('outside')
-
-    editor.undo()
-
-    expect(tagsOf(project, 'new')).toEqual([])
-    expect(styleOf(project, 'new').fontFamily).toBe(SEED_FAMILY)
-  })
-
-  /**
-   * Derived before written, which is what lets the degradation chain have no
-   * exception in it: written first, this object would be the only member of its
-   * new tag set and would recommend its own current style back to itself.
-   */
-  it('does not let the object vote for itself in the meaning it is joining', () => {
-    const { project, editor } = openTagged([
-      styled('x', ['outside'], { fontFamily: 'Gothic' }),
-      ...many(30, 1, ['outside'], { fontFamily: 'Mincho' }),
-    ])
-    editor.selectOnly('x')
-
-    editor.cmdToggleTagOnSelection('emphasis')
-
-    expect(tagsOf(project, 'x')).toEqual(['emphasis', 'outside'])
-    expect(styleOf(project, 'x').fontFamily).toBe('Mincho')
-  })
-
-  /** Each object derives from its own resulting tag set, so a batch lands the
-   * same way however the objects are ordered. */
-  it('derives per object across a mixed selection', () => {
-    const { project, editor } = openTagged([
-      styled('a', ['outside'], { fontFamily: 'Gothic' }),
-      styled('b', [], { fontFamily: 'Gothic' }),
-      ...many(4, 1, ['outside'], { fontFamily: 'Mincho' }),
-    ])
-    editor.selectMany(['a', 'b'], false)
-
-    editor.cmdToggleTagOnSelection('emphasis')
-
-    expect(styleOf(project, 'a').fontFamily).toBe('Mincho')
-    expect(styleOf(project, 'b').fontFamily).toBe(SEED_FAMILY)
-    expect(editor.canUndo).toBe(true)
-    editor.undo()
-    expect(styleOf(project, 'a').fontFamily).toBe('Gothic')
-    expect(styleOf(project, 'b').fontFamily).toBe('Gothic')
-  })
-
-  /** Untagged is not a meaning to derive from, so taking the last tag off is a
-   * reset — the same answer a brand new object gets. */
-  it('falls back to the seed when the last tag comes off', () => {
-    const { project, editor } = openTagged([
-      styled('a', ['outside'], { fontFamily: 'Gothic', color: '#abcdef' }),
-      ...many(4, 1, ['outside'], { fontFamily: 'Gothic', color: '#abcdef' }),
-    ])
-    editor.selectOnly('a')
-
-    editor.cmdToggleTagOnSelection('outside')
-
-    expect(tagsOf(project, 'a')).toEqual([])
-    expect(styleOf(project, 'a')).toEqual(project.header.seedStyle)
-  })
-
-  it('counts the whole chapter, not the page on screen', () => {
-    const project = useProjectStore()
-    project.allFiles = [
-      pageOf('001.png', [{ ...label('new'), tags: [] }]),
-      pageOf('002.png', many(5, 1, ['outside'], { fontFamily: 'Mincho' })),
-    ]
-    project.addTag('outside')
-    const editor = useEditorStore()
-    editor.startOnPage('001.png')
-    editor.selectOnly('new')
-
-    editor.cmdToggleTagOnSelection('outside')
-
-    expect(project.labelById('001.png', 'new')!.translation.style.fontFamily).toBe('Mincho')
-  })
-})
-
-describe('tagging a partly tagged selection', () => {
-  function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
-    const entry = label(id)
-    entry.tags = tags
-    entry.translation.style = { ...DEFAULT_TEXT_STYLE, ...style }
-    return entry
-  }
-
-  /**
-   * The trigger is the tag set changing. An object the click did not reclassify
-   * had nothing happen to it, and restyling it would make a batch that fills in
-   * the stragglers overwrite the objects that were already right.
-   */
-  it('restyles only the objects whose meaning changed', () => {
-    const project = useProjectStore()
-    const editor = useEditorStore()
-    project.allFiles = [
-      pageOf(PAGE, [
-        styled('had', ['outside'], { fontFamily: 'Gothic' }),
-        styled('lacked', [], { fontFamily: 'Gothic' }),
-        ...Array.from({ length: 4 }, (_, i) =>
-          styled(`s${i}`, ['outside'], { fontFamily: 'Mincho' }),
-        ),
-      ]),
-    ]
-    project.addTag('outside')
-    editor.currentPageId = PAGE
-    editor.selectMany(['had', 'lacked'], false)
-
-    editor.cmdToggleTagOnSelection('outside')
-
-    expect(project.labelById(PAGE, 'had')!.translation.style.fontFamily).toBe('Gothic')
-    expect(project.labelById(PAGE, 'lacked')!.translation.style.fontFamily).toBe('Mincho')
-    expect(project.labelById(PAGE, 'lacked')!.tags).toEqual(['outside'])
-  })
-})
-
 describe('spraying tags with the brush', () => {
   function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
     const entry = label(id)
@@ -2728,6 +2564,29 @@ describe('spraying tags with the brush', () => {
     expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Seed')
   })
 
+  /**
+   * The number on the button. One meaning is a batch that keeps what it finds;
+   * anything above one is being flattened, and that is what has to be visible
+   * before the press.
+   */
+  it('counts the meanings a batch would flatten, not just the objects', () => {
+    const { editor } = openSprayed([
+      styled('a', ['outside'], {}),
+      styled('b', ['outside'], {}),
+      styled('c', ['emphasis'], {}),
+      styled('d', [], {}),
+    ])
+
+    editor.selectMany(['a', 'b'], false)
+    expect(editor.paintTargetScope).toEqual({ objects: 2, meanings: 1 })
+
+    editor.selectMany(['a', 'b', 'c', 'd'], false)
+    expect(editor.paintTargetScope).toEqual({ objects: 4, meanings: 3 })
+
+    editor.selectOnly(null)
+    expect(editor.paintTargetScope).toEqual({ objects: 0, meanings: 0 })
+  })
+
   /** Held, the key turns the switch over — whichever way it was standing. */
   it('reads the held key as turning the switch over, not as one fixed answer', () => {
     const editor = useEditorStore()
@@ -2773,23 +2632,6 @@ describe('spraying tags with the brush', () => {
     editor.undo()
 
     expect(tagsOf(project, 'mine')).toEqual(['emphasis'])
-  })
-
-  /** A list holding a group says something about it without taking it over. */
-  it('toggles a tag on named objects without touching the selection', () => {
-    const { project, editor } = openSprayed([
-      styled('a', [], {}),
-      styled('b', [], {}),
-      styled('held', [], {}),
-    ])
-    editor.selectOnly('held')
-
-    editor.cmdToggleTagOnObjects(['a', 'b'], 'outside')
-
-    expect(tagsOf(project, 'a')).toEqual(['outside'])
-    expect(tagsOf(project, 'b')).toEqual(['outside'])
-    expect(tagsOf(project, 'held')).toEqual([])
-    expect([...editor.selectedIds]).toEqual(['held'])
   })
 
   /** Nothing changed is nothing to undo — a sweep over what already says this. */

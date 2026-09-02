@@ -4,13 +4,17 @@
     list, because a tag being on the brush and a tag existing are two states of
     the same row, and two lists would have to be kept saying the same thing.
   -->
-  <div class="h-full min-h-0 overflow-y-auto p-1.5">
+  <div class="flex h-full min-h-0 flex-col">
     <!--
       How the brush behaves, above what it carries. The mark is square where a
       tag's is round, and a rule stands under it: one press means "load this"
       below the rule and "turn this over" above it, and which of the two it is
       has to be readable before the press rather than after.
+
+      Pinned, as the button at the foot is: both are the tool, and only the
+      list between them is what the tool is carrying.
     -->
+    <div class="shrink-0 px-1.5 pt-1.5">
     <button
       type="button"
       class="flex w-full min-w-0 items-center gap-2 rounded px-1 py-1 text-xs hover:bg-secondary/40"
@@ -33,8 +37,10 @@
         ctrl
       </kbd>
     </button>
-    <div class="my-1.5 border-b border-border" />
+    </div>
+    <div class="mx-1.5 my-1.5 shrink-0 border-b border-border" />
 
+    <div class="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
     <Draggable
       :model-value="project.header.tags"
       item-key="name"
@@ -108,6 +114,32 @@
     </template>
 
     <CanvasMenu :at="menuAt" :items="MENU" @pick="onPick" @close="menuAt = null" />
+    </div>
+
+    <!--
+      The same act as a stroke, aimed by what is selected instead of by where
+      the hand goes — so the brush stays the one place a meaning is written, and
+      a batch does not need a second set of rules to explain itself.
+
+      It writes one meaning, so a selection holding several is flattening them.
+      That count is on the button rather than behind a hover: a selection
+      gathered by eye is exactly where nobody notices.
+    -->
+    <div class="shrink-0 border-t border-border p-1.5">
+      <button
+        type="button"
+        class="w-full rounded border border-border px-2 py-1 text-xs disabled:opacity-40"
+        :class="scope.objects > 0 && 'hover:bg-secondary'"
+        :disabled="scope.objects === 0"
+        title="把畫筆上這組標記套用到選中的文字物件。按住 Ctrl 可以把這一次反過來"
+        @click="onApplyToSelection"
+      >
+        <span class="block truncate">套用於選取的 {{ scope.objects }} 個</span>
+        <span v-if="scope.meanings > 1" class="mt-0.5 block truncate text-[10px] text-amber-500">
+          {{ scope.meanings }} 種組合會被壓成一種
+        </span>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -123,6 +155,16 @@ import { useProjectStore } from '@/stores/projectStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+
+const scope = computed(() => editor.paintTargetScope)
+
+function onApplyToSelection() {
+  editor.cmdPaintTags(
+    [...editor.selectedIds],
+    editor.paintTags,
+    editor.paintStrokeUpdatesStyle,
+  )
+}
 
 /** How many objects in the chapter carry each tag, registered or not. */
 const counts = computed(() => {
