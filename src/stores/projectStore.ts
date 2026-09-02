@@ -1236,6 +1236,58 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /**
+   * Puts a block into the same translation, and the same side, as one already
+   * in it — directly after it.
+   *
+   * ⭐ What a copy of a piece of lettering is: another piece of the same
+   * content. A block that landed on the page belonging to nothing would be a
+   * translation nobody can find, drawn on top of the one it came from.
+   *
+   * The gap it arrives with is empty, as a sound split in two wants.
+   */
+  function addMemberAfter(pageId: string, afterId: string, blockId: string): boolean {
+    const file = pageById(pageId)
+    const place = file ? placeOfBlock(file.page, afterId) : undefined
+    if (!file || place === undefined) return false
+    const list = place.side === 'source' ? place.unit.source : place.unit.translation
+    if (list.members.includes(blockId)) return false
+    list.members.splice(place.at + 1, 0, blockId)
+    list.separators.splice(place.at, 0, '')
+    markPageDirty(pageId)
+    return true
+  }
+
+  /**
+   * The order the blocks of one side are read in, restated.
+   *
+   * ⚠️ The whole side at once, and refused unless it names exactly what the
+   * side already holds. A reorder that also added or dropped a block would be
+   * two acts wearing one name, and the one it does not announce is the one that
+   * loses somebody's lettering.
+   *
+   * ⭐ The gaps stay where they are. What one holds is what goes between the
+   * first block and the second, which is a fact about that seam and not about
+   * either block — a space wanted between two pieces of lettering is still
+   * wanted there when they change places.
+   */
+  function reorderMembers(
+    pageId: string,
+    unitId: string,
+    side: TextSide,
+    members: readonly string[],
+  ): boolean {
+    const unit = unitById(pageId, unitId)
+    if (!unit) return false
+    const list = side === 'source' ? unit.source : unit.translation
+    if (members.length !== list.members.length) return false
+    if (new Set(members).size !== members.length) return false
+    if (!members.every((id) => list.members.includes(id))) return false
+    list.members = [...members]
+    markPageDirty(pageId)
+    return true
+  }
+
   function setLabelTags(pageId: string, unitId: string, tags: readonly string[]) {
     const unit = unitById(pageId, unitId)
     if (!unit) return
@@ -1429,6 +1481,8 @@ export const useProjectStore = defineStore('project', () => {
     moveLabel,
     rotateLabel,
     updateLabelText,
+    addMemberAfter,
+    reorderMembers,
     setLabelTags,
     setLabelSource,
     setLabelTranslation,

@@ -2440,6 +2440,33 @@ export const useEditorStore = defineStore('editor', () => {
    * travels in one command with the tags: an undo that took back the meaning
    * and left the look would leave a style nobody asked for standing.
    */
+  /**
+   * The order the blocks of one side are read in, as a step of history.
+   *
+   * ⭐ On the stack rather than written straight through, unlike a restack in
+   * the layer tree: this changes what the translation says. Dragging 「隆」 above
+   * 「轟」 makes the page read 隆轟, and an edit to the words is exactly what a
+   * Ctrl+Z is expected to reach.
+   */
+  function cmdReorderMembers(
+    pageId: string,
+    unitId: string,
+    side: TextSide,
+    members: readonly string[],
+  ) {
+    const project = useProjectStore()
+    const unit = project.unitById(pageId, unitId)
+    if (!unit) return
+    const was = [...(side === 'source' ? unit.source : unit.translation).members]
+    if (was.length === members.length && was.every((id, at) => id === members[at])) return
+    const wanted = [...members]
+    pushCommand({
+      label: `reorder-members ${unitId}`,
+      do: () => project.reorderMembers(pageId, unitId, side, wanted),
+      undo: () => project.reorderMembers(pageId, unitId, side, was),
+    })
+  }
+
   function cmdPaintTags(
     ids: readonly string[],
     tags: readonly string[],
@@ -2744,6 +2771,7 @@ export const useEditorStore = defineStore('editor', () => {
     appearanceKind,
     cmdApplyStyle,
     cmdApplyEffects,
+    cmdReorderMembers,
     cmdPaintTags,
     paintTags,
     loadPaintTags,

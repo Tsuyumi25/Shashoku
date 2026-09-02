@@ -1,8 +1,9 @@
 import { computed } from 'vue'
 import type { LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
+import { cloneEffects } from '@shared/effects/clone'
 import { pageStack } from '@shared/page/stack'
-import { isMergeable, pathOf, textObjects } from '@shared/page/tree'
+import { isMergeable, pathOf } from '@shared/page/tree'
 import {
   mergeDownPair,
   mergeParticipants,
@@ -210,18 +211,33 @@ export function useMergeLayers() {
    * layer file of its own — two entries naming one file would let deleting
    * either of them take the other's pixels with it when orphans are swept.
    */
+  /**
+   * ⚠️ Everything a node owns is copied, not shared. A spread alone leaves the
+   * copy and its original holding one body and one list of effects between
+   * them: dragging either would move both, typing into either would write into
+   * both, and what looked like two objects would be one wearing two ids.
+   */
   function cloneEntry(entry: LayerEntry, into: Clone): LayerEntry {
     const id = generateId()
+    const effects = cloneEffects(entry.effects)
     if (entry.kind === 'raster') {
       const file = `${id}.png`
       if (entry.w > 0 && entry.h > 0) into.files.push({ from: entry.file, to: file })
-      return { ...entry, id, file }
+      return { ...entry, id, file, effects }
     }
     if (entry.kind === 'text') {
       into.texts.push([entry.id, id])
-      return { ...entry, id }
+      const body = { ...entry.body, lines: [...entry.body.lines], style: { ...entry.body.style } }
+      return entry.side === 'source'
+        ? { ...entry, id, effects, side: 'source', body: { ...body, by: entry.body.by } }
+        : { ...entry, id, effects, side: 'translation', body }
     }
-    return { ...entry, id, children: entry.children.map((c) => cloneEntry(c, into)) }
+    return {
+      ...entry,
+      id,
+      effects,
+      children: entry.children.map((c) => cloneEntry(c, into)),
+    }
   }
 
   const canDuplicate = computed(() => {
@@ -253,20 +269,17 @@ export function useMergeLayers() {
     // Directly above the original, which is where every panel puts a copy.
     const at = [...path.slice(0, -1), path[path.length - 1] + 1]
 
-    /** Each copied translation follows the one it came from, so reading order survives. */
-    const order = [...(project.pageById(open.page)?.page.readingOrder ?? [])]
-    for (const [was, now] of clone.texts) {
-      const found = order.indexOf(was)
-      order.splice(found === -1 ? order.length : found + 1, 0, now)
-    }
-
     let removed: RemovedEntry | null = null
     editor.pushCommand({
       label: `duplicate-layer ${copy.id}`,
       do: () => {
         if (removed === null) {
           project.addLayer(open.page, copy, at)
-          if (textObjects([copy]).length > 0) project.setReadingOrder(open.page, [...order])
+          // ⭐ Each copy joins the translation its original says, right after
+          // it — a second piece of lettering for the same content rather than a
+          // second translation of it. Reading order is untouched for the same
+          // reason: the page still has as much to say as it did.
+          for (const [was, now] of clone.texts) project.addMemberAfter(open.page, was, now)
         } else {
           project.restoreEntry(removed)
         }

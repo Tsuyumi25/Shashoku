@@ -153,7 +153,7 @@ describe('the translation candidates', () => {
    * with too few pieces has no block to show some of its words from.
    */
   it('opens a slot naming a candidate with the wrong number of blocks as empty', () => {
-    const short = [{ id: 't1', pieces: [['掰'], ['開']] }]
+    const short = [{ id: 't1', pieces: [['轟'], ['隆']] }]
     const parsed = parseManifest(withPool({ candidates: short, chosen: 't1' }))
     expect(parsed.translationUnits[0].chosen).toBeNull()
   })

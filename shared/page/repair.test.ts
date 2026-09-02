@@ -181,7 +181,7 @@ describe('repairing what a unit says it is made of', () => {
     const second = blankBlock('at2', 'translation', DEFAULT_TEXT_STYLE)
     a.blocks.push(second)
     a.unit.translation = { members: ['at', 'at2'], separators: [''] }
-    a.unit.candidates = [{ id: 'c1', pieces: [['掰開']] }]
+    a.unit.candidates = [{ id: 'c1', pieces: [['轟隆']] }]
     a.unit.chosen = 'c1'
     const { manifest } = repairPage(page([a], ['a']), counter())
     expect(manifest.translationUnits[0].chosen).toBeNull()

@@ -123,7 +123,7 @@
             :key="row.key"
             class="gutter-cell border-b border-border/40 pt-1 pr-1 text-right text-xs text-muted-foreground tabular-nums select-none"
             :class="isSelected(row) && 'bg-accent/50'"
-          >{{ row.depth ?? '' }}</div>
+          >{{ row.kind === 'block' ? '' : (row.depth ?? '') }}</div>
         </div>
 
         <!--
@@ -144,24 +144,25 @@
           :class="group.rows.length === 0 ? 'rows-empty' : 'rows'"
           @change="onChanged(group, $event)"
         >
+          <!--
+            ⚠️ The item slot below holds one element and nothing else — no
+            sibling, no `v-if` at the top of it, and not even a comment. Every
+            one of those is a child node, and vuedraggable refuses a slot with
+            more than one. Which row was dragged is worked out by counting the
+            children it was handed, so a second node is a row that does not
+            exist. Anything that has to be said about a row is said in the
+            dispatchers in the script, or here.
+          -->
           <template #item="{ element }">
             <div
               tabindex="0"
-              :data-row-id="(element as LabelRow).blocks[0]?.id"
+              :data-row-id="rowId(element as Row)"
               class="row-content flex min-w-0 items-start gap-1.5 border-b border-border/40 py-1 pr-2 pl-1.5 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
-              :class="[
-                isSelected(element as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
-                !isEditing(element as LabelRow) && 'select-none',
-                (element as LabelRow).lane !== undefined && 'rail-held',
-                !isEditing(element as LabelRow) &&
-                  !filtering &&
-                  (element as LabelRow).lane === undefined &&
-                  'cursor-grab',
-              ]"
-              :style="branchIndent(element as LabelRow)"
-              @mousedown="onPick(element as LabelRow, $event)"
-              @dblclick="onEdit(element as LabelRow)"
-              @keydown="onRowKey(element as LabelRow, $event)"
+              :class="rowClass(element as Row)"
+              :style="rowStyle(element as Row)"
+              @mousedown="onRowDown(element as Row, $event)"
+              @dblclick="onRowOpen(element as Row)"
+              @keydown="onRowKeys(element as Row, $event)"
             >
               <!--
                 Unlike visibility, a lock is worth showing on a flat list: it
@@ -170,11 +171,23 @@
                 tree's to answer.
               -->
               <Lock
-                v-if="isRowLocked(element as LabelRow)"
+                v-if="isRowLocked(element as Row)"
                 :size="11"
                 class="mt-1 shrink-0 text-muted-foreground/60"
                 aria-label="已鎖定"
               />
+
+              <!--
+                ⭐ A block of a split translation is a row like any other — same
+                rule, same padding, same type. What tells it apart is one step of
+                indent and this number, so the column of them reads as the order
+                the side is set in.
+              -->
+              <span
+                v-if="(element as Row).kind === 'block'"
+                class="shrink-0 text-sm leading-snug text-muted-foreground/60 tabular-nums"
+                >{{ (element as BlockRow).at }}</span
+              >
 
               <!--
                 The translation keeps the full width and what the object means
@@ -196,6 +209,7 @@
                   is visible instead of merely absent.
                 -->
                 <span
+                  v-if="(element as Row).kind === 'label'"
                   class="text-[10px] leading-snug whitespace-pre-wrap text-muted-foreground"
                   :class="!asideText(element as LabelRow) && 'opacity-50'"
                 >{{ asideText(element as LabelRow) || '—' }}</span>
@@ -206,73 +220,36 @@
                   caret, which is what makes the two ways of editing one edit.
                 -->
                 <textarea
-                  v-if="isEditing(element as LabelRow)"
+                  v-if="isRowEditing(element as Row)"
                   :ref="takeFocus"
                   rows="1"
                   spellcheck="false"
                   :placeholder="blankLabel"
                   class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
-                  :class="pinned && 'pinned'"
-                  :style="pinnedStyle"
-                  :value="mainText(element as LabelRow)"
-                  @input="onInput(element as LabelRow, $event)"
+                  :class="(element as Row).kind === 'label' && pinned && 'pinned'"
+                  :style="(element as Row).kind === 'label' ? pinnedStyle : undefined"
+                  :value="rowText(element as Row)"
+                  @input="onRowInput(element as Row, $event)"
                   @keydown="onInputKey($event)"
-                  @blur="onInputBlur(element as LabelRow)"
+                  @blur="onRowBlur(element as Row)"
                 />
                 <!--
                   The row goes on reading as a row while the box is away on the
                   canvas — a body being typed elsewhere is still the body this
                   row is about.
+
+                  ⭐ A translation set in several blocks draws none of it here:
+                  the block rows below say the whole of it, and saying it twice
+                  would cost the row a line of height for a line nobody needs.
                 -->
                 <pre
-                  v-if="!isEditing(element as LabelRow) || pinned"
+                  v-if="showsReading(element as Row)"
                   class="reading text-sm leading-snug whitespace-pre-wrap"
-                  :class="isMainBlank(element as LabelRow) && 'text-muted-foreground/50'"
-                >{{ preview(element as LabelRow) }}<br v-if="endsOnABreak(element as LabelRow)" /></pre>
-
-                <!--
-                  ⭐ Only where the lettering was split, so an ordinary balloon
-                  is one row exactly as it always was. Each block gets its own
-                  line to be typed into, numbered in the order it is read.
-                -->
-                <div
-                  v-if="(element as LabelRow).blocks.length > 1"
-                  class="mt-0.5 flex flex-col gap-0.5"
-                >
-                  <div
-                    v-for="(block, at) in (element as LabelRow).blocks"
-                    :key="block.id"
-                    tabindex="0"
-                    :data-row-id="block.id"
-                    class="flex min-w-0 items-start gap-1.5 rounded-sm px-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
-                    :class="
-                      editor.isSelected(block.id) ? 'bg-accent/50' : 'hover:bg-secondary/40'
-                    "
-                    @mousedown.stop="onPickBlock(blockRowOf(element as LabelRow, at), $event)"
-                    @dblclick.stop="onEditBlock(blockRowOf(element as LabelRow, at))"
-                  >
-                    <span class="mt-0.5 shrink-0 text-[10px] text-muted-foreground/70">{{
-                      at + 1
-                    }}</span>
-                    <textarea
-                      v-if="isEditingBlock(blockRowOf(element as LabelRow, at))"
-                      :ref="takeFocus"
-                      rows="1"
-                      spellcheck="false"
-                      class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none"
-                      :value="blockRowOf(element as LabelRow, at).text"
-                      @input="onInputBlock(blockRowOf(element as LabelRow, at), $event)"
-                      @keydown="onInputKey($event)"
-                    />
-                    <pre
-                      v-else
-                      class="reading min-w-0 flex-1 text-sm leading-snug whitespace-pre-wrap"
-                    >{{ blockRowOf(element as LabelRow, at).text }}</pre>
-                  </div>
-                </div>
+                  :class="isRowBlank(element as Row) && 'text-muted-foreground/50'"
+                >{{ rowPreview(element as Row) }}<br v-if="rowEndsOnABreak(element as Row)" /></pre>
 
                 <div
-                  v-if="(element as LabelRow).unit.tags.length > 0"
+                  v-if="(element as Row).kind === 'label' && (element as LabelRow).unit.tags.length > 0"
                   class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
                 >
                   <span
@@ -353,13 +330,12 @@ const emptyNote = computed(() => {
  * leave it alone any more.
  */
 const pageGroups = computed(() => {
-  const out: { page: PageRow; rows: LabelRow[] }[] = []
-  // ⚠️ Only the translations. A block row belongs to the row above it and is
-  // drawn inside it, so putting one in this list would make it a sibling the
-  // drag could carry off on its own.
+  const out: { page: PageRow; rows: Array<LabelRow | BlockRow> }[] = []
+  // ⭐ Blocks are rows like any other. A translation set in two is two things to
+  // take hold of, and a row drawn inside another row is a row nothing can drag.
   for (const row of rows.value) {
     if (row.kind === 'page') out.push({ page: row, rows: [] })
-    else if (row.kind === 'label') out[out.length - 1]?.rows.push(row)
+    else out[out.length - 1]?.rows.push(row)
   }
   /*
    * Narrowing puts the rail away rather than drawing it with holes in. A line
@@ -420,39 +396,106 @@ function branchIndent(row: LabelRow): Record<string, string> | undefined {
 }
 
 /** Its own lock or a folder's above it, which this list has no way to tell apart. */
-function isRowLocked(row: LabelRow): boolean {
-  return row.blocks.some((block) => editor.isLayerLocked(block.id))
-}
-
-function isSelected(row: LabelRow): boolean {
-  return row.blocks.some((block) => editor.isSelected(block.id))
+function isRowLocked(row: LabelRow | BlockRow): boolean {
+  return row.kind === 'block'
+    ? editor.isLayerLocked(row.block.id)
+    : row.blocks.some((block) => editor.isLayerLocked(block.id))
 }
 
 /**
- * A row's block, as the row the handlers take. Built here rather than emitted
- * as a sibling in the list, because a block belongs to the translation above it
- * — a sibling is something a drag could carry off on its own.
+ * ⭐ One row, two kinds. Every one of these answers for both, so the template
+ * has a single root: a `v-if` at the top of the drag slot leaves a comment node
+ * behind, and Sortable maps a dragged node back to its row by counting.
  */
-function blockRowOf(row: LabelRow, at: number): BlockRow {
-  const block = row.blocks[at]
-  return {
-    kind: 'block',
-    key: `block/${row.pageId}/${block.id}`,
-    pageId: row.pageId,
-    unit: row.unit,
-    block,
-    at: at + 1,
-    text: blockTexts.value.get(block.id) ?? block.body.lines.join('\n'),
-    index: row.index,
-  }
+type Row = LabelRow | BlockRow
+
+/** What the canvas selects when this row is picked — its first block. */
+function rowId(row: Row): string | undefined {
+  return row.kind === 'block' ? row.block.id : row.blocks[0]?.id
 }
 
-/** Every block's resolved words, keyed by id, off the same pass the rows came from. */
-const blockTexts = computed(() => {
-  const out = new Map<string, string>()
-  for (const row of rows.value) if (row.kind === 'block') out.set(row.block.id, row.text)
-  return out
-})
+function rowClass(row: Row): Array<string | false | undefined> {
+  const editing = isRowEditing(row)
+  if (row.kind === 'block') {
+    return [
+      isSelected(row) ? 'bg-accent/50' : 'hover:bg-secondary/40',
+      !editing && 'select-none',
+      !editing && !filtering.value && 'cursor-grab',
+    ]
+  }
+  return [
+    isSelected(row) ? 'bg-accent/50' : 'hover:bg-secondary/40',
+    !editing && 'select-none',
+    row.lane !== undefined && 'rail-held',
+    !editing && !filtering.value && row.lane === undefined && 'cursor-grab',
+  ]
+}
+
+/** One step in for a block, so the column of them reads as belonging above. */
+function rowStyle(row: Row): Record<string, string> | undefined {
+  return row.kind === 'block' ? { paddingLeft: '1.5rem' } : branchIndent(row)
+}
+
+function onRowDown(row: Row, e: MouseEvent) {
+  if (row.kind === 'block') onPickBlock(row, e)
+  else onPick(row, e)
+}
+
+function onRowOpen(row: Row) {
+  if (row.kind === 'block') onEditBlock(row)
+  else onEdit(row)
+}
+
+function onRowKeys(row: Row, e: KeyboardEvent) {
+  if (row.kind === 'block') onBlockKey(row, e)
+  else onRowKey(row, e)
+}
+
+function isRowEditing(row: Row): boolean {
+  return row.kind === 'block' ? isEditingBlock(row) : isEditing(row)
+}
+
+function rowText(row: Row): string {
+  return row.kind === 'block' ? row.text : mainText(row)
+}
+
+function onRowInput(row: Row, e: Event) {
+  if (row.kind === 'block') onInputBlock(row, e)
+  else onInput(row, e)
+}
+
+function onRowBlur(row: Row) {
+  if (row.kind === 'block') commitBlockEdit()
+  else onInputBlur(row)
+}
+
+/**
+ * ⚠️ A translation set in several blocks draws none of its own reading: the
+ * block rows under it say the whole of it, and saying it twice would cost the
+ * row a line of height for a line nobody needs.
+ */
+function showsReading(row: Row): boolean {
+  if (row.kind === 'block') return !isEditingBlock(row)
+  return row.blocks.length < 2 && (!isEditing(row) || pinned.value)
+}
+
+function isRowBlank(row: Row): boolean {
+  return row.kind === 'block' ? row.text.length === 0 : isMainBlank(row)
+}
+
+function rowPreview(row: Row): string {
+  return row.kind === 'block' ? row.text : preview(row)
+}
+
+function rowEndsOnABreak(row: Row): boolean {
+  return row.kind === 'block' ? row.text.endsWith('\n') : endsOnABreak(row)
+}
+
+function isSelected(row: LabelRow | BlockRow): boolean {
+  return row.kind === 'block'
+    ? editor.isSelected(row.block.id)
+    : row.blocks.some((block) => editor.isSelected(block.id))
+}
 
 /**
  * The one block a row is typed into. A translation set in several is typed into
@@ -676,11 +719,21 @@ const LABEL_GROUP = { name: 'labels' }
  * capability neither panel has, and having it here alone would make the same
  * gesture mean different things in two lists side by side.
  */
+/**
+ * ⭐ Two drags, told apart by what was picked up. A translation dragged says
+ * where it is read on the page; a block of one dragged says where it is read
+ * inside that translation — which changes the words, and is why only one of
+ * them touches the reading order.
+ *
+ * ⚠️ A block dropped outside its own translation's run is refused: what that
+ * would mean — joining another translation, leaving this one — is a decision
+ * with a command of its own, and a drag cannot say which was intended.
+ */
 function onChanged(
-  group: { page: PageRow; rows: LabelRow[] },
+  group: { page: PageRow; rows: Array<LabelRow | BlockRow> },
   evt: {
-    moved?: { element: LabelRow; oldIndex: number; newIndex: number }
-    added?: { element: LabelRow; newIndex: number }
+    moved?: { element: LabelRow | BlockRow; oldIndex: number; newIndex: number }
+    added?: { element: LabelRow | BlockRow; newIndex: number }
   },
 ) {
   const change = evt.moved ?? evt.added
@@ -689,6 +742,20 @@ function onChanged(
   const next = [...group.rows]
   if (evt.moved) next.splice(evt.moved.oldIndex, 1)
   next.splice(change.newIndex, 0, change.element)
+
+  if (change.element.kind === 'block') {
+    const unit = change.element.unit
+    const above = next
+      .slice(0, change.newIndex)
+      .reverse()
+      .find((r) => r.kind === 'label' || r.unit.id !== unit.id)
+    if (above?.kind !== 'label' || above.unit.id !== unit.id) return
+    const members = next.flatMap((r) =>
+      r.kind === 'block' && r.unit.id === unit.id ? [r.block.id] : [],
+    )
+    editor.cmdReorderMembers(change.element.pageId, unit.id, editor.textSide, members)
+    return
+  }
 
   const target = dropAt(next[change.newIndex - 1] ?? group.page, true)
   editor.moveObjectsTo([change.element.unit.id], target.page, target.index)
@@ -729,6 +796,20 @@ useEventListener(window, 'keydown', (e) => {
 function onInputBlur(row: LabelRow) {
   if (!isEditing(row)) return
   editor.commitTextEdit()
+}
+
+function commitBlockEdit() {
+  editor.commitTextEdit()
+}
+
+/** The same two keys open a block as open the row it stands under. */
+function onBlockKey(row: BlockRow, e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (ownsKeyboard(document.activeElement)) return
+  if (e.key !== 'Enter' && e.key !== 'i') return
+  if (editor.selectedIds.size > 1) return
+  e.preventDefault()
+  onEditBlock(row)
 }
 
 function onInputKey(e: KeyboardEvent) {

@@ -126,14 +126,14 @@ describe('collectTexts', () => {
 
   /** ⭐ What the escape hatch is for: the model has to know it needs two pieces. */
   it('says how many blocks the lettering was split into', () => {
-    const a = said('a', { artwork: ['くぱぁ'] })
+    const a = said('a', { artwork: ['ゴゴゴ'] })
     const second = blankBlock('a2', 'translation', DEFAULT_TEXT_STYLE)
-    second.body.lines = ['開']
-    a.blocks[0].body.lines = ['掰']
+    second.body.lines = ['隆']
+    a.blocks[0].body.lines = ['轟']
     a.blocks.push(second)
     a.unit.translation = { members: ['a', 'a2'], separators: [''] }
     const [page] = collectTexts([file('001', [a], ['u-a'])])
-    expect(page.objects[0]).toMatchObject({ translation: '掰開', blocks: 2 })
+    expect(page.objects[0]).toMatchObject({ translation: '轟隆', blocks: 2 })
   })
 
   it('walks pages in reading order and keeps damaged pages listed but empty', () => {

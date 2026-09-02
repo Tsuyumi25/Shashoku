@@ -1,4 +1,7 @@
-import type { LabelRow } from './labelRows'
+import type { BlockRow, LabelRow } from './labelRows'
+
+/** A row the rail has to leave room for, whether or not it is a translation. */
+type RailRow = LabelRow | BlockRow
 
 /**
  * Where the rail's strokes fall for one row.
@@ -40,9 +43,10 @@ export function laneOffset(lane: number): number {
 }
 
 /** Nothing at all while no line has been drawn: the column is not there to take up room. */
-export function railWidth(rows: readonly LabelRow[]): number {
+export function railWidth(rows: readonly RailRow[]): number {
   let widest = -1
   for (const row of rows) {
+    if (row.kind === 'block') continue
     if (row.lane !== undefined && row.lane > widest) widest = row.lane
     for (const lane of row.carries) if (lane > widest) widest = lane
   }
@@ -57,13 +61,30 @@ export function railWidth(rows: readonly LabelRow[]): number {
  * row's own lines arriving, so it is drawn as a join rather than as a stub left
  * hanging. A lane that starts here is this row's own, on its way down.
  */
-export function railMarks(rows: readonly LabelRow[]): RailMark[] {
+export function railMarks(rows: readonly RailRow[]): RailMark[] {
   const laneOf = new Map<string, number>()
-  for (const row of rows) if (row.lane !== undefined) laneOf.set(row.unit.id, row.lane)
+  for (const row of rows) {
+    if (row.kind !== 'block' && row.lane !== undefined) laneOf.set(row.unit.id, row.lane)
+  }
 
   const marks: RailMark[] = []
   let above: readonly number[] = []
   for (const row of rows) {
+    // ⭐ A block of a translation set in several is not a place in the reading —
+    // it stands under one. Whatever was running past the row above runs past it
+    // too, so a line down the page is not cut into pieces by the rows that only
+    // say how the lettering was split.
+    if (row.kind === 'block') {
+      marks.push({
+        through: above.map(laneOffset),
+        arrives: undefined,
+        leaves: undefined,
+        joins: [],
+        dot: undefined,
+        stops: undefined,
+      })
+      continue
+    }
     const below = row.carries
     if (row.lane === undefined) {
       marks.push({ through: [], arrives: undefined, leaves: undefined, joins: [], dot: undefined, stops: undefined })

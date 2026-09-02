@@ -281,7 +281,7 @@ export interface TranslationUnitSide {
  *
  * ⚠️ It says nothing about which source block goes with which translation
  * block. A sound written as one word and lettered as two is not a claim that
- * half of it means 掰.
+ * half of it means 轟.
  */
 export interface TranslationUnit {
   id: string

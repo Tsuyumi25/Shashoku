@@ -51,7 +51,7 @@ function page(layers: LayerEntry[], units: TranslationUnit[]): ManifestJson {
   }
 }
 
-const SOUND = [sourceBlock('s', ['くぱぁ']), block('t1', ['掰']), block('t2', ['開'])]
+const SOUND = [sourceBlock('s', ['ゴゴゴ']), block('t1', ['轟']), block('t2', ['隆'])]
 const SPLIT = unit({
   source: { members: ['s'], separators: [] },
   translation: { members: ['t1', 't2'], separators: [''] },
@@ -59,27 +59,27 @@ const SPLIT = unit({
 
 describe('projectionOf', () => {
   it('reads one block as the words in it', () => {
-    const layers = [sourceBlock('s', ['くぱぁ']), block('t', ['掰開'])]
-    expect(projectionOf(layers, unit(), 'translation')).toBe('掰開')
+    const layers = [sourceBlock('s', ['ゴゴゴ']), block('t', ['轟隆'])]
+    expect(projectionOf(layers, unit(), 'translation')).toBe('轟隆')
   })
 
   it('reads several blocks as one stretch, in the order the unit holds them', () => {
-    expect(projectionOf(SOUND, SPLIT, 'translation')).toBe('掰開')
+    expect(projectionOf(SOUND, SPLIT, 'translation')).toBe('轟隆')
   })
 
   it('puts the stored separator between them', () => {
     const spaced = unit({ translation: { members: ['t1', 't2'], separators: [' '] } })
-    expect(projectionOf(SOUND, spaced, 'translation')).toBe('掰 開')
+    expect(projectionOf(SOUND, spaced, 'translation')).toBe('轟 隆')
   })
 
   /** The whole point: one sound stays one entry in the ledger. */
   it('leaves the source alone when the lettering is split', () => {
-    expect(projectionOf(SOUND, SPLIT, 'source')).toBe('くぱぁ')
+    expect(projectionOf(SOUND, SPLIT, 'source')).toBe('ゴゴゴ')
   })
 
   it('skips a member the page no longer holds rather than reading a gap', () => {
     const lost = unit({ translation: { members: ['t1', 'gone'], separators: ['／'] } })
-    expect(projectionOf(SOUND, lost, 'translation')).toBe('掰')
+    expect(projectionOf(SOUND, lost, 'translation')).toBe('轟')
   })
 })
 
@@ -91,10 +91,10 @@ describe('linesAt', () => {
   it('reads the chosen candidate piece for that block', () => {
     const picked = unit({
       translation: { members: ['t1', 't2'], separators: [''] },
-      candidates: [{ id: 'c1', pieces: [['掰'], ['開']] }],
+      candidates: [{ id: 'c1', pieces: [['轟'], ['隆']] }],
       chosen: 'c1',
     })
-    expect(linesAt(picked, 1, [''])).toEqual(['開'])
+    expect(linesAt(picked, 1, [''])).toEqual(['隆'])
   })
 
   it('falls back to the block own words when the slot names a candidate the pool lost', () => {
@@ -104,7 +104,7 @@ describe('linesAt', () => {
   it('falls back when the candidate has no piece for this block', () => {
     const short = unit({
       translation: { members: ['t1', 't2'], separators: [''] },
-      candidates: [{ id: 'c1', pieces: [['掰開']] }],
+      candidates: [{ id: 'c1', pieces: [['轟隆']] }],
       chosen: 'c1',
     })
     expect(linesAt(short, 1, ['留著'])).toEqual(['留著'])
@@ -126,7 +126,7 @@ describe('shownLinesOf', () => {
   /** Nobody proposes readings of the artwork, so the source says its own words. */
   it('leaves a source block reading its own words', () => {
     const manifest = page(SOUND, [SPLIT])
-    expect(shownLinesOf(manifest, SOUND[0] as never)).toEqual(['くぱぁ'])
+    expect(shownLinesOf(manifest, SOUND[0] as never)).toEqual(['ゴゴゴ'])
   })
 })
 
@@ -134,8 +134,8 @@ describe('candidateFits', () => {
   const split = unit({
     translation: { members: ['t1', 't2'], separators: [''] },
     candidates: [
-      { id: 'two', pieces: [['掰'], ['開']] },
-      { id: 'one', pieces: [['掰開']] },
+      { id: 'two', pieces: [['轟'], ['隆']] },
+      { id: 'one', pieces: [['轟隆']] },
     ],
   })
 
@@ -154,14 +154,14 @@ describe('candidateFits', () => {
 
 describe('isUntranslated', () => {
   it('is true where every block is empty', () => {
-    const layers = [sourceBlock('s', ['くぱぁ']), block('t', [''])]
+    const layers = [sourceBlock('s', ['ゴゴゴ']), block('t', [''])]
     expect(isUntranslated(layers, unit())).toBe(true)
   })
 
   /** What MCP leaves behind when it fills a blank unit's slot. */
   it('is false when only the chosen candidate has words', () => {
-    const layers = [sourceBlock('s', ['くぱぁ']), block('t', [''])]
-    const picked = unit({ candidates: [{ id: 'c1', pieces: [['掰開']] }], chosen: 'c1' })
+    const layers = [sourceBlock('s', ['ゴゴゴ']), block('t', [''])]
+    const picked = unit({ candidates: [{ id: 'c1', pieces: [['轟隆']] }], chosen: 'c1' })
     expect(isUntranslated(layers, picked)).toBe(false)
   })
 })

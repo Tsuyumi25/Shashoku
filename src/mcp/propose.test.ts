@@ -120,8 +120,8 @@ describe('planProposal', () => {
     expect(
       planProposal(two.page, two.unit, {
         unitId: two.unit.id,
-        pieces: [['掰'], ['開']],
+        pieces: [['轟'], ['隆']],
       }),
-    ).toEqual({ action: 'append', pieces: [['掰'], ['開']], fillSlot: true })
+    ).toEqual({ action: 'append', pieces: [['轟'], ['隆']], fillSlot: true })
   })
 })
