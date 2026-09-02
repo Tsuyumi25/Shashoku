@@ -845,14 +845,19 @@ const painting = computed(() => editor.tool === 'tag-paint')
 /**
  * The objects one gesture has already crossed. Held so that sweeping back over
  * one does not ask twice, and so the whole sweep lands as a single command.
+ *
+ * ⭐ Whether this stroke restyles what it crosses is read once, at the press.
+ * A modifier sampled all the way through would let one sweep write two
+ * different things depending on where the finger was when it passed each
+ * object, and a sweep is one act.
  */
-const tagSpray = ref<Set<string> | null>(null)
+const tagSpray = ref<{ ids: Set<string>; updateStyle: boolean } | null>(null)
 
 function sprayAt(p: Anchor) {
   const spray = tagSpray.value
   if (spray === null) return
   const id = objectAt(p)
-  if (id !== null) spray.add(id)
+  if (id !== null) spray.ids.add(id)
 }
 
 const ARROW_HEADS = [
@@ -1472,7 +1477,10 @@ function onPointerDown(e: PointerEvent) {
   if (painting.value) {
     el.setPointerCapture(e.pointerId)
     const rect = containerRef.value.getBoundingClientRect()
-    tagSpray.value = new Set()
+    // The press is the last word on whether the key was down, and saying so
+    // here also resyncs the switch the panel is drawing.
+    editor.overrideHeld = e.ctrlKey || e.metaKey
+    tagSpray.value = { ids: new Set(), updateStyle: editor.paintStrokeUpdatesStyle }
     sprayAt(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
     return
   }
@@ -1662,7 +1670,8 @@ function onPointerUp(e: PointerEvent) {
     return
   }
   if (tagSpray.value !== null) {
-    editor.cmdPaintTags([...tagSpray.value], editor.paintTags)
+    const { ids, updateStyle } = tagSpray.value
+    editor.cmdPaintTags([...ids], editor.paintTags, updateStyle)
     tagSpray.value = null
     return
   }

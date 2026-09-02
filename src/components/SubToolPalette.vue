@@ -5,6 +5,36 @@
     the same row, and two lists would have to be kept saying the same thing.
   -->
   <div class="h-full min-h-0 overflow-y-auto p-1.5">
+    <!--
+      How the brush behaves, above what it carries. The mark is square where a
+      tag's is round, and a rule stands under it: one press means "load this"
+      below the rule and "turn this over" above it, and which of the two it is
+      has to be readable before the press rather than after.
+    -->
+    <button
+      type="button"
+      class="flex w-full min-w-0 items-center gap-2 rounded px-1 py-1 text-xs hover:bg-secondary/40"
+      :class="editor.paintStrokeUpdatesStyle ? 'text-foreground' : 'text-muted-foreground'"
+      title="噴上去的同時，把這組標記的樣式也套上。按住 Ctrl 畫可以把這一筆反過來"
+      @click="editor.paintUpdatesStyle = !editor.paintUpdatesStyle"
+    >
+      <!--
+        The box follows the key as it is held, not the switch underneath it.
+        A quasimode the interface does not show is just a mode, and the whole
+        reason to hold a key rather than flip a switch is that you can see you
+        are holding it.
+      -->
+      <span
+        class="h-3 w-3 shrink-0 rounded-sm border-2 border-current"
+        :class="editor.paintStrokeUpdatesStyle && 'bg-current'"
+      />
+      <span class="min-w-0 truncate text-left font-medium">更新樣式</span>
+      <kbd class="ml-auto shrink-0 rounded border border-border px-1 text-[10px] font-normal">
+        ctrl
+      </kbd>
+    </button>
+    <div class="my-1.5 border-b border-border" />
+
     <Draggable
       :model-value="project.header.tags"
       item-key="name"

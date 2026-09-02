@@ -2728,6 +2728,53 @@ describe('spraying tags with the brush', () => {
     expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Seed')
   })
 
+  /** Held, the key turns the switch over — whichever way it was standing. */
+  it('reads the held key as turning the switch over, not as one fixed answer', () => {
+    const editor = useEditorStore()
+
+    expect(editor.paintUpdatesStyle).toBe(true)
+    expect(editor.paintStrokeUpdatesStyle).toBe(true)
+
+    editor.overrideHeld = true
+    expect(editor.paintStrokeUpdatesStyle).toBe(false)
+
+    editor.paintUpdatesStyle = false
+    expect(editor.paintStrokeUpdatesStyle).toBe(true)
+
+    editor.overrideHeld = false
+    expect(editor.paintStrokeUpdatesStyle).toBe(false)
+  })
+
+  /**
+   * The switch off, or Ctrl held: the pass is correcting a label, and the page
+   * is already laid out.
+   */
+  it('leaves the style alone when the stroke does not update it', () => {
+    const { project, editor } = openSprayed([
+      styled('mine', ['emphasis'], { fontFamily: 'Chosen', color: '#abcdef' }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        styled(`s${i}`, ['outside'], { fontFamily: 'Mincho' }),
+      ),
+    ])
+
+    editor.cmdPaintTags(['mine'], ['outside'], false)
+
+    expect(tagsOf(project, 'mine')).toEqual(['outside'])
+    expect(project.labelById(PAGE, 'mine')!.translation.style).toMatchObject({
+      fontFamily: 'Chosen',
+      color: '#abcdef',
+    })
+  })
+
+  it('still puts the tags back on undo when the style was left alone', () => {
+    const { project, editor } = openSprayed([styled('mine', ['emphasis'], {})])
+
+    editor.cmdPaintTags(['mine'], ['outside'], false)
+    editor.undo()
+
+    expect(tagsOf(project, 'mine')).toEqual(['emphasis'])
+  })
+
   /** A list holding a group says something about it without taking it over. */
   it('toggles a tag on named objects without touching the selection', () => {
     const { project, editor } = openSprayed([

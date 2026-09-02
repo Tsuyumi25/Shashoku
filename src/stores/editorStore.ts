@@ -496,6 +496,34 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * Whether spraying a meaning also hands the object that meaning's style.
+   *
+   * On to begin with: an object taking its first tag has no style of its own to
+   * lose, and that is the case the derivation was built for. Off is for a pass
+   * that is correcting labels rather than setting them — the page is already
+   * laid out and only the classification was wrong.
+   *
+   * ⭐ Said rather than guessed. Which of the two a tag change is cannot be read
+   * off the tag sets: the same edit is a correction one minute and a change of
+   * meaning the next, and every rule that tries to tell them apart is a rule
+   * that is sometimes wrong without saying so.
+   */
+  const paintUpdatesStyle = ref(true)
+
+  /**
+   * Whether the key that turns a tool's switch over is down right now.
+   *
+   * Kept here rather than read off each event on its own, because the panel
+   * drawing the switch has to move with it: a quasimode the interface does not
+   * show is just a mode with a shorter fuse. Pointer events resync it, so a
+   * keyup missed while the window was away cannot leave it stuck.
+   */
+  const overrideHeld = ref(false)
+
+  /** What one stroke would do right now, switch and held key together. */
+  const paintStrokeUpdatesStyle = computed(() => paintUpdatesStyle.value !== overrideHeld.value)
+
+  /**
    * Which of an object's two bodies everything is working on.
    *
    * ⭐ A mode and not a tool. Which half of an object is being worked on is
@@ -2372,7 +2400,11 @@ export const useEditorStore = defineStore('editor', () => {
    * The style follows on the terms `cmdToggleTagOnSelection` sets: derived from
    * a sample read before anything is written, and in one command with the tags.
    */
-  function cmdPaintTags(ids: readonly string[], tags: readonly string[]) {
+  function cmdPaintTags(
+    ids: readonly string[],
+    tags: readonly string[],
+    updateStyle = true,
+  ) {
     const project = useProjectStore()
     const wanted = normalizeTagSet(tags)
     const targets = textObjectsByIds(ids).filter(
@@ -2386,10 +2418,13 @@ export const useEditorStore = defineStore('editor', () => {
       tags: [...entry.tags],
       style: { ...entry.translation.style },
     }))
-    const sample = chapterBucketObjects()
-    const { tags: registry, seedStyle } = project.header
-    const style = deriveStyle(sample, wanted, registry, seedStyle)
-    const after = before.map((entry) => ({ ...entry, tags: wanted, style }))
+    let after = before.map((entry) => ({ ...entry, tags: wanted }))
+    if (updateStyle) {
+      const sample = chapterBucketObjects()
+      const { tags: registry, seedStyle } = project.header
+      const style = deriveStyle(sample, wanted, registry, seedStyle)
+      after = after.map((entry) => ({ ...entry, style }))
+    }
     const write = (states: typeof before) => {
       for (const state of states) {
         project.setLabelTags(state.pageId, state.id, state.tags)
@@ -2669,6 +2704,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdPaintTags,
     paintTags,
     loadPaintTags,
+    paintUpdatesStyle,
+    overrideHeld,
+    paintStrokeUpdatesStyle,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
     cmdSetLabelTags,

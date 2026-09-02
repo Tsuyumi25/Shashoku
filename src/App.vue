@@ -260,6 +260,24 @@ useEventListener(window, 'keydown', (e) => {
  * is also what makes the label list's two layers work, since a row being typed
  * into is a real input and a row merely selected is not.
  */
+/**
+ * The key that turns a tool's switch over, watched here rather than where it is
+ * used: the panel drawing the switch and the canvas acting on it have to agree,
+ * and the hand is often over the panel while the key goes down.
+ *
+ * ⚠️ Blur matters. Holding the key and alt-tabbing away means the release
+ * happens somewhere else, and a switch left turned over is exactly the mode
+ * error a quasimode exists to prevent.
+ */
+const readOverride = (e: KeyboardEvent) => {
+  editor.overrideHeld = e.ctrlKey || e.metaKey
+}
+useEventListener(window, 'keydown', readOverride)
+useEventListener(window, 'keyup', readOverride)
+useEventListener(window, 'blur', () => {
+  editor.overrideHeld = false
+})
+
 useEventListener(window, 'keydown', (e) => {
   if (ui.settingsOpen) return
   if (ui.view !== 'editor') return
