@@ -18,32 +18,70 @@ import type {
   LayerEntry,
   OcrCandidatePersisted,
   RasterLayerEntry,
+  SourceTextLayerEntry,
   TextLayerEntry,
   TranslationCandidate,
+  TranslationUnit,
 } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
-import { linesOf, textOf, textOfBody } from '@shared/page/text'
+import { linesOf } from '@shared/page/text'
+import { blocksOf, blocksOnSide, projectionOf } from '@shared/page/units'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 import { offeredReadings } from '@shared/ocr/offer'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 
 const PAGE = 'p001.png'
 
+/**
+ * One block of lettering. Its translation is built alongside it and given the
+ * same id, so every id in these fixtures still names one thing whichever level
+ * is asking.
+ */
 function label(id: string, text = ''): TextLayerEntry {
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.body.lines = linesOf(text)
+  entry.body.x = 200
+  entry.body.y = 150
+  return entry
+}
+
+const SOURCE_OF = (id: string) => `${id}~s`
+
+function sourceFor(id: string): TextLayerEntry {
+  const entry = blankBlock(SOURCE_OF(id), 'source', DEFAULT_TEXT_STYLE)
+  entry.body.x = 200
+  entry.body.y = 150
+  return entry
+}
+
+function unitFor(id: string): TranslationUnit {
   return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: linesOf(text),
-      x: 200,
-      y: 150,
-      candidates: [],
-      chosen: null,
-    },
+    id,
+    tags: [],
+    source: { members: [SOURCE_OF(id)], separators: [] },
+    translation: { members: [id], separators: [] },
+    candidates: [],
+    chosen: null,
   }
+}
+
+/** The blocks of both sides for a run of lettering, plus the units over them. */
+const spread = (labels: readonly TextLayerEntry[]) => ({
+  layers: labels.flatMap((l) => [l, sourceFor(l.id)]),
+  translationUnits: labels.map((l) => unitFor(l.id)),
+})
+
+/** What the artwork says under one block of lettering. */
+const unitOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+  project.placeOf(PAGE, id)!.unit
+
+/** What the artwork says under one block of lettering. */
+const sourceOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
+  const unit = unitOf(project, id)
+  return (project.blockById(PAGE, unit.source.members[0]) as SourceTextLayerEntry).body
 }
 
 function openOnePage(labels: TextLayerEntry[] = []) {
@@ -59,9 +97,9 @@ function openOnePage(labels: TextLayerEntry[] = []) {
         name: 'p',
         width: 1200,
         height: 1700,
+        ...spread(labels),
         readingOrder: labels.map((l) => l.id),
         readingEdges: [],
-        layers: [...labels],
       },
       badge: 'ok',
     },
@@ -82,20 +120,24 @@ function pageOf(pageId: string, labels: TextLayerEntry[]): ProjectFile {
       name: 'p',
       width: 1200,
       height: 1700,
+      ...spread(labels),
       readingOrder: labels.map((l) => l.id),
       readingEdges: [],
-      layers: [...labels],
     },
     badge: 'ok',
   }
 }
 
 function labelsOf(project: ReturnType<typeof useProjectStore>): TextLayerEntry[] {
-  return project.labelsOf(PAGE)
+  return project
+    .labelsOf(PAGE)
+    .flatMap((unit) => blocksOf(project.pageById(PAGE)!.page.layers, unit, 'translation'))
 }
 
 const textsOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-  labelsOf(project).map((label) => textOf(label.translation))
+  project
+    .labelsOf(PAGE)
+    .map((unit) => projectionOf(project.pageById(PAGE)!.page.layers, unit, 'translation'))
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -217,10 +259,10 @@ describe('addLabelAt', () => {
 
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
-    expect(added).toMatchObject({ tags: [] })
-    expect(added?.translation).toMatchObject({ x: 100, y: 225, lines: [''] })
-    expect(added?.source).toMatchObject({ x: 100, y: 225, lines: [''] })
-    expect(added?.translation.style).toEqual(project.header.seedStyle)
+    expect(unitOf(project, added!.id)).toMatchObject({ tags: [] })
+    expect(added?.body).toMatchObject({ x: 100, y: 225, lines: [''] })
+    expect(sourceOf(project, added!.id)).toMatchObject({ x: 100, y: 225, lines: [''] })
+    expect(added?.body.style).toEqual(project.header.seedStyle)
     expect(editor.cursorId).toBe(added?.id)
   })
 
@@ -266,8 +308,8 @@ describe('addLabelAt', () => {
     ]
     editor.addLabelAt(100, 225)
     const added = labelsOf(project).at(-1)!
-    expect(added.source.from).toBeUndefined()
-    expect(added.source.lines).toEqual([''])
+    expect(sourceOf(project, added.id).from).toBeUndefined()
+    expect(sourceOf(project, added.id).lines).toEqual([''])
   })
 })
 
@@ -281,10 +323,10 @@ describe('cmdApplyVerdict', () => {
   it('writes the words the page chose onto a standing object, with their source', () => {
     const { project, editor } = openOnePage([label('a')])
     editor.cmdApplyVerdict(PAGE, {
-      fills: new Map([['a', { text: 'ふん', from: 'r1' }]]),
+      fills: new Map([[SOURCE_OF('a'), { text: 'ふん', from: 'r1' }]]),
       spawns: [],
     })
-    expect(labelsOf(project)[0].source).toMatchObject({
+    expect(sourceOf(project, labelsOf(project)[0]!.id)).toMatchObject({
       lines: ['ふん'],
       from: 'r1',
       by: 'auto',
@@ -307,12 +349,12 @@ describe('cmdApplyVerdict', () => {
       ],
     })
     const born = labelsOf(project).at(-1)
-    expect(born?.translation.style).toMatchObject({
+    expect(born?.body.style).toMatchObject({
       direction: 'vertical',
       fontSizePx: 38,
       leadingPercent: 118,
     })
-    expect(born?.source).toMatchObject({ lines: ['ふん'], from: 'r1', by: 'auto' })
+    expect(sourceOf(project, born!.id)).toMatchObject({ lines: ['ふん'], from: 'r1', by: 'auto' })
   })
 
   it('leaves the seed style alone where the run measured nothing', () => {
@@ -321,7 +363,7 @@ describe('cmdApplyVerdict', () => {
       fills: new Map(),
       spawns: [{ from: 'r1', text: 'ふん', centre: { x: 300, y: 400 } }],
     })
-    expect(labelsOf(project).at(-1)?.translation.style).toEqual(project.header.seedStyle)
+    expect(labelsOf(project).at(-1)?.body.style).toEqual(project.header.seedStyle)
   })
 
   /**
@@ -331,7 +373,7 @@ describe('cmdApplyVerdict', () => {
   it('takes a whole run back in one step', () => {
     const { project, editor } = openOnePage([label('a')])
     editor.cmdApplyVerdict(PAGE, {
-      fills: new Map([['a', { text: 'いち', from: 'r1' }]]),
+      fills: new Map([[SOURCE_OF('a'), { text: 'いち', from: 'r1' }]]),
       spawns: [
         { from: 'r2', text: 'に', centre: { x: 300, y: 400 } },
         { from: 'r3', text: 'さん', centre: { x: 600, y: 400 } },
@@ -341,12 +383,12 @@ describe('cmdApplyVerdict', () => {
 
     editor.undo()
     expect(labelsOf(project)).toHaveLength(1)
-    expect(labelsOf(project)[0].source.from).toBeUndefined()
-    expect(labelsOf(project)[0].source.lines).toEqual([''])
+    expect(sourceOf(project, labelsOf(project)[0].id).from).toBeUndefined()
+    expect(sourceOf(project, labelsOf(project)[0].id).lines).toEqual([''])
 
     editor.redo()
     expect(labelsOf(project)).toHaveLength(3)
-    expect(labelsOf(project)[0].source).toMatchObject({ lines: ['いち'], from: 'r1' })
+    expect(sourceOf(project, labelsOf(project)[0]!.id)).toMatchObject({ lines: ['いち'], from: 'r1' })
   })
 })
 
@@ -360,8 +402,8 @@ describe('addLabelAtViewCenter', () => {
     editor.addLabelAtViewCenter()
 
     const added = labelsOf(project).at(-1)
-    expect(added?.translation.x).toBeCloseTo(200, 6)
-    expect(added?.translation.y).toBeCloseTo(150, 6)
+    expect(added?.body.x).toBeCloseTo(200, 6)
+    expect(added?.body.y).toBeCloseTo(150, 6)
   })
 
   it('clamps onto the page when the view has been panned off it', () => {
@@ -373,7 +415,7 @@ describe('addLabelAtViewCenter', () => {
 
     editor.addLabelAtViewCenter()
 
-    expect(labelsOf(project).at(-1)?.translation).toMatchObject({ x: 400, y: 300 })
+    expect(labelsOf(project).at(-1)?.body).toMatchObject({ x: 400, y: 300 })
   })
 
   it('does nothing before a page has been measured', () => {
@@ -784,22 +826,22 @@ describe('pending text edit', () => {
   it('turns one editing session into one undo entry', () => {
     const { project, editor } = openOnePage([label('a', 'before')])
     editor.beginTextEdit(PAGE, 'a', 'before')
-    project.updateLabelText(PAGE, 'a', 'translation', 'b')
-    project.updateLabelText(PAGE, 'a', 'translation', 'be')
-    project.updateLabelText(PAGE, 'a', 'translation', 'bee')
+    project.updateLabelText(PAGE, 'a', 'b')
+    project.updateLabelText(PAGE, 'a', 'be')
+    project.updateLabelText(PAGE, 'a', 'bee')
     editor.commitTextEdit()
 
     expect(editor.canUndo).toBe(true)
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('before')
+    expect(labelsOf(project)[0].body.lines.join('\n')).toBe('before')
     expect(editor.canUndo).toBe(false)
   })
 
   it('records nothing when the text came back unchanged', () => {
     const { project, editor } = openOnePage([label('a', 'same')])
     editor.beginTextEdit(PAGE, 'a', 'same')
-    project.updateLabelText(PAGE, 'a', 'translation', 'typed')
-    project.updateLabelText(PAGE, 'a', 'translation', 'same')
+    project.updateLabelText(PAGE, 'a', 'typed')
+    project.updateLabelText(PAGE, 'a', 'same')
     editor.commitTextEdit()
     expect(editor.canUndo).toBe(false)
   })
@@ -807,9 +849,9 @@ describe('pending text edit', () => {
   it('commits the previous session when a new one begins', () => {
     const { project, editor } = openOnePage([label('a', 'a0'), label('b', 'b0')])
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
     editor.beginTextEdit(PAGE, 'b', 'b0')
-    project.updateLabelText(PAGE, 'b', 'translation', 'b1')
+    project.updateLabelText(PAGE, 'b', 'b1')
     editor.commitTextEdit()
 
     editor.undo()
@@ -821,29 +863,29 @@ describe('pending text edit', () => {
   it('keeps the stack in the order things happened', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
     editor.selectOnly('a')
     editor.deleteSelection()
 
     expect(labelsOf(project)).toHaveLength(0)
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('a1')
+    expect(textsOf(project)[0]).toBe('a1')
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('a0')
+    expect(textsOf(project)[0]).toBe('a0')
   })
 
   it('flushes what has been typed and keeps the visit open', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
     editor.flushTextEdit()
-    project.updateLabelText(PAGE, 'a', 'translation', 'a2')
+    project.updateLabelText(PAGE, 'a', 'a2')
     editor.commitTextEdit()
 
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('a1')
+    expect(textsOf(project)[0]).toBe('a1')
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('a0')
+    expect(textsOf(project)[0]).toBe('a0')
   })
 
   it('drops a session whose label is gone', () => {
@@ -857,7 +899,7 @@ describe('pending text edit', () => {
   it('is dropped along with the rest of the history', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
     editor.clearHistory()
     editor.commitTextEdit()
     expect(editor.canUndo).toBe(false)
@@ -867,14 +909,14 @@ describe('pending text edit', () => {
     const { project, editor } = openOnePage([label('a', 'a0')])
     editor.selectOnly('a')
     // A drag writes through and only records on release, so the test does both.
-    project.moveLabel(PAGE, 'a', 'translation', 80, 60)
-    editor.cmdMoveLabel(PAGE, 'a', 'translation', { x: 200, y: 150 }, { x: 80, y: 60 })
+    project.moveLabel(PAGE, 'a', 80, 60)
+    editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 80, y: 60 })
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
 
     editor.undo()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('a0')
-    expect(labelsOf(project)[0].translation.x).toBe(80)
+    expect(textsOf(project)[0]).toBe('a0')
+    expect(labelsOf(project)[0].body.x).toBe(80)
   })
 
   it('ends the redo branch, so a redo after typing is a no-op', () => {
@@ -885,7 +927,7 @@ describe('pending text edit', () => {
     expect(editor.canRedo).toBe(true)
 
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
     editor.redo()
 
     expect(labelsOf(project)).toHaveLength(1)
@@ -1043,7 +1085,7 @@ describe('revealLabel', () => {
     const editor = useEditorStore()
     editor.currentPageId = '001.png'
     editor.beginTextEdit('001.png', 'a', 'a0')
-    project.updateLabelText('001.png', 'a', 'translation', 'a1')
+    project.updateLabelText('001.png', 'a', 'a1')
 
     editor.revealLabel('002.png', 'c')
 
@@ -1058,15 +1100,15 @@ describe('cmdRotateLabel', () => {
   it('takes the object back to how it was lying', () => {
     const { project, editor } = openOnePage([label('a')])
     // A rotate drag writes through and only records on release, as a move does.
-    project.rotateLabel(PAGE, 'a', 'translation', 0.5)
-    editor.cmdRotateLabel(PAGE, 'a', 'translation', { rotation: 0, ...PUT }, { rotation: 0.5, ...PUT })
-    expect(labelsOf(project)[0].translation.rotation).toBe(0.5)
+    project.rotateLabel(PAGE, 'a', 0.5)
+    editor.cmdRotateLabel(PAGE, 'a', { rotation: 0, ...PUT }, { rotation: 0.5, ...PUT })
+    expect(labelsOf(project)[0].body.rotation).toBe(0.5)
 
     editor.undo()
-    expect(labelsOf(project)[0].translation.rotation).toBe(0)
+    expect(labelsOf(project)[0].body.rotation).toBe(0)
 
     editor.redo()
-    expect(labelsOf(project)[0].translation.rotation).toBe(0.5)
+    expect(labelsOf(project)[0].body.rotation).toBe(0.5)
   })
 
   /**
@@ -1075,19 +1117,19 @@ describe('cmdRotateLabel', () => {
    */
   it('puts the position back with the angle', () => {
     const { project, editor } = openOnePage([label('a')])
-    project.rotateLabel(PAGE, 'a', 'translation', 0.5)
-    project.moveLabel(PAGE, 'a', 'translation', 260, 190)
-    editor.cmdRotateLabel(PAGE, 'a', 'translation', { rotation: 0, ...PUT }, { rotation: 0.5, x: 260, y: 190 })
+    project.rotateLabel(PAGE, 'a', 0.5)
+    project.moveLabel(PAGE, 'a', 260, 190)
+    editor.cmdRotateLabel(PAGE, 'a', { rotation: 0, ...PUT }, { rotation: 0.5, x: 260, y: 190 })
 
     editor.undo()
     const back = labelsOf(project)[0]
-    expect([back.translation.x, back.translation.y]).toEqual([PUT.x, PUT.y])
+    expect([back.body.x, back.body.y]).toEqual([PUT.x, PUT.y])
   })
 
   it('keeps a turn that ended where it started out of the stack', () => {
     const { editor } = openOnePage([label('a')])
     const lying = { rotation: 0.25, ...PUT }
-    editor.cmdRotateLabel(PAGE, 'a', 'translation', lying, { ...lying })
+    editor.cmdRotateLabel(PAGE, 'a', lying, { ...lying })
     expect(editor.canUndo).toBe(false)
   })
 })
@@ -1100,33 +1142,31 @@ describe('cmdScaleLabel', () => {
 
   it('undoes back to the size the object had before the drag', () => {
     const { project, editor } = openOnePage([label('a')])
-    project.setLabelStyle(PAGE, 'a', 'translation', sized(48))
+    project.setLabelStyle(PAGE, 'a', sized(48))
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      'translation',
       { style: sized(24), ...PUT },
       { style: sized(48), ...PUT },
     )
 
     editor.undo()
-    expect(labelsOf(project)[0].translation.style.fontSizePx).toBe(24)
+    expect(labelsOf(project)[0].body.style.fontSizePx).toBe(24)
   })
 
   it('leaves the fields the drag did not touch alone', () => {
     const { project, editor } = openOnePage([label('a')])
     const before: TextStyle = { ...DEFAULT_TEXT_STYLE, color: '#ff0000' }
-    project.setLabelStyle(PAGE, 'a', 'translation', { ...before, fontSizePx: 48 })
+    project.setLabelStyle(PAGE, 'a', { ...before, fontSizePx: 48 })
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      'translation',
       { style: before, ...PUT },
       { style: { ...before, fontSizePx: 48 }, ...PUT },
     )
 
     editor.undo()
-    expect(labelsOf(project)[0].translation.style).toEqual(before)
+    expect(labelsOf(project)[0].body.style).toEqual(before)
   })
 
   /**
@@ -1136,26 +1176,25 @@ describe('cmdScaleLabel', () => {
    */
   it('puts the position back with the size', () => {
     const { project, editor } = openOnePage([label('a')])
-    project.setLabelStyle(PAGE, 'a', 'translation', sized(48))
-    project.moveLabel(PAGE, 'a', 'translation', 260, 190)
+    project.setLabelStyle(PAGE, 'a', sized(48))
+    project.moveLabel(PAGE, 'a', 260, 190)
     editor.cmdScaleLabel(
       PAGE,
       'a',
-      'translation',
       { style: sized(24), ...PUT },
       { style: sized(48), x: 260, y: 190 },
     )
 
     editor.undo()
     const back = labelsOf(project)[0]
-    expect([back.translation.x, back.translation.y]).toEqual([PUT.x, PUT.y])
+    expect([back.body.x, back.body.y]).toEqual([PUT.x, PUT.y])
     expect(editor.canUndo).toBe(false)
   })
 
   it('keeps a corner nudged and put back out of the stack', () => {
     const { editor } = openOnePage([label('a')])
     const held = { style: sized(24), ...PUT }
-    editor.cmdScaleLabel(PAGE, 'a', 'translation', held, { ...held })
+    editor.cmdScaleLabel(PAGE, 'a', held, { ...held })
     expect(editor.canUndo).toBe(false)
   })
 })
@@ -1201,7 +1240,17 @@ describe('layer tree edits', () => {
         pageId: PAGE,
         pageDir: `/x/${PAGE}`,
         ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
-        page: { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges: [], layers },
+        page: {
+          schemaVersion: MANIFEST_SCHEMA_VERSION,
+          revision: 0,
+          name: 'p',
+          width: 1200,
+          height: 1700,
+          translationUnits: readingOrder.map(unitFor),
+          readingOrder,
+          readingEdges: [],
+          layers: [...layers, ...readingOrder.map(sourceFor)],
+        },
         badge: 'ok',
       },
     ]
@@ -1210,8 +1259,12 @@ describe('layer tree edits', () => {
     return { project, editor }
   }
 
+  /** ⚠️ The lettering only: the artwork's own blocks sit alongside it and are
+   * not what a restack is about. */
   const stackOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-    (project.pageById(PAGE)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(PAGE)?.page.layers ?? [])
+      .filter((e) => !(e.kind === 'text' && e.side === 'source'))
+      .map((e) => e.id)
 
   const orderOf = (project: ReturnType<typeof useProjectStore>): string[] =>
     project.pageById(PAGE)?.page.readingOrder ?? []
@@ -1275,10 +1328,10 @@ describe('layer tree edits', () => {
     const { project, editor } = openTree([label('a')], ['a'])
 
     editor.cmdSetLayerVisible(PAGE, 'a', false)
-    expect(project.labelById(PAGE, 'a')?.visible).toBe(false)
+    expect(project.blockById(PAGE, 'a')?.visible).toBe(false)
 
     editor.undo()
-    expect(project.labelById(PAGE, 'a')?.visible).toBe(true)
+    expect(project.blockById(PAGE, 'a')?.visible).toBe(true)
   })
 
   const alphaLockOf = (project: ReturnType<typeof useProjectStore>, id: string): boolean => {
@@ -1312,18 +1365,16 @@ describe('layer tree edits', () => {
       const { project, editor } = openTree([label('a')], ['a'])
       lock(project, 'a')
 
-      editor.cmdMoveLabel(PAGE, 'a', 'translation', { x: 200, y: 150 }, { x: 40, y: 30 })
+      editor.cmdMoveLabel(PAGE, 'a', { x: 200, y: 150 }, { x: 40, y: 30 })
       editor.cmdRotateLabel(
         PAGE,
         'a',
-        'translation',
         { rotation: 0, x: 200, y: 150 },
         { rotation: 1, x: 200, y: 150 },
       )
       editor.cmdScaleLabel(
         PAGE,
         'a',
-        'translation',
         { style: { ...DEFAULT_TEXT_STYLE }, x: 200, y: 150 },
         { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 }, x: 200, y: 150 },
       )
@@ -1336,9 +1387,9 @@ describe('layer tree edits', () => {
       const { project, editor } = openTree([label('a', 'before')], ['a'])
       lock(project, 'a')
 
-      editor.cmdUpdateLabelText(PAGE, 'a', 'translation', 'before', 'after')
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
 
-      expect(textOf(labelsOf(project)[0].translation)).toBe('before')
+      expect(labelsOf(project)[0].body.lines.join('\n')).toBe('before')
       expect(editor.canUndo).toBe(false)
     })
 
@@ -1388,9 +1439,9 @@ describe('layer tree edits', () => {
       const { project, editor } = openTree([folder('g', [label('a', 'before')])], ['a'])
       lock(project, 'g')
 
-      editor.cmdUpdateLabelText(PAGE, 'a', 'translation', 'before', 'after')
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
 
-      expect(textOf(labelsOf(project)[0].translation)).toBe('before')
+      expect(labelsOf(project)[0].body.lines.join('\n')).toBe('before')
     })
 
     it('deletes what it can and steps over the locked', () => {
@@ -1412,7 +1463,7 @@ describe('layer tree edits', () => {
 
       editor.cmdSetLayerVisible(PAGE, 'a', false)
 
-      expect(project.labelById(PAGE, 'a')?.visible).toBe(false)
+      expect(project.blockById(PAGE, 'a')?.visible).toBe(false)
     })
 
     // Where paint may land is exactly what the lock was put on to hold still.
@@ -1442,13 +1493,13 @@ describe('layer tree edits', () => {
      */
     it('undoes a change that was made before the lock went on', () => {
       const { project, editor } = openTree([label('a', 'before')], ['a'])
-      editor.cmdUpdateLabelText(PAGE, 'a', 'translation', 'before', 'after')
+      editor.cmdUpdateLabelText(PAGE, 'a', 'before', 'after')
       editor.cmdSetLayerLocked(PAGE, 'a', true)
 
       editor.undo()
       editor.undo()
 
-      expect(textOf(labelsOf(project)[0].translation)).toBe('before')
+      expect(labelsOf(project)[0].body.lines.join('\n')).toBe('before')
     })
   })
 
@@ -1581,7 +1632,7 @@ describe('layer tree edits', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          readingOrder: ['z'],
+          translationUnits: [], readingOrder: ['z'],
           readingEdges: [],
           layers: [label('z')],
         },
@@ -1752,9 +1803,10 @@ describe('deleteSelection', () => {
         name: 'p',
         width: 1200,
         height: 1700,
+        translationUnits: p.order.map(unitFor),
         readingOrder: p.order,
         readingEdges: [],
-        layers: p.layers,
+        layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
     }))
@@ -1767,7 +1819,9 @@ describe('deleteSelection', () => {
     project.pageById(name)?.page.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.pageById(name)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(name)?.page.layers ?? [])
+      .filter((e) => !(e.kind === 'text' && e.side === 'source'))
+      .map((e) => e.id)
 
   it('takes the whole selection in one step of history', () => {
     const { project, editor } = open([
@@ -1999,7 +2053,7 @@ describe('selectLayerBy', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          readingOrder: order,
+          translationUnits: [], readingOrder: order,
           readingEdges: [],
           layers,
         },
@@ -2059,7 +2113,7 @@ describe('editBy', () => {
     const { project, editor } = openOnePage([label('a', 'a0'), label('b', 'b0')])
     editor.selectOnly('a')
     editor.beginTextEdit(PAGE, 'a', 'a0')
-    project.updateLabelText(PAGE, 'a', 'translation', 'a1')
+    project.updateLabelText(PAGE, 'a', 'a1')
 
     editor.editBy(1)
 
@@ -2115,9 +2169,10 @@ describe('moveObjectsTo', () => {
         name: 'p',
         width: 1200,
         height: 1700,
+        translationUnits: p.order.map(unitFor),
         readingOrder: p.order,
         readingEdges: p.drawn ?? [],
-        layers: p.layers,
+        layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
     }))
@@ -2130,7 +2185,9 @@ describe('moveObjectsTo', () => {
     project.pageById(name)?.page.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.pageById(name)?.page.layers ?? []).map((e) => e.id)
+    (project.pageById(name)?.page.layers ?? [])
+      .filter((e) => !(e.kind === 'text' && e.side === 'source'))
+      .map((e) => e.id)
 
   /**
    * Reordering within a page is about what is read first, and says nothing
@@ -2500,20 +2557,25 @@ describe('moving through a narrowed list', () => {
 describe('spraying tags with the brush', () => {
   function styled(id: string, tags: string[], style: Partial<TextStyle>): TextLayerEntry {
     const entry = label(id)
-    entry.tags = tags
-    entry.translation.style = { ...DEFAULT_TEXT_STYLE, ...style }
+    entry.body.style = { ...DEFAULT_TEXT_STYLE, ...style }
+    Object.assign(entry, { __tags: tags })
     return entry
   }
 
   function openSprayed(labels: TextLayerEntry[]) {
     const { project, editor } = openOnePage(labels)
+    // The meaning lives one level up, so it is written after the page is built.
+    for (const entry of labels) {
+      const tags = (entry as unknown as { __tags?: string[] }).__tags ?? []
+      if (tags.length > 0) project.setLabelTags(PAGE, entry.id, tags)
+    }
     project.addTag('outside')
     project.addTag('emphasis')
     return { project, editor }
   }
 
   const tagsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-    project.labelById(PAGE, id)!.tags
+    project.unitById(PAGE, id)!.tags
 
   it('replaces the meaning an object carried rather than joining it', () => {
     const { project, editor } = openSprayed([styled('a', ['emphasis'], {})])
@@ -2557,11 +2619,11 @@ describe('spraying tags with the brush', () => {
 
     editor.cmdPaintTags(['new'], ['outside'])
 
-    expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Mincho')
+    expect(project.blockById(PAGE, 'new')!.body.style.fontFamily).toBe('Mincho')
 
     editor.undo()
 
-    expect(project.labelById(PAGE, 'new')!.translation.style.fontFamily).toBe('Seed')
+    expect(project.blockById(PAGE, 'new')!.body.style.fontFamily).toBe('Seed')
   })
 
   /**
@@ -2619,7 +2681,7 @@ describe('spraying tags with the brush', () => {
     editor.cmdPaintTags(['mine'], ['outside'], false)
 
     expect(tagsOf(project, 'mine')).toEqual(['outside'])
-    expect(project.labelById(PAGE, 'mine')!.translation.style).toMatchObject({
+    expect(project.blockById(PAGE, 'mine')!.body.style).toMatchObject({
       fontFamily: 'Chosen',
       color: '#abcdef',
     })
@@ -2761,7 +2823,10 @@ describe('drawing lines between text objects', () => {
         effects: [],
         children: [a, b],
       },
+      sourceFor('a'),
+      sourceFor('b'),
     ]
+    file.page.translationUnits = [unitFor('a'), unitFor('b')]
     file.page.readingOrder = ['a', 'b']
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
     editor.selectOnly('g')
@@ -2773,7 +2838,7 @@ describe('drawing lines between text objects', () => {
 
   it('takes the lines on an object with it when its creation is undone', () => {
     const { project, editor } = openOnePage([label('a')])
-    editor.cmdAddLabel(PAGE, label('b'))
+    editor.cmdAddLabel(PAGE, { unit: unitFor('b'), blocks: [label('b'), sourceFor('b')] })
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
     editor.undo()
     editor.undo()
@@ -3010,27 +3075,41 @@ describe('a reading dropped on an object that already had one', () => {
 
   function standingOn(hash: string, text: string): TextLayerEntry {
     const entry = label('a')
-    entry.source = {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: linesOf(text),
-      x: 300,
-      y: 420,
-      rotation: 0.4,
-      by: 'auto',
-      from: hash,
-    }
+    Object.assign(entry, { __source: { lines: linesOf(text), from: hash } })
     return entry
+  }
+
+  /** Writes the artwork's words after the page exists, since they live next door. */
+  function openStanding(labels: TextLayerEntry[]) {
+    const opened = openOnePage(labels)
+    for (const entry of labels) {
+      const said = (entry as unknown as { __source?: { lines: string[]; from: string } }).__source
+      if (said === undefined) continue
+      const body = sourceOf(opened.project, entry.id)
+      body.lines = said.lines
+      body.from = said.from
+      body.x = 300
+      body.y = 420
+      body.rotation = 0.4
+    }
+    return opened
   }
 
   const offering = (
     project: ReturnType<typeof useProjectStore>,
     pool: readonly OcrCandidatePersisted[],
-  ): string[] => offeredReadings(pool, project.labelsOf(PAGE)).map((r) => r.hash)
+  ): string[] =>
+    offeredReadings(
+      pool,
+      blocksOnSide(project.pageById(PAGE)!.page.layers, 'source').map((b) => ({
+        source: { from: (b as SourceTextLayerEntry).body.from },
+      })),
+    ).map((r) => r.hash)
 
   it('says what the new reading says, and stops saying what the old one did', () => {
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
-    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
-    expect(textOfBody(labelsOf(project)[0].source)).toBe('おいつ')
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), reading('now', 'おいつ'))
+    expect(sourceOf(project, 'a').lines.join('\n')).toBe('おいつ')
   })
 
   /**
@@ -3039,9 +3118,9 @@ describe('a reading dropped on an object that already had one', () => {
    */
   it('hands the reading it was standing on back to the page, and takes up the new one', () => {
     const pool = [reading('was', 'あいつ'), reading('now', 'おいつ')]
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
     expect(offering(project, pool)).toEqual(['now'])
-    editor.cmdReplaceLabelSource(PAGE, 'a', pool[1])
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), pool[1])
     expect(offering(project, pool)).toEqual(['was'])
   })
 
@@ -3051,58 +3130,68 @@ describe('a reading dropped on an object that already had one', () => {
    * the characters.
    */
   it('stamps the object as settled by hand', () => {
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
-    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
-    expect(labelsOf(project)[0].source.by).toBe('human')
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), reading('now', 'おいつ'))
+    expect(sourceOf(project, 'a').by).toBe('human')
   })
 
   /** What a drop on an object says is "the contents are wrong", and no more. */
   it('leaves the object standing exactly where it was, set as it was', () => {
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
-    const before = labelsOf(project)[0].source
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
+    const before = sourceOf(project, labelsOf(project)[0]!.id)
     const was = { x: before.x, y: before.y, rotation: before.rotation, style: before.style }
-    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
-    const after = labelsOf(project)[0].source
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), reading('now', 'おいつ'))
+    const after = sourceOf(project, labelsOf(project)[0]!.id)
     expect({ x: after.x, y: after.y, rotation: after.rotation, style: after.style }).toEqual(was)
   })
 
   it('takes the replacement back, words and fence together', () => {
     const pool = [reading('was', 'あいつ'), reading('now', 'おいつ')]
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
-    editor.cmdReplaceLabelSource(PAGE, 'a', pool[1])
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), pool[1])
     editor.undo()
-    expect(textOfBody(labelsOf(project)[0].source)).toBe('あいつ')
-    expect(labelsOf(project)[0].source.by).toBe('auto')
+    expect(sourceOf(project, 'a').lines.join('\n')).toBe('あいつ')
+    expect(sourceOf(project, 'a').by).toBe('auto')
     expect(offering(project, pool)).toEqual(['now'])
   })
 
   it('has nothing to record for a drop of the reading already standing there', () => {
-    const { project, editor } = openOnePage([standingOn('was', 'あいつ')])
-    editor.cmdReplaceLabelSource(PAGE, 'a', reading('was', 'あいつ'))
+    const { project, editor } = openStanding([standingOn('was', 'あいつ')])
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), reading('was', 'あいつ'))
     expect(editor.canUndo).toBe(false)
-    expect(labelsOf(project)[0].source.by).toBe('auto')
+    expect(sourceOf(project, 'a').by).toBe('auto')
   })
 
   it('refuses an object somebody has locked', () => {
     const locked = standingOn('was', 'あいつ')
-    locked.locked = true
-    const { project, editor } = openOnePage([locked])
-    editor.cmdReplaceLabelSource(PAGE, 'a', reading('now', 'おいつ'))
-    expect(textOfBody(labelsOf(project)[0].source)).toBe('あいつ')
+    const { project, editor } = openStanding([locked])
+    project.blockById(PAGE, SOURCE_OF('a'))!.locked = true
+    editor.cmdReplaceLabelSource(PAGE, SOURCE_OF('a'), reading('now', 'おいつ'))
+    expect(sourceOf(project, 'a').lines.join('\n')).toBe('あいつ')
   })
 })
 
 describe('the translation candidates', () => {
   function withCandidates(...candidates: TranslationCandidate[]): TextLayerEntry {
     const entry = label('a', '自己打的')
-    entry.translation.candidates = candidates
+    Object.assign(entry, { __pool: candidates })
     return entry
   }
 
+  /** The pool belongs to the translation, so it is filled once the page exists. */
+  function openPooled(labels: TextLayerEntry[]) {
+    const opened = openOnePage(labels)
+    for (const entry of labels) {
+      const pool = (entry as unknown as { __pool?: TranslationCandidate[] }).__pool
+      if (pool) opened.project.unitById(PAGE, entry.id)!.candidates = pool
+    }
+    return opened
+  }
+
   const rowsOf = (project: ReturnType<typeof useProjectStore>) =>
-    labelsOf(project)[0].translation.candidates
+    project.unitById(PAGE, 'a')!.candidates
   const chosenOf = (project: ReturnType<typeof useProjectStore>) =>
-    labelsOf(project)[0].translation.chosen
+    project.unitById(PAGE, 'a')!.chosen
 
   /**
    * ⭐ The two doors are one door. Typing reaches whichever row the object is
@@ -3111,35 +3200,35 @@ describe('the translation candidates', () => {
    * person happened to be looking at.
    */
   it('takes a proposal as your own the moment it is typed into, from either door', () => {
-    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
-    project.updateLabelText(PAGE, 'a', 'translation', '我改的')
-    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我改的'], human: true })
+    project.updateLabelText(PAGE, 'a', '我改的')
+    expect(rowsOf(project)[0]).toMatchObject({ pieces: [['我改的']], human: true })
   })
 
   /** Or a model could no longer withdraw words it wrote and nobody kept. */
   it('hands an untouched proposal back to the model when the typing is undone', () => {
-    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.beginTextEdit(PAGE, 'a', '模型的')
-    project.updateLabelText(PAGE, 'a', 'translation', '我改的')
+    project.updateLabelText(PAGE, 'a', '我改的')
     editor.commitTextEdit()
     editor.undo()
-    expect(rowsOf(project)[0].lines).toEqual(['模型的'])
+    expect(rowsOf(project)[0].pieces[0]).toEqual(['模型的'])
     expect(rowsOf(project)[0].human).toBeUndefined()
   })
 
   /** A proposal that was already somebody's stays theirs through an undo. */
   it('leaves a proposal that was already yours marked as yours', () => {
-    const { project, editor } = openOnePage([
-      withCandidates({ id: 'h', lines: ['我寫的'], human: true }),
+    const { project, editor } = openPooled([
+      withCandidates({ id: 'h', pieces: [['我寫的']], human: true }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'h')
     editor.beginTextEdit(PAGE, 'a', '我寫的')
-    project.updateLabelText(PAGE, 'a', 'translation', '再改一次')
+    project.updateLabelText(PAGE, 'a', '再改一次')
     editor.commitTextEdit()
     editor.undo()
-    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我寫的'], human: true })
+    expect(rowsOf(project)[0]).toMatchObject({ pieces: [['我寫的']], human: true })
   })
 
   /**
@@ -3148,7 +3237,7 @@ describe('the translation candidates', () => {
    * moment somebody is sure what they just did.
    */
   it('takes a pick back', () => {
-    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     expect(chosenOf(project)).toBe('m')
     editor.undo()
@@ -3156,15 +3245,15 @@ describe('the translation candidates', () => {
   })
 
   it('has nothing to record for picking the row already being read', () => {
-    const { editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    const { editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
     editor.cmdPickTranslation(PAGE, 'a', null)
     expect(editor.canUndo).toBe(false)
   })
 
   it('adds a candidate blank, yours, and already being read', () => {
-    const { project, editor } = openOnePage([withCandidates()])
+    const { project, editor } = openPooled([withCandidates()])
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
-    expect(rowsOf(project)).toEqual([{ id: 'fresh', lines: [''], human: true }])
+    expect(rowsOf(project)).toEqual([{ id: 'fresh', pieces: [['']], human: true }])
     expect(chosenOf(project)).toBe('fresh')
   })
 
@@ -3173,7 +3262,7 @@ describe('the translation candidates', () => {
    * so a redo that minted a fresh one would leave that slot pointing at nothing.
    */
   it('brings the same candidate back on redo', () => {
-    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
+    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
     editor.undo()
@@ -3191,21 +3280,21 @@ describe('the translation candidates', () => {
    * about it.
    */
   it('drops the object back to its own lines when the proposal it was reading is thrown away', () => {
-    const { project, editor } = openOnePage([
-      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
+    const { project, editor } = openPooled([
+      withCandidates({ id: 'm', pieces: [['模型的']] }, { id: 'n', pieces: [['另一個']] }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdRemoveTranslation(PAGE, 'a', 'm')
     expect(chosenOf(project)).toBeNull()
-    expect(textOf(labelsOf(project)[0].translation)).toBe('自己打的')
+    expect(textsOf(project)[0]).toBe('自己打的')
   })
 
   it('puts a thrown-away proposal back where it was, still being read', () => {
-    const { project, editor } = openOnePage([
+    const { project, editor } = openPooled([
       withCandidates(
-        { id: 'first', lines: ['一'] },
-        { id: 'second', lines: ['二'] },
-        { id: 'third', lines: ['三'] },
+        { id: 'first', pieces: [['一']] },
+        { id: 'second', pieces: [['二']] },
+        { id: 'third', pieces: [['三']] },
       ),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'second')
@@ -3216,8 +3305,8 @@ describe('the translation candidates', () => {
   })
 
   it('leaves the row being read alone when some other proposal is thrown away', () => {
-    const { project, editor } = openOnePage([
-      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
+    const { project, editor } = openPooled([
+      withCandidates({ id: 'm', pieces: [['模型的']] }, { id: 'n', pieces: [['另一個']] }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdRemoveTranslation(PAGE, 'a', 'n')
@@ -3225,9 +3314,9 @@ describe('the translation candidates', () => {
   })
 
   it('refuses every one of them on a locked object', () => {
-    const locked = withCandidates({ id: 'm', lines: ['模型的'] })
+    const locked = withCandidates({ id: 'm', pieces: [['模型的']] })
     locked.locked = true
-    const { project, editor } = openOnePage([locked])
+    const { project, editor } = openPooled([locked])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
     editor.cmdRemoveTranslation(PAGE, 'a', 'm')
@@ -3252,7 +3341,7 @@ describe('a style set the way a run measured the artwork', () => {
       fontSizePx: 27.712812921102035,
       leadingPercent: 118.40000152587891,
     })
-    const { style } = labelsOf(project)[0].translation
+    const { style } = labelsOf(project)[0].body
     expect(style.fontSizePx).toBe(28)
     expect(style.leadingPercent).toBe(118)
   })
@@ -3266,7 +3355,7 @@ describe('a style set the way a run measured the artwork', () => {
     editor.cmdAddLabelFromReading(PAGE, { x: 300, y: 100 }, { hash: 'b', text: '二' }, {
       fontSizePx: 28.4,
     })
-    expect(labelsOf(project).map((l) => l.translation.style.fontSizePx)).toEqual([28, 28])
+    expect(labelsOf(project).map((l) => l.body.style.fontSizePx)).toEqual([28, 28])
   })
 
   /** ⚠️ Absent still means unmeasured, and keeps whatever it is laid over. */
@@ -3274,7 +3363,7 @@ describe('a style set the way a run measured the artwork', () => {
     const { project, editor } = openOnePage()
     const seed = project.header.seedStyle
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, {})
-    const { style } = labelsOf(project)[0].translation
+    const { style } = labelsOf(project)[0].body
     expect(style.fontSizePx).toBe(seed.fontSizePx)
     expect(style.leadingPercent).toBe(seed.leadingPercent)
   })
@@ -3290,7 +3379,7 @@ describe('a style set the way a run measured the artwork', () => {
       fontSizePx: 38,
       leadingPercent: 118,
     })
-    expect(labelsOf(project)[0].source.style).toMatchObject({
+    expect(labelsOf(project)[0].body.style).toMatchObject({
       direction: 'vertical',
       leadingPercent: 118,
     })
@@ -3323,7 +3412,7 @@ describe('the one size the source side is read at', () => {
   it('sets a dropped reading at the page size rather than at the measured one', () => {
     const { project, editor } = openScan()
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { fontSizePx: 38 })
-    expect(labelsOf(project)[0].source.style.fontSizePx).toBe(READING_SIZE_PX)
+    expect(sourceOf(project, labelsOf(project)[0].id).style.fontSizePx).toBe(READING_SIZE_PX)
   })
 
   it('sets a born object at it too, however the balloon was measured', () => {
@@ -3335,7 +3424,7 @@ describe('the one size the source side is read at', () => {
         { from: 'r2', text: 'に', centre: { x: 600, y: 400 }, fontSizePx: 72 },
       ],
     })
-    expect(labelsOf(project).map((l) => l.source.style.fontSizePx)).toEqual([
+    expect(labelsOf(project).map((l) => sourceOf(project, l.id).style.fontSizePx)).toEqual([
       READING_SIZE_PX,
       READING_SIZE_PX,
     ])
@@ -3345,10 +3434,10 @@ describe('the one size the source side is read at', () => {
   it('holds a standing object at it when a run fills it', () => {
     const { project, editor } = openScan([label('a')])
     editor.cmdApplyVerdict(PAGE, {
-      fills: new Map([['a', { text: 'ふん', from: 'r1', fontSizePx: 38 }]]),
+      fills: new Map([[SOURCE_OF('a'), { text: 'ふん', from: 'r1', fontSizePx: 38 }]]),
       spawns: [],
     })
-    expect(labelsOf(project)[0].source.style.fontSizePx).toBe(READING_SIZE_PX)
+    expect(sourceOf(project, labelsOf(project)[0].id).style.fontSizePx).toBe(READING_SIZE_PX)
   })
 })
 
@@ -3362,12 +3451,12 @@ describe('a measured leading out of the range a page can be set in', () => {
   it('refuses to stack the lines through each other', () => {
     const { project, editor } = openOnePage()
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { leadingPercent: 41 })
-    expect(labelsOf(project)[0].source.style.leadingPercent).toBe(100)
+    expect(labelsOf(project)[0].body.style.leadingPercent).toBe(100)
   })
 
   it('refuses to blow the lines apart', () => {
     const { project, editor } = openOnePage()
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { leadingPercent: 900 })
-    expect(labelsOf(project)[0].source.style.leadingPercent).toBe(250)
+    expect(labelsOf(project)[0].body.style.leadingPercent).toBe(250)
   })
 })

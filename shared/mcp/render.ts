@@ -2,7 +2,7 @@ import type {
   ChooseOutcome,
   PageTexts,
   ProposeOutcome,
-  TextObjectTexts,
+  TranslationTexts,
   WithdrawOutcome,
   WriteResult,
 } from "./types";
@@ -17,10 +17,13 @@ function flat(text: string): string {
   return text.replaceAll("\n", "／");
 }
 
-export function renderObject(obj: TextObjectTexts): string {
+export function renderObject(obj: TranslationTexts): string {
   const out: string[] = [obj.id];
   out.push(`  原文: ${obj.source === null ? "（無）" : flat(obj.source)}`);
   out.push(`  譯文: ${obj.translation === "" ? "（未翻）" : flat(obj.translation)}`);
+  // Said only where it is not one, so an ordinary balloon's line stays a line
+  // about the words rather than about how they were set.
+  if (obj.blocks > 1) out.push(`  譯文分成 ${obj.blocks} 塊——候選要有同樣多塊才選得起來`);
   if (obj.candidates.length > 0) {
     const drawer = obj.candidates
       .map((c) => {
@@ -35,7 +38,7 @@ export function renderObject(obj: TextObjectTexts): string {
 
 export function renderTexts(pages: PageTexts[]): string {
   const total = pages.reduce((n, p) => n + p.objects.length, 0);
-  const out: string[] = [`專案 · ${pages.length} 頁 · ${total} 個文字物件`];
+  const out: string[] = [`專案 · ${pages.length} 頁 · ${total} 筆翻譯`];
   for (const page of pages) {
     out.push("");
     if (page.badge !== "ok") {
@@ -48,7 +51,7 @@ export function renderTexts(pages: PageTexts[]): string {
   return out.join("\n");
 }
 
-function withStates(head: string[], objects: TextObjectTexts[]): string {
+function withStates(head: string[], objects: TranslationTexts[]): string {
   if (objects.length > 0) {
     head.push("", "操作後的物件狀態：");
     for (const obj of objects) head.push(renderObject(obj));
@@ -63,11 +66,11 @@ export function renderProposeResult(result: WriteResult<ProposeOutcome>): string
   for (const o of result.outcomes) {
     if (o.ok) {
       out.push(
-        `${o.objectId} → 候選 ${o.translationId}` +
-          (o.filledSlot ? "（物件原本空白，已直接生效）" : "（進入抽屜，現值未動）"),
+        `${o.unitId} → 候選 ${o.translationId}` +
+          (o.filledSlot ? "（這一筆原本空白，已直接生效）" : "（進入抽屜，現值未動）"),
       );
     } else {
-      out.push(`${o.objectId} ✗ ${o.reason}`);
+      out.push(`${o.unitId} ✗ ${o.reason}`);
     }
   }
   return withStates(out, result.objects);
@@ -76,8 +79,8 @@ export function renderProposeResult(result: WriteResult<ProposeOutcome>): string
 export function renderChooseResult(result: WriteResult<ChooseOutcome>): string {
   const out = result.outcomes.map((o) =>
     o.ok
-      ? `${o.objectId} 現在讀作候選 ${o.translationId}`
-      : `${o.objectId} ✗ ${o.reason}（${o.translationId}）`,
+      ? `${o.unitId} 現在讀作候選 ${o.translationId}`
+      : `${o.unitId} ✗ ${o.reason}（${o.translationId}）`,
   );
   return withStates(out, result.objects);
 }

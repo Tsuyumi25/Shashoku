@@ -1,8 +1,7 @@
 import { ref } from 'vue'
 import { parseManifest } from '@shared/page/schema'
-import { textObjects } from '@shared/page/tree'
 import { folderName, parentFolder } from '@shared/project/library'
-import type { BucketObject } from '@/lib/valueBuckets'
+import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -33,14 +32,9 @@ export function useSeriesObjects() {
     for (const page of opened.pages) {
       if (page.badge !== 'ok') continue
       const raw = await window.api.readPage(page.pageDir)
-      for (const label of textObjects(parseManifest(raw.manifestRaw).layers)) {
-        out.push({
-          id: label.id,
-          pageId: `${folderName(rootPath)}/${page.pageId}`,
-          tags: label.tags,
-          style: label.translation.style,
-        })
-      }
+      const manifest = parseManifest(raw.manifestRaw)
+      for (const object of bucketObjectsOf(`${folderName(rootPath)}/${page.pageId}`, manifest, 'translation'))
+        out.push(object)
     }
     return out
   }

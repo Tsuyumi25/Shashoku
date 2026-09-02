@@ -5,6 +5,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { PASS_THROUGH } from './types'
+import type { TextSide } from './text'
 
 /**
  * How a page stacks, answered once.
@@ -60,8 +61,14 @@ function needsBuffer(folder: GroupLayerEntry): boolean {
  * Hiding is inherited: a folder that is off takes everything under it with it,
  * whatever those objects say about themselves. A folder that needs no buffer
  * disappears into whatever holds it, so the common page comes back flat.
+ *
+ * ⭐ Only one side's blocks. What a page exports as is always the translation,
+ * and the artwork's own words are a second page laid over the same drawing —
+ * two sides in one stack would draw both at once. Asked for rather than
+ * assumed, so a caller that means the translation whatever the interface is
+ * showing has to say so.
  */
-export function pageStack(layers: readonly LayerEntry[]): StackNode[] {
+export function pageStack(layers: readonly LayerEntry[], side: TextSide): StackNode[] {
   const out: StackNode[] = []
   for (const entry of layers) {
     if (!entry.visible) continue
@@ -70,10 +77,11 @@ export function pageStack(layers: readonly LayerEntry[]): StackNode[] {
       continue
     }
     if (entry.kind === 'text') {
+      if (entry.side !== side) continue
       out.push({ kind: 'text', entry, opacity: entry.opacity, blendMode: entry.blendMode })
       continue
     }
-    const children = pageStack(entry.children)
+    const children = pageStack(entry.children, side)
     if (!needsBuffer(entry)) {
       out.push(...children)
       continue

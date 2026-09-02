@@ -147,7 +147,7 @@
           <template #item="{ element }">
             <div
               tabindex="0"
-              :data-row-id="(element as LabelRow).label.id"
+              :data-row-id="(element as LabelRow).blocks[0]?.id"
               class="row-content flex min-w-0 items-start gap-1.5 border-b border-border/40 py-1 pr-2 pl-1.5 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
               :class="[
                 isSelected(element as LabelRow) ? 'bg-accent/50' : 'hover:bg-secondary/40',
@@ -230,12 +230,53 @@
                   :class="isMainBlank(element as LabelRow) && 'text-muted-foreground/50'"
                 >{{ preview(element as LabelRow) }}<br v-if="endsOnABreak(element as LabelRow)" /></pre>
 
+                <!--
+                  ⭐ Only where the lettering was split, so an ordinary balloon
+                  is one row exactly as it always was. Each block gets its own
+                  line to be typed into, numbered in the order it is read.
+                -->
                 <div
-                  v-if="(element as LabelRow).label.tags.length > 0"
+                  v-if="(element as LabelRow).blocks.length > 1"
+                  class="mt-0.5 flex flex-col gap-0.5"
+                >
+                  <div
+                    v-for="(block, at) in (element as LabelRow).blocks"
+                    :key="block.id"
+                    tabindex="0"
+                    :data-row-id="block.id"
+                    class="flex min-w-0 items-start gap-1.5 rounded-sm px-1 focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+                    :class="
+                      editor.isSelected(block.id) ? 'bg-accent/50' : 'hover:bg-secondary/40'
+                    "
+                    @mousedown.stop="onPickBlock(blockRowOf(element as LabelRow, at), $event)"
+                    @dblclick.stop="onEditBlock(blockRowOf(element as LabelRow, at))"
+                  >
+                    <span class="mt-0.5 shrink-0 text-[10px] text-muted-foreground/70">{{
+                      at + 1
+                    }}</span>
+                    <textarea
+                      v-if="isEditingBlock(blockRowOf(element as LabelRow, at))"
+                      :ref="takeFocus"
+                      rows="1"
+                      spellcheck="false"
+                      class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none"
+                      :value="blockRowOf(element as LabelRow, at).text"
+                      @input="onInputBlock(blockRowOf(element as LabelRow, at), $event)"
+                      @keydown="onInputKey($event)"
+                    />
+                    <pre
+                      v-else
+                      class="reading min-w-0 flex-1 text-sm leading-snug whitespace-pre-wrap"
+                    >{{ blockRowOf(element as LabelRow, at).text }}</pre>
+                  </div>
+                </div>
+
+                <div
+                  v-if="(element as LabelRow).unit.tags.length > 0"
                   class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
                 >
                   <span
-                    v-for="tag in orderedTags((element as LabelRow).label.tags)"
+                    v-for="tag in orderedTags((element as LabelRow).unit.tags)"
                     :key="tag"
                     class="flex min-w-0 items-center gap-1"
                   >
@@ -261,11 +302,11 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
 import PageRowThumb from '@/components/PageRowThumb.vue'
-import { isBlank, textOnSide } from '@shared/page/text'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
   buildLabelRows,
   dropAt,
+  type BlockRow,
   type ChapterRow,
   type LabelRow,
   type PageRow,
@@ -286,7 +327,7 @@ const surface = useTextEditSurface()
  * at that scale — which is also what makes selecting across pages fall out of
  * this list rather than needing anything of its own.
  */
-const rows = computed(() => buildLabelRows(project.files, editor.labelQuery))
+const rows = computed(() => buildLabelRows(project.files, editor.textSide, editor.labelQuery))
 
 /**
  * Narrowing lives in the store because moving up and down walks what is on
@@ -313,9 +354,12 @@ const emptyNote = computed(() => {
  */
 const pageGroups = computed(() => {
   const out: { page: PageRow; rows: LabelRow[] }[] = []
+  // ⚠️ Only the translations. A block row belongs to the row above it and is
+  // drawn inside it, so putting one in this list would make it a sibling the
+  // drag could carry off on its own.
   for (const row of rows.value) {
     if (row.kind === 'page') out.push({ page: row, rows: [] })
-    else out[out.length - 1]?.rows.push(row)
+    else if (row.kind === 'label') out[out.length - 1]?.rows.push(row)
   }
   /*
    * Narrowing puts the rail away rather than drawing it with holes in. A line
@@ -338,7 +382,7 @@ function fileOf(pageId: string) {
 
 /** What a range reaches over, in the order the panel is showing it. */
 const sequence = computed(() =>
-  rows.value.filter((r): r is LabelRow => r.kind === 'label').map((r) => r.label.id),
+  rows.value.flatMap((r) => (r.kind === 'label' ? r.blocks.map((b) => b.id) : [])),
 )
 
 const scrollEl = ref<HTMLElement | null>(null)
@@ -377,11 +421,46 @@ function branchIndent(row: LabelRow): Record<string, string> | undefined {
 
 /** Its own lock or a folder's above it, which this list has no way to tell apart. */
 function isRowLocked(row: LabelRow): boolean {
-  return editor.isLayerLocked(row.label.id)
+  return row.blocks.some((block) => editor.isLayerLocked(block.id))
 }
 
 function isSelected(row: LabelRow): boolean {
-  return editor.isSelected(row.label.id)
+  return row.blocks.some((block) => editor.isSelected(block.id))
+}
+
+/**
+ * A row's block, as the row the handlers take. Built here rather than emitted
+ * as a sibling in the list, because a block belongs to the translation above it
+ * — a sibling is something a drag could carry off on its own.
+ */
+function blockRowOf(row: LabelRow, at: number): BlockRow {
+  const block = row.blocks[at]
+  return {
+    kind: 'block',
+    key: `block/${row.pageId}/${block.id}`,
+    pageId: row.pageId,
+    unit: row.unit,
+    block,
+    at: at + 1,
+    text: blockTexts.value.get(block.id) ?? block.body.lines.join('\n'),
+    index: row.index,
+  }
+}
+
+/** Every block's resolved words, keyed by id, off the same pass the rows came from. */
+const blockTexts = computed(() => {
+  const out = new Map<string, string>()
+  for (const row of rows.value) if (row.kind === 'block') out.set(row.block.id, row.text)
+  return out
+})
+
+/**
+ * The one block a row is typed into. A translation set in several is typed into
+ * one block at a time, on the rows below — there is no caret that spans them,
+ * and pretending otherwise would be a box writing into somewhere it is not.
+ */
+function soleBlock(row: LabelRow): string | null {
+  return row.blocks.length === 1 ? row.blocks[0].id : null
 }
 
 /**
@@ -401,28 +480,32 @@ function isHere(row: ChapterRow): boolean {
  */
 function isEditing(row: LabelRow): boolean {
   const pending = editor.pendingTextEdit
-  return pending?.pageId === row.pageId && pending?.labelId === row.label.id
+  const sole = soleBlock(row)
+  return sole !== null && pending?.pageId === row.pageId && pending?.labelId === sole
 }
 
-/** The other body, on the small line above. */
+function isEditingBlock(row: BlockRow): boolean {
+  const pending = editor.pendingTextEdit
+  return pending?.pageId === row.pageId && pending?.labelId === row.block.id
+}
+
+/** The other side, on the small line above. */
 function asideText(row: LabelRow): string {
-  return textOnSide(row.label, editor.textSide === 'source' ? 'translation' : 'source')
+  return row.opposite
 }
 
 /** And the one being worked on, which is the line the caret opens in. */
 function mainText(row: LabelRow): string {
-  return textOnSide(row.label, editor.textSide)
+  return row.main
 }
 
 /**
  * Whether the main line says nothing at all — which on the translation side is
- * not the same as having typed nothing into it, so it goes through the
- * resolution rather than reading `lines`.
+ * not the same as having typed nothing into it, so it reads the projection
+ * rather than any one block's own words.
  */
 function isMainBlank(row: LabelRow): boolean {
-  return editor.textSide === 'source'
-    ? row.label.source.lines.every((line) => line.length === 0)
-    : isBlank(row.label.translation)
+  return row.main.length === 0
 }
 
 const blankLabel = computed(() => (editor.textSide === 'source' ? '(沒有原文)' : '(未翻譯)'))
@@ -510,11 +593,28 @@ function focusIn(selector: string) {
   scrollEl.value?.querySelector<HTMLElement>(selector)?.focus()
 }
 
+/**
+ * ⭐ Picking a translation picks every block that says it, which is the same
+ * thing framing them on the canvas does. What a row stands for is one piece of
+ * content, and taking hold of half the lettering of it was never the offer.
+ */
 function onPick(row: LabelRow, e: MouseEvent) {
   if (isEditing(row)) return
-  if (e.shiftKey) editor.extendSelectionTo(row.label.id, sequence.value)
-  else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.label.id)
-  else editor.revealLabel(row.pageId, row.label.id)
+  const first = row.blocks[0]?.id
+  if (first === undefined) return
+  if (e.shiftKey) editor.extendSelectionTo(first, sequence.value)
+  else if (e.ctrlKey || e.metaKey) for (const block of row.blocks) editor.toggleSelected(block.id)
+  else {
+    editor.revealLabel(row.pageId, first)
+    for (const block of row.blocks.slice(1)) editor.toggleSelected(block.id)
+  }
+}
+
+function onPickBlock(row: BlockRow, e: MouseEvent) {
+  if (isEditingBlock(row)) return
+  if (e.shiftKey) editor.extendSelectionTo(row.block.id, sequence.value)
+  else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.block.id)
+  else editor.revealLabel(row.pageId, row.block.id)
 }
 
 /**
@@ -523,8 +623,16 @@ function onPick(row: LabelRow, e: MouseEvent) {
  * user is looking.
  */
 function onEdit(row: LabelRow) {
-  editor.revealLabel(row.pageId, row.label.id)
-  editor.beginTextEdit(row.pageId, row.label.id, textOnSide(row.label, editor.textSide))
+  const sole = soleBlock(row)
+  if (sole === null) return
+  editor.revealLabel(row.pageId, sole)
+  editor.beginTextEdit(row.pageId, sole, row.main)
+  surface.pin(false)
+}
+
+function onEditBlock(row: BlockRow) {
+  editor.revealLabel(row.pageId, row.block.id)
+  editor.beginTextEdit(row.pageId, row.block.id, row.text)
   surface.pin(false)
 }
 
@@ -583,7 +691,7 @@ function onChanged(
   next.splice(change.newIndex, 0, change.element)
 
   const target = dropAt(next[change.newIndex - 1] ?? group.page, true)
-  editor.moveObjectsTo([change.element.label.id], target.page, target.index)
+  editor.moveObjectsTo([change.element.unit.id], target.page, target.index)
 }
 
 /**
@@ -596,8 +704,10 @@ function onSearchKey(e: KeyboardEvent) {
   e.preventDefault()
   const first = rows.value.find((r): r is LabelRow => r.kind === 'label')
   if (first === undefined) return
-  editor.revealLabel(first.pageId, first.label.id)
-  void nextTick(() => focusIn(`[data-row-id="${CSS.escape(first.label.id)}"]`))
+  const block = first.blocks[0]
+  if (block === undefined) return
+  editor.revealLabel(first.pageId, block.id)
+  void nextTick(() => focusIn(`[data-row-id="${CSS.escape(block.id)}"]`))
 }
 
 useEventListener(window, 'keydown', (e) => {
@@ -640,13 +750,14 @@ function onInputKey(e: KeyboardEvent) {
  * the whole visit to this row, closed by whatever takes the caret away.
  */
 function onInput(row: LabelRow, e: Event) {
-  if (editor.isLayerLocked(row.label.id)) return
-  project.updateLabelText(
-    row.pageId,
-    row.label.id,
-    editor.textSide,
-    (e.target as HTMLTextAreaElement).value,
-  )
+  const sole = soleBlock(row)
+  if (sole === null || editor.isLayerLocked(sole)) return
+  project.updateLabelText(row.pageId, sole, (e.target as HTMLTextAreaElement).value)
+}
+
+function onInputBlock(row: BlockRow, e: Event) {
+  if (editor.isLayerLocked(row.block.id)) return
+  project.updateLabelText(row.pageId, row.block.id, (e.target as HTMLTextAreaElement).value)
 }
 
 /**
@@ -667,7 +778,13 @@ watch(
       labelId === null
         ? rows.value.findIndex((r) => r.kind === 'page' && r.pageId === pageId)
         : rows.value.findIndex(
-            (r) => r.kind === 'label' && r.pageId === pageId && r.label.id === labelId,
+            (r) =>
+              r.kind === 'block'
+                ? r.pageId === pageId && r.block.id === labelId
+                : r.kind === 'label' &&
+                  r.pageId === pageId &&
+                  r.blocks.length === 1 &&
+                  r.blocks[0].id === labelId,
           )
     if (index === -1) return
     const selector =

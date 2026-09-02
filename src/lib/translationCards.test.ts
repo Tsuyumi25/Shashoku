@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TranslationBody, TranslationCandidate } from '@shared/page/types'
-import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import { emptyBody } from '@shared/page/schema'
+import type { TranslationCandidate, TranslationUnit } from '@shared/page/types'
 import {
   OWN,
   offersAChoice,
@@ -15,29 +13,37 @@ import {
 const PAGE = { width: 1200, height: 1700 }
 const BASE = 12
 
-function body(over: Partial<TranslationBody> = {}): TranslationBody {
-  return { ...emptyBody(DEFAULT_TEXT_STYLE), candidates: [], chosen: null, ...over }
+function unit(over: Partial<TranslationUnit> = {}): TranslationUnit {
+  return {
+    id: 'u1',
+    tags: [],
+    source: { members: ['s'], separators: [] },
+    translation: { members: ['t'], separators: [] },
+    candidates: [],
+    chosen: null,
+    ...over,
+  }
 }
 
 const candidate = (id: string, text: string, over: Partial<TranslationCandidate> = {}) =>
-  ({ id, lines: text.split('\n'), ...over }) as TranslationCandidate
+  ({ id, pieces: [text.split('\n')], ...over }) as TranslationCandidate
 
 describe('what an object can be read as', () => {
   it('reads an object nobody has proposed for as its own one line', () => {
-    expect(rowsOf(body({ lines: ['已經打好的'] }))).toEqual([
+    expect(rowsOf(unit(), '已經打好的')).toEqual([
       { id: OWN, text: '已經打好的', by: 'own' },
     ])
   })
 
   it('names the model that proposed a line, and the hand that corrected one', () => {
     const rows = rowsOf(
-      body({
-        lines: [''],
+      unit({
         candidates: [
           candidate('m', '模型說的', { source: 'claude' }),
           candidate('h', '我改的', { human: true }),
         ],
       }),
+      '',
     )
     expect(rows.map((r) => [r.by, r.source])).toEqual([
       ['own', undefined],
@@ -52,20 +58,18 @@ describe('what an object can be read as', () => {
    * words appearing out of nowhere.
    */
   it('keeps the line the object typed while a proposal is picked', () => {
-    const rows = rowsOf(
-      body({ lines: ['自己打的'], candidates: [candidate('m', '模型的')], chosen: 'm' }),
-    )
+    const rows = rowsOf(unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }), '自己打的')
     expect(rows.map((r) => r.id)).toEqual([OWN, 'm'])
   })
 
   /** With nothing typed and nothing picked it is still the row being read. */
   it('keeps an empty own line while it is the one being read', () => {
-    expect(rowsOf(body({ lines: [''] })).map((r) => r.id)).toEqual([OWN])
+    expect(rowsOf(unit(), '').map((r) => r.id)).toEqual([OWN])
   })
 
   /** Empty and not being read, it is a row saying nothing about nothing. */
   it('drops an empty own line once a proposal is picked', () => {
-    const rows = rowsOf(body({ lines: [''], candidates: [candidate('m', '模型的')], chosen: 'm' }))
+    const rows = rowsOf(unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }), '')
     expect(rows.map((r) => r.id)).toEqual(['m'])
   })
 })
@@ -76,26 +80,24 @@ describe('what an object can be read as', () => {
  */
 describe('when a list is worth drawing', () => {
   it('draws nothing for an object with one way to read it', () => {
-    expect(offersAChoice(rowsOf(body({ lines: ['一句話'] })))).toBe(false)
+    expect(offersAChoice(rowsOf(unit(), '一句話'))).toBe(false)
   })
 
   it('draws a list the moment a second way to read it turns up', () => {
-    const rows = rowsOf(body({ lines: ['一句話'], candidates: [candidate('m', '另一句')] }))
+    const rows = rowsOf(unit({ candidates: [candidate('m', '另一句')] }), '一句話')
     expect(offersAChoice(rows)).toBe(true)
   })
 
   /** The picked one is counted, so a proposal against an empty object is a pair. */
   it('counts the row being read among the two', () => {
-    const rows = rowsOf(
-      body({ lines: ['自己打的'], candidates: [candidate('m', '模型的')], chosen: 'm' }),
-    )
+    const rows = rowsOf(unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }), '自己打的')
     expect(rows).toHaveLength(2)
     expect(offersAChoice(rows)).toBe(true)
   })
 
   /** A proposal picked into an object that had nothing typed is one row, not two. */
   it('draws nothing where the only proposal replaced an empty line', () => {
-    const rows = rowsOf(body({ lines: [''], candidates: [candidate('m', '模型的')], chosen: 'm' }))
+    const rows = rowsOf(unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }), '')
     expect(offersAChoice(rows)).toBe(false)
   })
 })

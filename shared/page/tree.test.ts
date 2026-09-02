@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { blankTextObject, emptyBody } from './schema'
+import { blankBlock } from './schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import type { GroupLayerEntry, LayerEntry, ManifestJson, RasterLayerEntry, TextLayerEntry } from './types'
-import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
+import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from './types'
+import { PASS_THROUGH } from './types'
 import {
   dissolveGroupAt,
   findEntry,
@@ -17,20 +17,12 @@ import {
   pathOf,
   removeAtPath,
   textObjects,
-  textObjectsInReadingOrder,
 } from './tree'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
-      candidates: [],
-      chosen: null,
-    },
-    ...extra,
-  }
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.body.lines = [id]
+  return Object.assign(entry, extra)
 }
 
 function group(id: string, children: LayerEntry[], visible = true): GroupLayerEntry {
@@ -66,10 +58,6 @@ function raster(id: string): RasterLayerEntry {
   }
 }
 
-function manifest(layers: LayerEntry[], readingOrder: string[]): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges: [], layers }
-}
-
 const idsOf = (entries: readonly { id: string }[]): string[] => entries.map((e) => e.id)
 
 describe('textObjects', () => {
@@ -83,37 +71,6 @@ describe('textObjects', () => {
     expect(idsOf(textObjects(layers))).toEqual(['a'])
   })
 })
-
-describe('textObjectsInReadingOrder', () => {
-  it('answers in reading order rather than tree order', () => {
-    const layers = [text('a'), text('b'), text('c')]
-    expect(idsOf(textObjectsInReadingOrder(manifest(layers, ['c', 'a', 'b'])))).toEqual([
-      'c',
-      'a',
-      'b',
-    ])
-  })
-
-  it('reaches text nested in groups', () => {
-    const layers = [group('g', [text('b')]), text('a')]
-    expect(idsOf(textObjectsInReadingOrder(manifest(layers, ['a', 'b'])))).toEqual(['a', 'b'])
-  })
-
-  // The rule the whole split exists to keep: an object the order does not
-  // mention is absent, never quietly restored from the tree's own order.
-  it('never falls back to the tree for an object the order omits', () => {
-    const layers = [text('a'), text('b')]
-    expect(idsOf(textObjectsInReadingOrder(manifest(layers, ['a'])))).toEqual(['a'])
-  })
-
-  it('skips an id no text object answers to', () => {
-    const layers = [text('a'), raster('r'), group('g', [])]
-    expect(idsOf(textObjectsInReadingOrder(manifest(layers, ['a', 'gone', 'r', 'g'])))).toEqual([
-      'a',
-    ])
-  })
-})
-
 
 describe('findEntry', () => {
   it('finds a folder as readily as an object', () => {

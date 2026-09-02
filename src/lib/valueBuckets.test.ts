@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { TagDefinition } from '@shared/tags/types'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
-import type { TextLayerEntry } from '@shared/page/types'
-import { blankTextObject } from '@shared/page/schema'
+import type { ManifestJson } from '@shared/page/types'
+import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { blankBlock } from '@shared/page/schema'
 import type { TextSide } from '@shared/page/text'
 import { bucketObjectsOf, groupByValue, type BucketObject } from './valueBuckets'
 
@@ -116,19 +117,38 @@ describe('groupByValue', () => {
 })
 
 describe('which body the statistics count', () => {
-  function twoBodied(id: string, sourcePx: number, translationPx: number): TextLayerEntry {
-    const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
-    entry.source = { ...entry.source, style: { ...DEFAULT_TEXT_STYLE, fontSizePx: sourcePx } }
-    entry.translation = {
-      ...entry.translation,
-      style: { ...DEFAULT_TEXT_STYLE, fontSizePx: translationPx },
+  function twoBodied(id: string, sourcePx: number, translationPx: number) {
+    const lettering = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+    lettering.body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: translationPx }
+    const artwork = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+    artwork.body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: sourcePx }
+    return {
+      unit: {
+        id: `u-${id}`,
+        tags: [],
+        source: { members: [artwork.id], separators: [] },
+        translation: { members: [lettering.id], separators: [] },
+        candidates: [],
+        chosen: null,
+      },
+      blocks: [lettering, artwork],
     }
-    return entry
   }
 
-  const page = [twoBodied('a', 41, 20), twoBodied('b', 37, 20)]
+  const said = [twoBodied('a', 41, 20), twoBodied('b', 37, 20)]
+  const page: ManifestJson = {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision: 0,
+    name: 'p',
+    width: 1200,
+    height: 1700,
+    translationUnits: said.map((s) => s.unit),
+    readingOrder: said.map((s) => s.unit.id),
+    readingEdges: [],
+    layers: said.flatMap((s) => s.blocks),
+  }
 
-  it('reads the body it was asked about and not the other one', () => {
+  it('reads the side it was asked about and not the other one', () => {
     expect(bucketObjectsOf('001.png', page, 'translation').map((o) => o.style.fontSizePx)).toEqual([
       20, 20,
     ])

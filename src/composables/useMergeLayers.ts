@@ -124,7 +124,7 @@ export function useMergeLayers() {
 
     // Hiding is inherited and `pageStack` honours it, so a hidden participant
     // contributes nothing and is still consumed — as merging does anywhere.
-    const nodes = pageStack(parts)
+    const nodes = pageStack(parts, 'translation')
     const page = { w: target.w, h: target.h }
     const frame = frameOf(nodes, page)
 

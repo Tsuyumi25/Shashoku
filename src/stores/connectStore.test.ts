@@ -7,14 +7,14 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankTextObject } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 const PAGE = 'p001.png'
 const AT = { x: 0, y: 0 }
 
 function label(id: string): TextLayerEntry {
   return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
+    ...blankBlock(id, 'translation', DEFAULT_TEXT_STYLE),
   }
 }
 
@@ -30,7 +30,7 @@ function openPage(ids: string[]) {
         name: 'p',
         width: 1200,
         height: 1700,
-        readingOrder: ids,
+        translationUnits: [], readingOrder: ids,
         readingEdges: [],
         layers: ids.map(label),
       },

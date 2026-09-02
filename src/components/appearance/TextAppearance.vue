@@ -42,7 +42,6 @@ import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
-import { bodyOnSide } from '@shared/page/text'
 import StyleEditor from '@/components/StyleEditor.vue'
 import StrokeEditor from '@/components/appearance/StrokeEditor.vue'
 import { useStyleRecommendations } from '@/composables/useStyleRecommendations'
@@ -74,7 +73,7 @@ const targets = computed(() => props.targets)
 const { tagState, suggestions } = useStyleRecommendations(targets)
 
 const styles = computed(() =>
-  props.targets.map((t) => bodyOnSide(t.entry, editor.textSide).style),
+  props.targets.map((t) => t.entry.body.style),
 )
 
 /**

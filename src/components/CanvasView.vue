@@ -291,9 +291,9 @@ import { useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
-import { isLocked, textObjects } from '@shared/page/tree'
+import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { bodyOnSide, textOnSide } from '@shared/page/text'
+import { blocksOnSide, placeOfBlock, shownLinesOf, sideOf } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -322,7 +322,7 @@ import {
   type FrameBox,
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
-import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
+import { cornersOf, obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -362,7 +362,7 @@ const currentFile = computed(() =>
 )
 
 /** What this page draws and in what order — the same answer the export reads. */
-const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers) : []))
+const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers, editor.textSide) : []))
 
 /**
  * Every layer the page draws, decoded once and kept until the page turns.
@@ -452,27 +452,28 @@ const objects = computed(() => {
   // hidden object would have nowhere to land and would go undrawn, which is the
   // one thing this tool must not do.
   const entries = connecting.value
-    ? textObjects(file.page.layers)
+    ? blocksOnSide(file.page.layers, editor.textSide)
     : stackedTextNodes(stack.value).map((node) => node.entry)
   // Every source drawn the same way, over a halo — a reference treatment for
   // reading them against un-lettered artwork, and the canvas's alone.
   const reference = editor.textSide === 'source'
   return entries.map((label) => {
-    const body = bodyOnSide(label, editor.textSide)
+    const body = label.body
+    const tags = placeOfBlock(file.page, label.id)?.unit.tags ?? []
     const look = reference
       ? sourceLook(body.style)
       : { style: previewedStyle(label.id, body.style), effects: label.effects }
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
-    text: textOnSide(label, editor.textSide),
+    text: shownLinesOf(file.page, label).join('\n'),
     x: body.x,
     y: body.y,
     rotation: body.rotation,
-    accent: accentOf(label.tags),
+    accent: accentOf(tags),
     style: look.style,
     effects: look.effects,
-    tags: tagsInRegistryOrder(label.tags, project.header.tags).map((name) => ({
+    tags: tagsInRegistryOrder(tags, project.header.tags).map((name) => ({
       name,
       color: tagColor(name, project.header.tags),
     })),
@@ -616,12 +617,12 @@ onMounted(() => {
  */
 function moveLabelTo(labelId: string, to: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
-  project.moveLabel(editor.currentPageId, labelId, editor.textSide, to.x, to.y)
+  project.moveLabel(editor.currentPageId, labelId, to.x, to.y)
 }
 
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId) return
-  editor.cmdMoveLabel(editor.currentPageId, labelId, editor.textSide, from, to)
+  editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
 }
 
 /**
@@ -636,7 +637,7 @@ function onSelectObject(id: string, additive: boolean) {
 
 function labelById(labelId: string): TextLayerEntry | undefined {
   return editor.currentPageId
-    ? project.labelById(editor.currentPageId, labelId)
+    ? project.blockById(editor.currentPageId, labelId)
     : undefined
 }
 
@@ -669,7 +670,7 @@ function beginCanvasTextEdit(labelId: string, index: number) {
 let scaledFrom: ScaledLabel | null = null
 
 function scaledState(label: TextLayerEntry): ScaledLabel {
-  const body = bodyOnSide(label, editor.textSide)
+  const body = label.body
   return { style: { ...body.style }, x: body.x, y: body.y }
 }
 
@@ -686,9 +687,9 @@ function beginLabelScale(labelId: string) {
 function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentPageId || editor.isLayerLocked(labelId)) return
-  const style = { ...bodyOnSide(label, editor.textSide).style, fontSizePx }
-  project.setLabelStyle(editor.currentPageId, labelId, editor.textSide, style)
-  project.moveLabel(editor.currentPageId, labelId, editor.textSide, at.x, at.y)
+  const style = { ...label.body.style, fontSizePx }
+  project.setLabelStyle(editor.currentPageId, labelId, style)
+  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }
 
 function commitLabelScale(labelId: string) {
@@ -697,7 +698,6 @@ function commitLabelScale(labelId: string) {
   editor.cmdScaleLabel(
     editor.currentPageId,
     labelId,
-    editor.textSide,
     scaledFrom,
     scaledState(label),
   )
@@ -707,13 +707,13 @@ function commitLabelScale(labelId: string) {
 /** Both together, for the same reason a corner drag writes both. */
 function rotateLabelTo(labelId: string, radians: number, at: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
-  project.rotateLabel(editor.currentPageId, labelId, editor.textSide, radians)
-  project.moveLabel(editor.currentPageId, labelId, editor.textSide, at.x, at.y)
+  project.rotateLabel(editor.currentPageId, labelId, radians)
+  project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }
 
 function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) {
   if (!editor.currentPageId) return
-  editor.cmdRotateLabel(editor.currentPageId, labelId, editor.textSide, from, to)
+  editor.cmdRotateLabel(editor.currentPageId, labelId, from, to)
 }
 
 /**
@@ -887,6 +887,47 @@ const objectBoxes = computed(() => {
 })
 
 /**
+ * Each translation's frame on the page, which is where its lines begin and end.
+ *
+ * ⭐ A unit has no place of its own, so its frame is worked out from the blocks
+ * of the side being shown — one block's own frame, and the union where a sound
+ * was lettered in several. Held apart from the blocks' frames because the two
+ * answer different questions: a line joins two pieces of content, and a handle
+ * takes hold of one piece of lettering.
+ */
+const unitBoxes = computed(() => {
+  const out = new Map<string, FrameBox>()
+  const page = currentFile.value?.page
+  if (page === undefined) return out
+  for (const unit of page.translationUnits) {
+    const boxes = sideOf(unit, editor.textSide)
+      .members.map((id) => objectBoxes.value.get(id))
+      .filter((b): b is FrameBox => b !== undefined)
+    if (boxes.length === 0) continue
+    if (boxes.length === 1) {
+      out.set(unit.id, boxes[0])
+      continue
+    }
+    // The turn goes: two blocks set at different angles have no shared one, and
+    // a line arriving at a tilted rectangle nobody drew reads as a mistake.
+    const corners = boxes.flatMap((b) => cornersOf({ center: b.center, w: b.w, h: b.h, rotation: b.rotation }))
+    const xs = corners.map((c) => c.x)
+    const ys = corners.map((c) => c.y)
+    const left = Math.min(...xs)
+    const right = Math.max(...xs)
+    const top = Math.min(...ys)
+    const bottom = Math.max(...ys)
+    out.set(unit.id, {
+      center: { x: (left + right) / 2, y: (top + bottom) / 2 },
+      w: right - left,
+      h: bottom - top,
+      rotation: 0,
+    })
+  }
+  return out
+})
+
+/**
  * Which object a page point is on — the topmost, so the one drawn over the
  * others is the one taken hold of.
  *
@@ -932,8 +973,8 @@ const drawnLines = computed(() => {
   const chosen = connect.selected
   const out: { key: string; a: Anchor; b: Anchor; chosen: boolean }[] = []
   const draw = (edge: ReadingEdge, keyPrefix: string) => {
-    const from = objectBoxes.value.get(edge.from)
-    const to = objectBoxes.value.get(edge.to)
+    const from = unitBoxes.value.get(edge.from)
+    const to = unitBoxes.value.get(edge.to)
     if (from === undefined || to === undefined) return
     const line = readingLineBetween(from, to)
     out.push({
@@ -963,10 +1004,10 @@ const hoverTargetId = ref<string | null>(null)
 const previewLine = computed(() => {
   const g = connect.gesture
   if (g === null) return null
-  const from = objectBoxes.value.get(g.source)
+  const from = unitBoxes.value.get(g.source)
   if (from === undefined) return null
   const target = hoverTargetId.value
-  const to = target === null ? undefined : objectBoxes.value.get(target)
+  const to = target === null ? undefined : unitBoxes.value.get(target)
   if (to === undefined) {
     return { a: nearestAnchor(from, g.at), b: g.at, refused: false }
   }
@@ -997,8 +1038,8 @@ function lineAt(p: Anchor): ReadingEdge | null {
   const at = toScreen(p)
   let nearest: { edge: ReadingEdge; away: number } | null = null
   for (const edge of heldEdges.value) {
-    const from = objectBoxes.value.get(edge.from)
-    const to = objectBoxes.value.get(edge.to)
+    const from = unitBoxes.value.get(edge.from)
+    const to = unitBoxes.value.get(edge.to)
     if (from === undefined || to === undefined) continue
     const line = readingLineBetween(from, to)
     const away = distanceToSegment(at, toScreen(line.a), toScreen(line.b))
@@ -1133,7 +1174,7 @@ function liveLayer(id: string) {
 const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
-  return artworkSignature(pageStack(file.page.layers), (id) =>
+  return artworkSignature(pageStack(file.page.layers, 'translation'), (id) =>
     raster.holds(id) ? `${id}@${raster.writesTo(id)}` : null,
   )
 })

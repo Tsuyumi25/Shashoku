@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useProjectStore } from '@/stores/projectStore'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import type { TextLayerEntry } from '@shared/page/types'
+import type { TextLayerEntry, TranslationUnit } from '@shared/page/types'
 import type { ProjectFile } from '@/types/project'
 import type {
   ChooseOutcome,
@@ -12,28 +12,45 @@ import type {
   WriteResult,
 } from '@shared/mcp/types'
 import { answer } from './answers'
-import type { TranslationBody } from '@shared/page/types'
-import { blankTextObject } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 const PAGE_ID = 'p1'
 const CLIENT = 'claude-code 2.1.219'
 
-function label(id: string, extra: Partial<TranslationBody> = {}): TextLayerEntry {
-  const entry = blankTextObject(id, DEFAULT_TEXT_STYLE)
-  entry.translation = { ...entry.translation, lines: [], ...extra }
-  return entry
+/** One ordinary translation, and the two blocks that say it. */
+function label(
+  id: string,
+  over: { words?: string[] } & Partial<TranslationUnit> = {},
+): { unit: TranslationUnit; blocks: TextLayerEntry[] } {
+  const { words, ...rest } = over
+  const lettering = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  lettering.body.lines = words ?? []
+  const artwork = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+  return {
+    unit: {
+      id: `u-${id}`,
+      tags: [],
+      source: { members: [artwork.id], separators: [] },
+      translation: { members: [lettering.id], separators: [] },
+      candidates: [],
+      chosen: null,
+      ...rest,
+    },
+    blocks: [lettering, artwork],
+  }
 }
 
 function openWith(
   project: ReturnType<typeof useProjectStore>,
-  entries: TextLayerEntry[],
+  said: { unit: TranslationUnit; blocks: TextLayerEntry[] }[],
   badge: ProjectFile['badge'] = 'ok',
 ) {
   project.rootPath = '/root'
   const page = defaultManifest('p', 1200, 1700)
-  for (const entry of entries) {
-    page.layers.push(entry)
-    page.readingOrder.push(entry.id)
+  for (const one of said) {
+    page.layers.push(...one.blocks)
+    page.translationUnits.push(one.unit)
+    page.readingOrder.push(one.unit.id)
   }
   project.allFiles = [
     { pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge },
@@ -43,7 +60,7 @@ function openWith(
 const writePage = vi.fn(async () => {})
 const writeProjectMeta = vi.fn(async () => {})
 
-function propose(items: { objectId: string; lines: string[] }[]) {
+function propose(items: { unitId: string; lines: string[] }[]) {
   return answer({
     id: 'q',
     method: 'propose_translations',
@@ -69,16 +86,16 @@ describe('answer — the orchestration the bridge drives', () => {
   it('refuses the whole batch before touching a damaged page', async () => {
     const project = useProjectStore()
     openWith(project, [label('a')], 'damaged')
-    await expect(propose([{ objectId: 'a', lines: ['新譯'] }])).rejects.toThrow('拒絕寫入')
+    await expect(propose([{ unitId: 'u-a', lines: ['新譯'] }])).rejects.toThrow('拒絕寫入')
     expect(writePage).not.toHaveBeenCalled()
   })
 
   it('proposes through the real path: stamped, filled, flushed, state attached', async () => {
     const project = useProjectStore()
     openWith(project, [label('a')])
-    const result = await propose([{ objectId: 'a', lines: ['新譯'] }])
+    const result = await propose([{ unitId: 'u-a', lines: ['新譯'] }])
     expect(result.outcomes).toEqual([
-      { objectId: 'a', ok: true, translationId: expect.any(String), filledSlot: true },
+      { unitId: 'u-a', ok: true, translationId: expect.any(String), filledSlot: true },
     ])
     expect(result.objects).toHaveLength(1)
     expect(result.objects[0].translation).toBe('新譯')
@@ -90,12 +107,12 @@ describe('answer — the orchestration the bridge drives', () => {
     const project = useProjectStore()
     openWith(project, [label('a')])
     const result = await propose([
-      { objectId: 'a', lines: ['一稿'] },
-      { objectId: 'a', lines: ['二稿'] },
-      { objectId: 'gone', lines: ['x'] },
+      { unitId: 'u-a', lines: ['一稿'] },
+      { unitId: 'u-a', lines: ['二稿'] },
+      { unitId: 'gone', lines: ['x'] },
     ])
     expect(result.outcomes.map((o) => o.ok)).toEqual([true, true, false])
-    expect(result.objects.map((o) => o.id)).toEqual(['a'])
+    expect(result.objects.map((o) => o.id)).toEqual(['u-a'])
     expect(result.objects[0].candidates).toHaveLength(2)
   })
 
@@ -104,8 +121,8 @@ describe('answer — the orchestration the bridge drives', () => {
     openWith(project, [
       label('a', {
         candidates: [
-          { id: 't1', lines: ['甲'] },
-          { id: 't2', lines: ['乙'] },
+          { id: 't1', pieces: [['甲']] },
+          { id: 't2', pieces: [['乙']] },
         ],
         chosen: 't1',
       }),
@@ -116,12 +133,12 @@ describe('answer — the orchestration the bridge drives', () => {
       params: {
         pageId: PAGE_ID,
         items: [
-          { objectId: 'a', translationId: 'elsewhere' },
-          { objectId: 'a', translationId: 't2' },
+          { unitId: 'u-a', translationId: 'elsewhere' },
+          { unitId: 'u-a', translationId: 't2' },
         ],
       },
     })) as WriteResult<ChooseOutcome>
-    expect(result.outcomes[0]).toMatchObject({ ok: false, reason: '候選不在這個物件的抽屜裡' })
+    expect(result.outcomes[0]).toMatchObject({ ok: false, reason: '候選不在這一筆的抽屜裡' })
     expect(result.outcomes[1]).toMatchObject({ ok: true, translationId: 't2' })
     expect(result.objects[0].translation).toBe('乙')
   })
@@ -130,8 +147,8 @@ describe('answer — the orchestration the bridge drives', () => {
     const project = useProjectStore()
     openWith(project, [
       label('a', {
-        lines: ['自己的字'],
-        candidates: [{ id: 'mine', lines: ['本 client 提的'], source: CLIENT }],
+        words: ['自己的字'],
+        candidates: [{ id: 'mine', pieces: [['本 client 提的']], source: CLIENT }],
         chosen: 'mine',
       }),
     ])
@@ -140,7 +157,7 @@ describe('answer — the orchestration the bridge drives', () => {
       method: 'withdraw_translation',
       params: {
         pageId: PAGE_ID,
-        items: [{ objectId: 'a', translationId: 'mine' }],
+        items: [{ unitId: 'u-a', translationId: 'mine' }],
         source: CLIENT,
       },
     })) as WriteResult<WithdrawOutcome>

@@ -4,7 +4,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 function page(): ProjectFile {
   return {
@@ -18,20 +18,21 @@ function page(): ProjectFile {
       name: 'p',
       width: 1200,
       height: 1700,
-      readingOrder: ['a'],
+      translationUnits: [
+        {
+          id: 'u',
+          tags: [],
+          source: { members: ['s'], separators: [] },
+          translation: { members: ['a'], separators: [] },
+          candidates: [],
+          chosen: null,
+        },
+      ],
+      readingOrder: ['u'],
       readingEdges: [],
       layers: [
-        {
-          ...blankTextObject('a', DEFAULT_TEXT_STYLE),
-          translation: {
-            ...emptyBody(DEFAULT_TEXT_STYLE),
-            lines: ['ふむ'],
-            x: 200,
-            y: 150,
-            candidates: [],
-            chosen: null,
-          },
-        },
+        blankBlock('a', 'translation', DEFAULT_TEXT_STYLE),
+        blankBlock('s', 'source', DEFAULT_TEXT_STYLE),
       ],
     },
   }
@@ -43,14 +44,14 @@ const textOn = (file: ProjectFile) => file.page.layers[0] as TextLayerEntry
 describe('thumbnailKey', () => {
   it('changes when the page is retyped', async () => {
     const edited = page()
-    textOn(edited).translation.lines = ['なるほど']
+    textOn(edited).body.lines = ['なるほど']
 
     expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
   })
 
   it('changes when an object is restyled', async () => {
     const edited = page()
-    textOn(edited).translation.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
+    textOn(edited).body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
 
     expect(await thumbnailKey(edited)).not.toBe(await thumbnailKey(page()))
   })
@@ -60,9 +61,9 @@ describe('thumbnailKey', () => {
    * throw away every thumbnail in the chapter for a classification pass that
    * changed no pixel.
    */
-  it('is unchanged by an object being tagged', async () => {
+  it('is unchanged by a translation being tagged', async () => {
     const tagged = page()
-    textOn(tagged).tags = ['心聲']
+    tagged.page.translationUnits[0].tags = ['心聲']
 
     expect(await thumbnailKey(tagged)).toBe(await thumbnailKey(page()))
   })

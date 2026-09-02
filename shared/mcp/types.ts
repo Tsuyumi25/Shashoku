@@ -36,24 +36,40 @@ export interface TranslationCandidateView {
   source?: string;
 }
 
-export interface TextObjectTexts {
+export interface TranslationTexts {
   id: string;
   /** Resolved source text, or null where no reading names what the artwork says. */
   source: string | null;
-  /** What the object reads as today — the translation slot resolved, own lines otherwise. */
+  /** What this reads as today — the slot resolved, the blocks' own words otherwise. */
   translation: string;
+  /**
+   * How many blocks of lettering the translation is set in. One is the ordinary
+   * case; more means a sound was split across the artwork, and a proposal has to
+   * carry that many pieces to be choosable.
+   */
+  blocks: number;
   candidates: TranslationCandidateView[];
 }
 
 export interface PageTexts {
   pageId: string;
   badge: PageBadge;
-  objects: TextObjectTexts[];
+  objects: TranslationTexts[];
 }
 
 export interface ProposeItem {
-  objectId: string;
-  lines: string[];
+  unitId: string;
+  /** The whole translation, one line per array entry. */
+  lines?: string[];
+  /**
+   * The translation already cut into blocks, one array of lines each.
+   *
+   * ⚠️ Where lettering goes on the artwork is a decision about the drawing, not
+   * about the language, so this is here to keep the surface from being unable to
+   * say it rather than because anything should reach for it. `lines` is the
+   * ordinary way in and means one block.
+   */
+  pieces?: string[][];
 }
 
 export interface ProposeParams {
@@ -64,11 +80,11 @@ export interface ProposeParams {
 }
 
 export type ProposeOutcome =
-  | { objectId: string; ok: true; translationId: string; filledSlot: boolean }
-  | { objectId: string; ok: false; reason: string };
+  | { unitId: string; ok: true; translationId: string; filledSlot: boolean }
+  | { unitId: string; ok: false; reason: string };
 
 export interface ChooseItem {
-  objectId: string;
+  unitId: string;
   translationId: string;
 }
 
@@ -78,8 +94,8 @@ export interface ChooseParams {
 }
 
 export type ChooseOutcome =
-  | { objectId: string; translationId: string; ok: true }
-  | { objectId: string; translationId: string; ok: false; reason: string };
+  | { unitId: string; translationId: string; ok: true }
+  | { unitId: string; translationId: string; ok: false; reason: string };
 
 export interface WithdrawParams {
   pageId: string;
@@ -89,8 +105,8 @@ export interface WithdrawParams {
 }
 
 export type WithdrawOutcome =
-  | { objectId: string; translationId: string; ok: true; clearedSlot: boolean }
-  | { objectId: string; translationId: string; ok: false; reason: string };
+  | { unitId: string; translationId: string; ok: true; clearedSlot: boolean }
+  | { unitId: string; translationId: string; ok: false; reason: string };
 
 /**
  * Every write answers with the touched objects' full current state, so a
@@ -99,5 +115,5 @@ export type WithdrawOutcome =
  */
 export interface WriteResult<Outcome> {
   outcomes: Outcome[];
-  objects: TextObjectTexts[];
+  objects: TranslationTexts[];
 }

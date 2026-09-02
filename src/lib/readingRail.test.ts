@@ -6,24 +6,30 @@ import { buildLabelRows, type LabelRow } from '@/lib/labelRows'
 import { laneOffset, railMarks, railWidth } from '@/lib/readingRail'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 function text(id: string): TextLayerEntry {
-  return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
-      candidates: [],
-      chosen: null,
-    },
-  }
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.body.lines = [id]
+  return entry
+}
+
+function sourceText(id: string): TextLayerEntry {
+  return blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
 }
 
 /** One page, given as the ids it holds and the lines drawn across it. */
 function page(ids: string, drawn: string[] = []): LabelRow[] {
   const order = ids.split(' ')
-  const layers: LayerEntry[] = order.map(text)
+  const layers: LayerEntry[] = order.flatMap((id) => [text(id), sourceText(id)])
+  const units = order.map((id) => ({
+    id,
+    tags: [],
+    source: { members: [`${id}s`], separators: [] },
+    translation: { members: [id], separators: [] },
+    candidates: [],
+    chosen: null,
+  }))
   const file: ProjectFile = {
     pageId: '001.png',
     pageDir: '/p/001.png',
@@ -35,6 +41,7 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
       name: 'p',
       width: 1200,
       height: 1700,
+      translationUnits: units,
       readingOrder: order,
       readingEdges: drawn.map((pair) => {
         const [from, to] = pair.split('>')
@@ -43,7 +50,9 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
       layers,
     },
   }
-  return buildLabelRows([file]).filter((row): row is LabelRow => row.kind === 'label')
+  return buildLabelRows([file], 'translation').filter(
+    (row): row is LabelRow => row.kind === 'label',
+  )
 }
 
 describe('railWidth', () => {
@@ -74,7 +83,7 @@ describe('railMarks', () => {
 
   it('carries the reading past a branch rather than breaking off', () => {
     const rows = page('a b c d', ['a>b', 'b>c', 'a>d'])
-    expect(rows.map((row) => row.label.id)).toEqual(['a', 'd', 'b', 'c'])
+    expect(rows.map((row) => row.unit.id)).toEqual(['a', 'd', 'b', 'c'])
     const [, branch, back] = railMarks(rows)
     // The branch sits in its own lane, joined from the lane the reading runs
     // down — which keeps running past it, so that lane is drawn through as well.

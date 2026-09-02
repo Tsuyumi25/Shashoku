@@ -4,13 +4,13 @@ import type {
   McpQuery,
   ProposeOutcome,
   ProposeParams,
-  TextObjectTexts,
+  TranslationTexts,
   WithdrawOutcome,
   WithdrawParams,
   WriteResult,
 } from '@shared/mcp/types'
 import { useProjectStore } from '@/stores/projectStore'
-import { collectTexts, textsOfEntry } from './collect'
+import { collectTexts, textsOfUnit } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
 
@@ -27,21 +27,21 @@ function writablePage(project: ReturnType<typeof useProjectStore>, pageId: strin
   return file
 }
 
-/** The touched objects' state as of after the batch, in first-touch order. */
+/** The touched translations' state as of after the batch, in first-touch order. */
 function statesOf(
   project: ReturnType<typeof useProjectStore>,
   pageId: string,
-  objectIds: readonly string[],
-): TextObjectTexts[] {
+  unitIds: readonly string[],
+): TranslationTexts[] {
   const file = project.pageById(pageId)
   if (!file) return []
   const seen = new Set<string>()
-  const out: TextObjectTexts[] = []
-  for (const id of objectIds) {
+  const out: TranslationTexts[] = []
+  for (const id of unitIds) {
     if (seen.has(id)) continue
     seen.add(id)
-    const entry = project.labelById(pageId, id)
-    if (entry) out.push(textsOfEntry(entry))
+    const unit = project.unitById(pageId, id)
+    if (unit) out.push(textsOfUnit(file.page, unit))
   }
   return out
 }
@@ -51,24 +51,26 @@ async function proposeTranslations(
 ): Promise<WriteResult<ProposeOutcome>> {
   const project = openProject()
   writablePage(project, params.pageId)
+  const page = project.pageById(params.pageId)?.page
   const outcomes: ProposeOutcome[] = params.items.map((item) => {
-    const entry = project.labelById(params.pageId, item.objectId)
-    const plan = planProposal(entry, item.lines)
+    const unit = project.unitById(params.pageId, item.unitId)
+    if (page === undefined) return { unitId: item.unitId, ok: false, reason: '頁面不存在' }
+    const plan = planProposal(page, unit, item)
     if (plan.action === 'refuse') {
-      return { objectId: item.objectId, ok: false, reason: plan.reason }
+      return { unitId: item.unitId, ok: false, reason: plan.reason }
     }
     const translationId = project.addTranslation(
       params.pageId,
-      item.objectId,
-      item.lines,
+      item.unitId,
+      plan.pieces,
       'model',
       params.source,
     )
     if (translationId === null) {
-      return { objectId: item.objectId, ok: false, reason: '物件不存在' }
+      return { unitId: item.unitId, ok: false, reason: '這一筆翻譯不存在' }
     }
-    if (plan.fillSlot) project.setLabelTranslation(params.pageId, item.objectId, translationId)
-    return { objectId: item.objectId, ok: true, translationId, filledSlot: plan.fillSlot }
+    if (plan.fillSlot) project.setLabelTranslation(params.pageId, item.unitId, translationId)
+    return { unitId: item.unitId, ok: true, translationId, filledSlot: plan.fillSlot }
   })
   // Landed before the reply: an answer that only reached memory would report
   // success right up until a crash took it back.
@@ -78,7 +80,7 @@ async function proposeTranslations(
     objects: statesOf(
       project,
       params.pageId,
-      params.items.map((i) => i.objectId),
+      params.items.map((i) => i.unitId),
     ),
   }
 }
@@ -86,14 +88,25 @@ async function proposeTranslations(
 async function chooseTranslation(params: ChooseParams): Promise<WriteResult<ChooseOutcome>> {
   const project = openProject()
   writablePage(project, params.pageId)
-  const outcomes: ChooseOutcome[] = params.items.map(({ objectId, translationId }) => {
-    const entry = project.labelById(params.pageId, objectId)
-    if (!entry) return { objectId, translationId, ok: false, reason: '物件不存在' }
-    if (!entry.translation.candidates.some((c) => c.id === translationId)) {
-      return { objectId, translationId, ok: false, reason: '候選不在這個物件的抽屜裡' }
+  const outcomes: ChooseOutcome[] = params.items.map(({ unitId, translationId }) => {
+    const unit = project.unitById(params.pageId, unitId)
+    if (!unit) return { unitId, translationId, ok: false, reason: '這一筆翻譯不存在' }
+    const candidate = unit.candidates.find((c) => c.id === translationId)
+    if (!candidate) {
+      return { unitId, translationId, ok: false, reason: '候選不在這一筆的抽屜裡' }
     }
-    project.setLabelTranslation(params.pageId, objectId, translationId)
-    return { objectId, translationId, ok: true }
+    // ⚠️ Refused rather than filled part way: a reading with the wrong number
+    // of blocks has no block to show some of its words from.
+    if (candidate.pieces.length !== unit.translation.members.length) {
+      return {
+        unitId,
+        translationId,
+        ok: false,
+        reason: `這則候選有 ${candidate.pieces.length} 塊,而這一筆的譯文排成 ${unit.translation.members.length} 塊`,
+      }
+    }
+    project.setLabelTranslation(params.pageId, unitId, translationId)
+    return { unitId, translationId, ok: true }
   })
   await project.flush()
   return {
@@ -101,7 +114,7 @@ async function chooseTranslation(params: ChooseParams): Promise<WriteResult<Choo
     objects: statesOf(
       project,
       params.pageId,
-      params.items.map((i) => i.objectId),
+      params.items.map((i) => i.unitId),
     ),
   }
 }
@@ -111,12 +124,12 @@ async function withdrawTranslation(
 ): Promise<WriteResult<WithdrawOutcome>> {
   const project = openProject()
   writablePage(project, params.pageId)
-  const outcomes: WithdrawOutcome[] = params.items.map(({ objectId, translationId }) => {
-    const entry = project.labelById(params.pageId, objectId)
-    const plan = planWithdraw(entry, translationId, params.source)
-    if (plan.action === 'refuse') return { objectId, translationId, ok: false, reason: plan.reason }
-    project.removeTranslation(params.pageId, objectId, translationId)
-    return { objectId, translationId, ok: true, clearedSlot: plan.wasChosen }
+  const outcomes: WithdrawOutcome[] = params.items.map(({ unitId, translationId }) => {
+    const unit = project.unitById(params.pageId, unitId)
+    const plan = planWithdraw(unit, translationId, params.source)
+    if (plan.action === 'refuse') return { unitId, translationId, ok: false, reason: plan.reason }
+    project.removeTranslation(params.pageId, unitId, translationId)
+    return { unitId, translationId, ok: true, clearedSlot: plan.wasChosen }
   })
   await project.flush()
   return {
@@ -124,7 +137,7 @@ async function withdrawTranslation(
     objects: statesOf(
       project,
       params.pageId,
-      params.items.map((i) => i.objectId),
+      params.items.map((i) => i.unitId),
     ),
   }
 }

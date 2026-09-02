@@ -5,25 +5,35 @@ import { useProjectStore } from './projectStore'
 import { defaultManifest, defaultOcr, serializeManifest } from '@shared/page/schema'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import type { TextLayerEntry } from '@shared/page/types'
-import { textOf } from '@shared/page/text'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { projectionOf } from '@shared/page/units'
+import type { TranslationParts } from './projectStore'
+import { blankBlock } from '@shared/page/schema'
 
 const ROOT = '/root'
 const PAGE_ID = 'source-260809-1200'
 const PAGE_DIR = `${ROOT}/shashoku/pages/${PAGE_ID}`
 
-function label(id: string): TextLayerEntry {
+/** One ordinary translation, ready to hand to `addLabel`. */
+function label(id: string): TranslationParts {
+  const lettering = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  lettering.body.lines = ['x']
+  const artwork = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
   return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: ['x'],
+    unit: {
+      id: `u-${id}`,
+      tags: [],
+      source: { members: [artwork.id], separators: [] },
+      translation: { members: [lettering.id], separators: [] },
       candidates: [],
       chosen: null,
     },
+    blocks: [lettering, artwork],
   }
 }
+
+/** What a translation reads as today, resolved. */
+const reads = (project: ReturnType<typeof useProjectStore>, unitId: string) =>
+  projectionOf(project.pageById(PAGE_ID)!.page.layers, project.unitById(PAGE_ID, unitId)!, 'translation')
 
 /**
  * What the main process was asked to do, in the order it was asked, plus what
@@ -120,20 +130,20 @@ describe('the translation pool on an object', () => {
 
   it('leaves the typed lines alone when a candidate is taken', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
-    project.setLabelTranslation(PAGE_ID, 't1', id)
+    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
+    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
 
-    expect(textOf(project.labelById(PAGE_ID, 't1')!.translation)).toBe('候選')
-    expect(project.labelById(PAGE_ID, 't1')!.translation.lines).toEqual(['x'])
+    expect(reads(project, 'u-t1')).toBe('候選')
+    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['x'])
   })
 
   it('brings the typed lines back word for word when the slot is emptied', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
-    project.setLabelTranslation(PAGE_ID, 't1', id)
-    project.setLabelTranslation(PAGE_ID, 't1', null)
+    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
+    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    project.setLabelTranslation(PAGE_ID, 'u-t1', null)
 
-    expect(textOf(project.labelById(PAGE_ID, 't1')!.translation)).toBe('x')
+    expect(reads(project, 'u-t1')).toBe('x')
   })
 
   /**
@@ -142,34 +152,33 @@ describe('the translation pool on an object', () => {
    */
   it('types into whichever candidate the object is reading', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
-    project.setLabelTranslation(PAGE_ID, 't1', id)
-    project.updateLabelText(PAGE_ID, 't1', 'translation', '改過的')
+    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
+    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    project.updateLabelText(PAGE_ID, 't1', '改過的')
 
-    const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translation.candidates[0].lines).toEqual(['改過的'])
-    expect(label1.translation.lines).toEqual(['x'])
+    const unit1 = project.unitById(PAGE_ID, 'u-t1')!
+    expect(unit1.candidates[0].pieces[0]).toEqual(['改過的'])
+    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['x'])
   })
 
   it('types into the object itself when the slot is empty', () => {
     const project = withLabel()
-    project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')
-    project.updateLabelText(PAGE_ID, 't1', 'translation', '改過的')
+    project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')
+    project.updateLabelText(PAGE_ID, 't1', '改過的')
 
-    const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translation.lines).toEqual(['改過的'])
-    expect(label1.translation.candidates[0].lines).toEqual(['候選'])
+    const unit1 = project.unitById(PAGE_ID, 'u-t1')!
+    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['改過的'])
+    expect(unit1.candidates[0].pieces[0]).toEqual(['候選'])
   })
 
   it('falls back to the typed lines when what it was reading is thrown away', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
-    project.setLabelTranslation(PAGE_ID, 't1', id)
-    project.removeTranslation(PAGE_ID, 't1', id)
+    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
+    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    project.removeTranslation(PAGE_ID, 'u-t1', id)
 
-    const label1 = project.labelById(PAGE_ID, 't1')!
-    expect(label1.translation.chosen).toBeNull()
-    expect(textOf(label1.translation)).toBe('x')
+    expect(project.unitById(PAGE_ID, 'u-t1')!.chosen).toBeNull()
+    expect(reads(project, 'u-t1')).toBe('x')
   })
 
   /**
@@ -179,22 +188,22 @@ describe('the translation pool on an object', () => {
    */
   it('makes a proposal yours the moment you type over it', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')!
-    project.setLabelTranslation(PAGE_ID, 't1', id)
-    project.updateLabelText(PAGE_ID, 't1', 'translation', '我改的')
+    const id = project.addTranslation(PAGE_ID, 'u-t1', [['模型的']], 'model')!
+    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    project.updateLabelText(PAGE_ID, 't1', '我改的')
 
-    expect(project.labelById(PAGE_ID, 't1')!.translation.candidates[0]).toMatchObject({
-      lines: ['我改的'],
+    expect(project.unitById(PAGE_ID, 'u-t1')!.candidates[0]).toMatchObject({
+      pieces: [['我改的']],
       human: true,
     })
   })
 
   it('marks only what a person wrote', () => {
     const project = withLabel()
-    project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')
-    project.addTranslation(PAGE_ID, 't1', ['人的'], 'human')
+    project.addTranslation(PAGE_ID, 'u-t1', [['模型的']], 'model')
+    project.addTranslation(PAGE_ID, 'u-t1', [['人的']], 'human')
 
-    const { candidates } = project.labelById(PAGE_ID, 't1')!.translation
+    const { candidates } = project.unitById(PAGE_ID, 'u-t1')!
     expect(candidates[0].human).toBeUndefined()
     expect(candidates[1].human).toBe(true)
   })

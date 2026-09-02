@@ -1,19 +1,20 @@
-import { textObjectsInReadingOrder } from '@shared/page/tree'
-import { textOf } from '@shared/page/text'
-import type { TextLayerEntry } from '@shared/page/types'
-import type { PageTexts, TextObjectTexts } from '@shared/mcp/types'
+import type { ManifestJson, TranslationUnit } from '@shared/page/types'
+import { joinPieces, projectionOf, unitsInReadingOrder } from '@shared/page/units'
+import type { PageTexts, TranslationTexts } from '@shared/mcp/types'
 import type { ProjectFile } from '@/types/project'
 
-export function textsOfEntry(entry: TextLayerEntry): TextObjectTexts {
+export function textsOfUnit(page: ManifestJson, unit: TranslationUnit): TranslationTexts {
+  const source = projectionOf(page.layers, unit, 'source')
   return {
-    id: entry.id,
-    source: entry.source.lines.join('\n') || null,
-    translation: textOf(entry.translation),
-    candidates: entry.translation.candidates.map((c) => ({
+    id: unit.id,
+    source: source.length === 0 ? null : source,
+    translation: projectionOf(page.layers, unit, 'translation'),
+    blocks: unit.translation.members.length,
+    candidates: unit.candidates.map((c) => ({
       id: c.id,
-      text: c.lines.join('\n'),
+      text: joinPieces(c.pieces, unit.translation.separators),
       human: c.human === true,
-      chosen: entry.translation.chosen === c.id,
+      chosen: unit.chosen === c.id,
       ...(c.source ? { source: c.source } : {}),
     })),
   }
@@ -25,7 +26,7 @@ export function collectTexts(files: readonly ProjectFile[]): PageTexts[] {
     return {
       pageId: file.pageId,
       badge: file.badge,
-      objects: textObjectsInReadingOrder(file.page).map(textsOfEntry),
+      objects: unitsInReadingOrder(file.page).map((unit) => textsOfUnit(file.page, unit)),
     }
   })
 }

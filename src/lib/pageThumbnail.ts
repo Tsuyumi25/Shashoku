@@ -1,5 +1,5 @@
 import type { ProjectFile } from '@/types/project'
-import { serializeLayers } from '@shared/page/schema'
+import { serializeDrawnLayers } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage, fitWithin, resizeCanvas } from '@/lib/pageComposite'
 
@@ -40,7 +40,7 @@ export function thumbnailKey(file: ProjectFile, edge: number = THUMBNAIL_EDGE): 
       // The tree alone. Reading order is left out on purpose: it decides which
       // object comes first in the label list, never what the page looks like,
       // and hashing it would throw the picture away for a reordering.
-      serializeLayers(file.page.layers),
+      serializeDrawnLayers(file.page),
     ]),
   )
 }

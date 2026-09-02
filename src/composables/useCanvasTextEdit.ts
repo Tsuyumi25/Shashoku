@@ -1,5 +1,5 @@
 import { computed, nextTick } from 'vue'
-import { textOnSide } from '@shared/page/text'
+import { shownLinesOf } from '@shared/page/units'
 import { isHidden, isLocked } from '@shared/page/tree'
 import type { TextLayerEntry } from '@shared/page/types'
 import { useTextEditSurface } from '@/composables/useTextEditSurface'
@@ -83,9 +83,11 @@ export function useCanvasTextEdit() {
    */
   async function enterAt(pageId: string, label: TextLayerEntry, index: number): Promise<void> {
     if (refuse(pageId, label)) return
+    const page = project.pageById(pageId)?.page
+    if (page === undefined) return
     preferences.setSidePanel('labels')
     editor.revealLabel(pageId, label.id)
-    editor.beginTextEdit(pageId, label.id, textOnSide(label, editor.textSide))
+    editor.beginTextEdit(pageId, label.id, shownLinesOf(page, label).join('\n'))
     // The work is happening on the page, so the box goes to the page — pinned
     // to the insertion point, where the IME will open its candidates.
     surface.pin(true)

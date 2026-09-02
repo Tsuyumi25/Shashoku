@@ -5,7 +5,7 @@ import {
   type StackNode,
   type TextStackNode,
 } from '@shared/page/stack'
-import { textOf } from '@shared/page/text'
+import { shownLinesOf } from '@shared/page/units'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { layerWithEffects } from '@/lib/layerEffects'
@@ -114,25 +114,31 @@ export async function decodeLayerBitmaps(
   return decoded
 }
 
-function drawTextWith(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void {
-  const label = node.entry
-  const text = textOf(label.translation)
-  if (text.length === 0) return
-  const body = label.translation
-  const drawn = drawnLabel(text, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
-  // A family this machine lacks draws notdef boxes rather than nothing, so the
-  // only way to arrive here without a bitmap is a catalogue that never
-  // answered. Exporting the page short one label silently would be worse than
-  // stopping, since the file would look finished.
-  if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${text}」`)
+/**
+ * Bound to the page rather than free, because what a block reads as is the
+ * unit's answer and not the block's: a chosen candidate lives one level up.
+ */
+function drawTextWith(page: ManifestJson): StackPaint['drawText'] {
+  return (ctx, node) => {
+    const label = node.entry
+    const text = shownLinesOf(page, label).join('\n')
+    if (text.length === 0) return
+    const body = label.body
+    const drawn = drawnLabel(text, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
+    // A family this machine lacks draws notdef boxes rather than nothing, so the
+    // only way to arrive here without a bitmap is a catalogue that never
+    // answered. Exporting the page short one label silently would be worse than
+    // stopping, since the file would look finished.
+    if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${text}」`)
 
-  // The engine already turned the outline, so there is nothing left to rotate
-  // here and nothing to resample: the bitmap lands one pixel per pixel.
-  const { width, height } = drawn.sample.image
-  ctx.translate(drawn.center.x, drawn.center.y)
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = smoothingQualityFor(1)
-  ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
+    // The engine already turned the outline, so there is nothing left to rotate
+    // here and nothing to resample: the bitmap lands one pixel per pixel.
+    const { width, height } = drawn.sample.image
+    ctx.translate(drawn.center.x, drawn.center.y)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = smoothingQualityFor(1)
+    ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
+  }
 }
 
 /**
@@ -218,7 +224,7 @@ export function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
-  return await compositeWith(input, drawTextWith)
+  return await compositeWith(input, drawTextWith(input.page))
 }
 
 /**
@@ -324,7 +330,7 @@ async function compositeWith(
   drawText: StackPaint['drawText'],
 ): Promise<OffscreenCanvas> {
   const size = { w: input.page.width, h: input.page.height }
-  const stack = pageStack(input.page.layers)
+  const stack = pageStack(input.page.layers, 'translation')
   const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)

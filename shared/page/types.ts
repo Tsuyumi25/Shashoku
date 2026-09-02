@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 12
+export const MANIFEST_SCHEMA_VERSION = 13
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -71,17 +71,16 @@ export interface RasterLayerEntry extends LayerEntryBase {
 
 
 /**
- * One body of text an object carries — what the artwork says, or what it will
- * say — and everything about how that body sits on the page.
+ * The words one block carries — what the artwork says, or what it will say —
+ * and everything about how they sit on the page.
  *
- * ⭐ Neither side is the object. The object is the thing on the page; these are
- * the two things it says, and they are the same kind of thing. What used to be
- * the object's own position, angle and style belonged to the translation alone,
- * which made the source a lesser field of it — able to hold words and nothing
- * else, borrowing typesetting decisions made about a different sentence.
+ * ⭐ The two sides are the same kind of thing. What was once the object's own
+ * position, angle and style belonged to the translation alone, which made the
+ * source a lesser field of it — able to hold words and nothing else, borrowing
+ * typesetting decisions made about a different sentence.
  *
- * A third body, in a third language, would be another one of these. Nothing
- * here is keyed by language yet, because two is what there is.
+ * A third language would be a third side of a unit, holding these same blocks.
+ * Nothing here is keyed by language yet, because two is what there is.
  */
 export interface TextBody {
   /** One entry per line; an embedded newline is refused at parse. */
@@ -161,78 +160,43 @@ export interface SourceBody extends TextBody {
   from?: string
 }
 
-/** What the object will say, with the other ways it could have said it. */
-export interface TranslationBody extends TextBody {
-  /**
-   * Held by the body rather than by the page: a translation is written for one
-   * object, unlike a reading, which was found on the artwork before anybody
-   * knew whose it was.
-   */
-  candidates: TranslationCandidate[]
-
-  /**
-   * Which of them this body reads as, or null for its own `lines`.
-   *
-   * ⭐ A pointer and not a copy: what was there before is still in the pool,
-   * and `lines` — what somebody typed themselves — is never overwritten by
-   * picking a candidate.
-   */
-  chosen: string | null
-}
-
 /**
- * A text object, whole — the manifest holds it rather than pointing at a copy
- * of it elsewhere, so creating or deleting one is a single atomic write and an
- * orphan cannot exist.
+ * One block of text on the page — the manifest holds it rather than pointing
+ * at a copy of it elsewhere, so creating or deleting one is a single atomic
+ * write and an orphan cannot exist.
  *
  * It has no name. The tree and the label list are two views of these same
  * objects, and a name anyone could edit would let one object read differently
  * in each while drifting from the translation it stands for.
+ *
+ * ⭐ One side and one body. Which translation this block belongs to is not
+ * written here: `ManifestJson.translationUnits` holds the lists, so a block's
+ * place in a translation is one fact in one place rather than a number on each
+ * block that every insertion and deletion would have to renumber.
  */
-export interface TextLayerEntry extends LayerEntryBase {
+interface TextLayerEntryBase extends LayerEntryBase {
   kind: 'text'
+}
 
-  /**
-   * What this object is, semantically — 框内, 心聲, 角色/ゆみ. A set, not a
-   * list: the order it arrives in carries nothing, and the stored form is
-   * sorted so two objects meaning the same thing look the same on disk.
-   *
-   * Any string is a legal tag. `project.tags` colours the ones it knows and
-   * says nothing about the rest; a name it has never heard is still data the
-   * user typed, and dropping it would be losing their work to a lookup miss.
-   *
-   * A facet — the `角色/` in `角色/ゆみ` — is a convention inside the string,
-   * with nothing in the schema to hold it. How finely to cut the vocabulary is
-   * a translation decision, and the file format has no business making it.
-   *
-   * On the object rather than on either body: what a balloon means is one fact
-   * about the balloon, not two facts that could disagree.
-   */
-  tags: string[]
-
-  source: SourceBody
-
-  translation: TranslationBody
+/** One block of what the artwork says. */
+export interface SourceTextLayerEntry extends TextLayerEntryBase {
+  side: 'source'
+  body: SourceBody
 }
 
 /**
- * One way this object could read, once translated.
+ * One block of what the page will say.
  *
- * ⚠️ Only what a person wrote carries a mark. A model spends no tokens saying
- * who it is, and the rule that protects the work is stated the other way round:
- * a marked candidate may not be edited, only appended after.
+ * The words it could say instead are not here. A candidate is a whole
+ * translation and a block is a typesetting decision about one, so the pool
+ * hangs on the unit — see `TranslationUnit.candidates`.
  */
-export interface TranslationCandidate {
-  id: string
-  lines: string[]
-  human?: boolean
-  /**
-   * Who proposed this, for telling drawers apart — the MCP handshake's
-   * clientInfo, stamped by the server, costing the model nothing. Display
-   * only: the mark that protects work is `human`, never this.
-   */
-  source?: string
+export interface TranslationTextLayerEntry extends TextLayerEntryBase {
+  side: 'translation'
+  body: TextBody
 }
+
+export type TextLayerEntry = SourceTextLayerEntry | TranslationTextLayerEntry
 
 /**
  * A folder. It means nothing to the translation, but it does carry the base's
@@ -245,6 +209,118 @@ export interface GroupLayerEntry extends LayerEntryBase {
 }
 
 export type LayerEntry = RasterLayerEntry | TextLayerEntry | GroupLayerEntry
+
+
+/**
+ * One way a translation could read, whole.
+ *
+ * ⚠️ Only what a person wrote carries a mark. A model spends no tokens saying
+ * who it is, and the rule that protects the work is stated the other way round:
+ * a marked candidate may not be edited, only appended after.
+ */
+export interface TranslationCandidate {
+  id: string
+
+  /**
+   * The words, one array of lines per block this reading wants to be set in.
+   * One block is the ordinary shape, and the only one anybody types by hand.
+   *
+   * ⭐ Cutting a sentence into blocks is a decision about the artwork, not
+   * about the language, so a model has no reason to reach for it — the escape
+   * hatch is here because a surface that cannot express it at all is a surface
+   * that would have to be widened later, not because it will be used.
+   */
+  pieces: string[][]
+
+  human?: boolean
+
+  /**
+   * Who proposed this, for telling drawers apart — the MCP handshake's
+   * clientInfo, stamped by the server, costing the model nothing. Display
+   * only: the mark that protects work is `human`, never this.
+   */
+  source?: string
+}
+
+/**
+ * One side of a translation: which blocks say it, in the order they are read.
+ *
+ * The array position *is* the order. Held here rather than as a number on each
+ * block, so that removing one is a splice and no state where the numbering has
+ * a hole or a repeat can be written down at all.
+ */
+export interface TranslationUnitSide {
+  /**
+   * At least one, always. A unit missing a side is not a translation, and a
+   * blank block is how a side with nothing in it yet says so — the same way an
+   * untranslated balloon has always been an object holding no words.
+   */
+  members: string[]
+
+  /**
+   * What goes between one block and the next when the side is read as one
+   * stretch of text. One shorter than `members`.
+   *
+   * Empty string for lettering split out of one sound, which is the case this
+   * exists for; a narration broken across two blocks may want a space. Stored
+   * rather than assumed, because whether there is a space there is something a
+   * person decided.
+   */
+  separators: string[]
+}
+
+/**
+ * One entry in the translation ledger: these blocks of artwork and those blocks
+ * of lettering are the same piece of content.
+ *
+ * ⭐ It draws nothing. No transform, no visibility, no blending, no effects —
+ * the page never composites this, and every question about how something looks
+ * is answered by the blocks themselves. What it owns is the identity: the row
+ * in the label list, the place in the reading order, and what the content
+ * means.
+ *
+ * ⚠️ It says nothing about which source block goes with which translation
+ * block. A sound written as one word and lettered as two is not a claim that
+ * half of it means 掰.
+ */
+export interface TranslationUnit {
+  id: string
+
+  /**
+   * What this is, semantically — 框内, 心聲, 角色/ゆみ. A set, not a list: the
+   * order it arrives in carries nothing, and the stored form is sorted so two
+   * units meaning the same thing look the same on disk.
+   *
+   * Any string is a legal tag. `project.tags` colours the ones it knows and
+   * says nothing about the rest; a name it has never heard is still data the
+   * user typed, and dropping it would be losing their work to a lookup miss.
+   *
+   * A facet — the `角色/` in `角色/ゆみ` — is a convention inside the string,
+   * with nothing in the schema to hold it. How finely to cut the vocabulary is
+   * a translation decision, and the file format has no business making it.
+   *
+   * On the unit rather than on any block: what a balloon means is one fact
+   * about the balloon, not one fact per piece of lettering that could disagree.
+   */
+  tags: string[]
+
+  source: TranslationUnitSide
+  translation: TranslationUnitSide
+
+  candidates: TranslationCandidate[]
+
+  /**
+   * Which of them this unit reads as, or null for what its blocks hold.
+   *
+   * ⭐ A pointer and not a copy: what was there before is still in the pool,
+   * and the words somebody typed themselves are never overwritten by picking a
+   * candidate.
+   *
+   * ⚠️ A candidate may only be pointed at while it has one block per
+   * translation member. Whoever sets this is responsible for that being true.
+   */
+  chosen: string | null
+}
 
 
 export interface ManifestJson {
@@ -272,9 +348,23 @@ export interface ManifestJson {
   height: number
 
   /**
-   * Every text object on the page, in the order a reader meets them. Held
+   * Every translation on the page, each owning the blocks that say it.
+   *
+   * Held beside the tree rather than in it, like the two below: the tree
+   * expresses z-order and containment, and a translation is neither. Blocks of
+   * one translation are free to sit apart, in different folders, with other
+   * layers between them.
+   */
+  translationUnits: TranslationUnit[]
+
+  /**
+   * Every translation on the page, in the order a reader meets them. Held
    * apart from the tree because the tree's own order is z-order, which is what
    * that tree exists to express.
+   *
+   * ⭐ Units and not blocks. Reading order answers which piece of content comes
+   * first, and how many blocks a piece of lettering was split into is not an
+   * answer to that.
    *
    * Whatever needs reading order reads this and never falls back to the tree.
    * A fallback is how an order someone set quietly reverts to stacking order.
@@ -282,10 +372,10 @@ export interface ManifestJson {
   readingOrder: string[]
 
   /**
-   * The lines drawn between text objects on this page, each saying that one is
+   * The lines drawn between translations on this page, each saying that one is
    * read before another. A layer over the order rather than a replacement for
-   * it: the order covers every object because it is the typing surface, and a
-   * line says the one thing a single column cannot, which is that two objects
+   * it: the order covers every unit because it is the typing surface, and a
+   * line says the one thing a single column cannot, which is that two units
    * split off the same place.
    *
    * Empty is the ordinary state of a page and stays legal for ever — a short
@@ -293,8 +383,12 @@ export interface ManifestJson {
    * where the persisted form leaves it out when empty, so nothing downstream
    * has to keep asking whether an absent key means no lines.
    *
-   * ⚠️ No line between two objects does not mean they are read at the same
+   * ⚠️ No line between two units does not mean they are read at the same
    * time. It means nobody has said. See `readingGraph.ts`.
+   *
+   * ⚠️ Both ends name a unit, which has no place on the page of its own. What
+   * a line is drawn between has to be worked out from the blocks of whichever
+   * side is being shown.
    */
   readingEdges: ReadingEdge[]
 

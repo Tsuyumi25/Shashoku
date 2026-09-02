@@ -1,7 +1,6 @@
 import type {
   GroupLayerEntry,
   LayerEntry,
-  ManifestJson,
   RasterLayerEntry,
   TextLayerEntry,
 } from './types'
@@ -54,30 +53,6 @@ export function findTextObject(
   id: string,
 ): TextLayerEntry | undefined {
   return textObjects(layers).find((t) => t.id === id)
-}
-
-
-/**
- * The page as a reader meets it — the label list's projection.
- *
- * Built from `readingOrder` alone. An object the order does not name is absent
- * from the answer rather than recovered from where it sits in the tree: a
- * fallback is how an order someone set reverts to stacking order without ever
- * saying so. Keeping the two in step is the repair layer's job, done once on
- * the way in.
- */
-export function textObjectsInReadingOrder(manifest: ManifestJson): TextLayerEntry[] {
-  const byId = new Map(textObjects(manifest.layers).map((t) => [t.id, t]))
-  const out: TextLayerEntry[] = []
-  const seen = new Set<string>()
-  for (const id of manifest.readingOrder) {
-    if (seen.has(id)) continue
-    const entry = byId.get(id)
-    if (entry === undefined) continue
-    seen.add(id)
-    out.push(entry)
-  }
-  return out
 }
 
 

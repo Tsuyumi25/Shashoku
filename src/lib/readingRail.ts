@@ -59,7 +59,7 @@ export function railWidth(rows: readonly LabelRow[]): number {
  */
 export function railMarks(rows: readonly LabelRow[]): RailMark[] {
   const laneOf = new Map<string, number>()
-  for (const row of rows) if (row.lane !== undefined) laneOf.set(row.label.id, row.lane)
+  for (const row of rows) if (row.lane !== undefined) laneOf.set(row.unit.id, row.lane)
 
   const marks: RailMark[] = []
   let above: readonly number[] = []

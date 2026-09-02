@@ -175,9 +175,14 @@ import {
   Type,
   Ungroup,
 } from '@lucide/vue'
-import type { GroupLayerEntry, LayerEntry, RasterLayerEntry } from '@shared/page/types'
+import type {
+  GroupLayerEntry,
+  LayerEntry,
+  RasterLayerEntry,
+  TextLayerEntry,
+} from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
-import { isBlank, linesFor } from '@shared/page/text'
+import { shownLinesOf } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
@@ -209,7 +214,7 @@ const collapsed = computed(() => editor.collapsedLayerIds)
  */
 function missingFamilyOf(entry: LayerEntry): string | null {
   if (entry.kind !== 'text') return null
-  const { fontFamily } = entry.translation.style
+  const { fontFamily } = entry.body.style
   return familyIsMissing(fontFamily) ? fontFamily : null
 }
 
@@ -364,7 +369,17 @@ function iconFor(entry: LayerEntry) {
 }
 
 function isUntitled(entry: LayerEntry): boolean {
-  return entry.kind === 'text' && isBlank(entry.translation)
+  return entry.kind === 'text' && wordsOf(entry).every((line) => line.length === 0)
+}
+
+/**
+ * ⚠️ Goes up to the page: a block standing in for a chosen candidate says what
+ * the candidate says, and a tree reading only the block's own words would keep
+ * showing what was typed before somebody picked something else.
+ */
+function wordsOf(entry: TextLayerEntry): readonly string[] {
+  const page = project.pageById(editor.currentPageId ?? '')?.page
+  return page === undefined ? entry.body.lines : shownLinesOf(page, entry)
 }
 
 /**
@@ -374,6 +389,6 @@ function isUntitled(entry: LayerEntry): boolean {
  */
 function nameFor(entry: LayerEntry): string {
   if (entry.kind !== 'text') return entry.name
-  return linesFor(entry.translation).find((line) => line.length > 0) ?? '(未翻譯)'
+  return wordsOf(entry).find((line) => line.length > 0) ?? '(未翻譯)'
 }
 </script>

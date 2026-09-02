@@ -54,7 +54,7 @@ function pageOf(pageId: string): ProjectFile {
       name: pageId,
       width: 100,
       height: 100,
-      readingOrder: [],
+      translationUnits: [], readingOrder: [],
       readingEdges: [],
       layers: [],
     },

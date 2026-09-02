@@ -166,11 +166,11 @@ function onApplyToSelection() {
   )
 }
 
-/** How many objects in the chapter carry each tag, registered or not. */
+/** How many translations in the chapter carry each tag, registered or not. */
 const counts = computed(() => {
   const tally = new Map<string, number>()
-  for (const { label } of project.allTextObjects()) {
-    for (const tag of label.tags) tally.set(tag, (tally.get(tag) ?? 0) + 1)
+  for (const { unit } of project.allUnits()) {
+    for (const tag of unit.tags) tally.set(tag, (tally.get(tag) ?? 0) + 1)
   }
   return tally
 })

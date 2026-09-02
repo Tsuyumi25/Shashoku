@@ -3,19 +3,13 @@ import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } fr
 import { PASS_THROUGH } from '@shared/page/types'
 import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 function text(id: string, visible = true): TextLayerEntry {
-  return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    visible: visible,
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
-      candidates: [],
-      chosen: null,
-    },
-  }
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.visible = visible
+  entry.body.lines = [id]
+  return entry
 }
 
 function group(id: string, children: LayerEntry[], visible = true): GroupLayerEntry {

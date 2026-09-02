@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { OcrModel, OcrPageResult, OcrProgress, OcrRegion } from '@shared/ocr/types'
-import type { LayerEntry, TextLayerEntry } from '@shared/page/types'
-import { textOfBody } from '@shared/page/text'
+import type { LayerEntry, SourceTextLayerEntry } from '@shared/page/types'
+import { blocksOnSide } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { settleBreaks } from '@shared/ocr/breaks'
 import { decide } from '@shared/ocr/decide'
@@ -95,10 +95,10 @@ const STATION_NAMES: Record<string, string> = {
  * artwork — a translation carried off to the margin for the sake of the page
  * has not moved the balloon it was read out of.
  */
-function labelCentre(object: TextLayerEntry) {
-  const body = object.source
+function labelCentre(object: SourceTextLayerEntry) {
+  const body = object.body
   return drawnLabel(
-    textOfBody(body),
+    body.lines.join('\n'),
     body.style,
     object.effects,
     { x: body.x, y: body.y },
@@ -236,15 +236,20 @@ export const useOcrStore = defineStore('ocr', () => {
    * by hand since the last pass is exactly the case that depends on it, and
    * gating this on new readings would leave that object empty for ever.
    */
+  function sourceBlocksOfPage(pageId: string): SourceTextLayerEntry[] {
+    const page = useProjectStore().pageById(pageId)?.page
+    return page ? (blocksOnSide(page.layers, 'source') as SourceTextLayerEntry[]) : []
+  }
+
   function settle(pageId: string) {
     const project = useProjectStore()
     useEditorStore().cmdApplyVerdict(
       pageId,
       decide(
-        project.labelsOf(pageId).map((object) => ({
-          id: object.id,
-          centre: labelCentre(object),
-          source: object.source,
+        sourceBlocksOfPage(pageId).map((block) => ({
+          id: block.id,
+          centre: labelCentre(block),
+          source: block.body,
         })),
         project.readingsOfPage(pageId),
         MAY_NOT_CREATE,

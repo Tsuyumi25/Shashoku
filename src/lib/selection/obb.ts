@@ -8,7 +8,7 @@ export interface Obb {
   rotation: number
 }
 
-function cornersOf(box: Obb): Point[] {
+export function cornersOf(box: Obb): Point[] {
   const cos = Math.cos(box.rotation)
   const sin = Math.sin(box.rotation)
   const hx = box.w / 2

@@ -1,20 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import type { GroupLayerEntry, LayerEntry, ManifestJson, TextLayerEntry } from './types'
+import type { GroupLayerEntry, LayerEntry, ManifestJson, TranslationUnit } from './types'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { validatePage } from './validate'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import { blankTextObject, emptyBody } from './schema'
+import { blankBlock } from './schema'
 
-function text(id: string): TextLayerEntry {
+/** A translation set in one block a side, which is what an ordinary balloon is. */
+function said(id: string): { unit: TranslationUnit; blocks: LayerEntry[] } {
+  const source = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+  const translation = blankBlock(`${id}t`, 'translation', DEFAULT_TEXT_STYLE)
+  translation.body.lines = [id]
   return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
+    unit: {
+      id,
+      tags: [],
+      source: { members: [source.id], separators: [] },
+      translation: { members: [translation.id], separators: [] },
       candidates: [],
       chosen: null,
     },
+    blocks: [source, translation],
   }
 }
 
@@ -32,12 +38,23 @@ function group(id: string, children: LayerEntry[]): GroupLayerEntry {
   }
 }
 
-function manifest(
-  layers: LayerEntry[],
+function page(
+  said: { unit: TranslationUnit; blocks: LayerEntry[] }[],
   readingOrder: string[],
   readingEdges: ReadingEdge[] = [],
+  extra: LayerEntry[] = [],
 ): ManifestJson {
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision: 0, name: 'p', width: 1200, height: 1700, readingOrder, readingEdges, layers }
+  return {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision: 0,
+    name: 'p',
+    width: 1200,
+    height: 1700,
+    translationUnits: said.map((s) => s.unit),
+    readingOrder,
+    readingEdges,
+    layers: [...said.flatMap((s) => s.blocks), ...extra],
+  }
 }
 
 function edges(...pairs: string[]): ReadingEdge[] {
@@ -47,90 +64,141 @@ function edges(...pairs: string[]): ReadingEdge[] {
   })
 }
 
+const kinds = (m: ManifestJson): string[] => validatePage(m).map((d) => d.kind)
+
 describe('validatePage', () => {
   it('finds nothing wrong with a page whose order covers it exactly', () => {
-    expect(validatePage(manifest([text('a'), group('g', [text('b')])], ['b', 'a']))).toEqual([])
+    const a = said('a')
+    const b = said('b')
+    expect(validatePage(page([a, b], ['a', 'b']))).toEqual([])
   })
 
-  it('names a text object the order never mentions', () => {
-    expect(validatePage(manifest([text('a'), text('b')], ['a']))).toEqual([
+  it('names a translation the order never mentions', () => {
+    const a = said('a')
+    const b = said('b')
+    expect(validatePage(page([a, b], ['a']))).toEqual([
       { kind: 'reading-order-missing', id: 'b' },
     ])
   })
 
-  it('names an order entry no text object answers to', () => {
-    expect(validatePage(manifest([text('a')], ['a', 'ghost']))).toEqual([
+  it('names an order entry no translation answers to', () => {
+    const a = said('a')
+    expect(validatePage(page([a], ['a', 'ghost']))).toEqual([
       { kind: 'reading-order-dangling', id: 'ghost' },
-    ])
-  })
-
-  // Coverage is set equality with the text objects, so a folder standing in the
-  // order is as wrong as an id that resolves to nothing.
-  it('names an order entry that lands on a folder', () => {
-    expect(validatePage(manifest([group('g', [])], ['g']))).toEqual([
-      { kind: 'reading-order-dangling', id: 'g' },
     ])
   })
 
   it('names a repeated order entry once per extra appearance', () => {
-    expect(validatePage(manifest([text('a')], ['a', 'a']))).toEqual([
-      { kind: 'reading-order-duplicate', id: 'a' },
-    ])
+    const a = said('a')
+    expect(kinds(page([a], ['a', 'a', 'a']))).toEqual(['reading-order-duplicate'])
+  })
+
+  it('names two units sharing one id', () => {
+    const a = said('a')
+    const twin = said('a')
+    const m = page([a, twin], ['a'])
+    expect(kinds(m)).toContain('duplicate-unit-id')
   })
 
   it('names two entries sharing one id', () => {
-    expect(validatePage(manifest([text('a'), group('a', [])], ['a']))).toEqual([
-      { kind: 'duplicate-id', id: 'a' },
-    ])
-  })
-
-  it('reports every fault it finds rather than stopping at the first', () => {
-    expect(validatePage(manifest([text('a'), text('b')], ['ghost', 'a', 'a']))).toEqual([
-      { kind: 'reading-order-duplicate', id: 'a' },
-      { kind: 'reading-order-dangling', id: 'ghost' },
-      { kind: 'reading-order-missing', id: 'b' },
-    ])
+    const a = said('a')
+    const m = page([a], ['a'], [], [group('as', [])])
+    expect(kinds(m)).toContain('duplicate-id')
   })
 })
 
-describe('the lines drawn between objects', () => {
-  it('finds nothing wrong with lines between objects that are all there', () => {
-    expect(validatePage(manifest([text('a'), text('b')], ['a', 'b'], edges('a>b')))).toEqual([])
+describe('what a unit says it is made of', () => {
+  it('names a member the page does not hold', () => {
+    const a = said('a')
+    a.unit.translation.members = ['gone']
+    const m = page([a], ['a'])
+    expect(kinds(m)).toContain('unit-member-dangling')
   })
 
-  it('names a line reaching for an object that is not on the page', () => {
-    expect(validatePage(manifest([text('a')], ['a'], edges('a>ghost')))).toEqual([
+  it('names a source list holding a block of lettering', () => {
+    const a = said('a')
+    a.unit.source.members = ['at']
+    const m = page([a], ['a'])
+    expect(kinds(m)).toContain('unit-member-side-mismatch')
+  })
+
+  it('names a block two units both claim', () => {
+    const a = said('a')
+    const b = said('b')
+    b.unit.translation.members = ['at']
+    const m = page([a, b], ['a', 'b'])
+    expect(kinds(m)).toContain('unit-member-shared')
+  })
+
+  it('names a side a unit has nothing left in', () => {
+    const a = said('a')
+    a.unit.translation.members = ['gone']
+    expect(validatePage(page([a], ['a']))).toContainEqual({
+      kind: 'unit-side-empty',
+      id: 'a',
+      side: 'translation',
+    })
+  })
+
+  it('names a block no unit claims at all', () => {
+    const a = said('a')
+    const stray = blankBlock('stray', 'translation', DEFAULT_TEXT_STYLE)
+    const m = page([a], ['a'], [], [stray])
+    expect(validatePage(m)).toContainEqual({ kind: 'unit-member-orphan', id: 'stray' })
+  })
+
+  it('reports every fault it finds rather than stopping at the first', () => {
+    const a = said('a')
+    const b = said('b')
+    a.unit.translation.members = ['gone']
+    const m = page([a, b], ['a', 'ghost'])
+    expect(new Set(kinds(m))).toEqual(
+      new Set([
+        'unit-member-dangling',
+        'unit-side-empty',
+        'unit-member-orphan',
+        'reading-order-dangling',
+        'reading-order-missing',
+      ]),
+    )
+  })
+})
+
+describe('the lines drawn between translations', () => {
+  it('finds nothing wrong with lines between units that are all there', () => {
+    const a = said('a')
+    const b = said('b')
+    expect(validatePage(page([a, b], ['a', 'b'], edges('a>b')))).toEqual([])
+  })
+
+  it('names a line reaching for a unit that is not on the page', () => {
+    const a = said('a')
+    expect(validatePage(page([a], ['a'], edges('a>ghost')))).toEqual([
       { kind: 'reading-edge-dangling', id: 'a', to: 'ghost' },
     ])
   })
 
-  // A line to a folder or a raster is the same fault as a line to nothing: the
-  // reading is between translations, and neither of those is one.
-  it('names a line reaching for something that is not a text object', () => {
-    expect(
-      validatePage(manifest([text('a'), group('g', [])], ['a'], edges('g>a'))),
-    ).toEqual([{ kind: 'reading-edge-dangling', id: 'g', to: 'a' }])
+  /** ⭐ A block is not a unit: lines join content, not lettering. */
+  it('names a line reaching for a block rather than a translation', () => {
+    const a = said('a')
+    const b = said('b')
+    expect(validatePage(page([a, b], ['a', 'b'], edges('a>bt')))).toEqual([
+      { kind: 'reading-edge-dangling', id: 'a', to: 'bt' },
+    ])
   })
 
-  /**
-   * A ring cannot be drawn — the canvas refuses the line that would close one —
-   * so this only catches a file written somewhere else. It matters because the
-   * gutter number is the longest path from an object nothing points into, and a
-   * ring has neither.
-   */
   it('names the line that closes a ring', () => {
-    const defects = validatePage(
-      manifest([text('a'), text('b')], ['a', 'b'], edges('a>b', 'b>a')),
-    )
-    expect(defects).toEqual([{ kind: 'reading-edge-cycle', id: 'b', to: 'a' }])
+    const a = said('a')
+    const b = said('b')
+    const m = page([a, b], ['a', 'b'], edges('a>b', 'b>a'))
+    expect(validatePage(m)).toEqual([{ kind: 'reading-edge-cycle', id: 'b', to: 'a' }])
   })
 
   it('leaves two chains that meet again alone, which is not a ring', () => {
-    const page = manifest(
-      [text('a'), text('b'), text('c'), text('d')],
-      ['a', 'b', 'c', 'd'],
-      edges('a>b', 'a>c', 'b>d', 'c>d'),
-    )
-    expect(validatePage(page)).toEqual([])
+    const a = said('a')
+    const b = said('b')
+    const c = said('c')
+    const m = page([a, b, c], ['a', 'b', 'c'], edges('a>b', 'a>c', 'b>c'))
+    expect(validatePage(m)).toEqual([])
   })
 })

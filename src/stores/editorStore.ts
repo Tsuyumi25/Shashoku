@@ -14,10 +14,16 @@ import type { ProjectFile } from '@/types/project'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
 import { useNoticeStore } from '@/stores/noticeStore'
-import { useProjectStore, type LabelPlace, type RemovedEntry } from '@/stores/projectStore'
+import {
+  useProjectStore,
+  type RemovedEntry,
+  type RemovedTranslation,
+  type TranslationParts,
+} from '@/stores/projectStore'
 import { clamp, screenToPagePx } from '@/lib/coords'
-import { blankTextObject, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
-import { bodyOnSide, linesOf, textOnSide, type TextSide } from '@shared/page/text'
+import { blankTranslation, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
+import { linesOf, type TextSide } from '@shared/page/text'
+import { blocksOf, shownLinesOf } from '@shared/page/units'
 import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
@@ -473,7 +479,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** The label list as it is being shown, filter and all. */
   function shownRows(): ChapterRow[] {
-    return buildLabelRows(useProjectStore().files, labelQuery.value)
+    return buildLabelRows(useProjectStore().files, textSide.value, labelQuery.value)
   }
 
   /**
@@ -532,10 +538,19 @@ export const useEditorStore = defineStore('editor', () => {
    * eye is exactly where that happens without being noticed.
    */
   const paintTargetScope = computed(() => {
+    const project = useProjectStore()
     const targets = selectedTextObjects()
+    // ⭐ Counted over the translations the blocks belong to, not the blocks. A
+    // sound set in two blocks means one thing, so seeing it twice is not two
+    // meanings about to be flattened into one.
+    const units = new Map<string, readonly string[]>()
+    for (const { pageId, entry } of targets) {
+      const unit = project.placeOf(pageId, entry.id)?.unit
+      if (unit) units.set(unit.id, unit.tags)
+    }
     return {
       objects: targets.length,
-      meanings: new Set(targets.map(({ entry }) => tagSetKey(entry.tags))).size,
+      meanings: new Set([...units.values()].map(tagSetKey)).size,
     }
   })
 
@@ -741,16 +756,20 @@ export const useEditorStore = defineStore('editor', () => {
 
     const at = stops.findIndex((r) =>
       r.kind === 'label'
-        ? r.label.id === cursorId.value
-        : cursorId.value === null && r.pageId === currentPageId.value,
+        ? r.blocks.some((b) => b.id === cursorId.value)
+        : r.kind === 'block'
+          ? r.block.id === cursorId.value
+          : cursorId.value === null && r.pageId === currentPageId.value,
     )
     const next = at === -1 ? (offset > 0 ? 0 : stops.length - 1) : at + offset
     if (next < 0 || next >= stops.length) return
 
     const row = stops[next]
-    if (row.kind === 'label') {
-      selectOnly(row.label.id)
-      showPageOf(row.label.id)
+    if (row.kind === 'label' || row.kind === 'block') {
+      const id = row.kind === 'block' ? row.block.id : row.blocks[0]?.id
+      if (id === undefined) return
+      selectOnly(id)
+      showPageOf(id)
       return
     }
     commitTextEdit()
@@ -828,8 +847,11 @@ export const useEditorStore = defineStore('editor', () => {
     const pending = pendingTextEdit.value
     if (!pending) return undefined
     const project = useProjectStore()
-    const label = project.labelById(pending.pageId, pending.labelId)
-    return label === undefined ? undefined : textOnSide(label, pending.side)
+    const page = project.pageById(pending.pageId)?.page
+    const label = project.blockById(pending.pageId, pending.labelId)
+    return page === undefined || label === undefined
+      ? undefined
+      : shownLinesOf(page, label).join('\n')
   }
 
   /**
@@ -878,7 +900,7 @@ export const useEditorStore = defineStore('editor', () => {
     commitTextEdit()
     if (isLayerLocked(labelId)) return
     const side = textSide.value
-    const wasTheirs = chosenCandidate(pageId, labelId, side)?.human === true
+    const wasTheirs = chosenCandidate(pageId, labelId)?.human === true
     pendingTextEdit.value = { pageId, labelId, from, side, wasTheirs }
   }
 
@@ -895,14 +917,7 @@ export const useEditorStore = defineStore('editor', () => {
     pendingTextEdit.value = null
     // The label was deleted mid-edit, and the delete already captured its text.
     if (text === undefined) return
-    cmdUpdateLabelText(
-      pending.pageId,
-      pending.labelId,
-      pending.side,
-      pending.from,
-      text,
-      pending.wasTheirs,
-    )
+    cmdUpdateLabelText(pending.pageId, pending.labelId, pending.from, text, pending.wasTheirs)
   }
 
   /**
@@ -919,9 +934,11 @@ export const useEditorStore = defineStore('editor', () => {
     const page = currentPageId.value
     const id = cursorId.value
     if (page === null || id === null) return
-    const label = useProjectStore().labelById(page, id)
-    if (!label) return
-    beginTextEdit(page, id, textOnSide(label, textSide.value))
+    const project = useProjectStore()
+    const manifest = project.pageById(page)?.page
+    const label = project.blockById(page, id)
+    if (!label || !manifest) return
+    beginTextEdit(page, id, shownLinesOf(manifest, label).join('\n'))
   }
 
   /**
@@ -1253,17 +1270,27 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
-  function cmdAddLabel(pageId: string, label: TextLayerEntry) {
+  function cmdAddLabel(pageId: string, parts: TranslationParts) {
     const project = useProjectStore()
-    let place: LabelPlace | undefined
+    let removed: RemovedTranslation | undefined
     pushCommand({
-      label: `add-label ${label.id}`,
-      do: () => project.addLabel(pageId, label, place),
+      label: `add-label ${parts.unit.id}`,
+      do: () =>
+        project.addLabel(
+          pageId,
+          removed === undefined ? parts : { unit: removed.unit, blocks: removed.blocks.map((b) => b.entry) },
+          removed && {
+            paths: removed.blocks.map((b) => b.path),
+            orderIndex: removed.orderIndex,
+            edges: removed.edges,
+          },
+        ),
       undo: () => {
-        place = project.deleteLabel(pageId, label.id) ?? undefined
+        removed = project.deleteLabel(pageId, parts.unit.id) ?? undefined
       },
     })
-    selectOnly(label.id)
+    const first = parts.blocks.find((b) => b.side === textSide.value) ?? parts.blocks[0]
+    if (first) selectOnly(first.id)
   }
 
   /**
@@ -1275,12 +1302,12 @@ export const useEditorStore = defineStore('editor', () => {
   function addLabelAt(x: number, y: number) {
     const project = useProjectStore()
     if (!currentPageId.value) return
-    const label = blankTextObject(generateLabelId(), project.header.seedStyle)
-    label.source.x = x
-    label.source.y = y
-    label.translation.x = x
-    label.translation.y = y
-    cmdAddLabel(currentPageId.value, label)
+    const parts = blankTranslation(project.header.seedStyle, generateLabelId)
+    for (const block of parts.blocks) {
+      block.body.x = x
+      block.body.y = y
+    }
+    cmdAddLabel(currentPageId.value, parts)
   }
 
   /**
@@ -1305,45 +1332,62 @@ export const useEditorStore = defineStore('editor', () => {
     const before = new Map<string, SourceBody>()
     const after = new Map<string, SourceBody>()
     for (const [id, filling] of verdict.fills) {
-      const label = project.labelById(pageId, id)
-      if (!label) continue
-      before.set(id, label.source)
+      const block = project.blockById(pageId, id)
+      if (block?.side !== 'source') continue
+      before.set(id, block.body)
       after.set(id, {
-        ...label.source,
+        ...block.body,
         lines: linesOf(filling.text),
         from: filling.from,
-        // ⚠️ Only the type, never the position. The object already stands where
+        // ⚠️ Only the type, never the position. The block already stands where
         // it stands, and this is a correction to what it says.
-        style: sourceStyle(label.source.style, filling, page),
+        style: sourceStyle(block.body.style, filling, page),
       })
     }
 
     const born = verdict.spawns.map((spawn) => {
       const style = measuredStyle(seed, spawn)
       const read = sourceStyle(seed, spawn, page)
-      const label = blankTextObject(generateLabelId(), style)
-      label.source = { ...emptyBody(read), by: 'auto', lines: linesOf(spawn.text), from: spawn.from }
+      const parts = blankTranslation(style, generateLabelId)
+      const [sourceBlock, translationBlock] = parts.blocks
+      sourceBlock.body = {
+        ...emptyBody(read),
+        by: 'auto',
+        lines: linesOf(spawn.text),
+        from: spawn.from,
+      }
       // Placed by where the reading was, which is the middle of the balloon.
       const source = anchorFor(read, spawn.centre)
       const translation = anchorFor(style, spawn.centre)
-      label.source.x = source.x
-      label.source.y = source.y
-      label.translation.x = translation.x
-      label.translation.y = translation.y
-      return label
+      sourceBlock.body.x = source.x
+      sourceBlock.body.y = source.y
+      translationBlock.body.x = translation.x
+      translationBlock.body.y = translation.y
+      return parts
     })
 
-    const places = new Map<string, LabelPlace>()
+    const removed = new Map<string, RemovedTranslation>()
     pushCommand({
       label: `recognize ${pageId}`,
       do: () => {
         for (const [id, source] of after) project.setLabelSource(pageId, id, source)
-        for (const label of born) project.addLabel(pageId, label, places.get(label.id))
+        for (const parts of born) {
+          const back = removed.get(parts.unit.id)
+          project.addLabel(
+            pageId,
+            back === undefined ? parts : { unit: back.unit, blocks: back.blocks.map((b) => b.entry) },
+            back && {
+              paths: back.blocks.map((b) => b.path),
+              orderIndex: back.orderIndex,
+              edges: back.edges,
+            },
+          )
+        }
       },
       undo: () => {
-        for (const label of born) {
-          const place = project.deleteLabel(pageId, label.id)
-          if (place) places.set(label.id, place)
+        for (const parts of born) {
+          const back = project.deleteLabel(pageId, parts.unit.id)
+          if (back) removed.set(parts.unit.id, back)
         }
         for (const [id, source] of before) project.setLabelSource(pageId, id, source)
       },
@@ -1422,8 +1466,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const entry = project.entryById(labelId)
-    if (entry?.kind !== 'text') return
-    const was = entry.source
+    if (entry?.kind !== 'text' || entry.side !== 'source') return
+    const was = entry.body
     const before: SourceBody = { ...was, lines: [...was.lines], style: { ...was.style } }
     if (before.from === reading.hash) return
     const after: SourceBody = {
@@ -1459,21 +1503,22 @@ export const useEditorStore = defineStore('editor', () => {
     if (!page) return
     const style = measuredStyle(project.header.seedStyle, measured)
     const read = sourceStyle(project.header.seedStyle, measured, page)
-    const label = blankTextObject(generateLabelId(), style)
-    label.source = {
+    const parts = blankTranslation(style, generateLabelId)
+    const [sourceBlock, translationBlock] = parts.blocks
+    sourceBlock.body = {
       ...emptyBody(read),
       by: 'auto',
       lines: linesOf(reading.text),
       from: reading.hash,
     }
-    // Placed by its middle, as a run's own objects are.
+    // Placed by its middle, as a run's own blocks are.
     const source = anchorFor(read, at)
     const translation = anchorFor(style, at)
-    label.source.x = source.x
-    label.source.y = source.y
-    label.translation.x = translation.x
-    label.translation.y = translation.y
-    cmdAddLabel(pageId, label)
+    sourceBlock.body.x = source.x
+    sourceBlock.body.y = source.y
+    translationBlock.body.x = translation.x
+    translationBlock.body.y = translation.y
+    cmdAddLabel(pageId, parts)
   }
 
   /**
@@ -1533,7 +1578,7 @@ export const useEditorStore = defineStore('editor', () => {
     const touched = new Set<string>([page])
     const incoming: string[] = []
     for (const id of moving) {
-      const from = project.pageOfEntry(id)
+      const from = project.pageOfUnit(id) ?? project.pageOfEntry(id)
       if (from === null) continue
       touched.add(from)
       if (from !== page) incoming.push(id)
@@ -1563,29 +1608,44 @@ export const useEditorStore = defineStore('editor', () => {
       [...orders].every(([p, order]) => order.join('\u0000') === before.get(p)?.join('\u0000'))
     if (settled) return
 
-    let removed: RemovedEntry[] = []
+    // Whole translations travel, blocks and all: a page holding one side of a
+    // translation and not the other is not a page anybody can work on.
+    let removed: Array<{ from: string; gone: RemovedTranslation }> = []
     pushCommand({
       label: `move-objects ${moving.length}`,
       do: () => {
-        removed = incoming
-          .map((id) => project.removeEntry(id))
-          .filter((r): r is RemovedEntry => r !== null)
-        for (const r of removed) project.appendEntry(page, r.entry)
+        removed = incoming.flatMap((id) => {
+          const from = project.pageOfUnit(id)
+          if (from === null) return []
+          const gone = project.deleteLabel(from, id)
+          return gone === null ? [] : [{ from, gone }]
+        })
+        for (const { gone } of removed) {
+          project.addLabel(page, { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) })
+        }
         // A line whose both ends made the same journey is still saying something
         // true, so it travels with them. One that had an end left behind is not:
         // ids only mean anything within a page, so there is nothing for it to
         // point at any more, and dropping it is the honest answer.
-        const landed = new Set(removed.flatMap((r) => textObjects([r.entry]).map((t) => t.id)))
+        const landed = new Set(removed.map((r) => r.gone.unit.id))
         project.addReadingEdges(
           page,
-          removed.flatMap((r) => r.edges).filter((e) => landed.has(e.from) && landed.has(e.to)),
+          removed.flatMap((r) => r.gone.edges).filter((e) => landed.has(e.from) && landed.has(e.to)),
         )
         for (const [p, order] of orders) project.setReadingOrder(p, [...order])
       },
       undo: () => {
-        for (const r of [...removed].reverse()) {
-          project.removeEntry(r.entry.id)
-          project.restoreEntry(r)
+        for (const { from, gone } of [...removed].reverse()) {
+          project.deleteLabel(page, gone.unit.id)
+          project.addLabel(
+            from,
+            { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) },
+            {
+              paths: gone.blocks.map((b) => b.path),
+              orderIndex: gone.orderIndex,
+              edges: gone.edges,
+            },
+          )
         }
         for (const [p, order] of before) project.setReadingOrder(p, [...order])
       },
@@ -1602,16 +1662,20 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function landingIndex(page: string, ids: readonly string[]): number {
     const project = useProjectStore()
-    const labels = project.labelsOf(page)
-    const atCursor = labels.findIndex((l) => l.id === cursorId.value)
+    const units = project.labelsOf(page)
+    const atCursor =
+      cursorId.value === null
+        ? -1
+        : units.findIndex((u) => u.id === project.placeOf(page, cursorId.value!)?.unit.id)
     if (atCursor >= 0) return atCursor
 
     const doomed = new Set<string>()
     for (const id of ids) {
       const entry = project.entryById(id)
-      if (entry) for (const t of textObjects([entry])) doomed.add(t.id)
+      if (entry) for (const t of textObjects([entry])) doomed.add(project.placeOf(page, t.id)?.unit.id ?? '')
+      else doomed.add(id)
     }
-    const first = labels.findIndex((l) => doomed.has(l.id))
+    const first = units.findIndex((u) => doomed.has(u.id))
     return first >= 0 ? first : 0
   }
 
@@ -1658,28 +1722,48 @@ export const useEditorStore = defineStore('editor', () => {
       return
     }
     const left = project.labelsOf(page)
-    selectOnly(left[Math.min(landing, left.length - 1)]?.id ?? null)
+    const landed = left[Math.min(landing, left.length - 1)]
+    const file = project.pageById(page)
+    // The cursor stands on a block, so the translation that took the place is
+    // resolved back down to the one being shown.
+    const block =
+      landed === undefined || file === undefined
+        ? undefined
+        : blocksOf(file.page.layers, landed, textSide.value)[0]
+    selectOnly(block?.id ?? null)
   }
 
   
   function cmdDuplicateLabel(
     pageId: string,
-    label: TextLayerEntry,
+    parts: TranslationParts,
     opts?: { alreadyApplied?: boolean },
   ) {
     const project = useProjectStore()
-    let place: LabelPlace | undefined
+    let removed: RemovedTranslation | undefined
     pushCommand(
       {
-        label: `duplicate-label ${label.id}`,
-        do: () => project.addLabel(pageId, label, place),
+        label: `duplicate-label ${parts.unit.id}`,
+        do: () =>
+          project.addLabel(
+            pageId,
+            removed === undefined
+              ? parts
+              : { unit: removed.unit, blocks: removed.blocks.map((b) => b.entry) },
+            removed && {
+              paths: removed.blocks.map((b) => b.path),
+              orderIndex: removed.orderIndex,
+              edges: removed.edges,
+            },
+          ),
         undo: () => {
-          place = project.deleteLabel(pageId, label.id) ?? undefined
+          removed = project.deleteLabel(pageId, parts.unit.id) ?? undefined
         },
       },
       opts,
     )
-    selectOnly(label.id)
+    const first = parts.blocks.find((b) => b.side === textSide.value) ?? parts.blocks[0]
+    if (first) selectOnly(first.id)
   }
 
 
@@ -1687,7 +1771,6 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdMoveLabel(
     pageId: string,
     labelId: string,
-    side: TextSide,
     oldPos: { x: number; y: number },
     newPos: { x: number; y: number },
   ) {
@@ -1696,8 +1779,8 @@ export const useEditorStore = defineStore('editor', () => {
     pushCommand(
       {
         label: `move-label ${labelId}`,
-        do: () => project.moveLabel(pageId, labelId, side, newPos.x, newPos.y),
-        undo: () => project.moveLabel(pageId, labelId, side, oldPos.x, oldPos.y),
+        do: () => project.moveLabel(pageId, labelId, newPos.x, newPos.y),
+        undo: () => project.moveLabel(pageId, labelId, oldPos.x, oldPos.y),
       },
       { alreadyApplied: true },
     )
@@ -1737,15 +1820,14 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdRotateLabel(
     pageId: string,
     labelId: string,
-    side: TextSide,
     from: TurnedLabel,
     to: TurnedLabel,
   ) {
     if (JSON.stringify(from) === JSON.stringify(to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: TurnedLabel) => {
-      project.rotateLabel(pageId, labelId, side, state.rotation)
-      project.moveLabel(pageId, labelId, side, state.x, state.y)
+      project.rotateLabel(pageId, labelId, state.rotation)
+      project.moveLabel(pageId, labelId, state.x, state.y)
     }
     pushCommand(
       {
@@ -1771,7 +1853,6 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdScaleLabel(
     pageId: string,
     labelId: string,
-    side: TextSide,
     from: ScaledLabel,
     to: ScaledLabel,
   ) {
@@ -1779,8 +1860,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
-      project.setLabelStyle(pageId, labelId, side, state.style)
-      project.moveLabel(pageId, labelId, side, state.x, state.y)
+      project.setLabelStyle(pageId, labelId, state.style)
+      project.moveLabel(pageId, labelId, state.x, state.y)
     }
     pushCommand(
       {
@@ -2064,24 +2145,24 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdUpdateLabelText(
     pageId: string,
     labelId: string,
-    side: TextSide,
     oldText: string,
     newText: string,
     wasTheirs?: boolean,
   ) {
     if (oldText === newText || isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const held = chosenCandidate(pageId, labelId, side)
+    const held = chosenCandidate(pageId, labelId)
     // ⚠️ Read now only for a caller that has not written anything through yet.
     // An editing session has, and stamped as it went, so it carries the answer
     // from before the first keystroke.
     const was = wasTheirs ?? held?.human === true
     pushCommand({
       label: `update-text ${labelId}`,
-      do: () => project.updateLabelText(pageId, labelId, side, newText),
+      do: () => project.updateLabelText(pageId, labelId, newText),
       undo: () => {
-        project.updateLabelText(pageId, labelId, side, oldText)
-        if (held) project.setTranslationHand(pageId, labelId, held.id, was)
+        project.updateLabelText(pageId, labelId, oldText)
+        const unit = project.placeOf(pageId, labelId)?.unit
+        if (held && unit) project.setTranslationHand(pageId, unit.id, held.id, was)
       },
     })
   }
@@ -2104,16 +2185,13 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /** The proposal an object is reading, when it is reading one. */
-  function chosenCandidate(
-    pageId: string,
-    labelId: string,
-    side: TextSide,
-  ): TranslationCandidate | null {
-    if (side !== 'translation') return null
+  /** Nothing to resolve on the artwork's side: nobody proposes readings of it. */
+  function chosenCandidate(pageId: string, blockId: string): TranslationCandidate | null {
     const project = useProjectStore()
-    const body = project.labelById(pageId, labelId)?.translation
-    if (!body || body.chosen === null) return null
-    return body.candidates.find((c) => c.id === body.chosen) ?? null
+    if (project.blockById(pageId, blockId)?.side !== 'translation') return null
+    const unit = project.placeOf(pageId, blockId)?.unit
+    if (!unit || unit.chosen === null) return null
+    return unit.candidates.find((c) => c.id === unit.chosen) ?? null
   }
 
   /**
@@ -2127,12 +2205,14 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdPickTranslation(pageId: string, labelId: string, id: string | null) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const was = project.labelById(pageId, labelId)?.translation.chosen ?? null
+    const unit = project.placeOf(pageId, labelId)?.unit
+    if (!unit) return
+    const was = unit.chosen
     if (was === id) return
     pushCommand({
-      label: `pick-translation ${labelId}`,
-      do: () => project.setLabelTranslation(pageId, labelId, id),
-      undo: () => project.setLabelTranslation(pageId, labelId, was),
+      label: `pick-translation ${unit.id}`,
+      do: () => project.setLabelTranslation(pageId, unit.id, id),
+      undo: () => project.setLabelTranslation(pageId, unit.id, was),
     })
   }
 
@@ -2152,19 +2232,23 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdAddTranslationCandidate(pageId: string, labelId: string, id: string) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const body = project.labelById(pageId, labelId)?.translation
-    if (!body) return
-    const at = body.candidates.length
-    const was = body.chosen
+    const unit = project.placeOf(pageId, labelId)?.unit
+    if (!unit) return
+    const at = unit.candidates.length
+    const was = unit.chosen
+    // One blank piece per block, so what is asked for can be read the moment it
+    // arrives — a proposal the slot cannot point at is one the request has to
+    // then go and fix.
+    const pieces = unit.translation.members.map(() => [''])
     pushCommand({
-      label: `add-translation ${labelId}`,
+      label: `add-translation ${unit.id}`,
       do: () => {
-        project.insertTranslation(pageId, labelId, { id, lines: [''], human: true }, at)
-        project.setLabelTranslation(pageId, labelId, id)
+        project.insertTranslation(pageId, unit.id, { id, pieces, human: true }, at)
+        project.setLabelTranslation(pageId, unit.id, id)
       },
       undo: () => {
-        project.setLabelTranslation(pageId, labelId, was)
-        project.removeTranslation(pageId, labelId, id)
+        project.setLabelTranslation(pageId, unit.id, was)
+        project.removeTranslation(pageId, unit.id, id)
       },
     })
   }
@@ -2180,17 +2264,20 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdRemoveTranslation(pageId: string, labelId: string, id: string) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const body = project.labelById(pageId, labelId)?.translation
-    const at = body?.candidates.findIndex((c) => c.id === id) ?? -1
-    if (!body || at === -1) return
-    const was = { ...body.candidates[at], lines: [...body.candidates[at].lines] }
-    const chosen = body.chosen
+    const unit = project.placeOf(pageId, labelId)?.unit
+    const at = unit?.candidates.findIndex((c) => c.id === id) ?? -1
+    if (!unit || at === -1) return
+    const was = {
+      ...unit.candidates[at],
+      pieces: unit.candidates[at].pieces.map((piece) => [...piece]),
+    }
+    const chosen = unit.chosen
     pushCommand({
-      label: `remove-translation ${labelId}`,
-      do: () => project.removeTranslation(pageId, labelId, id),
+      label: `remove-translation ${unit.id}`,
+      do: () => project.removeTranslation(pageId, unit.id, id),
       undo: () => {
-        project.insertTranslation(pageId, labelId, was, at)
-        project.setLabelTranslation(pageId, labelId, chosen)
+        project.insertTranslation(pageId, unit.id, was, at)
+        project.setLabelTranslation(pageId, unit.id, chosen)
       },
     })
   }
@@ -2266,15 +2353,14 @@ export const useEditorStore = defineStore('editor', () => {
   ) {
     const project = useProjectStore()
     if (targets.length === 0 || Object.keys(patch).length === 0) return
-    const side = textSide.value
     const before = targets.map(({ pageId, entry }) => ({
       pageId,
       id: entry.id,
-      style: { ...bodyOnSide(entry, side).style },
+      style: { ...entry.body.style },
     }))
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const write = (states: typeof before) => {
-      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, side, style)
+      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
     }
     pushCommand({
       label: `style ${targets.length}`,
@@ -2321,7 +2407,7 @@ export const useEditorStore = defineStore('editor', () => {
   function chapterBucketObjects(): BucketObject[] {
     const project = useProjectStore()
     return project.files.flatMap((file) =>
-      bucketObjectsOf(file.pageId, file.page.layers, 'translation'),
+      bucketObjectsOf(file.pageId, file.page, 'translation'),
     )
   }
 
@@ -2361,16 +2447,21 @@ export const useEditorStore = defineStore('editor', () => {
   ) {
     const project = useProjectStore()
     const wanted = normalizeTagSet(tags)
-    const targets = textObjectsByIds(ids).filter(
-      ({ entry }) => !sameTagSet(entry.tags, wanted),
-    )
+    // ⭐ The meaning is written one level up and the look on the block itself,
+    // so a stroke across two blocks of one sound writes that meaning once and
+    // both looks.
+    const targets = textObjectsByIds(ids).flatMap(({ pageId, entry }) => {
+      const unit = project.placeOf(pageId, entry.id)?.unit
+      return unit === undefined || sameTagSet(unit.tags, wanted) ? [] : [{ pageId, entry, unit }]
+    })
     if (targets.length === 0) return
 
-    const before = targets.map(({ pageId, entry }) => ({
+    const before = targets.map(({ pageId, entry, unit }) => ({
       pageId,
       id: entry.id,
-      tags: [...entry.tags],
-      style: { ...entry.translation.style },
+      unitId: unit.id,
+      tags: [...unit.tags],
+      style: { ...entry.body.style },
     }))
     let after = before.map((entry) => ({ ...entry, tags: wanted }))
     if (updateStyle) {
@@ -2381,8 +2472,8 @@ export const useEditorStore = defineStore('editor', () => {
     }
     const write = (states: typeof before) => {
       for (const state of states) {
-        project.setLabelTags(state.pageId, state.id, state.tags)
-        project.setLabelStyle(state.pageId, state.id, 'translation', state.style)
+        project.setLabelTags(state.pageId, state.unitId, state.tags)
+        project.setLabelStyle(state.pageId, state.id, state.style)
       }
     }
     pushCommand({

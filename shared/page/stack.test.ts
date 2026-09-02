@@ -8,19 +8,12 @@ import type {
 } from './types'
 import { PASS_THROUGH } from './types'
 import { pageStack, stackedRasterNodes, stackedTextNodes, type StackNode } from './stack'
-import { blankTextObject, emptyBody } from './schema'
+import { blankBlock } from './schema'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
-      candidates: [],
-      chosen: null,
-    },
-    ...extra,
-  }
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.body.lines = [id]
+  return Object.assign(entry, extra)
 }
 
 function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
@@ -66,30 +59,30 @@ const idsOf = (nodes: readonly StackNode[]): string[] => nodes.map((n) => n.entr
 
 describe('pageStack', () => {
   it('has nothing to draw for an empty page', () => {
-    expect(pageStack([])).toEqual([])
+    expect(pageStack([], 'translation')).toEqual([])
   })
 
   // The array runs bottom to top, and so does the answer: the last entry is
   // drawn last and so ends up on top.
   it("keeps the tree's order, which is the order things are drawn", () => {
-    expect(idsOf(pageStack([raster('a'), text('b'), raster('c')]))).toEqual(['a', 'b', 'c'])
+    expect(idsOf(pageStack([raster('a'), text('b'), raster('c')], 'translation'))).toEqual(['a', 'b', 'c'])
   })
 
   it('leaves a hidden entry out', () => {
-    expect(idsOf(pageStack([text('a'), text('b', { visible: false })]))).toEqual(['a'])
+    expect(idsOf(pageStack([text('a'), text('b', { visible: false })], 'translation'))).toEqual(['a'])
   })
 
   it('takes everything under a hidden folder out with it', () => {
     const page = [folder('g', [text('a'), raster('b')], { visible: false }), text('c')]
-    expect(idsOf(pageStack(page))).toEqual(['c'])
+    expect(idsOf(pageStack(page, 'translation'))).toEqual(['c'])
   })
 
   it('takes out what a hidden ancestor holds however deep it sits', () => {
-    expect(pageStack([folder('g', [folder('h', [text('a')])], { visible: false })])).toEqual([])
+    expect(pageStack([folder('g', [folder('h', [text('a')])], { visible: false })], 'translation')).toEqual([])
   })
 
   it("carries a leaf's own blending", () => {
-    const [node] = pageStack([raster('a', { opacity: 0.4, blendMode: 'multiply' })])
+    const [node] = pageStack([raster('a', { opacity: 0.4, blendMode: 'multiply' })], 'translation')
     expect([node.opacity, node.blendMode]).toEqual([0.4, 'multiply'])
   })
 })
@@ -97,25 +90,25 @@ describe('pageStack', () => {
 describe('a folder only becomes a buffer when it has to', () => {
   it('flattens a pass-through folder at full opacity into what holds it', () => {
     const page = [text('a'), folder('g', [raster('b'), text('c')]), text('d')]
-    expect(idsOf(pageStack(page))).toEqual(['a', 'b', 'c', 'd'])
+    expect(idsOf(pageStack(page, 'translation'))).toEqual(['a', 'b', 'c', 'd'])
   })
 
   it('flattens through several levels at once', () => {
     const page = [folder('g', [folder('h', [text('a')]), text('b')])]
-    expect(idsOf(pageStack(page))).toEqual(['a', 'b'])
+    expect(idsOf(pageStack(page, 'translation'))).toEqual(['a', 'b'])
   })
 
   // A folder's opacity cannot apply until its contents are one picture, and a
   // buffer is what makes them one.
   it('buffers a folder that has an opacity of its own', () => {
-    const [node] = pageStack([folder('g', [text('a')], { opacity: 0.5 })])
+    const [node] = pageStack([folder('g', [text('a')], { opacity: 0.5 })], 'translation')
     expect(node.kind).toBe('buffer')
     expect(node.opacity).toBe(0.5)
     expect(node.kind === 'buffer' && idsOf(node.children)).toEqual(['a'])
   })
 
   it('buffers a folder that blends, even at full opacity', () => {
-    const [node] = pageStack([folder('g', [text('a')], { blendMode: 'multiply' })])
+    const [node] = pageStack([folder('g', [text('a')], { blendMode: 'multiply' })], 'translation')
     expect(node.kind).toBe('buffer')
     expect(node.blendMode).toBe('multiply')
   })
@@ -126,38 +119,38 @@ describe('a folder only becomes a buffer when it has to', () => {
    * consumer should ever be handed pass-through to draw with.
    */
   it('composites a buffered pass-through folder normally', () => {
-    const [node] = pageStack([folder('g', [text('a')], { opacity: 0.5 })])
+    const [node] = pageStack([folder('g', [text('a')], { opacity: 0.5 })], 'translation')
     expect(node.blendMode).toBe('normal')
   })
 
   it('leaves out a folder that would buffer nothing', () => {
     const page = [folder('g', [text('a', { visible: false })], { opacity: 0.5 }), text('b')]
-    expect(idsOf(pageStack(page))).toEqual(['b'])
+    expect(idsOf(pageStack(page, 'translation'))).toEqual(['b'])
   })
 
   // A frame is a hit target rather than part of the picture, so the canvas
   // wants every text object it will draw in one flat layer over the top.
   it('lists the text objects inside a buffer along with the rest', () => {
     const page = [text('a'), folder('g', [text('b')], { opacity: 0.5 }), raster('c'), text('d')]
-    const ids = stackedTextNodes(pageStack(page)).map((n) => n.entry.id)
+    const ids = stackedTextNodes(pageStack(page, 'translation')).map((n) => n.entry.id)
     expect(ids).toEqual(['a', 'b', 'd'])
   })
 
   it('flattens the children of a buffer that are themselves plain folders', () => {
     const page = [folder('g', [folder('h', [text('a'), text('b')])], { opacity: 0.5 })]
-    const [node] = pageStack(page)
+    const [node] = pageStack(page, 'translation')
     expect(node.kind === 'buffer' && idsOf(node.children)).toEqual(['a', 'b'])
   })
 
   it('lists the raster layers inside a buffer along with the rest', () => {
     const page = [raster('a'), folder('g', [raster('b')], { opacity: 0.5 }), text('c'), raster('d')]
-    const ids = stackedRasterNodes(pageStack(page)).map((n) => n.entry.id)
+    const ids = stackedRasterNodes(pageStack(page, 'translation')).map((n) => n.entry.id)
     expect(ids).toEqual(['a', 'b', 'd'])
   })
 
   // A frame is offered for something on the page; a hidden layer is not on it.
   it('leaves out a raster layer a folder is hiding', () => {
     const page = [raster('a'), folder('g', [raster('b')], { visible: false })]
-    expect(stackedRasterNodes(pageStack(page)).map((n) => n.entry.id)).toEqual(['a'])
+    expect(stackedRasterNodes(pageStack(page, 'translation')).map((n) => n.entry.id)).toEqual(['a'])
   })
 })

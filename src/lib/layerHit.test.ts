@@ -70,7 +70,7 @@ const PIXELS: Record<string, string[]> = {
  * manifest is not written before the file it names.
  */
 function scene(layers: LayerEntry[], live: Record<string, Frame> = {}) {
-  const nodes = pageStack(layers)
+  const nodes = pageStack(layers, 'translation')
   const frameOf = (entry: RasterLayerEntry): Frame => live[entry.id] ?? entry
   // Reads at the frame the pixels are really at, as the renderer's plane does.
   const alphaAt = (entry: RasterLayerEntry, at: { x: number; y: number }): number => {

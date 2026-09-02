@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextLayerEntry } from '@shared/page/types'
-import { bodyOnSide, textOnSide } from '@shared/page/text'
+import { shownLinesOf } from '@shared/page/units'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -16,6 +16,7 @@ import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
 import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
@@ -79,6 +80,7 @@ const raster = useRasterStore()
  * against un-lettered artwork belongs on screen and nowhere else.
  */
 const editor = useEditorStore()
+const project = useProjectStore()
 const stroke = useStrokeOverlayStore()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
@@ -158,6 +160,16 @@ const effectedRasters = computed(() => {
  * function nothing would track it, and the page would stay blank until some
  * unrelated change happened to repaint it after the catalogue finished loading.
  */
+/**
+ * ⚠️ Goes up to the page, because a chosen candidate is the translation's answer
+ * rather than the block's. A block drawn from its own words alone would keep
+ * showing what somebody typed after they picked something else.
+ */
+function linesShown(entry: TextLayerEntry): readonly string[] {
+  const page = project.pageById(editor.currentPageId ?? '')?.page
+  return page === undefined ? entry.body.lines : shownLinesOf(page, entry)
+}
+
 const drawnTexts = computed(() => {
   const out = new Map<string, DrawnLabel>()
   // ⚠️ The same treatment the frames are measured with, and it has to be: a
@@ -167,14 +179,14 @@ const drawnTexts = computed(() => {
   for (const node of props.nodes) {
     if (node.kind !== 'text') continue
     const entry = node.entry
-    const body = bodyOnSide(entry, editor.textSide)
+    const body = entry.body
     const look = reference
       ? sourceLook(body.style)
       : { style: body.style, effects: entry.effects }
     out.set(
       entry.id,
       drawnLabel(
-        textOnSide(entry, editor.textSide),
+        linesShown(entry).join('\n'),
         look.style,
         look.effects,
         { x: body.x, y: body.y },
@@ -281,7 +293,7 @@ watch(
       .map((node) =>
         node.kind === 'raster'
           ? `${node.entry.x},${node.entry.y},${node.entry.w},${node.entry.h},${node.opacity}`
-          : `t${node.entry.id},${bodyOnSide(node.entry, editor.textSide).rotation},${node.opacity}`,
+          : `t${node.entry.id},${node.entry.body.rotation},${node.opacity}`,
       )
       .join('|'),
   schedulePaint,

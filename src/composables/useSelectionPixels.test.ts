@@ -10,7 +10,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
-import { blankTextObject, emptyBody } from '@shared/page/schema'
+import { blankBlock } from '@shared/page/schema'
 
 /**
  * The real engine, not a stand-in. The selection's coverage lives in its tiles,
@@ -43,15 +43,9 @@ function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerE
 }
 
 function text(id: string): TextLayerEntry {
-  return {
-    ...blankTextObject(id, DEFAULT_TEXT_STYLE),
-    translation: {
-      ...emptyBody(DEFAULT_TEXT_STYLE),
-      lines: [id],
-      candidates: [],
-      chosen: null,
-    },
-  }
+  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  entry.body.lines = [id]
+  return entry
 }
 
 function openWith(...layers: (RasterLayerEntry | TextLayerEntry | GroupLayerEntry)[]) {

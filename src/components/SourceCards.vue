@@ -181,9 +181,10 @@ import type { Box, Place } from '@shared/ocr/places'
 import { placesIn } from '@shared/ocr/places'
 import { offeredReadings } from '@shared/ocr/offer'
 import { claimsOf } from '@shared/ocr/vote'
-import { isLocked, textObjects } from '@shared/page/tree'
+import { isLocked } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
-import { textOfBody } from '@shared/page/text'
+import type { SourceTextLayerEntry } from '@shared/page/types'
+import { blocksOnSide } from '@shared/page/units'
 import { screenToContentPx } from '@/lib/coords'
 import { vAutoGrow } from '@/lib/autoGrow'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -222,7 +223,9 @@ const file = computed(() =>
 
 const pool = computed<readonly OcrCandidatePersisted[]>(() => file.value?.ocr.candidates ?? [])
 
-const objects = computed(() => (file.value ? textObjects(file.value.page.layers) : []))
+const objects = computed(() =>
+  file.value ? (blocksOnSide(file.value.page.layers, 'source') as SourceTextLayerEntry[]) : [],
+)
 
 /** How big the type on a card is, taken from the page rather than the project. */
 const basePx = computed(() => (file.value ? typeSizeFor(file.value.page) : 12))
@@ -239,13 +242,13 @@ const basePx = computed(() => (file.value ? typeSizeFor(file.value.page) : 12))
  * while the source is the side being worked on.
  */
 const objectTargets = computed(() =>
-  stackedTextNodes(pageStack(file.value?.page.layers ?? [])).map(({ entry }) => {
-    const body = entry.source
+  stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'source')).map(({ entry }) => {
+    const body = entry.body
     // The reference treatment the canvas draws these with, halo included: the
     // frame a drop lands on has to be the frame a reader can see.
     const look = sourceLook(body.style)
     const drawn = drawnLabel(
-      textOfBody(body),
+      body.lines.join('\n'),
       look.style,
       look.effects,
       { x: body.x, y: body.y },
@@ -278,10 +281,15 @@ const objectBoxes = computed<Box[]>(() =>
   })),
 )
 
+/** What `offeredReadings` asks about: which reading each source block names. */
+const claimants = computed(() =>
+  objects.value.map((block) => ({ source: { from: block.body.from } })),
+)
+
 const offeredHashes = computed(
   () =>
     new Set(
-      offeredReadings(pool.value, objects.value, OWN_CONFIDENCE_SCALE).map((r) => r.hash),
+      offeredReadings(pool.value, claimants.value, OWN_CONFIDENCE_SCALE).map((r) => r.hash),
     ),
 )
 

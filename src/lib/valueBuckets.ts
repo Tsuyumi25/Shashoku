@@ -1,11 +1,11 @@
-import type { LayerEntry } from '@shared/page/types'
+import type { ManifestJson } from '@shared/page/types'
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
-import { textObjects } from '@shared/page/tree'
-import { bodyOnSide, type TextSide } from '@shared/page/text'
+import type { TextSide } from '@shared/page/text'
+import { blocksOnSide, unitOfBlock } from '@shared/page/units'
 
-/** One text object, flattened to what a bucket needs to know about it. */
+/** One block of lettering, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
   id: string
   pageId: string
@@ -34,15 +34,19 @@ export interface BucketObject {
  */
 export function bucketObjectsOf(
   pageId: string,
-  layers: readonly LayerEntry[],
+  page: ManifestJson,
   side: TextSide,
 ): BucketObject[] {
   if (side === 'source') return []
-  return textObjects(layers).map((label) => ({
-    id: label.id,
+  // ⚠️ The meaning comes from one level up and the look from the block itself,
+  // so a sound set in two blocks votes twice for one meaning — which is right:
+  // the panel is about how many pieces of lettering agree, not how many
+  // sentences do.
+  return blocksOnSide(page.layers, side).map((block) => ({
+    id: block.id,
     pageId,
-    tags: label.tags,
-    style: bodyOnSide(label, side).style,
+    tags: unitOfBlock(page, block.id)?.tags ?? [],
+    style: block.body.style,
   }))
 }
 

@@ -211,13 +211,13 @@ watch([scope, fields], () => {
 })
 
 const chapterObjects = computed<BucketObject[]>(() =>
-  project.files.flatMap((file) => bucketObjectsOf(file.pageId, file.page.layers, 'translation')),
+  project.files.flatMap((file) => bucketObjectsOf(file.pageId, file.page, 'translation')),
 )
 
 const objects = computed<BucketObject[]>(() => {
   if (scope.value === 'page') {
     const file = editor.currentPageId ? project.pageById(editor.currentPageId) : null
-    return file ? bucketObjectsOf(file.pageId, file.page.layers, 'translation') : []
+    return file ? bucketObjectsOf(file.pageId, file.page, 'translation') : []
   }
   if (scope.value === 'chapter') return chapterObjects.value
   return [...chapterObjects.value, ...series.objects.value]

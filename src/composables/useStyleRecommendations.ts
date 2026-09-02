@@ -4,7 +4,6 @@ import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { sameTagSet, tagsInRegistryOrder } from '@shared/tags/set'
-import { bodyOnSide } from '@shared/page/text'
 import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import { recommendStyle, type StyleCandidate } from '@/lib/styleRecommendation'
 import type { AppearanceTarget } from '@/lib/appearance'
@@ -58,17 +57,22 @@ export function useStyleRecommendations(
   const project = useProjectStore()
   const editor = useEditorStore()
 
-  const styles = computed(() =>
-    targets.value.map((t) => bodyOnSide(t.entry, editor.textSide).style),
-  )
+  const styles = computed(() => targets.value.map((t) => t.entry.body.style))
 
+  /**
+   * ⭐ Read one level up, from the translations the selected blocks belong to. A
+   * sound set in two blocks means one thing, so two blocks of it agreeing is
+   * not two votes for that meaning — it is the same fact seen twice.
+   */
   const tagState = computed<TagState>(() => {
     const first = targets.value[0]
     if (!first) return { kind: 'none' }
+    const tagsOf = (id: string) => project.placeOf(editor.currentPageId ?? '', id)?.unit.tags ?? []
+    const head = tagsOf(first.entry.id)
     for (const { entry } of targets.value) {
-      if (!sameTagSet(entry.tags, first.entry.tags)) return { kind: 'many' }
+      if (!sameTagSet(tagsOf(entry.id), head)) return { kind: 'many' }
     }
-    return { kind: 'one', value: tagsInRegistryOrder(first.entry.tags, project.header.tags) }
+    return { kind: 'one', value: tagsInRegistryOrder(head, project.header.tags) }
   })
 
   /**
@@ -120,7 +124,7 @@ export function useStyleRecommendations(
     sampleKey,
     () => {
       sample.value = project.files.flatMap((file) =>
-        bucketObjectsOf(file.pageId, file.page.layers, editor.textSide).map((object) => ({
+        bucketObjectsOf(file.pageId, file.page, editor.textSide).map((object) => ({
           ...object,
           tags: [...object.tags],
           style: { ...object.style },
