@@ -76,8 +76,12 @@ export function typeSizeFor(page: { width: number; height: number }): number {
 const LINE_HEIGHT = 1.5
 const PADDING = 0.35
 const GAP = 0.5
-/** Room for the score that sits at the end of a row. */
-const MARK_WIDTH = 1.6
+/** Room for the score that starts a row, as a badge, and the gap after it. */
+const MARK_WIDTH = 2.3
+/** How far a row's hover surface stands in from the card, and its own padding
+    above and below the text. */
+const ROW_INSET = 0.15
+const ROW_PAD = 0.15
 /** The line the reader's name takes, under the text it belongs to. */
 const NAME_LINE = 0.95
 /** And the row of buttons under the whole list. */
@@ -151,8 +155,14 @@ export function cardSize(
     0,
   )
   return {
-    w: (column + MARK_WIDTH + PADDING * 2) * basePx,
-    h: (lines * LINE_HEIGHT + texts.length * NAME_LINE + FOOT_LINE + PADDING * 2) * basePx,
+    w: (column + MARK_WIDTH + PADDING * 2 + ROW_INSET * 2) * basePx,
+    h:
+      (lines * LINE_HEIGHT +
+        texts.length * (NAME_LINE + ROW_PAD * 2) +
+        FOOT_LINE +
+        PADDING * 2 +
+        ROW_INSET * 2) *
+      basePx,
   }
 }
 

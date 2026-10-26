@@ -50,11 +50,17 @@
         :class="[row.live ? 'source-row-live' : 'source-row-taken']"
         @pointerenter="row.live && ocr.pointAt(row.reading.hash)"
         @pointerleave="ocr.pointAt(null)"
-        @pointerdown.stop="row.live && onRowDown(row.reading, $event)"
-        @pointermove="onRowMove"
-        @pointerup="onRowUp"
-        @pointercancel="onRowCancel"
       >
+        <span
+          class="source-score"
+          :class="sureness(row.reading.confidence)"
+          @pointerdown.stop="row.live && onRowDown(row.reading, $event)"
+          @pointermove="onRowMove"
+          @pointerup="onRowUp"
+          @pointercancel="onRowCancel"
+        >
+          {{ Math.round(row.reading.confidence * 100) }}
+        </span>
         <div class="source-row-text">
           <!--
             ⭐ The row being corrected is a plain box, and the markings are off
@@ -108,9 +114,6 @@
           >{{ row.reading.text || EMPTY_READING }}</p>
           <p class="source-who">{{ row.reading.source }}</p>
         </div>
-        <span class="source-score" :class="sureness(row.reading.confidence)">
-          {{ Math.round(row.reading.confidence * 100) }}
-        </span>
       </div>
     </div>
 
@@ -443,7 +446,7 @@ const drawn = computed<DrawnCard[]>(() => {
         from: { x: list.x, y: list.y, w: list.w, h: list.h },
         ...box,
       },
-      rows: list.full.map((reading) => ({
+      rows: [...list.full].sort((a, b) => b.confidence - a.confidence).map((reading) => ({
         reading,
         live: live.has(reading.hash),
         marks: marksOf.get(reading.hash) ?? [],
@@ -828,6 +831,9 @@ function dismiss(plan: CardPlan) {
   position: absolute;
   display: flex;
   flex-direction: column;
+  /* The canvas behind it sets a grab cursor from whatever layer lies under the
+     pointer, and a card that set none would inherit it. */
+  cursor: default;
   border-radius: 0.35em;
   border: calc(1px * var(--px)) solid var(--border);
   background: var(--card);
@@ -886,22 +892,18 @@ function dismiss(plan: CardPlan) {
 .source-rows {
   min-height: 0;
   flex: 1;
+  padding: 0.15em;
 }
 
 .source-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.35em;
-  padding: 0 0.35em;
-}
-.source-row-live {
-  cursor: grab;
+  gap: 0.45em;
+  padding: 0.15em 0.35em;
+  border-radius: 0.3em;
 }
 .source-row-live:hover {
   background: var(--secondary);
-}
-.source-row-live:active {
-  cursor: grabbing;
 }
 /* Its space is kept and its words are not: the row above and the row below have
    to stay where they were, and this one has been dealt with. */
@@ -923,8 +925,8 @@ function dismiss(plan: CardPlan) {
 }
 
 /*
- * A caret on the words and a hand everywhere else on the row: pressing the text
- * is the one gesture here that does not move something.
+ * A caret on the words and a hand on the score: pressing the text is the one
+ * gesture here that does not move something.
  *
  * ⚠️ And the words are selectable where the rest of the card is not. The card
  * turns selection off so that dragging a row never sweeps up text, but a run
@@ -944,11 +946,18 @@ function dismiss(plan: CardPlan) {
  * beside it, and every row below shifts as one is opened.
  */
 .source-input {
+  /* Inline, it sits on a baseline and the line box adds a descender's worth
+     under it — the row grows the moment it is opened. */
+  display: block;
   width: 100%;
+  margin: 0;
   border: 0;
   background: transparent;
   padding: 0;
   font-family: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  letter-spacing: inherit;
   color: inherit;
   resize: none;
   outline: none;
@@ -970,10 +979,29 @@ function dismiss(plan: CardPlan) {
 }
 
 .source-score {
+  display: inline-flex;
   flex-shrink: 0;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  align-items: center;
+  justify-content: center;
+  min-width: 2.6em;
+  min-height: 2.6em;
+  padding: 0 0.45em;
+  border-radius: 0.35em;
+  background: color-mix(in oklch, currentColor 14%, transparent);
   font-size: 0.7em;
-  line-height: 2.1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.source-row-live .source-score {
+  cursor: grab;
+}
+.source-row-live .source-score:hover {
+  background: color-mix(in oklch, currentColor 24%, transparent);
+}
+.source-row-live .source-score:active {
+  cursor: grabbing;
+  background: color-mix(in oklch, currentColor 30%, transparent);
 }
 .sure {
   color: var(--settled);
