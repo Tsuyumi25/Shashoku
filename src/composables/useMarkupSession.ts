@@ -1,7 +1,7 @@
 import { computed, effectScope, nextTick, watch, type ComputedRef } from 'vue'
 import {
   applyPlainEdit,
-  codeCaret,
+  codeSelection,
   parseMarkup,
   plainCaret,
   unwrapPlainRange,
@@ -96,7 +96,7 @@ function createMarkupSession(): MarkupSession {
     const m = markup.value
     if (textWriter.value === 'code' || m === null) return codeEditSurface.range.value
     const at = plainEditSurface.range.value
-    return { start: codeCaret(m, at.start), end: codeCaret(m, at.end) }
+    return codeSelection(m, at.start, at.end)
   })
 
   const plainRange = computed<TextRange>(() => {
@@ -161,11 +161,7 @@ function createMarkupSession(): MarkupSession {
     const words = { start: plainCaret(m, at.start), end: plainCaret(m, at.end) }
     const cleared = unwrapPlainRange(from, words.start, words.end)
     const after = parseMarkup(cleared)
-    return {
-      code: cleared,
-      start: codeCaret(after, words.start),
-      end: codeCaret(after, words.end),
-    }
+    return { code: cleared, ...codeSelection(after, words.start, words.end) }
   }
 
   /**

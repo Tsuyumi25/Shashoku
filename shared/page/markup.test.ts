@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPlainEdit,
   codeCaret,
+  codeSelection,
   escapeText,
   parseMarkup,
   plainCaret,
@@ -283,5 +284,35 @@ describe('cutting the code into pieces', () => {
 
   it('cuts at the very edges without losing anything', () => {
     equivalent('<b weight=+1>ab</b>', [0, 2])
+  })
+})
+
+describe('a selection made on the words', () => {
+  it('holds the words and none of the tags around them', () => {
+    const m = parseMarkup('咦<upright>!?</upright>')
+    expect(codeSelection(m, 1, 3)).toEqual({ start: 10, end: 12 })
+    expect(m.code.slice(10, 12)).toBe('!?')
+  })
+
+  it('keeps the tags between the words it runs across', () => {
+    const m = parseMarkup('a<b>c</b>d')
+    const at = codeSelection(m, 0, 3)
+    expect(m.code.slice(at.start, at.end)).toBe('a<b>c</b>d')
+  })
+
+  it('covers a whole escape as one character', () => {
+    const m = parseMarkup('x&lt;y')
+    const at = codeSelection(m, 1, 2)
+    expect(m.code.slice(at.start, at.end)).toBe('&lt;')
+  })
+
+  it('keeps the direction it was dragged in', () => {
+    const m = parseMarkup('咦<upright>!?</upright>')
+    expect(codeSelection(m, 3, 1)).toEqual({ start: 12, end: 10 })
+  })
+
+  it('lands an empty selection where typing would continue the previous character', () => {
+    const m = parseMarkup('咦<upright>!?</upright>')
+    expect(codeSelection(m, 3, 3)).toEqual({ start: 12, end: 12 })
   })
 })

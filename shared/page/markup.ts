@@ -326,6 +326,26 @@ export function codeCaret(m: Markup, plainIndex: number): number {
   return start + codeWidth(m.code, start)
 }
 
+/**
+ * plain selection → code selection, holding only the words: a selection starts
+ * at the first selected character's code and ends right after the last one's,
+ * so no tag on either side of the words is ever inside it. An empty selection
+ * is a caret and lands as `codeCaret` does.
+ */
+export function codeSelection(m: Markup, start: number, end: number): { start: number; end: number } {
+  const clamp = (i: number) => (i < 0 ? 0 : i > m.plain.length ? m.plain.length : i)
+  const lo = clamp(Math.min(start, end))
+  const hi = clamp(Math.max(start, end))
+  if (lo === hi) {
+    const at = codeCaret(m, lo)
+    return { start: at, end: at }
+  }
+  const from = m.codeAt[lo]
+  const last = m.codeAt[hi - 1]
+  const to = last + codeWidth(m.code, last)
+  return start <= end ? { start: from, end: to } : { start: to, end: from }
+}
+
 /** code caret → plain caret: how many plain chars start before it, so a caret inside a tag freezes. */
 export function plainCaret(m: Markup, codeIndex: number): number {
   const c = codeIndex < 0 ? 0 : codeIndex > m.code.length ? m.code.length : codeIndex
