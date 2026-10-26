@@ -1,30 +1,18 @@
 <template>
-  <button
+  <div
     ref="cellRef"
-    type="button"
-    class="flex cursor-pointer flex-col gap-1 rounded-[5px] border p-1 text-left"
-    :class="
-      selected
-        ? 'border-primary bg-primary/10'
-        : 'border-transparent hover:border-border hover:bg-secondary'
-    "
+    class="flex cursor-default flex-col gap-1 rounded-[5px] p-1 select-none"
+    :class="selected ? 'bg-primary/20' : 'hover:bg-secondary'"
+    :title="file.page.name"
     @click="emit('pick', $event)"
   >
-    <!--
-      No frame of its own: a page is a rectangle of paper, and a rounded box
-      with a fill behind it would read as a second object around it. What is
-      drawn is the page, and the only thing framing it is the picking.
-    -->
-    <div class="relative">
+    <div class="relative aspect-[3/4] w-full overflow-hidden">
       <!-- Dragging a page picks a run of them; a native image drag would take
            the gesture instead. -->
-      <img v-if="src" :src="src" class="block w-full" alt="" draggable="false" />
-      <div
-        v-else
-        class="flex aspect-[3/4] w-full items-center justify-center bg-muted/40 px-1 text-center"
-      >
+      <img v-if="src" :src="src" class="h-full w-full object-cover" alt="" draggable="false" />
+      <div v-else class="flex h-full w-full items-center justify-center bg-muted/40 px-1 text-center">
         <span v-if="problem" class="text-xs text-destructive">{{ problem }}</span>
-        <ImageOff v-else-if="file.badge !== 'ok'" :size="16" class="text-muted-foreground" />
+        <ImageOff v-else-if="file.badge !== 'ok'" :size="14" class="text-muted-foreground" />
         <Loader v-else :size="14" class="animate-spin text-muted-foreground" />
       </div>
 
@@ -34,25 +22,17 @@
       >
         {{ badgeText }}
       </span>
-
     </div>
 
-    <!-- Beside the name rather than over the page, which is the one thing in
-         this cell nothing should be covering. -->
-    <div class="flex min-w-0 items-center gap-1.5">
-      <span class="pick" :data-checked="String(selected)">
-        <Check :size="12" :stroke-width="3" />
-      </span>
-      <span class="truncate text-xs" :class="selected ? '' : 'text-muted-foreground'">
-        {{ file.page.name }}
-      </span>
-    </div>
-  </button>
+    <span class="min-w-0 truncate text-xs" :class="selected ? '' : 'text-muted-foreground'">
+      {{ file.page.name }}
+    </span>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, useTemplateRef } from 'vue'
-import { Check, ImageOff, Loader } from '@lucide/vue'
+import { ImageOff, Loader } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import { usePageThumbnail } from '@/composables/usePageThumbnail'
 
