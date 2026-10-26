@@ -859,16 +859,18 @@ pub fn mask_reset() {
 // ────────────────────────────────────────────────────────────────────────────
 // Source import
 
-/// The size a page takes from the image it was created with.
+/// The size a page takes from the image it was created with, and the extension
+/// its base map file was written under.
 #[napi(object)]
 pub struct BaseMapSize {
     pub width: u32,
     pub height: u32,
+    pub extension: String,
 }
 
 pub struct ImportBaseMap {
     source: PathBuf,
-    dest: PathBuf,
+    dest_stem: PathBuf,
 }
 
 impl Task for ImportBaseMap {
@@ -876,36 +878,29 @@ impl Task for ImportBaseMap {
     type JsValue = BaseMapSize;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
-        import::import_base_map(&self.source, &self.dest).map_err(napi::Error::from_reason)
+        import::import_base_map(&self.source, &self.dest_stem).map_err(napi::Error::from_reason)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(BaseMapSize {
             width: output.width,
             height: output.height,
+            extension: output.extension.to_owned(),
         })
     }
 }
 
-/// Copies a source image into a page as its base map: a PNG of the same pixels
-/// at `destPath`, decoded exactly once and never again.
-///
-/// Two paths and no buffer. Electron refuses an ArrayBuffer over memory outside
-/// the V8 heap and caps a single allocation at 2GiB, both of which bind a native
-/// addon handing pixels to JavaScript — so this hands none over, and Chromium
-/// reads the result off disk the way it reads every other layer.
+/// Copies a source image into a page as its base map: the source's own bytes,
+/// at `destStem` plus the extension its format takes.
 ///
 /// Refuses a source whose bytes are not really on this machine and one that
 /// stops before its format's end marker, either of which would otherwise decode
 /// into a page that is quietly half grey.
-///
-/// Runs off the JavaScript thread: a page-sized decode and re-encode is far too
-/// much to do between frames.
 #[napi(ts_return_type = "Promise<BaseMapSize>")]
-pub fn import_base_map(source_path: String, dest_path: String) -> AsyncTask<ImportBaseMap> {
+pub fn import_base_map(source_path: String, dest_stem: String) -> AsyncTask<ImportBaseMap> {
     AsyncTask::new(ImportBaseMap {
         source: PathBuf::from(source_path),
-        dest: PathBuf::from(dest_path),
+        dest_stem: PathBuf::from(dest_stem),
     })
 }
 

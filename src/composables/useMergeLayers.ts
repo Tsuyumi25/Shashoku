@@ -221,7 +221,7 @@ export function useMergeLayers() {
     const id = generateId()
     const effects = cloneEffects(entry.effects)
     if (entry.kind === 'raster') {
-      const file = `${id}.png`
+      const file = `${id}${entry.file.slice(entry.file.lastIndexOf('.'))}`
       if (entry.w > 0 && entry.h > 0) into.files.push({ from: entry.file, to: file })
       return { ...entry, id, file, effects }
     }

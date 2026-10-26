@@ -395,12 +395,13 @@ async function makePage(
   const layersDir = join(pageDir, DIR_LAYERS);
   await mkdir(layersDir, { recursive: true });
   try {
-    const file = `${generateId()}.png`;
-    const { width, height } = await importBaseMap(
+    const stem = generateId();
+    const { width, height, extension } = await importBaseMap(
       join(rootPath, sourceName),
-      join(layersDir, file),
+      join(layersDir, stem),
     );
-    const retouchFile = `${generateId()}.png`;
+    const file = `${stem}.${extension}`;
+    const retouchFile = `${generateId()}.${extension}`;
     await copyFile(join(layersDir, file), join(layersDir, retouchFile));
     const manifest = defaultManifest(sourceName, width, height);
     manifest.layers = [

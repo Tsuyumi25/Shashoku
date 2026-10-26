@@ -11,11 +11,14 @@ import { createRequire } from "node:module";
  * exists after `pnpm engine:build` and would otherwise make typecheck depend on
  * build order — the same reason preload declares its own.
  */
+interface BaseMapSize {
+  width: number;
+  height: number;
+  extension: string;
+}
+
 interface EngineAddon {
-  importBaseMap(
-    sourcePath: string,
-    destPath: string,
-  ): Promise<{ width: number; height: number }>;
+  importBaseMap(sourcePath: string, destStem: string): Promise<BaseMapSize>;
 }
 
 let addon: EngineAddon | null = null;
@@ -26,18 +29,14 @@ function engine(): EngineAddon {
 }
 
 /**
- * Copies a source image into a page as its base map — a PNG of the same pixels,
- * decoded once and never again — and answers with the size the page therefore
- * has.
+ * Copies a source image into a page as its base map — the source's own bytes,
+ * at `destStem` plus the extension its format takes — and answers with the size
+ * the page therefore has and that extension.
  *
- * Two paths and no buffer, so the pixels never enter a JavaScript heap. Refuses
- * a source whose bytes are not really on this machine and one that stops before
- * its format's end marker, either of which would otherwise decode into a page
- * that is quietly half grey.
+ * Refuses a source whose bytes are not really on this machine and one that
+ * stops before its format's end marker, either of which would otherwise decode
+ * into a page that is quietly half grey.
  */
-export function importBaseMap(
-  sourcePath: string,
-  destPath: string,
-): Promise<{ width: number; height: number }> {
-  return engine().importBaseMap(sourcePath, destPath);
+export function importBaseMap(sourcePath: string, destStem: string): Promise<BaseMapSize> {
+  return engine().importBaseMap(sourcePath, destStem);
 }
