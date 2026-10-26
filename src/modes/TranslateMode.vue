@@ -18,13 +18,6 @@
       <SplitterPanel :order="1" :default-size="56" :min-size="25" class="flex min-w-0 flex-col">
         <section class="relative min-h-0 flex-1">
           <CanvasView />
-          <div
-            v-show="fontPicker.isOpen.value"
-            class="absolute inset-0 z-10 transition-opacity duration-150"
-            :class="fontPicker.previewFace.value !== null ? 'opacity-0' : ''"
-          >
-            <FontPickerOverlay />
-          </div>
         </section>
         <CanvasBottomBar />
       </SplitterPanel>
@@ -180,14 +173,12 @@ import {
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
-import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import ToolRail from '@/components/ToolRail.vue'
 import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
-import { useFontPicker } from '@/composables/useFontPicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
 import { useEditorStore } from '@/stores/editorStore'
@@ -207,7 +198,6 @@ const TABS: { panel: SidePanel; title: string }[] = [
 const project = useProjectStore()
 const editor = useEditorStore()
 const preferences = usePreferencesStore()
-const fontPicker = useFontPicker()
 const { canFill, fillSelection } = useFillSelection()
 const { canMerge, canDuplicate, mergeBySelection, duplicateLayer } = useMergeLayers()
 const pixels = useSelectionPixels()

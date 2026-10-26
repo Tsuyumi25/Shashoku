@@ -47,9 +47,9 @@ const isOpen = ref(false)
 const request = shallowRef<FontPickerRequest>({ current: '', fillColor: '#000000' })
 
 /**
- * The face being tried on the page. While set, the picker fades itself out and
- * the canvas draws the selection with this face instead of what the objects
- * store — letting go restores everything, because nothing was written.
+ * The face being tried on the page. While set, the canvas draws the selection
+ * with this face instead of what the objects store — letting go restores
+ * everything, because nothing was written.
  */
 const previewFace = shallowRef<FontEntry | null>(null)
 

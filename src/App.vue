@@ -15,8 +15,16 @@
             the tree holds a walk of the disk that is not worth doing again for
             a trip to the other side.
           -->
-          <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
+          <div v-show="ui.view === 'editor' && !fontPicker.isOpen.value" class="flex min-h-0 flex-1 flex-col">
             <ToolSidebar />
+          </div>
+          <!--
+            The picker takes the sidebar's whole height rather than covering the
+            canvas, so the page, the objects and their style stay in sight while a
+            face is chosen.
+          -->
+          <div v-show="ui.view === 'editor' && fontPicker.isOpen.value" class="flex min-h-0 flex-1 flex-col">
+            <FontPickerOverlay />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <ExportPanel v-if="ui.view === 'export'" />
@@ -63,6 +71,7 @@
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
+import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
 import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
@@ -71,6 +80,7 @@ import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
+import { useFontPicker } from '@/composables/useFontPicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
@@ -95,6 +105,7 @@ const connect = useConnectStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
+const fontPicker = useFontPicker()
 const fill = useFillSelection()
 const merge = useMergeLayers()
 const pixels = useSelectionPixels()
