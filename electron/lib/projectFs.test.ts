@@ -149,7 +149,7 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     const reopened = await openProject(root);
 
     expect(reopened.pages.map((p) => p.badge)).toEqual(["ok"]);
-    expect((await manifestOf(reopened.pages[0].pageDir)).layers).toHaveLength(1);
+    expect((await manifestOf(reopened.pages[0].pageDir)).layers).toHaveLength(2);
   });
 
   /**
@@ -187,6 +187,24 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     expect(written.subarray(0, 8)).toEqual(
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
+  });
+
+  it("puts an unlocked copy of the base map above it to retouch on", async () => {
+    await writeFile(join(root, "001.png"), sourcePng(6, 4));
+    await createProject(root);
+    await createPage(root, "001.png");
+
+    const opened = await openProject(root);
+    const [base, retouch] = (await manifestOf(opened.pages[0].pageDir)).layers;
+
+    expect(retouch.kind).toBe("raster");
+    if (base.kind !== "raster" || retouch.kind !== "raster") return;
+    expect(retouch.locked).toBe(false);
+    expect(retouch.name).toBe("修圖");
+    expect([retouch.x, retouch.y, retouch.w, retouch.h]).toEqual([0, 0, 6, 4]);
+    expect(retouch.file).not.toBe(base.file);
+    const dir = join(opened.pages[0].pageDir, DIR_LAYERS);
+    expect(await readFile(join(dir, retouch.file))).toEqual(await readFile(join(dir, base.file)));
   });
 
   it("does not read a format the engine has no decoder for", async () => {

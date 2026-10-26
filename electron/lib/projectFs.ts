@@ -2,7 +2,7 @@
 
 
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
@@ -400,8 +400,13 @@ async function makePage(
       join(rootPath, sourceName),
       join(layersDir, file),
     );
+    const retouchFile = `${generateId()}.png`;
+    await copyFile(join(layersDir, file), join(layersDir, retouchFile));
     const manifest = defaultManifest(sourceName, width, height);
-    manifest.layers = [baseMapLayer(file, width, height)];
+    manifest.layers = [
+      baseMapLayer(file, width, height),
+      { ...baseMapLayer(retouchFile, width, height), name: "修圖", locked: false },
+    ];
     await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), serializeManifest(manifest));
   } catch (err) {
     await rm(pageDir, { recursive: true, force: true }).catch(() => {});
