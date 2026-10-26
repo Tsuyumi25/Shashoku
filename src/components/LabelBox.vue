@@ -1,6 +1,7 @@
 <template>
   <ObjectFrame
     :box="box"
+    per-axis
     :view="view"
     :rotation="rotation"
     :selected="selected"
@@ -18,6 +19,7 @@
     @drag-end="onDragEnd"
     @scale-start="onScaleStart"
     @scale="onScale"
+    @scale-axes="onScaleAxes"
     @scale-end="emit('scaleEnd')"
     @rotate-start="onRotateStart"
     @rotate="onRotate"
@@ -74,7 +76,11 @@ import { useEventListener } from '@vueuse/core'
 import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import { cutText } from '@/lib/cutText'
 import type { LayerEffect } from '@shared/effects/types'
-import type { TextStyle } from '@shared/text-style/types'
+import {
+  MAX_SCALE_PERCENT,
+  MIN_SCALE_PERCENT,
+  type TextStyle,
+} from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import {
   clamp,
@@ -210,6 +216,8 @@ const emit = defineEmits<{
   moveEnd: [from: Anchor, to: Anchor]
   scaleStart: []
   scale: [fontSizePx: number, at: Anchor]
+  /** The Shift reading of the same drag: the two character scales, in percent. */
+  scaleAxes: [scaleXPercent: number, scaleYPercent: number, at: Anchor]
   scaleEnd: []
   rotate: [radians: number, at: Anchor]
   rotateEnd: [from: TurnedLabel, to: TurnedLabel]
@@ -294,22 +302,26 @@ function onDragEnd() {
 }
 
 /**
- * The size the text had when the corner was taken hold of.
+ * The style the text was set in when the corner was taken hold of.
  *
- * A corner reports total travel rather than a step, so this has to be the size
- * before the gesture wrote anything. Multiplying the size it has *now* would
- * compound: a ratio climbing to 1.5 over thirty frames would multiply thirty
- * ratios together instead of applying one, and the text would reach its
- * maximum before the pointer had gone anywhere.
+ * A corner reports total travel rather than a step, so every frame has to
+ * start from here. Multiplying what the object holds *now* would compound: a
+ * ratio climbing to 1.5 over thirty frames would multiply thirty ratios
+ * together instead of applying one, and the text would reach its maximum
+ * before the pointer had gone anywhere.
+ *
+ * It is the whole style rather than the one number each reading of the drag
+ * writes, so letting go of Shift mid-drag puts the other back to what it was
+ * instead of leaving half of a gesture nobody finished.
  */
-let scaleFromPx = 0
+let scaleFrom: TextStyle = props.textStyle
 
 /** Which point of the frame the drag is holding still, and where it stands. */
 let scalePin: Point = { x: 0, y: 0 }
 let scaleHeld: Point = { x: 0, y: 0 }
 
 function onScaleStart(pin: Point) {
-  scaleFromPx = props.textStyle.fontSizePx
+  scaleFrom = props.textStyle
   scalePin = pin
   scaleHeld = framePoint(
     { x: props.x, y: props.y },
@@ -322,18 +334,12 @@ function onScaleStart(pin: Point) {
 }
 
 /**
- * The size is rounded because the rasterizer is keyed on the size it was asked
- * for, and a drag through a continuum of fractional sizes would evict its own
- * cache on every frame.
- *
- * Where the object then has to stand is worked out from the size the typesetter
- * came back with rather than from the ratio the drag asked for — a clamped or
- * rounded size is not the one the pointer described, and the pinned corner has
- * to hold against what was actually set.
+ * Where the object has to stand for the pinned corner to stay where it is,
+ * worked out from the frame the typesetter came back with rather than from the
+ * ratio the drag asked for — a clamped or rounded value is not the one the
+ * pointer described, and the corner has to hold against what was actually set.
  */
-function onScale(ratio: number) {
-  const fontSizePx = clamp(Math.round(scaleFromPx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
-  const style = { ...props.textStyle, fontSizePx }
+function heldAt(style: TextStyle): Anchor {
   const grown = drawnLabel(
     props.code,
     style,
@@ -341,11 +347,37 @@ function onScale(ratio: number) {
     { x: props.x, y: props.y },
     props.rotation,
   )
-  emit(
-    'scale',
-    fontSizePx,
-    positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation),
+  return positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation)
+}
+
+/**
+ * The size is rounded because the rasterizer is keyed on the size it was asked
+ * for, and a drag through a continuum of fractional sizes would evict its own
+ * cache on every frame.
+ */
+function onScale(ratio: number) {
+  const fontSizePx = clamp(Math.round(scaleFrom.fontSizePx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
+  emit('scale', fontSizePx, heldAt({ ...scaleFrom, fontSizePx }))
+}
+
+/**
+ * Shift reads the same drag as two percentages instead of a size. Rounded for
+ * the same reason, and clamped by the same floor and ceiling the panel offers,
+ * so a gesture cannot leave the object anywhere the panel could not put it.
+ */
+function onScaleAxes(ratio: Point) {
+  const scaleXPercent = clamp(
+    Math.round(scaleFrom.scaleXPercent * ratio.x),
+    MIN_SCALE_PERCENT,
+    MAX_SCALE_PERCENT,
   )
+  const scaleYPercent = clamp(
+    Math.round(scaleFrom.scaleYPercent * ratio.y),
+    MIN_SCALE_PERCENT,
+    MAX_SCALE_PERCENT,
+  )
+  const style = { ...scaleFrom, scaleXPercent, scaleYPercent }
+  emit('scaleAxes', scaleXPercent, scaleYPercent, heldAt(style))
 }
 
 /**

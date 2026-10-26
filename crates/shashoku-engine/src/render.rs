@@ -55,6 +55,28 @@ pub struct Phase {
     pub y: f32,
 }
 
+/// What each glyph's own outline is multiplied by, about its own origin.
+///
+/// The Character-panel figure, not a transform of the finished run: advances
+/// follow the glyphs they belong to, so a scaled line stays a line of text
+/// with its own frame, its own carets and its own stroke width, rather than a
+/// picture of one that has been squashed.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Scale {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Scale {
+    pub const ONE: Scale = Scale { x: 1.0, y: 1.0 };
+}
+
+impl Default for Scale {
+    fn default() -> Self {
+        Scale::ONE
+    }
+}
+
 /// Where a line short of the longest one sits inside the block.
 ///
 /// Named for the direction the text runs rather than for a side of the bitmap,
@@ -540,6 +562,7 @@ fn build_horizontal_path(
     phase: Phase,
     align: Align,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -565,10 +588,10 @@ fn build_horizontal_path(
         let mut laid: Vec<LaidSegment> = Vec::new();
         for seg in segments_of(line, offset, size_px, spans) {
             let (seg_ascent, _, seg_height) = size_metrics(&sk_font, seg.size_px);
-            ascent = ascent.max(seg_ascent);
-            height = height.max(seg_height);
+            ascent = ascent.max(seg_ascent * scale.y);
+            height = height.max(seg_height * scale.y);
             let glyphs = shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false);
-            width += glyphs.iter().map(|g| g.x_advance).sum::<f32>();
+            width += glyphs.iter().map(|g| g.x_advance).sum::<f32>() * scale.x;
             laid.push(LaidSegment { seg, glyphs });
         }
         lines.push((laid, width, ascent, height));
@@ -595,9 +618,10 @@ fn build_horizontal_path(
                 if let Some(glyph) = outlines.get(gid) {
                     let mut pen = BaselinePen {
                         builder: groups.builder(seg.color, seg.weight),
-                        pen_x: pen_x + g.x_offset,
-                        baseline_y: baseline_y - g.y_offset,
-                        squeeze: 1.0,
+                        pen_x: pen_x + g.x_offset * scale.x,
+                        baseline_y: baseline_y - g.y_offset * scale.y,
+                        scale_x: scale.x,
+                        scale_y: scale.y,
                     };
                     glyph
                         .draw(DrawSettings::unhinted(size, loc), &mut pen)
@@ -607,10 +631,10 @@ fn build_horizontal_path(
                     cluster: seg.offset + g.cluster,
                     x: pen_x,
                     y: top,
-                    width: g.x_advance,
+                    width: g.x_advance * scale.x,
                     height: *height,
                 });
-                pen_x += g.x_advance;
+                pen_x += g.x_advance * scale.x;
             }
         }
         top += height;
@@ -641,6 +665,7 @@ fn build_vertical_path(
     phase: Phase,
     align: Align,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -660,7 +685,7 @@ fn build_vertical_path(
         let (mut height, mut width) = (0.0f32, 0.0f32);
         let mut laid: Vec<LaidSegment> = Vec::new();
         for seg in segments_of(line, offset, size_px, spans) {
-            width = width.max(seg.size_px * COLUMN_EM);
+            width = width.max(seg.size_px * COLUMN_EM * scale.x);
             let glyphs = shape_line(
                 &hr_font,
                 seg.text,
@@ -669,9 +694,9 @@ fn build_vertical_path(
                 !seg.upright,
             );
             height += if seg.upright {
-                seg.size_px
+                seg.size_px * scale.y
             } else {
-                glyphs.iter().map(|g| -g.y_advance).sum::<f32>()
+                glyphs.iter().map(|g| -g.y_advance).sum::<f32>() * scale.y
             };
             laid.push(LaidSegment { seg, glyphs });
         }
@@ -709,28 +734,30 @@ fn build_vertical_path(
                 let cell_top = col_origin_y + pen_y;
                 // The band the face draws in, centred in the cell: the cell is
                 // one em and a line of text is taller than one.
-                let baseline_y = cell_top + (em - ascent - descent) * 0.5 + ascent;
-                let mut at_x = col_center_x - natural * squeeze * 0.5;
+                let baseline_y =
+                    cell_top + (em - ascent - descent) * 0.5 * scale.y + ascent * scale.y;
+                let mut at_x = col_center_x - natural * squeeze * scale.x * 0.5;
                 for g in glyphs {
                     let gid = GlyphId::new(g.gid);
                     if let Some(glyph) = outlines.get(gid) {
                         let mut pen = BaselinePen {
                             builder: groups.builder(seg.color, seg.weight),
-                            pen_x: at_x + g.x_offset * squeeze,
-                            baseline_y: baseline_y - g.y_offset,
-                            squeeze,
+                            pen_x: at_x + g.x_offset * squeeze * scale.x,
+                            baseline_y: baseline_y - g.y_offset * scale.y,
+                            scale_x: squeeze * scale.x,
+                            scale_y: scale.y,
                         };
                         glyph
                             .draw(DrawSettings::unhinted(size, loc), &mut pen)
                             .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
                     }
-                    at_x += g.x_advance * squeeze;
+                    at_x += g.x_advance * squeeze * scale.x;
                 }
                 // The cell's height split evenly between the characters in it,
                 // so a caret and a selection still have a box each to land on.
                 let mut ids: Vec<u32> = glyphs.iter().map(|g| g.cluster).collect();
                 ids.dedup();
-                let share = em / (ids.len().max(1) as f32);
+                let share = em * scale.y / (ids.len().max(1) as f32);
                 for (nth, id) in ids.iter().enumerate() {
                     clusters.push(ClusterRect {
                         cluster: seg.offset + id,
@@ -740,12 +767,12 @@ fn build_vertical_path(
                         height: share,
                     });
                 }
-                pen_y += em;
+                pen_y += em * scale.y;
                 continue;
             }
             for g in glyphs {
-                let baseline_x = col_center_x + pen_x + g.x_offset;
-                let baseline_y = col_origin_y + pen_y - g.y_offset;
+                let baseline_x = col_center_x + pen_x + g.x_offset * scale.x;
+                let baseline_y = col_origin_y + pen_y - g.y_offset * scale.y;
 
                 let gid = GlyphId::new(g.gid);
                 if let Some(glyph) = outlines.get(gid) {
@@ -753,7 +780,8 @@ fn build_vertical_path(
                         builder: groups.builder(seg.color, seg.weight),
                         pen_x: baseline_x,
                         baseline_y,
-                        squeeze: 1.0,
+                        scale_x: scale.x,
+                        scale_y: scale.y,
                     };
                     glyph
                         .draw(DrawSettings::unhinted(size, loc), &mut pen)
@@ -764,10 +792,10 @@ fn build_vertical_path(
                     x: col_center_x - column_width * 0.5,
                     y: col_origin_y + pen_y,
                     width: *column_width,
-                    height: -g.y_advance,
+                    height: -g.y_advance * scale.y,
                 });
-                pen_x += g.x_advance;
-                pen_y -= g.y_advance;
+                pen_x += g.x_advance * scale.x;
+                pen_y -= g.y_advance * scale.y;
             }
         }
         right -= column_width;
@@ -1224,9 +1252,10 @@ pub fn render_text(
     stroke: Option<StrokeSpec>,
     weight: f32,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<TextBitmap, String> {
     let run = build_horizontal_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
     )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
@@ -1248,9 +1277,10 @@ pub fn render_vertical(
     stroke: Option<StrokeSpec>,
     weight: f32,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<TextBitmap, String> {
     let run = build_vertical_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
     )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
@@ -1283,9 +1313,10 @@ pub fn measure_text(
     phase: Phase,
     align: Align,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<TextMeasure, String> {
     let run = build_horizontal_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
     )?;
     Ok(measure_run(run, rotation))
 }
@@ -1304,9 +1335,10 @@ pub fn measure_vertical(
     phase: Phase,
     align: Align,
     spans: &[SpanStyle],
+    scale: Scale,
 ) -> Result<TextMeasure, String> {
     let run = build_vertical_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
     )?;
     Ok(measure_run(run, rotation))
 }
@@ -1533,15 +1565,19 @@ struct BaselinePen<'a> {
     builder: &'a mut PathBuilder,
     pen_x: f32,
     baseline_y: f32,
-    /// How much of its own width the glyph keeps. One everywhere but inside a
-    /// 縱中橫 cell, which is what pressing two or three characters into one em
-    /// of column amounts to.
-    squeeze: f32,
+    /// What the glyph's outline is multiplied by about its own origin: the
+    /// object's character scale, and on the x axis also the squeeze a 縱中橫
+    /// cell presses two or three characters into one em of column with.
+    scale_x: f32,
+    scale_y: f32,
 }
 
 impl<'a> BaselinePen<'a> {
     fn map(&self, x: f32, y: f32) -> (f32, f32) {
-        (self.pen_x + x * self.squeeze, self.baseline_y - y)
+        (
+            self.pen_x + x * self.scale_x,
+            self.baseline_y - y * self.scale_y,
+        )
     }
 }
 
@@ -2058,6 +2094,7 @@ mod align_tests {
                 Phase::default(),
                 align,
                 &[],
+                Scale::ONE,
             )
             .unwrap()
         };
@@ -2438,6 +2475,7 @@ mod stroke_tests {
                 Phase::default(),
                 Align::Start,
                 &[],
+                Scale::ONE,
             )
             .unwrap();
             let Some(path) = run.path.clone() else {
@@ -2496,6 +2534,7 @@ mod given_face {
             Phase::default(),
             Align::default(),
             &[],
+            Scale::ONE,
         )
         .unwrap_or_else(|err| panic!("the test font will not lay out {text:?}: {err}"));
         assert!(
@@ -2558,6 +2597,7 @@ mod measure_tests {
                     PHASE,
                     Align::Center,
                     spans,
+                    Scale::ONE,
                 )
                 .unwrap();
                 let r = render_text(
@@ -2573,6 +2613,7 @@ mod measure_tests {
                     spec(),
                     -1.0,
                     spans,
+                    Scale::ONE,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -2595,6 +2636,7 @@ mod measure_tests {
                     PHASE,
                     Align::End,
                     spans,
+                    Scale::ONE,
                 )
                 .unwrap();
                 let r = render_vertical(
@@ -2610,6 +2652,7 @@ mod measure_tests {
                     spec(),
                     -1.0,
                     spans,
+                    Scale::ONE,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -2667,6 +2710,7 @@ mod phase_tests {
             None,
             0.0,
             &[],
+            Scale::ONE,
         )
         .unwrap()
     }
@@ -2771,6 +2815,7 @@ mod phase_tests {
             None,
             0.0,
             &[],
+            Scale::ONE,
         )
         .unwrap();
         let moved = render_vertical(
@@ -2786,6 +2831,7 @@ mod phase_tests {
             None,
             0.0,
             &[],
+            Scale::ONE,
         )
         .unwrap();
 
@@ -2825,6 +2871,7 @@ mod span_tests {
             None,
             0.0,
             spans,
+            Scale::ONE,
         )
         .unwrap()
     }
@@ -2840,6 +2887,7 @@ mod span_tests {
             Phase::default(),
             Align::Start,
             spans,
+            Scale::ONE,
         )
         .unwrap()
     }
@@ -2855,6 +2903,7 @@ mod span_tests {
             Phase::default(),
             Align::Start,
             spans,
+            Scale::ONE,
         )
         .unwrap()
     }
@@ -3061,5 +3110,191 @@ mod tests {
         // Several glyphs can share a cluster, and shaping visits runs in its own
         // order, so the same offset can arrive more than once and out of order.
         assert_eq!(reportable_offsets("永a字b", &mut vec![7, 3, 7]), vec![3, 7]);
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::given_face::{PADDING, SIZE, drawing};
+    use super::*;
+
+    const TEXT: &str = "Hg\ngh";
+    const PHASE: Phase = Phase { x: 0.75, y: 0.25 };
+
+    /// An upright stretch, so a 縱中橫 cell is inside everything measured here.
+    const SPANS: [SpanStyle; 1] = [SpanStyle {
+        start: 1,
+        end: 4,
+        size_px: SIZE * 1.5,
+        color: Rgba(0, 128, 255, 255),
+        weight_px: 1.0,
+        upright: true,
+    }];
+
+    fn digest(bytes: &[u8]) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    }
+
+    /// Taken from the engine as it rendered before character scale existed,
+    /// which is the only place the figure can come from: scaling by one has to
+    /// be the identity down to the byte, and nothing inside this file can still
+    /// say what the bytes were. A deliberate change to how glyphs rasterize
+    /// moves these, and re-recording them is the right answer then; a change
+    /// that was not meant to touch unscaled text is the bug they are here for.
+    const UNSCALED_HORIZONTAL: (u32, u32, u64) = (61, 148, 0x8ecf_a27e_c008_e4ce);
+    const UNSCALED_VERTICAL: (u32, u32, u64) = (124, 88, 0xd3bf_3533_2150_a801);
+
+    fn drew(bmp: &TextBitmap) -> (u32, u32, u64) {
+        (bmp.width, bmp.height, digest(&bmp.rgba))
+    }
+
+    #[test]
+    fn a_scale_of_one_draws_what_the_engine_drew_before_character_scale() {
+        let (bytes, face) = drawing(TEXT);
+        let across = render_text(
+            &bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            PHASE,
+            Align::Center,
+            BLACK,
+            None,
+            0.0,
+            &SPANS,
+            Scale::ONE,
+        )
+        .unwrap();
+        let down = render_vertical(
+            &bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            PHASE,
+            Align::Center,
+            BLACK,
+            None,
+            0.0,
+            &SPANS,
+            Scale::ONE,
+        )
+        .unwrap();
+        assert_eq!(drew(&across), UNSCALED_HORIZONTAL);
+        assert_eq!(drew(&down), UNSCALED_VERTICAL);
+    }
+
+    fn across(bytes: &[u8], face: u32, text: &str, scale: Scale) -> TextMeasure {
+        measure_text(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            &[],
+            scale,
+        )
+        .unwrap()
+    }
+
+    fn down(bytes: &[u8], face: u32, text: &str, spans: &[SpanStyle], scale: Scale) -> TextMeasure {
+        measure_vertical(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            spans,
+            scale,
+        )
+        .unwrap()
+    }
+
+    /// The frame carries the padding on both sides, which no scale touches.
+    fn content(frame: u32) -> f32 {
+        (frame - PADDING * 2) as f32
+    }
+
+    #[test]
+    fn halving_the_horizontal_scale_halves_a_line_and_leaves_its_height() {
+        let (bytes, face) = drawing("Hgoh");
+        let full = across(&bytes, face, "Hgoh", Scale::ONE);
+        let half = across(&bytes, face, "Hgoh", Scale { x: 0.5, y: 1.0 });
+
+        // Within the pixel the frame is rounded up to.
+        assert!(
+            (content(half.width) - content(full.width) * 0.5).abs() <= 1.0,
+            "half of {} came back as {}",
+            content(full.width),
+            content(half.width)
+        );
+        assert_eq!(half.height, full.height);
+        assert_eq!(half.baseline, full.baseline);
+    }
+
+    #[test]
+    fn a_halved_line_s_clusters_follow_the_glyphs_they_box() {
+        let (bytes, face) = drawing("Hgoh");
+        let full = across(&bytes, face, "Hgoh", Scale::ONE);
+        let half = across(&bytes, face, "Hgoh", Scale { x: 0.5, y: 1.0 });
+
+        assert_eq!(half.clusters.len(), full.clusters.len());
+        for (narrow, wide) in half.clusters.iter().zip(full.clusters.iter()) {
+            assert_eq!(narrow.cluster, wide.cluster);
+            assert!((narrow.width - wide.width * 0.5).abs() < 0.01);
+            assert_eq!(narrow.height, wide.height);
+        }
+        let last = half.clusters.last().unwrap();
+        assert!(last.x + last.width <= (half.width - PADDING) as f32 + 0.01);
+    }
+
+    #[test]
+    fn doubling_the_vertical_scale_doubles_a_column_and_leaves_its_width() {
+        let (bytes, face) = drawing("Hgoh");
+        let full = down(&bytes, face, "Hgoh", &[], Scale::ONE);
+        let tall = down(&bytes, face, "Hgoh", &[], Scale { x: 1.0, y: 2.0 });
+
+        assert!(
+            (content(tall.height) - content(full.height) * 2.0).abs() <= 1.0,
+            "twice {} came back as {}",
+            content(full.height),
+            content(tall.height)
+        );
+        assert_eq!(tall.width, full.width);
+    }
+
+    #[test]
+    fn an_upright_cell_takes_the_scale_the_column_around_it_takes() {
+        let (bytes, face) = drawing(TEXT);
+        let full = down(&bytes, face, TEXT, &SPANS, Scale::ONE);
+        let tall = down(&bytes, face, TEXT, &SPANS, Scale { x: 1.0, y: 2.0 });
+        let wide = down(&bytes, face, TEXT, &SPANS, Scale { x: 2.0, y: 1.0 });
+
+        assert!(
+            (content(tall.height) - content(full.height) * 2.0).abs() <= 1.0,
+            "twice {} came back as {}",
+            content(full.height),
+            content(tall.height)
+        );
+        assert!(
+            (content(wide.width) - content(full.width) * 2.0).abs() <= 1.0,
+            "twice {} came back as {}",
+            content(full.width),
+            content(wide.width)
+        );
     }
 }

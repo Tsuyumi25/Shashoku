@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 14
+export const MANIFEST_SCHEMA_VERSION = 15
 
 export const OCR_SCHEMA_VERSION = 2
 

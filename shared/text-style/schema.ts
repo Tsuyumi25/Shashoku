@@ -2,6 +2,7 @@
 
 
 import type { TextAlign, TextDirection, TextStyle } from './types'
+import { MAX_SCALE_PERCENT, MIN_SCALE_PERCENT } from './types'
 
 type Fail = (message: string) => never
 
@@ -20,6 +21,8 @@ export const TEXT_STYLE_FIELDS = [
   'color',
   'leadingPercent',
   'weightPx',
+  'scaleXPercent',
+  'scaleYPercent',
 ] as const satisfies readonly (keyof TextStyle)[]
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -36,6 +39,13 @@ function parseAlign(v: unknown, at: string, fail: Fail): TextAlign {
   fail(`${at} 必須是 'start' | 'center' | 'end'`)
 }
 
+function parseScale(v: unknown, at: string, fail: Fail): number {
+  if (v === undefined) return 100
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < MIN_SCALE_PERCENT || v > MAX_SCALE_PERCENT)
+    fail(`${at} 必須是 ${MIN_SCALE_PERCENT} 到 ${MAX_SCALE_PERCENT} 之間的數`)
+  return v
+}
+
 export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const {
@@ -48,6 +58,8 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     color,
     leadingPercent,
     weightPx,
+    scaleXPercent,
+    scaleYPercent,
   } = v
   // Empty is a value: no family has been chosen yet. It is stored rather than
   // written as some placeholder name because a project file identifies a font
@@ -69,6 +81,10 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
   // file written before this field existed meant.
   if (weightPx !== undefined && (typeof weightPx !== 'number' || !Number.isFinite(weightPx)))
     fail(`${at}.weightPx 必須是有限數`)
+  // Absent means the face's own proportions, which is what every file written
+  // before characters could be scaled meant.
+  const scaleX = parseScale(scaleXPercent, `${at}.scaleXPercent`, fail)
+  const scaleY = parseScale(scaleYPercent, `${at}.scaleYPercent`, fail)
   return {
     fontFamily,
     fontFace,
@@ -79,6 +95,8 @@ export function parseTextStyle(v: unknown, at: string, fail: Fail): TextStyle {
     color,
     leadingPercent,
     weightPx: weightPx === undefined ? 0 : weightPx,
+    scaleXPercent: scaleX,
+    scaleYPercent: scaleY,
   }
 }
 
@@ -94,6 +112,8 @@ export function serializeTextStyle(s: TextStyle): Record<string, unknown> {
     color: s.color,
     leadingPercent: s.leadingPercent,
     weightPx: s.weightPx,
+    scaleXPercent: s.scaleXPercent,
+    scaleYPercent: s.scaleYPercent,
   }
 }
 

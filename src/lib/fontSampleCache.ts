@@ -50,6 +50,13 @@ export interface SampleRequest {
    * span carries its own size, so it moves what the run measures.
    */
   spans?: readonly EngineSpan[]
+  /**
+   * Horizontal and vertical character scale, as fractions of `sizePx`. Part of
+   * the identity of both the bitmap and the frame: every glyph is drawn and
+   * every advance counted through them.
+   */
+  scaleX?: number
+  scaleY?: number
 }
 
 export interface Sample {
@@ -175,6 +182,7 @@ function keyOf(req: SampleRequest): string {
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
     req.weightPx ?? 0,
+    `${req.scaleX ?? 1},${req.scaleY ?? 1}`,
     spansKey(req.spans, true),
     req.text,
   ].join('|')
@@ -248,6 +256,8 @@ function rasterize(req: SampleRequest): Sample {
         req.align,
         req.weightPx,
         spans,
+        req.scaleX,
+        req.scaleY,
       )
     : window.engine.renderText(
         drawWith,
@@ -262,6 +272,8 @@ function rasterize(req: SampleRequest): Sample {
         req.align,
         req.weightPx,
         spans,
+        req.scaleX,
+        req.scaleY,
       )
 
   const missing = new Set(uncovered)
@@ -310,6 +322,7 @@ function measureKeyOf(req: SampleRequest, padding: number): string {
     req.align ?? 'start',
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
+    `${req.scaleX ?? 1},${req.scaleY ?? 1}`,
     spansKey(req.spans, false),
     req.text,
   ].join('|')
@@ -341,6 +354,8 @@ function measure(req: SampleRequest, padding: number): EngineMeasure {
         req.phaseY,
         req.align,
         spans,
+        req.scaleX,
+        req.scaleY,
       )
     : window.engine.measureText(
         drawWith,
@@ -352,6 +367,8 @@ function measure(req: SampleRequest, padding: number): EngineMeasure {
         req.phaseY,
         req.align,
         spans,
+        req.scaleX,
+        req.scaleY,
       )
 }
 

@@ -529,6 +529,53 @@ describe('parseManifest', () => {
     expect(shownLinesOf(page, firstText(page))).toEqual(['Q&A', '<小聲>'])
   })
 
+  /** A style as it was written before the two character scales existed. */
+  const unscaled = () => {
+    const style: Record<string, unknown> = { ...DEFAULT_TEXT_STYLE }
+    delete style.scaleXPercent
+    delete style.scaleYPercent
+    return style
+  }
+
+  /**
+   * v15 added the two character scales. A page written before them was set at
+   * the proportions the face was cut at, which is what 100 says — and it comes
+   * back out as v15, so the file says what it now holds.
+   */
+  it('reads a page written before characters could be scaled as unscaled', () => {
+    const before = JSON.stringify({
+      schemaVersion: 14,
+      revision: 2,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      translationUnits: [unitFor('a')],
+      readingOrder: ['u-a'],
+      layers: [{ ...UPRIGHT, body: body({ style: unscaled() }) }],
+    })
+    const page = parseManifest(before)
+    expect(firstText(page).body.style).toEqual(DEFAULT_TEXT_STYLE)
+    expect(page.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(JSON.parse(serializeManifest(page)).schemaVersion).toBe(15)
+  })
+
+  /** The escaping and the scales are two migrations one old page needs both of. */
+  it('gives a plain-text page the unscaled characters as well as the escaping', () => {
+    const old = JSON.stringify({
+      schemaVersion: 13,
+      revision: 0,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      translationUnits: [unitFor('a')],
+      readingOrder: ['u-a'],
+      layers: [{ ...UPRIGHT, body: body({ lines: ['<b>這是'], style: unscaled() }) }],
+    })
+    const page = parseManifest(old)
+    expect(firstText(page).body.lines).toEqual(['&lt;b>這是'])
+    expect(firstText(page).body.style).toEqual(DEFAULT_TEXT_STYLE)
+  })
+
   it('leaves a page already stored as markup alone', () => {
     const page = parseManifest(raw(withTranslation({ lines: ['<b>這是', 'A&amp;B'] })))
     expect(firstText(page).body.lines).toEqual(['<b>這是', 'A&amp;B'])

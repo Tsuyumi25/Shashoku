@@ -55,6 +55,13 @@ export const BLEND_MODE_ALLOWLIST = [
  */
 const PLAIN_TEXT_VERSION = 13
 
+/**
+ * Every version this parser reads. The older two need nothing beyond what the
+ * style parser already does with a key that is not there — a character scale
+ * absent means the face's own proportions — except for the escaping below.
+ */
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, MANIFEST_SCHEMA_VERSION]
+
 
 export class PageParseError extends Error {}
 
@@ -546,7 +553,7 @@ export function parseManifest(raw: string): ManifestJson {
   const data = parseJson(raw, 'manifest.json')
   if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
 
-  if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION && data.schemaVersion !== PLAIN_TEXT_VERSION) {
+  if (!READABLE_VERSIONS.includes(data.schemaVersion)) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
       fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
     fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)

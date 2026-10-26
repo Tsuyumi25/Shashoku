@@ -1207,6 +1207,35 @@ describe('cmdScaleLabel', () => {
     expect(editor.canUndo).toBe(false)
   })
 
+  /**
+   * A corner pulled with Shift writes the two character scales instead of the
+   * size, and moves the object for the same reason. All three are one gesture,
+   * so one press of undo has to take back all three.
+   */
+  it('takes back both character scales and the position in one step', () => {
+    const { project, editor } = openOnePage([label('a')])
+    const squashed: TextStyle = {
+      ...DEFAULT_TEXT_STYLE,
+      scaleXPercent: 140,
+      scaleYPercent: 70,
+    }
+    project.setLabelStyle(PAGE, 'a', squashed)
+    project.moveLabel(PAGE, 'a', 260, 190)
+    editor.cmdScaleLabel(
+      PAGE,
+      'a',
+      { style: DEFAULT_TEXT_STYLE, ...PUT },
+      { style: squashed, x: 260, y: 190 },
+    )
+
+    editor.undo()
+    const back = labelsOf(project)[0]
+    expect(back.body.style.scaleXPercent).toBe(100)
+    expect(back.body.style.scaleYPercent).toBe(100)
+    expect([back.body.x, back.body.y]).toEqual([PUT.x, PUT.y])
+    expect(editor.canUndo).toBe(false)
+  })
+
   it('keeps a corner nudged and put back out of the stack', () => {
     const { editor } = openOnePage([label('a')])
     const held = { style: sized(24), ...PUT }

@@ -17,7 +17,7 @@ mod render;
 mod stroke;
 pub mod tile;
 
-use render::{Align, BLACK, Phase, SpanStyle, StrokePosition, StrokeSpec, parse_hex_rgba};
+use render::{Align, BLACK, Phase, Scale, SpanStyle, StrokePosition, StrokeSpec, parse_hex_rgba};
 
 #[napi]
 pub fn engine_version() -> String {
@@ -280,6 +280,13 @@ fn phase_from_opt(x: Option<f64>, y: Option<f64>) -> Phase {
     }
 }
 
+fn scale_from_opt(x: Option<f64>, y: Option<f64>) -> Scale {
+    Scale {
+        x: x.unwrap_or(1.0) as f32,
+        y: y.unwrap_or(1.0) as f32,
+    }
+}
+
 fn align_from_opt(align: Option<String>) -> napi::Result<Align> {
     match align.as_deref().unwrap_or("start") {
         "start" => Ok(Align::Start),
@@ -396,6 +403,10 @@ pub fn render_text(
     // strokes when negative, which is the direction a large size needs.
     weight_px: Option<f64>,
     spans: Option<Vec<EngineSpan>>,
+    // Per-glyph horizontal and vertical character scale, as fractions of the
+    // nominal size. 1 is unchanged.
+    scale_x: Option<f64>,
+    scale_y: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -413,6 +424,7 @@ pub fn render_text(
         stroke_spec,
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
+        scale_from_opt(scale_x, scale_y),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -442,6 +454,8 @@ pub fn measure_text(
     phase_y: Option<f64>,
     align: Option<String>,
     spans: Option<Vec<EngineSpan>>,
+    scale_x: Option<f64>,
+    scale_y: Option<f64>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_text(
@@ -454,6 +468,7 @@ pub fn measure_text(
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
         &spans_to_styles(spans)?,
+        scale_from_opt(scale_x, scale_y),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))
@@ -965,6 +980,8 @@ pub fn render_vertical(
     // strokes when negative, which is the direction a large size needs.
     weight_px: Option<f64>,
     spans: Option<Vec<EngineSpan>>,
+    scale_x: Option<f64>,
+    scale_y: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -982,6 +999,7 @@ pub fn render_vertical(
         stroke_spec,
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
+        scale_from_opt(scale_x, scale_y),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -1009,6 +1027,8 @@ pub fn measure_vertical(
     phase_y: Option<f64>,
     align: Option<String>,
     spans: Option<Vec<EngineSpan>>,
+    scale_x: Option<f64>,
+    scale_y: Option<f64>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_vertical(
@@ -1021,6 +1041,7 @@ pub fn measure_vertical(
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
         &spans_to_styles(spans)?,
+        scale_from_opt(scale_x, scale_y),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))

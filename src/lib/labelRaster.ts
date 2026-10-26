@@ -96,6 +96,8 @@ function requestFor(
     vertical: style.direction === 'vertical',
     align: style.align,
     weightPx: style.weightPx,
+    scaleX: style.scaleXPercent / 100,
+    scaleY: style.scaleYPercent / 100,
     rotation,
     phaseX: phase.x,
     phaseY: phase.y,

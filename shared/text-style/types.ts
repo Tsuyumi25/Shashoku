@@ -87,7 +87,31 @@ export interface TextStyle {
    * point the counters close and the letter turns into a blob.
    */
   weightPx: number
+
+  /**
+   * The glyphs' own width, as a percentage of what the face drew. 100 is the
+   * face untouched; below it the letters are condensed, above it extended.
+   *
+   * Per glyph rather than over the finished block: every advance and the line
+   * height scale with the letters, so a scaled run sets exactly as the same
+   * text would at a width the designer never cut, and nothing resamples a
+   * bitmap. This is the Character-panel scale and not a transform — a squash
+   * applied to the object would leave no number to read or to put back.
+   */
+  scaleXPercent: number
+
+  /** The same, along the glyph's own height. */
+  scaleYPercent: number
 }
+
+
+/**
+ * How far a character may be scaled. The floor keeps a letter that can still be
+ * seen to be a letter; the ceiling is the rasterizer's, which draws at the size
+ * it is asked for and would otherwise be handed a bitmap the size of a wall.
+ */
+export const MIN_SCALE_PERCENT = 10
+export const MAX_SCALE_PERCENT = 1000
 
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
@@ -100,4 +124,6 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   color: '#000000',
   leadingPercent: 120,
   weightPx: 0,
+  scaleXPercent: 100,
+  scaleYPercent: 100,
 }

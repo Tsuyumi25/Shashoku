@@ -129,15 +129,59 @@
     >{{ isMixed('weightPx') ? '—' : weightLabel }}</span>
   </div>
   <StyleSuggestions field="weightPx" :set="suggestions ?? null" @pick="onPick" />
+
+  <label class="text-muted-foreground">水平</label>
+  <div class="flex items-center gap-1">
+    <NumberStepper
+      :model-value="isMixed('scaleXPercent') ? null : value.scaleXPercent"
+      label="水平縮放"
+      :min="MIN_SCALE_PERCENT"
+      :max="MAX_SCALE_PERCENT"
+      :step="5"
+      :placeholder="isMixed('scaleXPercent') ? MIXED_TEXT : ''"
+      @update:model-value="(v: number) => onScalePercent('scaleXPercent', v)"
+    />
+    <span class="text-muted-foreground">%</span>
+  </div>
+  <StyleSuggestions field="scaleXPercent" :set="suggestions ?? null" @pick="onPick" />
+
+  <label class="text-muted-foreground">垂直</label>
+  <div class="flex items-center gap-1">
+    <NumberStepper
+      :model-value="isMixed('scaleYPercent') ? null : value.scaleYPercent"
+      label="垂直縮放"
+      :min="MIN_SCALE_PERCENT"
+      :max="MAX_SCALE_PERCENT"
+      :step="5"
+      :placeholder="isMixed('scaleYPercent') ? MIXED_TEXT : ''"
+      @update:model-value="(v: number) => onScalePercent('scaleYPercent', v)"
+    />
+    <span class="text-muted-foreground">%</span>
+    <button
+      type="button"
+      class="ml-auto h-6 rounded border border-input px-1.5 hover:border-primary disabled:opacity-40 disabled:hover:border-input"
+      :disabled="!scaled"
+      title="水平與垂直都回到 100%"
+      @click="onScaleReset"
+    >100%</button>
+  </div>
+  <StyleSuggestions field="scaleYPercent" :set="suggestions ?? null" @pick="onPick" />
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
-import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
+import {
+  MAX_SCALE_PERCENT,
+  MIN_SCALE_PERCENT,
+  type TextAlign,
+  type TextDirection,
+  type TextStyle,
+} from '@shared/text-style/types'
 import StyleSuggestions from '@/components/appearance/StyleSuggestions.vue'
 import ColorField from '@/components/ColorField.vue'
+import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { StyleSuggestionSet } from '@/composables/useStyleRecommendations'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
@@ -310,6 +354,29 @@ function onWeight(e: Event) {
 function onWeightReset() {
   if (!isMixed('weightPx') && props.value.weightPx === 0) return
   emit('patch', { weightPx: 0 })
+}
+
+function onScalePercent(key: 'scaleXPercent' | 'scaleYPercent', raw: number) {
+  if (!isMixed(key) && raw === props.value[key]) return
+  emit('patch', { [key]: raw })
+}
+
+/** Whether there is anything to put back — a selection that disagrees always has. */
+const scaled = computed(
+  () =>
+    isMixed('scaleXPercent') ||
+    isMixed('scaleYPercent') ||
+    props.value.scaleXPercent !== 100 ||
+    props.value.scaleYPercent !== 100,
+)
+
+/**
+ * Both at once, in one step: the pair is what a squashed object is, and putting
+ * one axis back is a state nobody asked for — which is the hole this feature
+ * exists to close, since a transform leaves nothing to press at all.
+ */
+function onScaleReset() {
+  emit('patch', { scaleXPercent: 100, scaleYPercent: 100 })
 }
 
 </script>

@@ -192,7 +192,11 @@
             @move="moveLabelTo(object.id, $event)"
             @move-end="(from, to) => commitLabelMove(object.id, from, to)"
             @scale-start="beginLabelScale(object.id)"
-            @scale="(fontSizePx, at) => scaleLabelTo(object.id, fontSizePx, at)"
+            @scale="(fontSizePx, at) => scaleLabelTo(object.id, { fontSizePx }, at)"
+            @scale-axes="
+              (scaleXPercent, scaleYPercent, at) =>
+                scaleLabelTo(object.id, { scaleXPercent, scaleYPercent }, at)
+            "
             @scale-end="commitLabelScale(object.id)"
             @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
             @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
@@ -329,6 +333,7 @@ import { useCutText } from '@/composables/useCutText'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
 import { previewedStyle } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
@@ -760,14 +765,19 @@ function beginLabelScale(labelId: string) {
 }
 
 /**
- * The size and the position are written together on every frame, because the
- * position is what holds the pinned corner still against the size that just
- * changed — writing one without the other would let the frame slip for a frame.
+ * What the corner changed and the position are written together on every frame,
+ * because the position is what holds the pinned corner still against the size
+ * that just changed — writing one without the other would let the frame slip
+ * for a frame.
+ *
+ * Laid over the style the drag started from rather than over the one on the
+ * object, so a gesture that switches between the two readings mid-drag takes
+ * back whichever of them it had been writing.
  */
-function scaleLabelTo(labelId: string, fontSizePx: number, at: Anchor) {
+function scaleLabelTo(labelId: string, patch: Partial<TextStyle>, at: Anchor) {
   const label = labelById(labelId)
   if (!label || !editor.currentPageId || editor.isLayerLocked(labelId)) return
-  const style = { ...label.body.style, fontSizePx }
+  const style = { ...(scaledFrom?.style ?? label.body.style), ...patch }
   project.setLabelStyle(editor.currentPageId, labelId, style)
   project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }

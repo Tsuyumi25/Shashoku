@@ -7,6 +7,7 @@ import {
   layoutOrigin,
   placeLabel,
   uniformScaleRatio,
+  axisScaleRatio,
 } from './labelBox'
 
 function styleWith(patch: Partial<TextStyle>): TextStyle {
@@ -220,6 +221,38 @@ describe('uniformScaleRatio', () => {
 
   it('holds at 1 when the drag began on the centre, where there is no distance to scale', () => {
     expect(uniformScaleRatio(CENTER, CENTER, { x: 180, y: 180 })).toBe(1)
+  })
+})
+
+describe('axisScaleRatio', () => {
+  const PIN = { x: 100, y: 100 }
+
+  it('starts at exactly 1 on both axes', () => {
+    expect(axisScaleRatio(PIN, { x: 140, y: 120 }, { x: 140, y: 120 }, 0)).toEqual({ x: 1, y: 1 })
+  })
+
+  it('reads the two axes apart, so one can widen while the other shrinks', () => {
+    const r = axisScaleRatio(PIN, { x: 140, y: 120 }, { x: 180, y: 110 }, 0)
+    expect(r.x).toBeCloseTo(2, 6)
+    expect(r.y).toBeCloseTo(0.5, 6)
+  })
+
+  /**
+   * The drag is along the frame's own baseline, not the screen's: an object
+   * lying on its side squashed by a pointer moving down the screen is squashed
+   * across its letters, the same gesture it would be upright.
+   */
+  it('measures along the frame axes of an object lying at an angle', () => {
+    const quarter = Math.PI / 2
+    const r = axisScaleRatio(PIN, { x: 100, y: 140 }, { x: 100, y: 180 }, quarter)
+    expect(r.x).toBeCloseTo(2, 6)
+    expect(r.y).toBeCloseTo(1, 6)
+  })
+
+  it('leaves an axis the drag started on alone instead of dividing by nothing', () => {
+    const r = axisScaleRatio(PIN, { x: 100, y: 140 }, { x: 160, y: 80 }, 0)
+    expect(r.x).toBe(1)
+    expect(r.y).toBeCloseTo(-0.5, 6)
   })
 })
 

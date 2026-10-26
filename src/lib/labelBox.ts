@@ -1,5 +1,5 @@
 import type { TextAlign, TextStyle } from '@shared/text-style/types'
-import { framePoint } from './coords'
+import { framePoint, turnedAround } from './coords'
 
 export interface Point {
   x: number
@@ -206,6 +206,29 @@ export function uniformScaleRatio(pivot: Point, from: Point, to: Point): number 
   const started = Math.hypot(from.x - pivot.x, from.y - pivot.y)
   if (started < 1e-6) return 1
   return Math.hypot(to.x - pivot.x, to.y - pivot.y) / started
+}
+
+/**
+ * The same drag read as two ratios, one along each of the frame's own axes —
+ * what a corner pulled with Shift down asks for, where the letters stop being
+ * square to the proportions the face was cut at.
+ *
+ * Measured in the frame's axes rather than the page's, so an object lying at
+ * an angle is squashed along its own baseline and not along the screen's.
+ *
+ * An axis the drag started on top of stays at 1: the ratio there would be a
+ * division by nothing. Dragged past the pivot a ratio goes negative, and what
+ * a negative scale may become is the caller's floor to decide.
+ */
+export function axisScaleRatio(pivot: Point, from: Point, to: Point, rotation: number): Point {
+  const started = turnedAround(pivot, from, -rotation)
+  const now = turnedAround(pivot, to, -rotation)
+  const dx = started.x - pivot.x
+  const dy = started.y - pivot.y
+  return {
+    x: Math.abs(dx) < 1e-6 ? 1 : (now.x - pivot.x) / dx,
+    y: Math.abs(dy) < 1e-6 ? 1 : (now.y - pivot.y) / dy,
+  }
 }
 
 /**

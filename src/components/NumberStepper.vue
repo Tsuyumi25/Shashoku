@@ -10,7 +10,7 @@
     <NumberFieldDecrement class="stepper-step" :title="`${label} −`">
       <Minus :size="12" />
     </NumberFieldDecrement>
-    <NumberFieldInput class="stepper-input" :aria-label="label" />
+    <NumberFieldInput class="stepper-input" :aria-label="label" :placeholder="placeholder" />
     <NumberFieldIncrement class="stepper-step" :title="`${label} +`">
       <Plus :size="12" />
     </NumberFieldIncrement>
@@ -27,11 +27,13 @@ import {
 } from 'reka-ui'
 
 defineProps<{
-  modelValue: number
+  /** Null where the selection disagrees: the field shows its placeholder instead. */
+  modelValue: number | null
   label: string
   min?: number
   max?: number
   step?: number
+  placeholder?: string
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: number] }>()

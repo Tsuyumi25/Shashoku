@@ -69,7 +69,7 @@ import {
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
-import { angleAround, angleDelta, uniformScaleRatio, type Point } from '@/lib/labelBox'
+import { angleAround, angleDelta, axisScaleRatio, uniformScaleRatio, type Point } from '@/lib/labelBox'
 import { useViewportOrigin } from '@/composables/useCanvasStage'
 
 /**
@@ -166,6 +166,12 @@ const props = defineProps<{
    */
   pointed?: boolean
   title?: string
+  /**
+   * Whether Shift on a corner scales each axis on its own. Only for a frame
+   * whose owner answers `scaleAxes`; any other would stop following the hand
+   * while Shift is down.
+   */
+  perAxis?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -188,6 +194,13 @@ const emit = defineEmits<{
    */
   scaleStart: [pin: Point]
   scale: [ratio: number]
+  /**
+   * The same drag with Shift down, read as one ratio per frame axis. A separate
+   * event because the two mean different things to whoever receives them: one
+   * is how much bigger, the other is how much wider and how much taller, and a
+   * caller that could only answer the first must not be handed the second.
+   */
+  scaleAxes: [ratio: Point]
   scaleEnd: []
   /**
    * A double click, carrying where in the frame it landed as a fraction of it —
@@ -613,6 +626,13 @@ const scale = {
   /** The press on the page, which is the ratio's denominator. */
   grab: ORIGIN as Anchor,
   client: ORIGIN as Point,
+  /**
+   * Shift as it was last seen. Read every frame, unlike Alt: the pin it would
+   * swap is what the drag is measured from, while this only decides which of
+   * two readings of the same travel is reported, so it can be taken back
+   * mid-drag and leave the object exactly where letting go of it would.
+   */
+  perAxis: false,
 }
 let scaling = false
 let scaleEngaged = false
@@ -630,7 +650,9 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
 }
 
 function reportScale() {
-  emit('scale', uniformScaleRatio(scale.pivot, scale.grab, pageAt(scale.client.x, scale.client.y)))
+  const now = pageAt(scale.client.x, scale.client.y)
+  if (scale.perAxis) emit('scaleAxes', axisScaleRatio(scale.pivot, scale.grab, now, props.rotation))
+  else emit('scale', uniformScaleRatio(scale.pivot, scale.grab, now))
 }
 
 /**
@@ -649,6 +671,7 @@ function onScaleMove(e: PointerEvent) {
     emit('scaleStart', scale.pin)
   }
   scale.client = { x: e.clientX, y: e.clientY }
+  scale.perAxis = props.perAxis === true && e.shiftKey
   reportScale()
 }
 

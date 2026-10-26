@@ -278,6 +278,12 @@ export interface ShashokuEngineApi {
    * `spans` set stretches of the text differently from the call's own style.
    * A line is as tall as the tallest thing set in it and a column as wide as
    * the widest, so a span can change the size that comes back.
+   *
+   * `scaleX` / `scaleY` multiply every glyph's outline about its own origin,
+   * as fractions of the nominal size — the Character panel's horizontal and
+   * vertical scale. Advances follow the glyphs they belong to, so a scaled run
+   * is still a run of text with its own frame and its own carets rather than a
+   * squashed picture of one. Absent is one, which changes nothing.
    */
   renderText(
     font: EngineFontSource,
@@ -292,6 +298,8 @@ export interface ShashokuEngineApi {
     align?: TextAlign,
     weightPx?: number,
     spans?: EngineSpan[],
+    scaleX?: number,
+    scaleY?: number,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -306,6 +314,8 @@ export interface ShashokuEngineApi {
     align?: TextAlign,
     weightPx?: number,
     spans?: EngineSpan[],
+    scaleX?: number,
+    scaleY?: number,
   ): EngineBitmap;
   /**
    * The render call stopped where painting would start. Takes only the
@@ -324,6 +334,8 @@ export interface ShashokuEngineApi {
     phaseY?: number,
     align?: TextAlign,
     spans?: EngineSpan[],
+    scaleX?: number,
+    scaleY?: number,
   ): EngineMeasure;
   measureVertical(
     font: EngineFontSource,
@@ -335,6 +347,8 @@ export interface ShashokuEngineApi {
     phaseY?: number,
     align?: TextAlign,
     spans?: EngineSpan[],
+    scaleX?: number,
+    scaleY?: number,
   ): EngineMeasure;
   /**
    * One box with an X through it per character — what there is to draw when

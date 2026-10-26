@@ -84,6 +84,23 @@ describe('parseTextStyle', () => {
     expect(parseTextStyle(serializeTextStyle(style), 'style', fail).align).toBe('end')
   })
 
+  it('round-trips characters scaled away from the proportions the face was cut at', () => {
+    const style = { ...DEFAULT_TEXT_STYLE, scaleXPercent: 140, scaleYPercent: 70 }
+    expect(parseTextStyle(serializeTextStyle(style), 'style', fail)).toEqual(style)
+  })
+
+  /**
+   * The range is the one the panel offers and the one a corner drag clamps to.
+   * A file naming a scale outside it would set at a size nothing in the
+   * interface could undo, and zero or a negative would not set at all.
+   */
+  it('refuses a character scale no control could have produced', () => {
+    for (const bad of [0, -100, 9, 1001]) {
+      const style = { ...serializeTextStyle(DEFAULT_TEXT_STYLE), scaleXPercent: bad }
+      expect(() => parseTextStyle(style, 'style', fail)).toThrow()
+    }
+  })
+
   /**
    * Named after the direction the text runs rather than after a side, so one
    * value means the same thing set horizontally and vertically.

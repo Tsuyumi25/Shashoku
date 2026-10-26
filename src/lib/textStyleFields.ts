@@ -15,6 +15,8 @@ export const TEXT_STYLE_FIELD_NAMES: Record<keyof TextStyle, string> = {
   color: '文字色',
   leadingPercent: '行距',
   weightPx: '字粗',
+  scaleXPercent: '水平縮放',
+  scaleYPercent: '垂直縮放',
 }
 
 /** One field's value as a person reads it, in the same words wherever it is shown. */
@@ -23,7 +25,8 @@ export function styleFieldText(style: TextStyle, field: keyof TextStyle): string
   if (field === 'fontFamily' || field === 'fontFace' || field === 'fontStyleName')
     return (value as string) || '未指定'
   if (field === 'fontSizePx') return `${value as number}px`
-  if (field === 'leadingPercent') return `${value as number}%`
+  if (field === 'leadingPercent' || field === 'scaleXPercent' || field === 'scaleYPercent')
+    return `${value as number}%`
   if (field === 'direction') return value === 'vertical' ? '直排' : '橫排'
   if (field === 'align') return { start: '起', center: '中', end: '末' }[value as string] ?? ''
   return String(value)
