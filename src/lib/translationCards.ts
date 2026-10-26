@@ -17,8 +17,8 @@
  * sized in screen pixels changes its relationship to the page at every zoom.
  */
 import type { Box } from '@shared/ocr/places'
-import type { TranslationUnit } from '@shared/page/types'
-import { joinPieces } from '@shared/page/units'
+import type { LayerEntry, TranslationUnit } from '@shared/page/types'
+import { blocksOf, joinPieces } from '@shared/page/units'
 import { cardGap, cardSize } from './sourceCards'
 
 /** The row that is the object's own typed lines rather than anybody's proposal. */
@@ -60,7 +60,11 @@ export interface TranslationCard extends TranslationList, Box {
  * the row the object is reading: a list whose current line was missing from it
  * would be a list with no way back to where you started.
  */
-export function rowsOf(unit: TranslationUnit, own: string): TranslationRow[] {
+export function rowsOf(layers: readonly LayerEntry[], unit: TranslationUnit): TranslationRow[] {
+  const own = joinPieces(
+    blocksOf(layers, unit, 'translation').map((block) => block.body.lines),
+    unit.translation.separators,
+  )
   const rows: TranslationRow[] = []
   if (own.length > 0 || unit.chosen === null) rows.push({ id: OWN, text: own, by: 'own' })
   for (const candidate of unit.candidates) {

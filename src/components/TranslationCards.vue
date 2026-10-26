@@ -105,7 +105,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { findTextObject } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { generateId } from '@shared/page/schema'
-import { projectionOf, shownLinesOf } from '@shared/page/units'
+import { shownLinesOf } from '@shared/page/units'
 import { drawnLabel } from '@/lib/labelRaster'
 import { screenToContentPx } from '@/lib/coords'
 import { vAutoGrow } from '@/lib/autoGrow'
@@ -229,7 +229,7 @@ const listed = computed<Listed[]>(() => {
     const first = unit.translation.members[0]
     const entry = first === undefined ? undefined : findTextObject(page.layers, first)
     if (entry === undefined || !shown.value.has(entry.id)) continue
-    const rows = rowsOf(unit, projectionOf(page.layers, unit, 'translation'))
+    const rows = rowsOf(page.layers, unit)
     if (!offersAChoice(rows)) continue
     out.push({ objectId: entry.id, rows, chosen: unit.chosen ?? OWN, entry })
   }
