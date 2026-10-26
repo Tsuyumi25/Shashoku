@@ -271,6 +271,10 @@ const boxStyle = computed(() => ({
   // is what "nobody has said what this is" looks like.
   outlineColor: props.accent ?? 'var(--primary)',
   pointerEvents: props.pointer === 'box' ? ('auto' as const) : ('none' as const),
+  // The object in hand answers before its neighbours, handles and box alike:
+  // objects set close together overlap, and a press meant for the one being
+  // worked on must not land on the frame of the one beside it.
+  zIndex: props.selected ? 1 : undefined,
 }))
 
 interface Corner {

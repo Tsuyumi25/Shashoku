@@ -128,7 +128,11 @@
           />
         </svg>
 
-        <div v-if="pageReady" class="pointer-events-none absolute inset-0">
+        <!--
+          Its own stacking context, so the frame raised above its neighbours is
+          raised among the frames only and stays under the cards drawn after.
+        -->
+        <div v-if="pageReady" class="pointer-events-none absolute inset-0 isolate">
           <!--
             The move tool alone, which is already the only one that can pick a
             raster layer. A rectangle drawn around what cannot be grabbed says
