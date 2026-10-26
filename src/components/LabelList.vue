@@ -481,9 +481,9 @@ function isRowEditing(row: Row): boolean {
 }
 
 /**
- * The stored string of the block this row is typed into — the code, which is
- * what the box shows. Read off the page rather than off the row, because the
- * rows carry the plain words every other line of the list is built from.
+ * The stored string of the block this row is typed into. Read off the page
+ * rather than off the row: a row of a split translation carries every block
+ * joined, and the box writes into one of them.
  */
 function rowCode(row: Row): string {
   const id = row.kind === 'block' ? row.block.id : soleBlock(row)

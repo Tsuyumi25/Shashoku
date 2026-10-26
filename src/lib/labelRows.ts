@@ -2,7 +2,7 @@ import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry, TranslationUnit } from '@shared/page/types'
 import type { TextSide } from '@shared/page/text'
 import { flattenReading } from '@shared/page/readingGraph'
-import { blocksOf, projectionOf, shownLinesOf, unitsInReadingOrder } from '@shared/page/units'
+import { blocksOf, projectionCodeOf, projectionOf, shownCodeOf, unitsInReadingOrder } from '@shared/page/units'
 
 export interface PageRow {
   kind: 'page'
@@ -27,9 +27,9 @@ export interface LabelRow {
   unit: TranslationUnit
   /** The blocks of the side being shown, in the order they are read. */
   blocks: readonly TextLayerEntry[]
-  /** What this side reads as, whole — every block of it with the gaps between. */
+  /** This side's markup, whole — every block of it with the gaps between — as the list shows and edits it. */
   main: string
-  /** What the other side reads as, whole — the context a row is checked against. */
+  /** The other side's markup, whole — the context a row is checked against. */
   opposite: string
   /**
    * Its place in this page's reading order — where a drop lands, not what is
@@ -62,7 +62,7 @@ export interface BlockRow {
   block: TextLayerEntry
   /** Which block of this side it is, counting from one, which is what it shows. */
   at: number
-  /** What this block reads as, chosen candidate resolved. */
+  /** This block's markup, chosen candidate resolved. */
   text: string
   /** Where its unit sits in the reading order, so a drop on it lands there. */
   index: number
@@ -132,8 +132,8 @@ export function buildLabelRows(
         pageId: file.pageId,
         unit: row.unit,
         blocks,
-        main: projectionOf(file.page.layers, row.unit, side),
-        opposite: projectionOf(file.page.layers, row.unit, other),
+        main: projectionCodeOf(file.page.layers, row.unit, side),
+        opposite: projectionCodeOf(file.page.layers, row.unit, other),
         index,
         depth: row.depth,
         lane: row.lane,
@@ -149,7 +149,7 @@ export function buildLabelRows(
           unit: row.unit,
           block,
           at: at + 1,
-          text: shownLinesOf(file.page, block).join('\n'),
+          text: shownCodeOf(file.page, block),
           index,
         })
       })
