@@ -14,6 +14,13 @@
     @contextmenu.prevent
   >
     <template v-if="currentFile && pageReady">
+      <div :style="stageStyle">
+        <div
+          class="page-checker"
+          :style="{ width: `${editor.viewContentSize.w}px`, height: `${editor.viewContentSize.h}px` }"
+        />
+      </div>
+
       <!--
         Outside the transformed stage on purpose: these carry their own pixels
         and place themselves in screen coordinates. The layer itself is
@@ -1848,6 +1855,11 @@ useEventListener(window, 'blur', () => {
 </script>
 
 <style scoped>
+.page-checker {
+  background: repeating-conic-gradient(#ffffff 0 25%, #cccccc 0 50%) 0 0 /
+    calc(var(--px) * 16px) calc(var(--px) * 16px);
+}
+
 /*
  * Straight, to begin with. A curve laid over a whiteboard's empty background
  * looks better and over a page of artwork covers more of it — but a straight
