@@ -331,6 +331,10 @@ watch(
       } else rasterize()
       return
     }
+    // A bitmap of the old request would be read against the new text: the
+    // placeholder holds the box until the right one is drawn.
+    current.value = null
+    failed.value = false
     unqueue = enqueueSample({ run: rasterize, visible: () => onScreen.value })
   },
   { immediate: true },
