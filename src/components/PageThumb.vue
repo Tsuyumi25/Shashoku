@@ -4,7 +4,6 @@
     class="flex cursor-default flex-col gap-1 rounded-[5px] p-1 select-none"
     :class="selected ? 'bg-primary/20' : 'hover:bg-secondary'"
     :title="file.page.name"
-    @click="emit('pick', $event)"
   >
     <div class="relative aspect-[3/4] w-full overflow-hidden">
       <!-- Dragging a page picks a run of them; a native image drag would take
@@ -41,7 +40,6 @@ import { usePageThumbnail } from '@/composables/usePageThumbnail'
  * the whole page plus what it takes to pick it out of a run.
  */
 const props = defineProps<{ file: ProjectFile; selected: boolean }>()
-const emit = defineEmits<{ pick: [MouseEvent] }>()
 
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
 const { src, problem } = usePageThumbnail(cellRef, () => props.file)

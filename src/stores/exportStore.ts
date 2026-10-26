@@ -109,6 +109,15 @@ export const useExportStore = defineStore('export', () => {
     selected.value = [...new Set([...selected.value, ...run])]
   }
 
+  function frameSelect(pageIds: readonly string[]) {
+    const hit = new Set(pageIds)
+    const ordered = project.files.map((f) => f.pageId).filter((id) => hit.has(id))
+    const same =
+      ordered.length === selected.value.length && ordered.every((id, at) => id === selected.value[at])
+    if (!same) selected.value = ordered
+    anchor.value = ordered[0] ?? null
+  }
+
   /** Nothing while idle; the running total while a run is out. */
   const progress = ref<{ done: number; total: number } | null>(null)
   const outcome = ref<
@@ -233,5 +242,6 @@ export const useExportStore = defineStore('export', () => {
     only,
     toggle,
     extendTo,
+    frameSelect,
   }
 })
