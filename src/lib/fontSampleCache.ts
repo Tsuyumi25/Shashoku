@@ -303,3 +303,8 @@ export function measureFor(req: SampleRequest): EngineMeasure {
     measure(req, padding),
   )
 }
+
+/** The sample if it is already drawn, without drawing it. */
+export function cachedSample(req: SampleRequest): Sample | undefined {
+  return cache.get(keyOf(req))
+}

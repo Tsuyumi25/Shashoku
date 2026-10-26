@@ -1,5 +1,5 @@
-export const MIN_FONT_SAMPLE_PX = 14;
-export const MAX_FONT_SAMPLE_PX = 64;
+export const MIN_FONT_PICKER_BOX_PX = 60;
+export const MAX_FONT_PICKER_BOX_PX = 240;
 
 /**
  * What the picker does with a family that cannot draw the current sample.
@@ -100,8 +100,12 @@ export interface Preferences {
    * without that family picks as though it were empty.
    */
   defaultFontFamily: string;
-  /** Sample size in the font picker grid. */
-  fontSamplePx: number;
+  /**
+   * How tall a sample's box is in the font picker, in CSS pixels. The sample is
+   * set at whatever size fills it, so this is how big the grid looks, not a size
+   * the text has.
+   */
+  fontPickerBoxPx: number;
   /** Empty means the picker's first preset; the presets are localizable UI. */
   fontSampleText: string;
   /**
@@ -166,7 +170,7 @@ export function defaultPreferences(): Preferences {
     fontFavorites: [],
     fontFolders: [],
     defaultFontFamily: "",
-    fontSamplePx: 40,
+    fontPickerBoxPx: 120,
     fontSampleText: "",
     fontSampleVertical: false,
     missingGlyphMode: "tofu",

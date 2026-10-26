@@ -3,8 +3,8 @@ import { defineStore } from 'pinia'
 import type { SplitterGroupProps } from 'reka-ui'
 import { parsePreferences, serializePreferences } from '@shared/preferences/schema'
 import {
-  MAX_FONT_SAMPLE_PX,
-  MIN_FONT_SAMPLE_PX,
+  MAX_FONT_PICKER_BOX_PX,
+  MIN_FONT_PICKER_BOX_PX,
   defaultPreferences,
   type MissingGlyphMode,
   type SidePanel,
@@ -82,9 +82,12 @@ export const usePreferencesStore = defineStore('preferences', () => {
     else prefs.fontFavorites.splice(at, 1)
   }
 
-  function setFontSamplePx(px: number) {
+  function setFontPickerBoxPx(px: number) {
     if (!Number.isFinite(px)) return
-    prefs.fontSamplePx = Math.min(MAX_FONT_SAMPLE_PX, Math.max(MIN_FONT_SAMPLE_PX, Math.round(px)))
+    prefs.fontPickerBoxPx = Math.min(
+      MAX_FONT_PICKER_BOX_PX,
+      Math.max(MIN_FONT_PICKER_BOX_PX, Math.round(px)),
+    )
   }
 
   function setFontSampleText(text: string) {
@@ -175,7 +178,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     favorites,
     isFavorite,
     toggleFavorite,
-    setFontSamplePx,
+    setFontPickerBoxPx,
     setFontSampleText,
     setFontSampleVertical,
     addFontFolder,

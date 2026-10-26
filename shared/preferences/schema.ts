@@ -1,6 +1,6 @@
 import {
-  MAX_FONT_SAMPLE_PX,
-  MIN_FONT_SAMPLE_PX,
+  MAX_FONT_PICKER_BOX_PX,
+  MIN_FONT_PICKER_BOX_PX,
   MIN_UNDO_PIXEL_BYTES,
   MIN_UNDO_PIXEL_STEPS,
   defaultOcrPreference,
@@ -51,7 +51,7 @@ export function parsePreferences(raw: string): Preferences {
     fontFavorites,
     fontFolders,
     defaultFontFamily,
-    fontSamplePx,
+    fontPickerBoxPx,
     fontSampleText,
     fontSampleVertical,
     missingGlyphMode,
@@ -82,10 +82,12 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof defaultFontFamily === "string") {
     prefs.defaultFontFamily = defaultFontFamily;
   }
-  if (typeof fontSamplePx === "number" && Number.isFinite(fontSamplePx)) {
-    prefs.fontSamplePx = Math.min(
-      MAX_FONT_SAMPLE_PX,
-      Math.max(MIN_FONT_SAMPLE_PX, Math.round(fontSamplePx)),
+  // A file from when this was a text size (`fontSamplePx`) says nothing about
+  // the box, and opens on the default.
+  if (typeof fontPickerBoxPx === "number" && Number.isFinite(fontPickerBoxPx)) {
+    prefs.fontPickerBoxPx = Math.min(
+      MAX_FONT_PICKER_BOX_PX,
+      Math.max(MIN_FONT_PICKER_BOX_PX, Math.round(fontPickerBoxPx)),
     );
   }
   if (typeof fontSampleText === "string") {
@@ -152,7 +154,7 @@ export function serializePreferences(prefs: Preferences): string {
       fontFavorites: prefs.fontFavorites,
       fontFolders: prefs.fontFolders,
       defaultFontFamily: prefs.defaultFontFamily,
-      fontSamplePx: prefs.fontSamplePx,
+      fontPickerBoxPx: prefs.fontPickerBoxPx,
       fontSampleText: prefs.fontSampleText,
       fontSampleVertical: prefs.fontSampleVertical,
       missingGlyphMode: prefs.missingGlyphMode,

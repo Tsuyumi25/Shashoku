@@ -1,43 +1,47 @@
 <template>
-  <div
-    v-if="current"
-    ref="boxEl"
-    class="sample-box"
-    :class="editing && 'editing'"
-    :style="boxStyle"
-    @pointerdown="onPointerDown"
-    @pointermove="onPointerMove"
-    @pointerup="onPointerUp"
-    @pointercancel="onPointerUp"
-    @mousedown="holdFocus"
-    @dblclick="onDoubleClick"
-  >
-    <canvas
-      ref="canvasEl"
-      class="block"
-      :width="current.image.width"
-      :height="current.image.height"
+  <div ref="holder" class="sample-holder">
+    <div
+      v-if="current"
+      ref="boxEl"
+      class="sample-box"
+      :class="editing && 'editing'"
       :style="boxStyle"
-    />
-    <div v-for="(box, i) in selectionBoxes" :key="i" class="selection-box" :style="box" />
-    <div v-if="caretBox" :key="caretKey" class="caret" :style="caretBox" />
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+      @mousedown="holdFocus"
+      @dblclick="onDoubleClick"
+    >
+      <canvas
+        ref="canvasEl"
+        class="block"
+        :width="current.image.width"
+        :height="current.image.height"
+        :style="boxStyle"
+      />
+      <div v-for="(box, i) in selectionBoxes" :key="i" class="selection-box" :style="box" />
+      <div v-if="caretBox" :key="caretKey" class="caret" :style="caretBox" />
+    </div>
+    <span
+      v-else-if="failed"
+      class="text-destructive/70"
+      :style="{ fontSize: `${sizePx * 0.4}px` }"
+      :title="failure"
+    >
+      無法繪製
+    </span>
+    <div v-else class="sample-pending" :style="{ width: `${fitWidth}px`, height: `${fitHeight}px` }" />
   </div>
-  <span
-    v-if="failed"
-    class="text-destructive/70"
-    :style="{ fontSize: `${sizePx * 0.4}px` }"
-    :title="failure"
-  >
-    無法繪製
-  </span>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { useElementVisibility, useEventListener } from '@vueuse/core'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
-import { sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
+import { cachedSample, sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
+import { enqueueSample } from '@/lib/sampleQueue'
 import { textProjection } from '@/lib/textProjection'
 import type { CaretOnScreen } from '@/lib/pinnedInput'
 
@@ -51,6 +55,12 @@ const props = defineProps<{
   vertical?: boolean
   /** Signed pixels the strokes move by. */
   weightPx?: number
+  /**
+   * The box the sample is shown inside, in CSS pixels. A sample that comes out
+   * larger is shown smaller to fit, so the cell's size never depends on the face.
+   */
+  fitWidth: number
+  fitHeight: number
   /** Outline the characters this family has no glyph for. */
   mark?: boolean
   /**
@@ -104,18 +114,27 @@ const request = computed<SampleRequest>(() => ({
   text: props.text,
   sizePx: Math.round(props.sizePx * dpr),
   fillColor: props.fillColor,
-  stroke: props.stroke,
+  // Device pixels, as the size is.
+  stroke: props.stroke && { ...props.stroke, width: props.stroke.width * dpr },
   vertical: props.vertical,
   // Scaled with the size: the sample is drawn at device resolution and shown
   // back down, so an unscaled offset would read thinner than it will typeset.
   weightPx: (props.weightPx ?? 0) * dpr,
 }))
 
+/** Shown pixels per bitmap pixel: device resolution, and smaller still if it would not fit. */
+const scale = computed(() => {
+  const sample = current.value
+  if (!sample) return 1 / dpr
+  const natural = { w: sample.image.width / dpr, h: sample.image.height / dpr }
+  return Math.min(1, props.fitWidth / natural.w, props.fitHeight / natural.h) / dpr
+})
+
 const boxStyle = computed(() =>
   current.value
     ? {
-        width: `${current.value.image.width / dpr}px`,
-        height: `${current.value.image.height / dpr}px`,
+        width: `${current.value.image.width * scale.value}px`,
+        height: `${current.value.image.height * scale.value}px`,
       }
     : undefined,
 )
@@ -140,7 +159,7 @@ const projection = computed(() => {
 
 /** Bitmap pixels to the CSS pixels the sample is shown at. */
 function shown(value: number): number {
-  return value / dpr
+  return value * scale.value
 }
 
 const caretBox = computed(() => {
@@ -188,7 +207,7 @@ const selectionBoxes = computed(() => {
 function indexAtPointer(e: { clientX: number; clientY: number }): number | null {
   const rect = boxEl.value?.getBoundingClientRect()
   if (!rect) return null
-  return projection.value.indexAt((e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr)
+  return projection.value.indexAt((e.clientX - rect.left) / scale.value, (e.clientY - rect.top) / scale.value)
 }
 
 /**
@@ -279,12 +298,6 @@ onBeforeUnmount(() => {
   if (props.editing) emit('caretAt', null)
 })
 
-/**
- * Runs during setup, not on mount. The virtual list measures a row the moment
- * its element exists, and a canvas whose size arrives later gets measured at
- * the wrong height — the list then compensates by moving the scroll position,
- * which is a change of size, which measures again.
- */
 function rasterize() {
   try {
     current.value = sampleFor(request.value)
@@ -296,7 +309,33 @@ function rasterize() {
     console.error(`font sample failed: ${props.entry.family}`, err)
   }
 }
-watch(request, rasterize, { immediate: true })
+
+/**
+ * Queued rather than drawn here: the cell's size is the box it was given, not
+ * the bitmap, so nothing waits on this to lay out. A sample already drawn, and
+ * the one being typed into, skip the queue.
+ */
+const holder = useTemplateRef<HTMLElement>('holder')
+const onScreen = useElementVisibility(holder)
+let unqueue: (() => void) | null = null
+watch(
+  request,
+  (req) => {
+    unqueue?.()
+    unqueue = null
+    const held = cachedSample(req)
+    if (held || props.editing) {
+      if (held) {
+        current.value = held
+        failed.value = false
+      } else rasterize()
+      return
+    }
+    unqueue = enqueueSample({ run: rasterize, visible: () => onScreen.value })
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => unqueue?.())
 
 function paint() {
   const el = canvasEl.value
@@ -339,6 +378,12 @@ watch([current, () => props.mark], paint, { flush: 'post' })
   z-index: 0;
   cursor: text;
 }
+/* The box a sample waits in, so the cell already has the size it will keep. */
+.sample-pending {
+  border-radius: 0.25rem;
+  background: color-mix(in oklch, var(--muted-foreground) 8%, transparent);
+}
+
 /* Behind the glyphs, the way a selection in a text field is. */
 .selection-box {
   position: absolute;

@@ -146,3 +146,17 @@ describe("the projects opened lately", () => {
     expect(parsePreferences(raw).recentProjects).toEqual(["/a"]);
   });
 });
+
+describe("how big the font picker's boxes are", () => {
+  it("comes back with what was written", () => {
+    const prefs = defaultPreferences();
+    prefs.fontPickerBoxPx = 180;
+    expect(parsePreferences(serializePreferences(prefs)).fontPickerBoxPx).toBe(180);
+  });
+
+  /** The old field was a text size; read as a box it would be a box far too small. */
+  it("opens a file that only knew the old text size on the default", () => {
+    const older = JSON.stringify({ fontSamplePx: 24 });
+    expect(parsePreferences(older).fontPickerBoxPx).toBe(defaultPreferences().fontPickerBoxPx);
+  });
+});

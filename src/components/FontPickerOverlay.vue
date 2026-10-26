@@ -36,19 +36,16 @@
         <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
       </ToggleGroupRoot>
 
-      <span class="shrink-0">字級</span>
+      <span class="shrink-0">顯示大小</span>
       <input
         type="range"
-        :min="MIN_FONT_SAMPLE_PX"
-        :max="MAX_FONT_SAMPLE_PX"
+        :min="MIN_FONT_PICKER_BOX_PX"
+        :max="MAX_FONT_PICKER_BOX_PX"
         step="1"
-        :value="preferences.prefs.fontSamplePx"
+        :value="preferences.prefs.fontPickerBoxPx"
         class="w-32 shrink-0 accent-[var(--primary)]"
-        @input="onSampleSize($event)"
+        @input="onBoxSize($event)"
       />
-      <span class="w-10 shrink-0 text-right tabular-nums">
-        {{ preferences.prefs.fontSamplePx }}px
-      </span>
 
       <span class="shrink-0">字粗</span>
       <input
@@ -176,8 +173,6 @@
         <div
           v-for="vrow in virtualRows"
           :key="vrow.index"
-          :ref="measureRow"
-          :data-index="vrow.index"
           class="font-row absolute left-0 top-0 w-full"
           :style="{
             transform: `translateY(${vrow.start}px)`,
@@ -188,6 +183,7 @@
             v-for="faces in rows[vrow.index]"
             :key="faces[0]!.family"
             class="font-cell group/cell"
+            :style="{ height: `${rowHeight}px` }"
             @mouseenter="hovered = faces"
             @mouseleave="hovered = null"
           >
@@ -229,11 +225,13 @@
               <FontSampleCanvas
                 :entry="shownFace(faces)"
                 :text="sampleText"
-                :size-px="appliedSize"
+                :size-px="samplePx"
+                :fit-width="box.w"
+                :fit-height="box.h"
                 :fill-color="fillColor"
-                :stroke="stroke"
+                :stroke="sampleStroke"
                 :vertical="vertical"
-                :weight-px="weightPx"
+                :weight-px="sampleWeight"
                 :mark="markMissing"
                 :editing="aimedAt === faces[0]!.family"
                 :selection="aimedAt === faces[0]!.family ? sampleRange : null"
@@ -245,7 +243,8 @@
             </div>
 
             <div class="cell-actions">
-              <div v-if="faces.length > 1" class="weight-row">
+              <!-- Held when there is nothing to cycle, so every cell is the same height. -->
+              <div class="weight-row" :class="faces.length > 1 ? '' : 'invisible'">
                 <button
                   type="button"
                   class="weight-step"
@@ -313,7 +312,7 @@ import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Star, X } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
-import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/types'
+import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownLinesOf } from '@shared/page/units'
@@ -327,7 +326,7 @@ import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { createTextEditSurface } from '@/composables/useTextEditSurface'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
-import { coverageFor, samplePadding } from '@/lib/fontSampleCache'
+import { coverageFor } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const picker = useFontPicker()
@@ -481,7 +480,6 @@ const sampleStyle = computed(() => {
   }
 })
 
-const appliedSize = computed(() => preferences.prefs.fontSamplePx)
 
 /**
  * Direction follows the selected object; toggling it here lasts until the
@@ -529,39 +527,50 @@ function advanceEm(line: string): number {
 }
 
 /**
- * Wide enough to hold the sample, because the cell clips what does not fit and
- * a vertical run starts at its right edge — a cell one column short hides the
- * first column, not the last.
+ * The box every sample is shown in, in CSS pixels: wide for rows, tall for
+ * columns. Its size is the display size and nothing else, so every cell is the
+ * same size whichever face it draws.
  */
-const minCellWidth = computed(() => {
-  const size = appliedSize.value
-  // Ceiling because the engine rounds its bitmap up to whole pixels, and a cell
-  // short by that one pixel clips a whole column's worth of edge.
-  const body = vertical.value
-    ? Math.ceil(size * VERTICAL_COLUMN_EM * sampleLines.value.length)
-    : size * sampleLines.value.reduce((most, line) => Math.max(most, advanceEm(line)), 1)
-  return Math.ceil(body + samplePadding(stroke.value, weightPx.value) * 2 + CELL_SIDE_PADDING_PX)
+const box = computed(() => {
+  const d = preferences.prefs.fontPickerBoxPx
+  return vertical.value ? { w: d, h: d * 2 } : { w: d * 2, h: d }
 })
 
+/** Room a sample keeps from its box's edge, in CSS pixels. */
+const BOX_MARGIN_PX = 8
+/** Smallest a sample is set at however long the text, in CSS pixels. */
+const MIN_SAMPLE_PX = 6
+
 /**
- * Label, padding, gap and the three action rows around the sample. Only an
- * estimate is needed: every row is measured for real once it exists, and the
- * closer this starts the less the list has to correct afterwards.
+ * The size that fills the box with this sample, worked out from the text alone
+ * so it is the same for every face. A long line sets small; a short one large.
  */
-const CELL_CHROME_PX = 130
+const samplePx = computed(() => {
+  const { w, h } = box.value
+  const lines = sampleLines.value
+  const fit = vertical.value
+    ? Math.min(
+        (w - BOX_MARGIN_PX) / (VERTICAL_COLUMN_EM * lines.length),
+        (h - BOX_MARGIN_PX) / (longestLine.value * 1.05),
+      )
+    : Math.min(
+        (w - BOX_MARGIN_PX) / lines.reduce((most, line) => Math.max(most, advanceEm(line)), 1),
+        (h - BOX_MARGIN_PX) / (LINE_HEIGHT_RATIO * lines.length),
+      )
+  return Math.max(MIN_SAMPLE_PX, Math.floor(fit))
+})
+
+const minCellWidth = computed(() => box.value.w + CELL_SIDE_PADDING_PX)
+
+/** Label, padding, gaps and the two action rows around the sample. */
+const CELL_CHROME_PX = 118
 /** A line box runs a little taller than the em; measured across this library. */
 const LINE_HEIGHT_RATIO = 1.35
 
-const estimatedRowHeight = computed(() => {
-  const size = appliedSize.value
-  const body = vertical.value
-    ? size * longestLine.value * 1.05
-    : size * LINE_HEIGHT_RATIO * sampleLines.value.length
-  return Math.round(body + CELL_CHROME_PX)
-})
+const rowHeight = computed(() => box.value.h + CELL_CHROME_PX)
 
-function onSampleSize(e: Event) {
-  preferences.setFontSamplePx((e.target as HTMLInputElement).valueAsNumber)
+function onBoxSize(e: Event) {
+  preferences.setFontPickerBoxPx((e.target as HTMLInputElement).valueAsNumber)
 }
 
 const hidingUndrawable = computed(() => preferences.prefs.missingGlyphMode === 'hide')
@@ -610,6 +619,19 @@ const currentFamily = computed(() =>
 )
 const fillColor = computed(() => lead.value?.body.style.color ?? '#000000')
 const stroke = computed(() => (lead.value ? engineStrokeFor(lead.value.effects) : undefined))
+
+/**
+ * The object's stroke and weight are pixels at its own size; the sample is set
+ * at another, so both are scaled to keep the proportion the object will have.
+ */
+const sizeRatio = computed(() => {
+  const objectPx = lead.value && agreed('fontSizePx') ? lead.value.body.style.fontSizePx : 0
+  return objectPx > 0 ? samplePx.value / objectPx : 1
+})
+const sampleStroke = computed(() =>
+  stroke.value ? { ...stroke.value, width: stroke.value.width * sizeRatio.value } : undefined,
+)
+const sampleWeight = computed(() => weightPx.value * sizeRatio.value)
 
 /**
  * The family under the pointer. Being over a cell is the preview: the canvas
@@ -747,17 +769,14 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: rows.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => estimatedRowHeight.value,
-    overscan: 6,
+    estimateSize: () => rowHeight.value,
+    overscan: 2,
   })),
 )
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-function measureRow(el: unknown) {
-  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
-}
-watch([appliedSize, columns, displayed, vertical], () => virtualizer.value.measure())
+watch([rowHeight, columns, displayed], () => virtualizer.value.measure())
 
 // Enumerating on open rather than at startup. The platform's own list does not
 // change while the app runs, so this only repeats when a folder is added.
