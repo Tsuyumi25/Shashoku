@@ -56,7 +56,8 @@
         :value="weightPx"
         class="w-24 shrink-0 accent-[var(--primary)]"
         @input="onWeight($event)"
-        @dblclick="weightPx = 0"
+        @change="commitWeight"
+        @dblclick="setWeight(0)"
       />
       <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
       <button
@@ -596,11 +597,7 @@ const markMissing = computed(
 const WEIGHT_MIN = -6
 const WEIGHT_MAX = 3
 
-/**
- * Seeded from the selected object and written with the face on 選擇. Held here
- * rather than written straight back: the grid is a place to try weights, and
- * trying is not deciding.
- */
+/** Seeded from the selected object, and following it as the selection moves. */
 const objectWeight = computed(() => (lead.value && agreed('weightPx') ? lead.value.body.style.weightPx : 0))
 const weightPx = ref(objectWeight.value)
 watch(objectWeight, (w) => (weightPx.value = w))
@@ -609,9 +606,24 @@ const weightLabel = computed(() =>
   weightPx.value === 0 ? '0' : `${weightPx.value > 0 ? '+' : ''}${weightPx.value}`,
 )
 
+/**
+ * The weight is live on the selection: dragging previews it on the page, letting
+ * go is one step of history. With nothing selected it only changes the samples.
+ */
 function onWeight(e: Event) {
   const raw = (e.target as HTMLInputElement).valueAsNumber
-  if (Number.isFinite(raw)) weightPx.value = raw
+  if (!Number.isFinite(raw)) return
+  weightPx.value = raw
+  if (targets.value.length > 0) editor.previewStyle(targets.value, { weightPx: raw })
+}
+
+function commitWeight() {
+  if (targets.value.length > 0) editor.cmdApplyStyle(targets.value, { weightPx: weightPx.value })
+}
+
+function setWeight(px: number) {
+  weightPx.value = px
+  commitWeight()
 }
 
 const currentFamily = computed(() =>
@@ -644,13 +656,12 @@ watch(
 )
 onBeforeUnmount(() => picker.endPreview())
 
-/** Writes the face, and the weight tried beside it, to every selected text object. */
+/** Writes the face to every selected text object; the weight is already theirs. */
 function choose(face: FontEntry) {
   const patch: Partial<TextStyle> = {
     fontFamily: face.family,
     fontFace: face.postscriptName,
     fontStyleName: face.style,
-    weightPx: weightPx.value,
   }
   editor.cmdApplyStyle(targets.value, patch)
 }
