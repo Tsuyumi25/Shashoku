@@ -51,6 +51,7 @@
             class="side-tab"
             :class="preferences.prefs.sidePanel === tab.panel && 'side-tab-active'"
             @click="preferences.setSidePanel(tab.panel)"
+            @pointerenter="preferences.setSidePanel(tab.panel)"
           >
             {{ tab.title }}
           </button>
