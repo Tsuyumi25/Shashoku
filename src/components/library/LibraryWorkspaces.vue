@@ -20,13 +20,26 @@
         class="lib-row"
         data-lib-row
         tabindex="0"
-        :class="{ 'lib-row-on': library.standingAt === null }"
+        :class="{ 'lib-row-on': library.standingAt === null && !library.recent }"
         @click="library.standAt(null)"
         @keydown.enter="library.standAt(null)"
       >
         <LibraryBig :size="15" class="shrink-0 text-muted-foreground" />
         <span class="min-w-0 flex-1 truncate">全部</span>
         <span class="lib-count">{{ library.bookTotal }}</span>
+      </div>
+
+      <div
+        class="lib-row"
+        data-lib-row
+        tabindex="0"
+        :class="{ 'lib-row-on': library.recent }"
+        @click="library.showRecent()"
+        @keydown.enter="library.showRecent()"
+      >
+        <History :size="15" class="shrink-0 text-muted-foreground" />
+        <span class="min-w-0 flex-1 truncate">最近</span>
+        <span class="lib-count">{{ preferences.prefs.recentProjects.length }}</span>
       </div>
 
       <p
@@ -83,6 +96,7 @@ import {
   FolderPlus,
   FolderSearch,
   FolderX,
+  History,
   LibraryBig,
   RefreshCw,
 } from '@lucide/vue'
@@ -96,9 +110,11 @@ import {
 } from 'reka-ui'
 import { useToast } from 'vue-toastification'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 const library = useLibraryStore()
+const preferences = usePreferencesStore()
 const project = useProjectStore()
 const toast = useToast()
 

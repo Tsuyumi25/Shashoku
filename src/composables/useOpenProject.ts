@@ -3,6 +3,7 @@ import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
@@ -83,6 +84,7 @@ export function useOpenProject() {
       await handOver(leaving)
       const opened = await open()
       if (opened === null) return false
+      usePreferencesStore().noteRecentProject(opened)
       await settle(leaving)
       return true
     } catch (err) {

@@ -1,6 +1,14 @@
 <template>
   <div class="flex min-w-0 items-center gap-0.5 overflow-hidden text-xs">
     <button
+      v-if="library.recent"
+      class="crumb crumb-here"
+      @click="library.showRecent()"
+    >
+      最近
+    </button>
+    <button
+      v-else
       class="crumb"
       :class="library.standingAt === null && 'crumb-here'"
       @click="library.standAt(null)"

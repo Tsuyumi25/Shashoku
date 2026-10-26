@@ -67,7 +67,7 @@
 
       <div v-else-if="library.standingAt === null" data-region="project" :class="gridClass">
         <LibraryCard
-          v-for="entry in library.home"
+          v-for="entry in library.rootEntries"
           :key="entry.path"
           class="shelf-card"
           :data-key="entryKey(entry)"
@@ -227,11 +227,13 @@ const ARMED_MS = 3000
 // Only the root is ever empty now: every folder stood in draws a page band,
 // and an empty one is the zone a folder becomes a book through.
 const isEmpty = computed(
-  () => !library.insideLoading && library.standingAt === null && library.home.length === 0,
+  () => !library.insideLoading && library.standingAt === null && library.rootEntries.length === 0,
 )
 
 const emptyText = computed(() =>
-  library.roots.length === 0
+  library.recent
+    ? '還沒有開過任何專案。'
+    : library.roots.length === 0
     ? '左邊按「加入工作區」，把一個裝著書的資料夾放進來。'
     : '還沒有工作區。',
 )

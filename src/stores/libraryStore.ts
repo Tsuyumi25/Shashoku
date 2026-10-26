@@ -75,6 +75,8 @@ export const useLibraryStore = defineStore('library', () => {
   const scanning = ref(false)
 
   const standingAt = ref<string | null>(null)
+  /** At the root, whether the shelf shows the recently opened projects instead of the workspaces. */
+  const recent = ref(false)
   const inside = ref<FolderContents>(empty())
   const insideLoading = ref(false)
 
@@ -161,7 +163,15 @@ export const useLibraryStore = defineStore('library', () => {
 
   function standAt(path: string | null): void {
     standingAt.value = path
+    recent.value = false
     clearChoice()
+  }
+
+  function showRecent(): void {
+    standingAt.value = null
+    recent.value = true
+    clearChoice()
+    void loadRecent()
   }
 
   /**
@@ -185,7 +195,21 @@ export const useLibraryStore = defineStore('library', () => {
 
   const insideWorkspace = computed<string | null>(() => crumbs.value[0]?.path ?? null)
 
+  /** The recently opened projects as cards, read off the disk each time the page is shown. */
+  const recentEntries = ref<DirEntry[]>([])
+  let recentGeneration = 0
+
+  async function loadRecent(): Promise<void> {
+    const mine = ++recentGeneration
+    const paths = [...usePreferencesStore().prefs.recentProjects]
+    const entries = await window.api.describeFolders(paths)
+    if (mine === recentGeneration) recentEntries.value = entries
+  }
+
   const home = computed<DirEntry[]>(() => roots.value.map(entryOf))
+
+  /** What the shelf lays out at the root: the workspaces, or the 最近 page. */
+  const rootEntries = computed<DirEntry[]>(() => (recent.value ? recentEntries.value : home.value))
 
   /**
    * The cards come off the disk; the order and what is hidden come from the
@@ -248,7 +272,7 @@ export const useLibraryStore = defineStore('library', () => {
    * draws them.
    */
   const projectItems = computed<ShelfItem[]>(() => {
-    if (standingAt.value === null) return home.value.map(entryItem)
+    if (standingAt.value === null) return rootEntries.value.map(entryItem)
     return [...bandPages.value.map(pageItem), ...bandProjects.value.map(entryItem)]
   })
 
@@ -409,6 +433,8 @@ export const useLibraryStore = defineStore('library', () => {
     bookTotal,
     scanning,
     standingAt,
+    recent,
+    showRecent,
     inside,
     insideLoading,
     picked,
@@ -417,6 +443,7 @@ export const useLibraryStore = defineStore('library', () => {
     crumbs,
     insideWorkspace,
     home,
+    rootEntries,
     bandPages,
     bandProjects,
     bandFiles,

@@ -58,6 +58,7 @@ export function parsePreferences(raw: string): Preferences {
     markMissingGlyphs,
     scanPoints,
     workspaces,
+    recentProjects,
     panelLayout,
     sidePanel,
     undoPixelSteps,
@@ -111,6 +112,11 @@ export function parsePreferences(raw: string): Preferences {
       (f): f is string => typeof f === "string" && f.length > 0,
     );
   }
+  if (Array.isArray(recentProjects)) {
+    prefs.recentProjects = recentProjects.filter(
+      (f): f is string => typeof f === "string" && f.length > 0,
+    );
+  }
   if (isRecord(panelLayout)) {
     for (const [key, value] of Object.entries(panelLayout)) {
       if (typeof value === "string") prefs.panelLayout[key] = value;
@@ -153,6 +159,7 @@ export function serializePreferences(prefs: Preferences): string {
       markMissingGlyphs: prefs.markMissingGlyphs,
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
+      recentProjects: prefs.recentProjects,
       panelLayout: prefs.panelLayout,
       sidePanel: prefs.sidePanel,
       undoPixelSteps: prefs.undoPixelSteps,

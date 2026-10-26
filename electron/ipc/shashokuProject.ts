@@ -7,6 +7,7 @@ import {
   createProject,
   createPage,
   deleteLayerParts,
+  describeFolders,
   listInside,
   openProject,
   readPage,
@@ -67,6 +68,7 @@ export function registerShashokuProjectHandlers(): void {
   ipcMain.handle(CHANNELS.scanLibrary, (_e, scanPoints: string[]) => scanLibrary(scanPoints));
   ipcMain.handle(CHANNELS.scanWorkspaces, (_e, roots: string[]) => scanWorkspaces(roots));
   ipcMain.handle(CHANNELS.listInside, (_e, path: string) => listInside(path));
+  ipcMain.handle(CHANNELS.describeFolders, (_e, paths: string[]) => describeFolders(paths));
   ipcMain.handle(CHANNELS.createProject, (_e, rootPath: string) => createProject(rootPath));
   ipcMain.handle(CHANNELS.createPage, (_e, rootPath: string, sourceName: string) =>
     createPage(rootPath, sourceName),

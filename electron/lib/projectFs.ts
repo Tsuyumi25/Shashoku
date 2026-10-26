@@ -3,7 +3,7 @@
 
 import type { Dirent } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
   DirEntry,
@@ -204,24 +204,37 @@ async function entriesInside(path: string): Promise<DirEntry[]> {
           books: null,
         };
       }
-      const book = await isProject(child);
-      const read = book ? await readBook(child) : null;
-      return {
-        name: e.name,
-        path: child,
-        folder: true,
-        book,
-        own: e.name === SHASHOKU_DIR,
-        cover: read ? read.cover : await firstPictureIn(child),
-        pageCount: read ? read.pageCount : null,
-        books: null,
-      };
+      return folderEntry(child, e.name);
     }),
   );
   return entries.sort((a, b) => {
     if (a.folder !== b.folder) return a.folder ? -1 : 1;
     return collator.compare(a.name, b.name);
   });
+}
+
+async function folderEntry(path: string, name: string): Promise<DirEntry> {
+  const book = await isProject(path);
+  const read = book ? await readBook(path) : null;
+  return {
+    name,
+    path,
+    folder: true,
+    book,
+    own: name === SHASHOKU_DIR,
+    cover: read ? read.cover : await firstPictureIn(path),
+    pageCount: read ? read.pageCount : null,
+    books: null,
+  };
+}
+
+/**
+ * Named folders as shelf cards, read where they stand rather than looked up in
+ * the workspace walk — which stops at the first book it meets and so never sees
+ * a book filed inside another.
+ */
+export async function describeFolders(paths: readonly string[]): Promise<DirEntry[]> {
+  return await Promise.all(paths.map((path) => folderEntry(path, basename(path))));
 }
 
 async function firstPictureIn(dir: string): Promise<ScannedCover | null> {

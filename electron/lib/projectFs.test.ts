@@ -9,6 +9,7 @@ import {
   createPage,
   createProject,
   deleteLayerParts,
+  describeFolders,
   openProject,
   readProjectMeta,
   writePage,
@@ -415,5 +416,35 @@ describe("reading a book's project.json on its own", () => {
     await writeProjectMeta(join(root, SHASHOKU_DIR), written);
 
     expect(await readProjectMeta(root)).toBe(written);
+  });
+});
+
+describe.skipIf(!haveEngine)("a folder described as a shelf card", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "shashoku-describe-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /**
+   * The workspace walk stops at the first book it meets, so a book filed inside
+   * another never reaches the tree; read where it stands, it has its cover.
+   */
+  it("carries the cover of a book standing inside another book", async () => {
+    await createProject(root);
+    const inner = join(root, "chapter");
+    await mkdir(inner);
+    await writeFile(join(inner, "001.png"), sourcePng(6, 4));
+    await createProject(inner);
+    await createPage(inner, "001.png");
+
+    const [card] = await describeFolders([inner]);
+
+    expect(card).toMatchObject({ name: "chapter", path: inner, book: true, pageCount: 1 });
+    expect(card.cover).not.toBeNull();
   });
 });

@@ -125,6 +125,11 @@ export interface Preferences {
    */
   workspaces: string[];
   /**
+   * Projects opened, most recent first. A path only: whether it is still a
+   * project is asked of the disk when the list is drawn.
+   */
+  recentProjects: string[];
+  /**
    * Splitter geometry, one entry per group keyed by its autoSaveId. reka-ui
    * owns both the keys and the serialized values; we only provide storage.
    */
@@ -168,6 +173,7 @@ export function defaultPreferences(): Preferences {
     markMissingGlyphs: true,
     scanPoints: [],
     workspaces: [],
+    recentProjects: [],
     panelLayout: {},
     // The reading, because a page is framed and typed before it is stacked.
     sidePanel: "labels",

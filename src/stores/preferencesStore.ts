@@ -13,6 +13,9 @@ import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
 
+/** How many opened projects the library's 最近 page remembers. */
+const RECENT_PROJECTS_KEPT = 30
+
 /** reka-ui does not export this type, but it is reachable through the props. */
 type PanelGroupStorage = NonNullable<SplitterGroupProps['storage']>
 
@@ -121,6 +124,13 @@ export const usePreferencesStore = defineStore('preferences', () => {
     if (at !== -1) prefs.workspaces.splice(at, 1)
   }
 
+  function noteRecentProject(path: string) {
+    prefs.recentProjects = [path, ...prefs.recentProjects.filter((p) => p !== path)].slice(
+      0,
+      RECENT_PROJECTS_KEPT,
+    )
+  }
+
   function setFontSampleVertical(vertical: boolean) {
     prefs.fontSampleVertical = vertical
   }
@@ -174,6 +184,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     removeScanPoint,
     addWorkspace,
     removeWorkspace,
+    noteRecentProject,
     setDefaultFontFamily,
     setMissingGlyphMode,
     setMarkMissingGlyphs,

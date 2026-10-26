@@ -130,3 +130,19 @@ describe("how this machine reads a page", () => {
     expect(parsePreferences(half).ocr).toEqual({ device: "cpu", onomatopoeia: false });
   });
 });
+
+describe("the projects opened lately", () => {
+  it("comes back in the order it was written, most recent first", () => {
+    const prefs = defaultPreferences();
+    prefs.recentProjects = ["/b/最新", "/a/older"];
+    expect(parsePreferences(serializePreferences(prefs)).recentProjects).toEqual([
+      "/b/最新",
+      "/a/older",
+    ]);
+  });
+
+  it("drops what is not a path", () => {
+    const raw = JSON.stringify({ recentProjects: ["/a", 3, "", null] });
+    expect(parsePreferences(raw).recentProjects).toEqual(["/a"]);
+  });
+});

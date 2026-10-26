@@ -1,5 +1,5 @@
 import type { ScannedScanPoint } from "../project/library";
-import type { FolderContents, WorkspaceScan } from "../project/workspace";
+import type { DirEntry, FolderContents, WorkspaceScan } from "../project/workspace";
 import type { McpQuery, McpReply } from "../mcp/types";
 
 export const CHANNELS = {
@@ -10,6 +10,7 @@ export const CHANNELS = {
   scanLibrary: "shashoku:scan-library",
   scanWorkspaces: "shashoku:scan-workspaces",
   listInside: "shashoku:list-inside",
+  describeFolders: "shashoku:describe-folders",
   createProject: "shashoku:create-project",
   createPage: "shashoku:create-page",
   openProject: "shashoku:open-project",
@@ -88,6 +89,8 @@ export interface ShashokuApi {
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;
   listInside(path: string): Promise<FolderContents>;
+  /** Each folder as a shelf card, in the order given. */
+  describeFolders(paths: string[]): Promise<DirEntry[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
    * One page, from one image in the project root. Answers with the name it
