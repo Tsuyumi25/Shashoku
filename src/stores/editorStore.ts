@@ -1270,7 +1270,7 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
-  function cmdAddLabel(pageId: string, parts: TranslationParts) {
+  function cmdAddLabel(pageId: string, parts: TranslationParts): string | null {
     const project = useProjectStore()
     let removed: RemovedTranslation | undefined
     pushCommand({
@@ -1290,7 +1290,9 @@ export const useEditorStore = defineStore('editor', () => {
       },
     })
     const first = parts.blocks.find((b) => b.side === textSide.value) ?? parts.blocks[0]
-    if (first) selectOnly(first.id)
+    if (!first) return null
+    selectOnly(first.id)
+    return first.id
   }
 
   /**
@@ -1299,15 +1301,15 @@ export const useEditorStore = defineStore('editor', () => {
    * been measured about either, so starting them apart would be inventing a
    * difference.
    */
-  function addLabelAt(x: number, y: number) {
+  function addLabelAt(x: number, y: number): string | null {
     const project = useProjectStore()
-    if (!currentPageId.value) return
+    if (!currentPageId.value) return null
     const parts = blankTranslation(project.header.seedStyle, generateLabelId)
     for (const block of parts.blocks) {
       block.body.x = x
       block.body.y = y
     }
-    cmdAddLabel(currentPageId.value, parts)
+    return cmdAddLabel(currentPageId.value, parts)
   }
 
   /**

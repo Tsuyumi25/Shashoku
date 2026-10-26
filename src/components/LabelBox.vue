@@ -217,6 +217,8 @@ const substitution = computed(() => {
   return missing === null ? '' : missingFamilyLabel(missing)
 })
 
+const UNTYPED_MIN_SCREEN_PX = 32
+
 /**
  * On the drawn centre rather than the stored one, so what is grabbed is where
  * the text actually is and the two cannot part company by half a pixel.
@@ -224,12 +226,15 @@ const substitution = computed(() => {
  * In page pixels: the stage carries the view, so a frame that multiplied by it
  * here would be scaled twice.
  */
-const box = computed(() => ({
-  centerX: drawn.value.center.x,
-  centerY: drawn.value.center.y,
-  width: drawn.value.box.w,
-  height: drawn.value.box.h,
-}))
+const box = computed(() => {
+  const least = untyped.value ? UNTYPED_MIN_SCREEN_PX / props.view.scale : 0
+  return {
+    centerX: drawn.value.center.x,
+    centerY: drawn.value.center.y,
+    width: Math.max(drawn.value.box.w, least),
+    height: Math.max(drawn.value.box.h, least),
+  }
+})
 
 /**
  * Where the object was before the drag wrote anything. A drag reports how far

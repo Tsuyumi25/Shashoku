@@ -1503,9 +1503,12 @@ function onPointerDown(e: PointerEvent) {
     if (selectionTool.onPointerDown(e)) return
   }
   if (editor.tool === 'text') {
+    // Keeps the press from taking focus off the field the new object opens.
+    e.preventDefault()
     const rect = containerRef.value.getBoundingClientRect()
     const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
-    editor.addLabelAt(p.x, p.y)
+    const id = editor.addLabelAt(p.x, p.y)
+    if (id !== null) beginCanvasTextEdit(id, 0)
     return
   }
   if (editor.tool === 'select-text') {
