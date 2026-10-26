@@ -1773,6 +1773,23 @@ describe('layer tree edits', () => {
       expect(effectsOf(project, 'r1')).toEqual([STROKE])
       expect(effectsOf(project, 'r2')).toEqual([])
     })
+
+    it('shows a preview at once and undoes the whole gesture in one step', () => {
+      const { project, editor } = openTree([raster('r')], [])
+      editor.selectOnly('r')
+      editor.cmdApplyEffects(editor.selectedNodes(), [STROKE])
+      const red = { ...STROKE, color: '#ff0000' }
+      const blue = { ...STROKE, color: '#0000ff' }
+
+      editor.previewEffects(editor.selectedNodes(), [red])
+      expect(effectsOf(project, 'r')).toEqual([red])
+      editor.previewEffects(editor.selectedNodes(), [blue])
+      editor.cmdApplyEffects(editor.selectedNodes(), [blue])
+      expect(effectsOf(project, 'r')).toEqual([blue])
+
+      editor.undo()
+      expect(effectsOf(project, 'r')).toEqual([STROKE])
+    })
   })
 })
 

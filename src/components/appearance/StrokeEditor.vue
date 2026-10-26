@@ -13,31 +13,21 @@
   </div>
 
   <template v-if="stroke !== null && !mixed">
-    <label class="pl-3 text-muted-foreground">├ 寬度</label>
-    <div class="flex items-center gap-1">
-      <input
-        type="number"
-        min="1"
-        step="1"
-        class="h-6 w-16 rounded border border-input bg-background px-1.5"
-        :value="stroke.width"
-        @change="onWidth($event)"
-      />
+    <span class="text-muted-foreground">寬度</span>
+    <div class="flex items-center gap-1.5">
+      <NumberStepper :model-value="stroke.width" label="描邊寬度" :min="1" @update:model-value="onWidth" />
       <span class="text-muted-foreground">px</span>
     </div>
 
-    <label class="pl-3 text-muted-foreground">├ 顏色</label>
-    <div class="flex items-center gap-1.5">
-      <input
-        type="color"
-        class="h-6 w-8 cursor-pointer rounded border border-input bg-background"
-        :value="stroke.color"
-        @change="onColor($event)"
-      />
-      <span class="font-mono text-muted-foreground">{{ stroke.color }}</span>
-    </div>
+    <span class="text-muted-foreground">顏色</span>
+    <ColorField
+      :model-value="stroke.color"
+      label="描邊顏色"
+      @input="onColorInput"
+      @update:model-value="onColor"
+    />
 
-    <label class="pl-3 text-muted-foreground">└ 位置</label>
+    <span class="text-muted-foreground">位置</span>
     <ToggleGroupRoot
       type="single"
       class="seg w-full"
@@ -54,6 +44,8 @@
 <script setup lang="ts">
 import { computed, useTemplateRef, watchEffect } from 'vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
+import ColorField from '@/components/ColorField.vue'
+import NumberStepper from '@/components/NumberStepper.vue'
 import type { LayerEffect, StrokeEffect, StrokePosition } from '@shared/effects/types'
 import { DEFAULT_STROKE } from '@shared/effects/types'
 import { strokeOf, withStroke } from '@shared/effects/stroke'
@@ -80,7 +72,11 @@ const props = defineProps<{
   mixed?: boolean
 }>()
 
-const emit = defineEmits<{ patch: [effects: LayerEffect[]] }>()
+const emit = defineEmits<{
+  /** A step of a gesture still under way; nothing for history yet. */
+  preview: [effects: LayerEffect[]]
+  patch: [effects: LayerEffect[]]
+}>()
 
 const toggleEl = useTemplateRef<HTMLInputElement>('toggleEl')
 
@@ -99,18 +95,21 @@ function onToggle(e: Event) {
   commit((e.target as HTMLInputElement).checked ? { ...DEFAULT_STROKE } : null)
 }
 
-function onWidth(e: Event) {
-  if (stroke.value === null) return
-  const raw = (e.target as HTMLInputElement).valueAsNumber
-  if (!Number.isFinite(raw) || raw <= 0 || raw === stroke.value.width) return
-  commit({ ...stroke.value, width: raw })
+function onWidth(width: number) {
+  if (stroke.value === null || width <= 0 || width === stroke.value.width) return
+  commit({ ...stroke.value, width })
 }
 
-function onColor(e: Event) {
+function onColorInput(color: string) {
   if (stroke.value === null) return
-  const v = (e.target as HTMLInputElement).value
-  if (v === stroke.value.color) return
-  commit({ ...stroke.value, color: v })
+  emit('preview', withStroke(props.effects, { ...stroke.value, color }))
+}
+
+// No same-colour guard: after a live drag the node already reads as the new
+// colour, and the commit is still owed to close the gesture.
+function onColor(color: string) {
+  if (stroke.value === null) return
+  commit({ ...stroke.value, color })
 }
 
 function onPosition(v: unknown) {

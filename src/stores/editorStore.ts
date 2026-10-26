@@ -2371,6 +2371,30 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
+  type EffectsState = { pageId: string; id: string; effects: LayerEffect[] }[]
+
+  function effectsOf(targets: readonly AppearanceTarget[]): EffectsState {
+    return targets.map(({ pageId, entry }) => ({
+      pageId,
+      id: entry.id,
+      effects: cloneEffects(entry.effects),
+    }))
+  }
+
+  /** What the nodes held before a gesture started previewing, until it commits. */
+  let previewedFrom: EffectsState | null = null
+
+  /**
+   * Writes straight through, outside history, while a gesture is still moving —
+   * the commit that ends it is the one step undo sees, back to where it began.
+   */
+  function previewEffects(targets: readonly AppearanceTarget[], effects: readonly LayerEffect[]) {
+    const project = useProjectStore()
+    previewedFrom ??= effectsOf(targets)
+    for (const { pageId, entry } of targets)
+      project.setLayerEffects(pageId, entry.id, cloneEffects(effects))
+  }
+
   /**
    * The whole list at once rather than one effect at a time. What a node
    * carries is an ordered set — turning the stroke off is the same write as
@@ -2382,14 +2406,17 @@ export const useEditorStore = defineStore('editor', () => {
     effects: readonly LayerEffect[],
   ) {
     const project = useProjectStore()
+    const previewed = previewedFrom
+    previewedFrom = null
     if (targets.length === 0) return
-    const before = targets.map(({ pageId, entry }) => ({
-      pageId,
-      id: entry.id,
-      effects: cloneEffects(entry.effects),
-    }))
+    const sameNodes =
+      previewed !== null &&
+      previewed.length === targets.length &&
+      previewed.every((s, at) => s.id === targets[at]!.entry.id)
+    const before = sameNodes ? previewed : effectsOf(targets)
     const after = before.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
-    const write = (states: typeof before) => {
+    if (JSON.stringify(before) === JSON.stringify(after)) return
+    const write = (states: EffectsState) => {
       for (const { pageId, id, effects: value } of states)
         project.setLayerEffects(pageId, id, value)
     }
@@ -2773,6 +2800,7 @@ export const useEditorStore = defineStore('editor', () => {
     appearanceKind,
     cmdApplyStyle,
     cmdApplyEffects,
+    previewEffects,
     cmdReorderMembers,
     cmdPaintTags,
     paintTags,

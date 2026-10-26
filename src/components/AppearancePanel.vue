@@ -9,22 +9,22 @@
         其中有不在目前頁面的物件
       </p>
 
-      <CommonAppearance :targets="targets" />
+      <template v-if="section === 'look'">
+        <CommonAppearance :targets="targets" />
 
-      <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[10px] text-muted-foreground/60">
-        選取的種類不同,只有共通的能一起調
-      </div>
+        <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[10px] text-muted-foreground/60">
+          選取的種類不同,只有共通的能一起調
+        </div>
 
-      <template v-else-if="kind === 'text'">
-        <div class="mt-2 border-t border-border pt-2">
+        <div v-else-if="kind === 'text'" class="mt-2 border-t border-border pt-2">
           <TextAppearance :targets="textTargets" />
         </div>
       </template>
 
-      <template v-else-if="kind === 'raster'">
-        <div class="mt-2 border-t border-border pt-2">
-          <LayerAppearance :targets="rasterTargets" />
-        </div>
+      <template v-else>
+        <EffectsAppearance v-if="kind === 'text'" :targets="textTargets" />
+        <EffectsAppearance v-else-if="kind === 'raster'" :targets="rasterTargets" />
+        <p v-else class="px-0.5 text-[10px] text-muted-foreground/60">這個選取沒有可以調的效果</p>
       </template>
     </template>
 
@@ -36,9 +36,9 @@
 import { computed } from 'vue'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import CommonAppearance from '@/components/appearance/CommonAppearance.vue'
-import LayerAppearance from '@/components/appearance/LayerAppearance.vue'
+import EffectsAppearance from '@/components/appearance/EffectsAppearance.vue'
 import TextAppearance from '@/components/appearance/TextAppearance.vue'
-import type { AppearanceTarget } from '@/lib/appearance'
+import type { AppearanceSection, AppearanceTarget } from '@/lib/appearance'
 import { scopeText } from '@/lib/appearanceText'
 import { useEditorStore } from '@/stores/editorStore'
 
@@ -61,6 +61,8 @@ import { useEditorStore } from '@/stores/editorStore'
  * half typed leaves the caret where it was, rather than rebuilding the field
  * under the hand.
  */
+defineProps<{ section: AppearanceSection }>()
+
 const editor = useEditorStore()
 
 const targets = computed(() => editor.selectedNodes())

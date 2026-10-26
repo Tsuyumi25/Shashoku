@@ -71,7 +71,12 @@ export default defineConfig({
         ...sharedAlias,
       },
     },
-    plugins: [tailwindcss(), vue()],
+    plugins: [
+      tailwindcss(),
+      vue({
+        template: { compilerOptions: { isCustomElement: (tag) => tag === "hex-color-picker" } },
+      }),
+    ],
     build: {
       outDir: "out/renderer",
       rollupOptions: { input: "index.html" },

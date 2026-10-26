@@ -26,12 +26,6 @@
       :text="representativeText"
       @patch="onPatch"
     />
-
-    <div class="col-span-2 mt-1 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
-      效果
-    </div>
-
-    <StrokeEditor :effects="representativeEffects" :mixed="effectsMixed" @patch="onEffects" />
   </div>
 </template>
 
@@ -45,7 +39,6 @@ import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
 import { shownLinesOf } from '@shared/page/units'
 import StyleEditor from '@/components/StyleEditor.vue'
-import StrokeEditor from '@/components/appearance/StrokeEditor.vue'
 import { useStyleRecommendations } from '@/composables/useStyleRecommendations'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
@@ -101,15 +94,7 @@ const representativeText = computed(() => {
   return first && page ? shownLinesOf(page, first.entry).join('\n') : ''
 })
 
-const effectsMixed = computed(
-  () => sharedValue(props.targets.map((t) => t.entry), 'effects').kind === 'many',
-)
-
 function onPatch(patch: Partial<TextStyle>) {
   editor.cmdApplyStyle(props.targets, patch)
-}
-
-function onEffects(effects: LayerEffect[]) {
-  editor.cmdApplyEffects(props.targets, effects)
 }
 </script>
