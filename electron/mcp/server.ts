@@ -16,9 +16,12 @@ import {
 } from "@shared/mcp/render";
 import type {
   ChooseOutcome,
+  ChooseParams,
   PageTexts,
   ProposeOutcome,
+  ProposeParams,
   WithdrawOutcome,
+  WithdrawParams,
   WriteResult,
 } from "@shared/mcp/types";
 
@@ -107,9 +110,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
       try {
         const result = await askRenderer<WriteResult<ProposeOutcome>>("propose_translations", {
           pageId: page_id,
-          items: items.map((i) => ({ objectId: i.object_id, lines: i.lines })),
+          items: items.map((i) => ({ unitId: i.object_id, lines: i.lines })),
           source: getSource(),
-        });
+        } satisfies ProposeParams);
         return { content: [{ type: "text", text: renderProposeResult(result) }] };
       } catch (err) {
         return toolError(err);
@@ -138,9 +141,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
       try {
         const result = await askRenderer<WriteResult<WithdrawOutcome>>("withdraw_translation", {
           pageId: page_id,
-          items: items.map((i) => ({ objectId: i.object_id, translationId: i.translation_id })),
+          items: items.map((i) => ({ unitId: i.object_id, translationId: i.translation_id })),
           source: getSource(),
-        });
+        } satisfies WithdrawParams);
         return { content: [{ type: "text", text: renderWithdrawResult(result) }] };
       } catch (err) {
         return toolError(err);
@@ -168,8 +171,8 @@ function buildServer(getSource: () => string | undefined): McpServer {
       try {
         const result = await askRenderer<WriteResult<ChooseOutcome>>("choose_translation", {
           pageId: page_id,
-          items: items.map((i) => ({ objectId: i.object_id, translationId: i.translation_id })),
-        });
+          items: items.map((i) => ({ unitId: i.object_id, translationId: i.translation_id })),
+        } satisfies ChooseParams);
         return { content: [{ type: "text", text: renderChooseResult(result) }] };
       } catch (err) {
         return toolError(err);
