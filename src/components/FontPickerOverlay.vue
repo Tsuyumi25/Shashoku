@@ -188,6 +188,8 @@
             v-for="faces in rows[vrow.index]"
             :key="faces[0]!.family"
             class="font-cell group/cell"
+            @mouseenter="hovered = faces"
+            @mouseleave="hovered = null"
           >
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
@@ -268,15 +270,6 @@
               <div class="action-row">
                 <button
                   type="button"
-                  class="cell-action"
-                  title="按住不放：畫布上選取的文字暫時套這個字款預覽"
-                  @mouseenter="picker.startPreview(shownFace(faces))"
-                  @mouseleave="picker.endPreview()"
-                >
-                  預覽
-                </button>
-                <button
-                  type="button"
                   class="cell-action primary"
                   :disabled="targets.length === 0"
                   :title="targets.length === 0 ? '先選一個文字物件' : undefined"
@@ -315,7 +308,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Star, X } from '@lucide/vue'
@@ -617,6 +610,17 @@ const currentFamily = computed(() =>
 )
 const fillColor = computed(() => lead.value?.body.style.color ?? '#000000')
 const stroke = computed(() => (lead.value ? engineStrokeFor(lead.value.effects) : undefined))
+
+/**
+ * The family under the pointer. Being over a cell is the preview: the canvas
+ * draws the selection in that cell's face, and leaving every cell restores it.
+ */
+const hovered = ref<FontEntry[] | null>(null)
+watch(
+  () => (hovered.value ? shownFace(hovered.value) : null),
+  (face) => (face ? picker.startPreview(face) : picker.endPreview()),
+)
+onBeforeUnmount(() => picker.endPreview())
 
 /** Writes the face, and the weight tried beside it, to every selected text object. */
 function choose(face: FontEntry) {
