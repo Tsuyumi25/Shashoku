@@ -32,7 +32,7 @@ export function useSelectionPixels() {
   const selection = useSelectionStore()
   const preferences = usePreferencesStore()
   const raster = useRasterStore()
-  const { target, refuse } = useRasterTarget()
+  const { target, refuse, refuseHidden } = useRasterTarget()
 
   const hasArea = computed(() => selection.bounds !== null && !isEmptyRect(selection.bounds))
 
@@ -127,7 +127,7 @@ export function useSelectionPixels() {
     const entry = target.value
     if (page === null || bounds === null || isEmptyRect(bounds) || entry === null) return
     const file = project.pageById(page)
-    if (!file || refuse(page, entry)) return
+    if (!file || refuseHidden(page, entry)) return
     if (entry.w <= 0 || entry.h <= 0) return
     const mask = selection.maskPatchOf(page, bounds)
     if (mask === null) return

@@ -152,8 +152,8 @@ describe('erasing what is inside the selection', () => {
   })
 })
 
-// The two exits differ in what they ask of storage — a lift only reads its
-// source — but they agree entirely on who is allowed near the layer.
+// A lift only reads its source, so a lock does not stop it; a hidden layer
+// still does, as it does the erase.
 describe('lifting what is inside the selection', () => {
   it('goes with the selection rather than the whole layer', () => {
     const { editor } = openWith(raster('r'))
@@ -165,14 +165,14 @@ describe('lifting what is inside the selection', () => {
     expect(pixels.liftsSelection.value).toBe(true)
   })
 
-  it('refuses the same layers the erase does', async () => {
-    const { editor } = openWith(raster('r', { name: '底圖', locked: true }))
+  it('refuses a hidden layer, as the erase does', async () => {
+    const { editor } = openWith(raster('r', { name: '塗白', visible: false }))
     selectSomething()
     editor.selectOnly('r')
 
     await useSelectionPixels().liftSelection()
 
-    expect(useNoticeStore().notice?.text).toBe('「底圖」鎖定中，改不了')
+    expect(useNoticeStore().notice?.text).toBe('「塗白」是隱藏的，改不了')
     expect(editor.canRedo).toBe(false)
   })
 

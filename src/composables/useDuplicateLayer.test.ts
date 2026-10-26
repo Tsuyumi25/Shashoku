@@ -4,6 +4,7 @@ import { blankBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { projectionOf } from '@shared/page/units'
+import { isLocked } from '@shared/page/tree'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMergeLayers } from '@/composables/useMergeLayers'
@@ -241,5 +242,66 @@ describe('copying a block of lettering', () => {
 
     expect(unit(project).source.members).toHaveLength(2)
     expect(unit(project).translation.members).toEqual(['t'])
+  })
+})
+
+describe('copying a locked layer', () => {
+  it('makes a copy that is not locked, and leaves the original locked', async () => {
+    const { project, merge } = open(['轟隆'])
+    project.entryById('t')!.locked = true
+
+    await merge.duplicateLayer()
+
+    const copy = lettering(project)[1]
+    expect(project.entryById(copy)?.locked).toBe(false)
+    expect(project.entryById('t')?.locked).toBe(true)
+  })
+
+  function folded(locks: { folder: boolean; child: boolean }) {
+    const page = useProjectStore().pageById(PAGE)!.page
+    page.layers[0] = {
+      kind: 'group',
+      id: 'g',
+      name: 'g',
+      visible: true,
+      locked: locks.folder,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      children: [{ ...page.layers[0], locked: locks.child }],
+    }
+    return page
+  }
+
+  it('keeps a locked folder locked in its copy, with everything inside it', async () => {
+    const { project, editor, merge } = open(['轟隆'])
+    const page = folded({ folder: true, child: false })
+    editor.selectOnly('g')
+
+    await merge.duplicateLayer()
+
+    expect(page.layers[1].locked).toBe(true)
+    expect(isLocked(page.layers, lettering(project)[1])).toBe(true)
+  })
+
+  it('keeps a locked layer locked when its unlocked folder is what gets copied', async () => {
+    const { project, editor, merge } = open(['轟隆'])
+    folded({ folder: false, child: true })
+    editor.selectOnly('g')
+
+    await merge.duplicateLayer()
+
+    expect(project.entryById(lettering(project)[1])?.locked).toBe(true)
+  })
+
+  it('unlocks a locked layer copied inside a locked folder, which still locks it from above', async () => {
+    const { project, merge } = open(['轟隆'])
+    const page = folded({ folder: true, child: true })
+
+    await merge.duplicateLayer()
+
+    const copy = lettering(project)[1]
+    expect(project.entryById(copy)?.locked).toBe(false)
+    expect(isLocked(page.layers, copy)).toBe(true)
   })
 })

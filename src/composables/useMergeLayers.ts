@@ -244,19 +244,20 @@ export function useMergeLayers() {
     const open = openPage()
     const id = editor.cursorId
     if (open === null || id === null) return false
-    return pathOf(open.layers, id) !== null && !editor.isLayerLocked(id)
+    return pathOf(open.layers, id) !== null
   })
 
   async function duplicateLayer(): Promise<void> {
     const open = openPage()
     const id = editor.cursorId
-    if (open === null || id === null || editor.isLayerLocked(id)) return
+    if (open === null || id === null) return
     const path = pathOf(open.layers, id)
     const source = project.entryById(id)
     if (path === null || source === undefined) return
 
     const clone: Clone = { entry: source, files: [], texts: [] }
     const copy = cloneEntry(source, clone)
+    if (copy.kind !== 'group') copy.locked = false
 
     if (clone.files.length > 0) {
       await project.flush()

@@ -40,6 +40,11 @@ export function useRasterTarget() {
       notices.say(`「${entry.name}」鎖定中，改不了`)
       return true
     }
+    return refuseHidden(pageId, entry)
+  }
+
+  function refuseHidden(pageId: string, entry: RasterLayerEntry): boolean {
+    const layers = project.pageById(pageId)?.page.layers ?? []
     if (isHidden(layers, entry.id)) {
       notices.say(`「${entry.name}」是隱藏的，改不了`)
       return true
@@ -47,5 +52,5 @@ export function useRasterTarget() {
     return false
   }
 
-  return { target, refuse }
+  return { target, refuse, refuseHidden }
 }
