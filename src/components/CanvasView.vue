@@ -294,9 +294,8 @@ import CanvasMenu from '@/components/CanvasMenu.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
-import { useFontPicker } from '@/composables/useFontPicker'
+import { previewedStyle, useFontPicker } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
-import type { TextStyle } from '@shared/text-style/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
@@ -432,23 +431,6 @@ const ocrPointedBox = computed(() => {
  * this component on every frame, does not hand each label a new style object
  * and make it look like the text changed.
  */
-/**
- * Trying a face on the page without writing it: while the picker's 預覽 is
- * held, the selection draws with that face and nothing else changes. Reading
- * the preview here keeps the swap inside the memoized style objects, so
- * letting go restores the page by mere recomputation.
- */
-function previewedStyle(id: string, style: TextStyle): TextStyle {
-  const face = fontPicker.previewFace.value
-  if (face === null || !editor.isSelected(id)) return style
-  return {
-    ...style,
-    fontFamily: face.family,
-    fontFace: face.postscriptName,
-    fontStyleName: face.style,
-  }
-}
-
 const objects = computed(() => {
   const file = currentFile.value
   if (!file) return []
@@ -469,7 +451,7 @@ const objects = computed(() => {
     const tags = placeOfBlock(file.page, label.id)?.unit.tags ?? []
     const look = reference
       ? sourceLook(body.style)
-      : { style: previewedStyle(label.id, body.style), effects: label.effects }
+      : { style: previewedStyle(body.style, editor.isSelected(label.id)), effects: label.effects }
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),

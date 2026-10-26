@@ -1,6 +1,7 @@
 import { ref, shallowRef } from 'vue'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
+import type { TextStyle } from '@shared/text-style/types'
 
 export interface FontPickerRequest {
   /** Current family; the grid scrolls it into view so the user starts from it. */
@@ -49,6 +50,21 @@ const request = shallowRef<FontPickerRequest>({ current: '', fillColor: '#000000
  * store — letting go restores everything, because nothing was written.
  */
 const previewFace = shallowRef<FontEntry | null>(null)
+
+/**
+ * The style an object is drawn and measured with while a face is being tried.
+ * Both the frames and the run canvas read it, so the box and the letters agree.
+ */
+export function previewedStyle(style: TextStyle, selected: boolean): TextStyle {
+  const face = previewFace.value
+  if (face === null || !selected) return style
+  return {
+    ...style,
+    fontFamily: face.family,
+    fontFace: face.postscriptName,
+    fontStyleName: face.style,
+  }
+}
 
 let resolver: ((result: FontPickerResult | null) => void) | null = null
 

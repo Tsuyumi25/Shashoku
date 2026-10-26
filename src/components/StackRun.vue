@@ -7,6 +7,7 @@ import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownLinesOf } from '@shared/page/units'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
+import { previewedStyle } from '@/composables/useFontPicker'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
@@ -182,7 +183,7 @@ const drawnTexts = computed(() => {
     const body = entry.body
     const look = reference
       ? sourceLook(body.style)
-      : { style: body.style, effects: entry.effects }
+      : { style: previewedStyle(body.style, editor.isSelected(entry.id)), effects: entry.effects }
     out.set(
       entry.id,
       drawnLabel(
