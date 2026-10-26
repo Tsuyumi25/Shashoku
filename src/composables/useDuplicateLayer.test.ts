@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { blankBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { projectionOf } from '@shared/page/units'
+import { projectionOf, shownLinesOf } from '@shared/page/units'
 import { isLocked } from '@shared/page/tree'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -51,197 +51,207 @@ function open(words: string[]) {
   return { project, editor, merge: useMergeLayers() }
 }
 
-const unit = (project: ReturnType<typeof useProjectStore>) =>
-  project.pageById(PAGE)!.page.translationUnits[0]
+type Project = ReturnType<typeof useProjectStore>
 
-const lettering = (project: ReturnType<typeof useProjectStore>) =>
-  unit(project).translation.members
+const page = (project: Project) => project.pageById(PAGE)!.page
+
+const unit = (project: Project) => page(project).translationUnits[0]
+
+const lettering = (project: Project) => unit(project).translation.members
+
+/** The translation the copy made: the one that is not `u`. */
+const twin = (project: Project) => page(project).translationUnits.find((u) => u.id !== 'u')!
+
+/** The block the copy of `t` is. */
+const copyOfT = (project: Project) => twin(project).translation.members[0]
 
 beforeEach(() => setActivePinia(createPinia()))
 
 /**
- * ⭐ The one way there is, today, to end up with a translation set in more than
- * one block — so what it does with the copy is what says whether the unit
- * exists at all outside the schema.
+ * ⭐ A copy is a second translation, whole: both sides, its own proposals, read
+ * right after the one it came from.
  */
 describe('copying a block of lettering', () => {
-  it('puts the copy in the same translation, right after the one it came from', async () => {
+  it('makes a second translation, read right after the original', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
 
-    expect(lettering(project)).toHaveLength(2)
-    expect(lettering(project)[0]).toBe('t')
+    expect(page(project).translationUnits).toHaveLength(2)
+    expect(page(project).readingOrder).toEqual(['u', twin(project).id])
+    expect(lettering(project)).toEqual(['t'])
   })
 
-  /**
-   * ⚠️ The fault this pins. A copy that joined no translation would be drawn on
-   * top of its original, absent from the label list, and named by nothing — so
-   * the whole act would read as having done nothing at all.
-   */
-  it('leaves no block the page cannot say anything about', () => {
+  /** Half a translation is a row the list cannot draw. */
+  it('copies the artwork side along with it', async () => {
     const { project, merge } = open(['轟隆'])
 
-    void merge.duplicateLayer()
+    await merge.duplicateLayer()
+
+    const [source] = twin(project).source.members
+    expect(source).not.toBe('s')
+    expect(project.blockById(PAGE, source!)?.side).toBe('source')
+  })
+
+  it('leaves no block the page cannot say anything about', async () => {
+    const { project, merge } = open(['轟隆'])
+
+    await merge.duplicateLayer()
 
     const claimed = new Set(
-      unit(project).source.members.concat(unit(project).translation.members),
+      page(project).translationUnits.flatMap((u) => [...u.source.members, ...u.translation.members]),
     )
-    for (const layer of project.pageById(PAGE)!.page.layers) {
+    for (const layer of page(project).layers) {
       expect(claimed.has(layer.id)).toBe(true)
     }
   })
 
-  /** One piece of content, however many pieces of lettering say it. */
-  it('does not make the page have one more thing to read', async () => {
-    const { project, merge } = open(['轟隆'])
+  /**
+   * ⚠️ The fault this pins. The words a chosen proposal gives live on the
+   * translation, not the block, so copying the block alone left a copy that
+   * said nothing.
+   */
+  it('says what the original says when its words come from a chosen proposal', async () => {
+    const { project, merge } = open([])
+    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
+    unit(project).chosen = 'c'
 
     await merge.duplicateLayer()
 
-    expect(project.pageById(PAGE)!.page.readingOrder).toEqual(['u'])
-    expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(1)
+    const copy = project.blockById(PAGE, copyOfT(project))!
+    expect(shownLinesOf(page(project), copy)).toEqual(['好痛！'])
+    expect(twin(project).chosen).not.toBe('c')
   })
 
-  /** The copy says what the original says, so the row reads it twice over. */
-  it('reads as both blocks, with nothing between them', async () => {
-    const { project, merge } = open(['轟隆'])
+  it('gives it proposals of its own, so retyping one leaves the other alone', async () => {
+    const { project, merge } = open([])
+    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
+    unit(project).chosen = 'c'
 
     await merge.duplicateLayer()
+    project.updateLabelText(PAGE, copyOfT(project), '不痛')
 
-    const page = project.pageById(PAGE)!.page
-    expect(projectionOf(page.layers, unit(project), 'translation')).toBe('轟隆轟隆')
+    expect(shownLinesOf(page(project), project.blockById(PAGE, 't')!)).toEqual(['好痛！'])
   })
 
-  it('takes the copy back out of the translation when it is undone', async () => {
+  it('takes the whole second translation back out when it is undone', async () => {
     const { project, editor, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
     editor.undo()
 
-    expect(lettering(project)).toEqual(['t'])
-    expect(project.pageById(PAGE)!.page.layers.map((l) => l.id)).toEqual(['t', 's'])
+    expect(page(project).translationUnits.map((u) => u.id)).toEqual(['u'])
+    expect(page(project).readingOrder).toEqual(['u'])
+    expect(page(project).layers.map((l) => l.id)).toEqual(['t', 's'])
   })
 
-  it('puts it back in the same place on redo', async () => {
+  it('puts it back the same on redo', async () => {
     const { project, editor, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
-    const copy = lettering(project)[1]
+    const made = JSON.parse(JSON.stringify(twin(project)))
     editor.undo()
     editor.redo()
 
-    expect(lettering(project)).toEqual(['t', copy])
+    expect(twin(project)).toEqual(made)
+    expect(page(project).readingOrder).toEqual(['u', made.id])
   })
 
   /**
-   * ⚠️ What a shallow copy costs, and it is the whole feature: two entries
-   * handed one body are one object wearing two ids. Dragging either moves both,
-   * so the page looks exactly as it did and the act reads as having failed.
+   * ⚠️ What a shallow copy costs: two entries handed one body are one object
+   * wearing two ids, and dragging either moves both.
    */
   it('gives the copy a body of its own, so moving it leaves the original where it was', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
-    const copy = lettering(project)[1]
-    project.moveLabel(PAGE, copy, 900, 40)
+    project.moveLabel(PAGE, copyOfT(project), 900, 40)
 
-    expect(project.blockById(PAGE, copy)!.body).toMatchObject({ x: 900, y: 40 })
+    expect(project.blockById(PAGE, copyOfT(project))!.body).toMatchObject({ x: 900, y: 40 })
     expect(project.blockById(PAGE, 't')!.body).toMatchObject({ x: 0, y: 0 })
-  })
-
-  it('gives it words of its own, so retyping one leaves the other alone', async () => {
-    const { project, merge } = open(['轟隆'])
-
-    await merge.duplicateLayer()
-    project.updateLabelText(PAGE, lettering(project)[1], '隆')
-
-    expect(project.blockById(PAGE, 't')!.body.lines).toEqual(['轟隆'])
   })
 
   it('gives it a style of its own, so restyling one leaves the other alone', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
-    const copy = lettering(project)[1]
+    const copy = copyOfT(project)
     project.setLabelStyle(PAGE, copy, { ...project.blockById(PAGE, copy)!.body.style, fontSizePx: 96 })
 
     expect(project.blockById(PAGE, 't')!.body.style.fontSizePx).not.toBe(96)
   })
 
-  /**
-   * ⭐ What being a row rather than a decoration is for. The blocks are the
-   * order the side is read in, so dragging one changes what the page says —
-   * which is why it is a step of history and not a write through.
-   */
-  describe('and then dragging one of the blocks', () => {
-    it('reads the side in the order the blocks were left in', async () => {
-      const { project, editor, merge } = open(['轟'])
-      await merge.duplicateLayer()
-      const copy = lettering(project)[1]
-      project.updateLabelText(PAGE, copy, '隆')
-
-      editor.cmdReorderMembers(PAGE, 'u', 'translation', [copy, 't'])
-
-      const page = project.pageById(PAGE)!.page
-      expect(projectionOf(page.layers, unit(project), 'translation')).toBe('隆轟')
-    })
-
-    it('is one step of history', async () => {
-      const { project, editor, merge } = open(['轟隆'])
-      await merge.duplicateLayer()
-      const copy = lettering(project)[1]
-
-      editor.cmdReorderMembers(PAGE, 'u', 'translation', [copy, 't'])
-      editor.undo()
-
-      expect(lettering(project)).toEqual(['t', copy])
-    })
-
-    it('records nothing for an order that is already the one it holds', async () => {
-      const { project, editor, merge } = open(['轟隆'])
-      await merge.duplicateLayer()
-      const held = [...lettering(project)]
-      const depth = editor.canUndo
-
-      editor.cmdReorderMembers(PAGE, 'u', 'translation', held)
-
-      expect(editor.canUndo).toBe(depth)
-    })
-
-    /** ⚠️ A reorder that also added or dropped one would be losing lettering. */
-    it('refuses a list that is not the blocks the side holds', async () => {
-      const { project, merge } = open(['轟隆'])
-      await merge.duplicateLayer()
-      const held = [...lettering(project)]
-
-      expect(project.reorderMembers(PAGE, 'u', 'translation', [held[0]])).toBe(false)
-      expect(project.reorderMembers(PAGE, 'u', 'translation', [held[0], held[0]])).toBe(false)
-      expect(project.reorderMembers(PAGE, 'u', 'translation', [held[0], 'stray'])).toBe(false)
-      expect(lettering(project)).toEqual(held)
-    })
-
-    /** A seam is a fact about the seam, so only the order moves. */
-    it('leaves the gap between the blocks where it was written', async () => {
-      const { project, merge } = open(['轟'])
-      await merge.duplicateLayer()
-      const [first, second] = lettering(project)
-      unit(project).translation.separators = ['／']
-
-      project.reorderMembers(PAGE, 'u', 'translation', [second, first])
-
-      expect(unit(project).translation.separators).toEqual(['／'])
-    })
-  })
-
-  /** The artwork's own words copy the same way, into the side they belong to. */
-  it('keeps a copied source block on the source side', async () => {
+  /** The artwork's own words copy the same way: a second translation, artwork first. */
+  it('copies a whole translation from its source block too', async () => {
     const { project, editor, merge } = open(['轟隆'])
     editor.selectOnly('s')
 
     await merge.duplicateLayer()
 
-    expect(unit(project).source.members).toHaveLength(2)
-    expect(unit(project).translation.members).toEqual(['t'])
+    expect(unit(project).source.members).toEqual(['s'])
+    expect(twin(project).translation.members).toHaveLength(1)
+  })
+})
+
+/**
+ * ⭐ What being a row rather than a decoration is for. The blocks are the order
+ * the side is read in, so dragging one changes what the page says — which is
+ * why it is a step of history and not a write through.
+ */
+describe('dragging one block of a translation set in two', () => {
+  function two(first: string, second: string) {
+    const opened = open([first])
+    const extra = blankBlock('t2', 'translation', DEFAULT_TEXT_STYLE)
+    extra.body.lines = [second]
+    page(opened.project).layers.unshift(extra)
+    unit(opened.project).translation = { members: ['t', 't2'], separators: [''] }
+    return opened
+  }
+
+  it('reads the side in the order the blocks were left in', () => {
+    const { project, editor } = two('轟', '隆')
+
+    editor.cmdReorderMembers(PAGE, 'u', 'translation', ['t2', 't'])
+
+    expect(projectionOf(page(project).layers, unit(project), 'translation')).toBe('隆轟')
+  })
+
+  it('is one step of history', () => {
+    const { project, editor } = two('轟', '隆')
+
+    editor.cmdReorderMembers(PAGE, 'u', 'translation', ['t2', 't'])
+    editor.undo()
+
+    expect(lettering(project)).toEqual(['t', 't2'])
+  })
+
+  it('records nothing for an order that is already the one it holds', () => {
+    const { editor } = two('轟', '隆')
+    const depth = editor.canUndo
+
+    editor.cmdReorderMembers(PAGE, 'u', 'translation', ['t', 't2'])
+
+    expect(editor.canUndo).toBe(depth)
+  })
+
+  /** ⚠️ A reorder that also added or dropped one would be losing lettering. */
+  it('refuses a list that is not the blocks the side holds', () => {
+    const { project } = two('轟', '隆')
+
+    expect(project.reorderMembers(PAGE, 'u', 'translation', ['t'])).toBe(false)
+    expect(project.reorderMembers(PAGE, 'u', 'translation', ['t', 't'])).toBe(false)
+    expect(project.reorderMembers(PAGE, 'u', 'translation', ['t', 'stray'])).toBe(false)
+    expect(lettering(project)).toEqual(['t', 't2'])
+  })
+
+  /** A seam is a fact about the seam, so only the order moves. */
+  it('leaves the gap between the blocks where it was written', () => {
+    const { project } = two('轟', '隆')
+    unit(project).translation.separators = ['／']
+
+    project.reorderMembers(PAGE, 'u', 'translation', ['t2', 't'])
+
+    expect(unit(project).translation.separators).toEqual(['／'])
   })
 })
 
@@ -252,8 +262,7 @@ describe('copying a locked layer', () => {
 
     await merge.duplicateLayer()
 
-    const copy = lettering(project)[1]
-    expect(project.entryById(copy)?.locked).toBe(false)
+    expect(project.entryById(copyOfT(project))?.locked).toBe(false)
     expect(project.entryById('t')?.locked).toBe(true)
   })
 
@@ -275,13 +284,13 @@ describe('copying a locked layer', () => {
 
   it('keeps a locked folder locked in its copy, with everything inside it', async () => {
     const { project, editor, merge } = open(['轟隆'])
-    const page = folded({ folder: true, child: false })
+    const layers = folded({ folder: true, child: false })
     editor.selectOnly('g')
 
     await merge.duplicateLayer()
 
-    expect(page.layers[1].locked).toBe(true)
-    expect(isLocked(page.layers, lettering(project)[1])).toBe(true)
+    expect(layers.layers[1].locked).toBe(true)
+    expect(isLocked(layers.layers, copyOfT(project))).toBe(true)
   })
 
   it('keeps a locked layer locked when its unlocked folder is what gets copied', async () => {
@@ -291,17 +300,17 @@ describe('copying a locked layer', () => {
 
     await merge.duplicateLayer()
 
-    expect(project.entryById(lettering(project)[1])?.locked).toBe(true)
+    expect(project.entryById(copyOfT(project))?.locked).toBe(true)
   })
 
   it('unlocks a locked layer copied inside a locked folder, which still locks it from above', async () => {
     const { project, merge } = open(['轟隆'])
-    const page = folded({ folder: true, child: true })
+    const layers = folded({ folder: true, child: true })
 
     await merge.duplicateLayer()
 
-    const copy = lettering(project)[1]
+    const copy = copyOfT(project)
     expect(project.entryById(copy)?.locked).toBe(false)
-    expect(isLocked(page.layers, copy)).toBe(true)
+    expect(isLocked(layers.layers, copy)).toBe(true)
   })
 })

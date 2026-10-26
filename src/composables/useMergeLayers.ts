@@ -1,5 +1,11 @@
 import { computed } from 'vue'
-import type { LayerEntry, RasterLayerEntry } from '@shared/page/types'
+import type {
+  LayerEntry,
+  RasterLayerEntry,
+  TextLayerEntry,
+  TranslationUnit,
+} from '@shared/page/types'
+import { unitOfBlock } from '@shared/page/units'
 import { generateId } from '@shared/page/schema'
 import { cloneEffects } from '@shared/effects/clone'
 import { pageStack } from '@shared/page/stack'
@@ -22,7 +28,7 @@ import {
 import { effectedFrame } from '@/lib/layerEffects'
 import { EMPTY_RECT, clampToPage, isEmptyRect, unionRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
-import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
+import { useProjectStore, type RemovedEntry, type RemovedTranslation } from '@/stores/projectStore'
 
 /**
  * Merging layers, and duplicating one.
@@ -247,6 +253,56 @@ export function useMergeLayers() {
     return pathOf(open.layers, id) !== null
   })
 
+  /**
+   * A whole translation copied, both sides: every block it holds gets a twin and
+   * the twins make a new unit of their own, read right after the original.
+   *
+   * ⭐ A copy is another translation, independent of the first. The words come
+   * with it — the proposals and which one is chosen are the unit's, not the
+   * block's, so copying only the block would leave a copy with nothing to say.
+   */
+  function copyUnits(
+    page: string,
+    clone: Clone,
+  ): { units: Array<{ of: string; unit: TranslationUnit }>; extra: TextLayerEntry[] } {
+    const file = project.pageById(page)
+    if (!file) return { units: [], extra: [] }
+    const twin = new Map(clone.texts)
+    const units: Array<{ of: string; unit: TranslationUnit }> = []
+    const extra: TextLayerEntry[] = []
+    for (const [was] of clone.texts) {
+      const unit = unitOfBlock(file.page, was)
+      if (!unit || units.some((u) => u.of === unit.id)) continue
+      for (const id of [...unit.source.members, ...unit.translation.members]) {
+        if (twin.has(id)) continue
+        const block = project.blockById(page, id)
+        if (!block) continue
+        const copy = cloneEntry(block, clone) as TextLayerEntry
+        twin.set(id, copy.id)
+        extra.push(copy)
+      }
+      const chosen = new Map(unit.candidates.map((c) => [c.id, generateId()]))
+      const side = (s: TranslationUnit['source']) => ({
+        members: s.members.flatMap((id) => twin.get(id) ?? []),
+        separators: [...s.separators],
+      })
+      const copy: TranslationUnit = {
+        id: generateId(),
+        tags: [...unit.tags],
+        source: side(unit.source),
+        translation: side(unit.translation),
+        candidates: unit.candidates.map((c) => ({
+          ...c,
+          id: chosen.get(c.id)!,
+          pieces: c.pieces.map((piece) => [...piece]),
+        })),
+        chosen: unit.chosen === null ? null : (chosen.get(unit.chosen) ?? null),
+      }
+      units.push({ of: unit.id, unit: copy })
+    }
+    return { units, extra }
+  }
+
   async function duplicateLayer(): Promise<void> {
     const open = openPage()
     const id = editor.cursorId
@@ -258,6 +314,7 @@ export function useMergeLayers() {
     const clone: Clone = { entry: source, files: [], texts: [] }
     const copy = cloneEntry(source, clone)
     if (copy.kind !== 'group') copy.locked = false
+    const { units, extra } = copyUnits(open.page, clone)
 
     if (clone.files.length > 0) {
       await project.flush()
@@ -269,24 +326,49 @@ export function useMergeLayers() {
 
     // Directly above the original, which is where every panel puts a copy.
     const at = [...path.slice(0, -1), path[path.length - 1] + 1]
+    const originals = new Map(clone.texts.map(([was, now]) => [now, was]))
 
     let removed: RemovedEntry | null = null
+    let leftovers: RemovedTranslation[] = []
     editor.pushCommand({
       label: `duplicate-layer ${copy.id}`,
       do: () => {
         if (removed === null) {
           project.addLayer(open.page, copy, at)
-          // ⭐ Each copy joins the translation its original says, right after
-          // it — a second piece of lettering for the same content rather than a
-          // second translation of it. Reading order is untouched for the same
-          // reason: the page still has as much to say as it did.
-          for (const [was, now] of clone.texts) project.addMemberAfter(open.page, was, now)
+          // The other side's twins, each above the block it copies.
+          for (const block of extra) {
+            const live = project.pageById(open.page)?.page.layers ?? []
+            const near = pathOf(live, originals.get(block.id) ?? '')
+            project.addLayer(
+              open.page,
+              block,
+              near === null ? undefined : [...near.slice(0, -1), near[near.length - 1] + 1],
+            )
+          }
+          for (const { of, unit } of units) {
+            const order = project.pageById(open.page)?.page.readingOrder ?? []
+            const after = order.indexOf(of)
+            project.addLabel(
+              open.page,
+              { unit, blocks: [] },
+              { paths: [], orderIndex: after === -1 ? order.length : after + 1, edges: [] },
+            )
+          }
         } else {
+          for (const gone of leftovers) {
+            project.addLabel(
+              open.page,
+              { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) },
+              { paths: gone.blocks.map((b) => b.path), orderIndex: gone.orderIndex, edges: gone.edges },
+            )
+          }
           project.restoreEntry(removed)
         }
       },
       undo: () => {
         removed = project.removeEntry(copy.id)
+        // A twin unit with blocks outside the copied entry is still standing.
+        leftovers = units.flatMap(({ unit }) => project.deleteLabel(open.page, unit.id) ?? [])
       },
     })
     editor.selectOnly(copy.id)
