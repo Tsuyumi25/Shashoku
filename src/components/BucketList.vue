@@ -180,8 +180,11 @@ const series = useSeriesObjects()
 const scope = ref<Scope>('chapter')
 // The skeleton to begin with, which is where the reasons for leaving fields out
 // now live: size spreads because it is computed, and the two font names split
-// buckets a reader sees as identical.
-const fields = ref(new Set<keyof TextStyle>(SKELETON_FIELDS))
+// buckets a reader sees as identical. Leading starts off as well, and is a
+// toggle away.
+const fields = ref(
+  new Set<keyof TextStyle>(SKELETON_FIELDS.filter((f) => f !== 'leadingPercent')),
+)
 const expanded = ref(new Set<string>())
 
 function chooseScope(next: Scope) {
