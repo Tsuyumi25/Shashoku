@@ -43,6 +43,20 @@
         <div v-if="caretBox" :key="caretKey" class="text-caret" :style="caretBox" />
       </div>
 
+      <button
+        v-if="cutBarAt"
+        type="button"
+        class="cut-bar"
+        :style="cutBarStyle(counterTurn)"
+        title="把選起來的字剪成另一塊，留在原位"
+        @pointerdown.stop
+        @mousedown.prevent.stop
+        @click.stop="emit('cut')"
+      >
+        <Scissors :size="14" />
+        剪成一塊
+      </button>
+
       <div
         v-if="tags.length > 0 && (hovered || inSelection || captioned)"
         class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[10px] leading-tight whitespace-nowrap text-white select-none"
@@ -60,6 +74,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
+import { Scissors } from '@lucide/vue'
+import { cutText } from '@/lib/cutText'
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import ObjectFrame from '@/components/ObjectFrame.vue'
@@ -199,6 +215,8 @@ const emit = defineEmits<{
   editAt: [index: number]
   /** Where the pointer put the selection, as offsets into the object's text. */
   selectText: [anchor: number, focus: number]
+  /** Cut the selected stretch out into a block of its own. */
+  cut: []
 }>()
 
 // Turned, because where the frame's middle sits follows the object round once
@@ -441,6 +459,33 @@ const selectionBoxes = computed(() => {
   }))
 })
 
+/**
+ * Where the cut button stands: just past the end of the selection, in the
+ * frame's pixels. Only for a selection that leaves something on either side.
+ */
+const cutBarAt = computed(() => {
+  const at = props.selection
+  if (!props.editing || !at || cutText(props.text, at.start, at.end) === null) return null
+  const last = projection.value.selection(at.start, at.end).at(-1)
+  return last ? { x: last.x + last.width, y: last.y + last.height } : null
+})
+
+/** A gap between the selection's corner and the button, in screen pixels. */
+const CUT_BAR_GAP_PX = 6
+
+/** Upright and screen-sized however the page and the object are turned, as the caption is. */
+function cutBarStyle(counterTurn: number) {
+  const at = cutBarAt.value
+  if (!at) return {}
+  const gap = `${CUT_BAR_GAP_PX}px * var(--px)`
+  return {
+    left: `${at.x}px`,
+    top: `${at.y}px`,
+    transform: `translate(calc(${gap}), calc(${gap})) rotate(${counterTurn}rad) scale(var(--px))`,
+    transformOrigin: 'top left',
+  }
+}
+
 /** The frame's turn on screen: the view's and the object's, as drawn. */
 const turn = computed(() => props.view.rotate + props.rotation)
 
@@ -647,6 +692,25 @@ function captionStyle(counterTurn: number) {
   position: absolute;
   background: var(--primary);
   opacity: 0.3;
+}
+.cut-bar {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
+}
+.cut-bar:hover {
+  background: var(--secondary);
 }
 .text-caret {
   position: absolute;

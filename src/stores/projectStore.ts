@@ -111,6 +111,15 @@ function comparePaths(a: readonly number[], b: readonly number[]): number {
 }
 
 
+/** What one side of a translation says; see `sideWordsOf`. */
+export interface SideWords {
+  /** Each block's own lines, by id. */
+  lines: Record<string, string[]>
+  /** The chosen proposal's pieces, or null when nothing is chosen. */
+  pieces: string[][] | null
+  separators: string[]
+}
+
 /**
  * One entry taken off a page, with everything needed to put it back.
  *
@@ -1259,6 +1268,50 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
+   * Everything one side of a translation says, held apart from where its blocks
+   * stand: each block's own lines, the chosen proposal's pieces, and the seams.
+   * Read and written whole, so a step that cuts one block into several can put
+   * the words back exactly as they were.
+   */
+  function sideWordsOf(pageId: string, blockId: string): SideWords | undefined {
+    const file = pageById(pageId)
+    const place = file ? placeOfBlock(file.page, blockId) : undefined
+    if (!file || place === undefined) return undefined
+    const list = place.side === 'source' ? place.unit.source : place.unit.translation
+    const lines: Record<string, string[]> = {}
+    for (const id of list.members) {
+      const block = findTextObject(file.page.layers, id)
+      if (block) lines[id] = [...block.body.lines]
+    }
+    const chosen =
+      place.side === 'translation'
+        ? place.unit.candidates.find((c) => c.id === place.unit.chosen)
+        : undefined
+    return {
+      lines,
+      pieces: chosen ? chosen.pieces.map((piece) => [...piece]) : null,
+      separators: [...list.separators],
+    }
+  }
+
+  function setSideWords(pageId: string, blockId: string, words: SideWords) {
+    const file = pageById(pageId)
+    const place = file ? placeOfBlock(file.page, blockId) : undefined
+    if (!file || place === undefined) return
+    const list = place.side === 'source' ? place.unit.source : place.unit.translation
+    for (const [id, lines] of Object.entries(words.lines)) {
+      const block = findTextObject(file.page.layers, id)
+      if (block) block.body.lines = [...lines]
+    }
+    const chosen = place.unit.candidates.find((c) => c.id === place.unit.chosen)
+    if (chosen && words.pieces && place.side === 'translation') {
+      chosen.pieces = words.pieces.map((piece) => [...piece])
+    }
+    list.separators = [...words.separators]
+    markPageDirty(pageId)
+  }
+
+  /**
    * The order the blocks of one side are read in, restated.
    *
    * ⚠️ The whole side at once, and refused unless it names exactly what the
@@ -1482,6 +1535,8 @@ export const useProjectStore = defineStore('project', () => {
     rotateLabel,
     updateLabelText,
     addMemberAfter,
+    sideWordsOf,
+    setSideWords,
     reorderMembers,
     setLabelTags,
     setLabelSource,

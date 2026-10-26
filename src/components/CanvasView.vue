@@ -178,6 +178,7 @@
             :caret-key="object.id === textEditingId ? caretKey : 0"
             @edit-at="beginCanvasTextEdit(object.id, $event)"
             @select-text="(anchor, focus) => setTextRange(anchor, focus)"
+            @cut="cutEditedText(object.id)"
             @pointerenter="pointedObjectId = object.id"
             @pointerleave="pointedObjectId = null"
             @contextmenu="onObjectMenu(object.id, $event)"
@@ -293,6 +294,7 @@ import TranslationCards from '@/components/TranslationCards.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
+import { useCutText } from '@/composables/useCutText'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
 import { previewedStyle } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
@@ -648,6 +650,15 @@ function beginCanvasTextEdit(labelId: string, index: number) {
   const label = labelById(labelId)
   if (pageId === null || label === undefined) return
   void enterTextEdit(pageId, label, index)
+}
+
+const { cutSelection } = useCutText()
+
+function cutEditedText(labelId: string) {
+  const pageId = editor.currentPageId
+  if (pageId === null) return
+  const { start, end } = textRange.value
+  cutSelection(pageId, labelId, start, end)
 }
 
 /**
