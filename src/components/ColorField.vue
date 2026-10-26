@@ -1,7 +1,11 @@
 <template>
   <span class="color-field">
     <PopoverRoot v-model:open="open">
-      <PopoverTrigger class="color-swatch" :style="{ '--swatch': modelValue }" :title="label" />
+      <PopoverTrigger
+        class="color-swatch"
+        :style="{ '--swatch': mixed ? 'transparent' : modelValue }"
+        :title="label"
+      />
       <PopoverPortal>
         <PopoverContent class="color-popover" side="bottom" align="start" :side-offset="6">
           <hex-color-picker
@@ -49,7 +53,8 @@
       spellcheck="false"
       autocomplete="off"
       :aria-label="label"
-      :value="modelValue"
+      :placeholder="mixed ? MIXED_TEXT : undefined"
+      :value="mixed ? '' : modelValue"
       @change="onOuterHex"
       @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
     />
@@ -62,13 +67,19 @@ import { useClipboard } from '@vueuse/core'
 import { Check, Copy } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import 'vanilla-colorful/hex-color-picker.js'
+import { MIXED_TEXT } from '@/lib/appearanceText'
 
 /**
  * A swatch that opens a picker, beside the hex it stands for. Every step of a
  * drag goes out as `input` so the page follows it live; letting go settles it
  * as `update:modelValue`, so one drag is one undo.
  */
-const props = defineProps<{ modelValue: string; label: string }>()
+const props = defineProps<{
+  modelValue: string
+  label: string
+  /** The selection disagrees: nothing is shown as the value, and any pick writes. */
+  mixed?: boolean
+}>()
 const emit = defineEmits<{
   /** Every step of a drag, for the canvas to follow. */
   input: [value: string]
@@ -112,7 +123,7 @@ function onPicked(e: Event) {
 }
 
 function write(hex: string) {
-  const changed = moving || hex !== props.modelValue.toLowerCase()
+  const changed = moving || props.mixed || hex !== props.modelValue.toLowerCase()
   moving = false
   if (changed) emit('update:modelValue', hex)
   else show(props.modelValue)
@@ -138,7 +149,7 @@ function onOuterHex(e: Event) {
   const input = e.target as HTMLInputElement
   const hex = parseHex(input.value)
   if (hex) write(hex)
-  else input.value = props.modelValue
+  else input.value = props.mixed ? '' : props.modelValue
 }
 
 function parseHex(raw: string): string | null {

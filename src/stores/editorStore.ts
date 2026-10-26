@@ -2344,6 +2344,23 @@ export const useEditorStore = defineStore('editor', () => {
     return [...kinds][0]
   })
 
+  type StyleState = { pageId: string; id: string; style: TextStyle }[]
+
+  function stylesOf(targets: readonly AppearanceTarget<TextLayerEntry>[]): StyleState {
+    return targets.map(({ pageId, entry }) => ({ pageId, id: entry.id, style: { ...entry.body.style } }))
+  }
+
+  /** What the objects held before a gesture started previewing, until it commits. */
+  let stylePreviewedFrom: StyleState | null = null
+
+  /** The same arrangement as `previewEffects`, for a text object's style. */
+  function previewStyle(targets: readonly AppearanceTarget<TextLayerEntry>[], patch: Partial<TextStyle>) {
+    const project = useProjectStore()
+    stylePreviewedFrom ??= stylesOf(targets)
+    for (const { pageId, id, style } of stylePreviewedFrom)
+      project.setLabelStyle(pageId, id, { ...style, ...patch })
+  }
+
   /**
    * One act, however many objects it touched. Undoing a batch has to put every
    * one of them back at once — anything else would leave the selection half
@@ -2354,14 +2371,17 @@ export const useEditorStore = defineStore('editor', () => {
     patch: Partial<TextStyle>,
   ) {
     const project = useProjectStore()
+    const previewed = stylePreviewedFrom
+    stylePreviewedFrom = null
     if (targets.length === 0 || Object.keys(patch).length === 0) return
-    const before = targets.map(({ pageId, entry }) => ({
-      pageId,
-      id: entry.id,
-      style: { ...entry.body.style },
-    }))
+    const sameNodes =
+      previewed !== null &&
+      previewed.length === targets.length &&
+      previewed.every((s, at) => s.id === targets[at]!.entry.id)
+    const before = sameNodes ? previewed : stylesOf(targets)
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
-    const write = (states: typeof before) => {
+    if (JSON.stringify(before) === JSON.stringify(after)) return
+    const write = (states: StyleState) => {
       for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
     }
     pushCommand({
@@ -2799,6 +2819,7 @@ export const useEditorStore = defineStore('editor', () => {
     batchScope,
     appearanceKind,
     cmdApplyStyle,
+    previewStyle,
     cmdApplyEffects,
     previewEffects,
     cmdReorderMembers,

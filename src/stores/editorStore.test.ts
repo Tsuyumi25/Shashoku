@@ -32,6 +32,7 @@ import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { blankBlock } from '@shared/page/schema'
 import { offeredReadings } from '@shared/ocr/offer'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
+import type { AppearanceTarget } from '@/lib/appearance'
 
 const PAGE = 'p001.png'
 
@@ -1789,6 +1790,31 @@ describe('layer tree edits', () => {
 
       editor.undo()
       expect(effectsOf(project, 'r')).toEqual([STROKE])
+    })
+  })
+
+  describe('style on the batch', () => {
+    const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+      (findEntry(project.pageById(PAGE)?.page.layers ?? [], id) as TextLayerEntry).body.style
+
+    /** Each object keeps its own other fields through the preview; one undo puts them all back. */
+    it('previews a colour across objects of different sizes and undoes it in one step', () => {
+      const big = label('a')
+      big.body.style.fontSizePx = 96
+      const { project, editor } = openTree([big, label('b')], ['a', 'b'])
+      editor.selectOnly('a')
+      editor.toggleSelected('b')
+      const targets = editor.selectedNodes() as AppearanceTarget<TextLayerEntry>[]
+
+      editor.previewStyle(targets, { color: '#ff0000' })
+      editor.previewStyle(targets, { color: '#0000ff' })
+      expect(styleOf(project, 'a')).toMatchObject({ color: '#0000ff', fontSizePx: 96 })
+      editor.cmdApplyStyle(targets, { color: '#0000ff' })
+
+      editor.undo()
+      expect(styleOf(project, 'a').color).toBe(DEFAULT_TEXT_STYLE.color)
+      expect(styleOf(project, 'b').color).toBe(DEFAULT_TEXT_STYLE.color)
+      expect(styleOf(project, 'a').fontSizePx).toBe(96)
     })
   })
 })

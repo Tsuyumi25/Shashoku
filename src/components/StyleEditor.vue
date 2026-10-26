@@ -87,18 +87,13 @@
   <StyleSuggestions field="align" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">文字色</label>
-  <div class="flex items-center gap-1.5">
-    <input
-      type="color"
-      class="h-6 w-8 cursor-pointer rounded border border-input bg-background"
-      :value="value.color"
-      @change="onColor($event)"
-    />
-    <span
-      class="font-mono"
-      :class="isMixed('color') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
-    >{{ isMixed('color') ? MIXED_TEXT : value.color }}</span>
-  </div>
+  <ColorField
+    :model-value="value.color"
+    label="文字色"
+    :mixed="isMixed('color')"
+    @input="(color) => emit('preview', { color })"
+    @update:model-value="(color) => emit('patch', { color })"
+  />
   <StyleSuggestions field="color" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">行距</label>
@@ -144,6 +139,7 @@ import type { LayerEffect } from '@shared/effects/types'
 import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
 import { engineStrokeFor } from '@shared/effects/stroke'
 import StyleSuggestions from '@/components/appearance/StyleSuggestions.vue'
+import ColorField from '@/components/ColorField.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import type { StyleSuggestionSet } from '@/composables/useStyleRecommendations'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
@@ -251,6 +247,8 @@ function cycleWeight(step: number) {
 }
 
 const emit = defineEmits<{
+  /** A step of a gesture still under way; nothing for history yet. */
+  preview: [patch: Partial<TextStyle>]
   patch: [patch: Partial<TextStyle>]
 }>()
 
@@ -318,12 +316,6 @@ function onAlign(v: unknown) {
   if (v !== 'start' && v !== 'center' && v !== 'end') return
   if (!isMixed('align') && v === props.value.align) return
   emit('patch', { align: v })
-}
-
-function onColor(e: Event) {
-  const v = (e.target as HTMLInputElement).value
-  if (!isMixed('color') && v === props.value.color) return
-  emit('patch', { color: v })
 }
 
 /**

@@ -24,6 +24,7 @@
       :effects="representativeEffects"
       :suggestions="suggestions"
       :text="representativeText"
+      @preview="(patch) => editor.previewStyle(targets, patch)"
       @patch="onPatch"
     />
   </div>
