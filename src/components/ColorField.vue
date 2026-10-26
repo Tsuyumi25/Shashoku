@@ -12,7 +12,6 @@
             class="color-picker"
             :color="picking"
             @color-changed="onPicked"
-            @pointerup="commit"
             @keyup="commit"
           />
           <div class="color-row">
@@ -63,7 +62,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { useClipboard } from '@vueuse/core'
+import { useClipboard, useEventListener } from '@vueuse/core'
 import { Check, Copy } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import 'vanilla-colorful/hex-color-picker.js'
@@ -103,9 +102,13 @@ function show(hex: string) {
 
 watch(() => props.modelValue, show)
 
-// A drag only ends where a hand lets go, and a hand can let go off the picker:
-// closing, or the field going away, settles whatever was still moving.
+// A drag ends wherever the hand lets go, which is often off the picker — so the
+// release is listened for on the window, before a press elsewhere can change
+// what is selected. Closing, or the field going away, settles anything left.
 let moving = false
+useEventListener(window, 'pointerup', () => {
+  if (moving) commit()
+})
 watch(open, (now) => {
   if (!now) commit()
 })

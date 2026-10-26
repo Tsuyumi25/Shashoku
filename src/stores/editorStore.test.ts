@@ -1816,6 +1816,23 @@ describe('layer tree edits', () => {
       expect(styleOf(project, 'b').color).toBe(DEFAULT_TEXT_STYLE.color)
       expect(styleOf(project, 'a').fontSizePx).toBe(96)
     })
+
+    /** A preview left on one object while the commit lands on another must not stay behind. */
+    it('puts back an object a preview reached when the commit lands on another', () => {
+      const { project, editor } = openTree([label('a'), label('b')], ['a', 'b'])
+      editor.selectOnly('a')
+      const onA = editor.selectedNodes() as AppearanceTarget<TextLayerEntry>[]
+      editor.previewStyle(onA, { color: '#ff0000' })
+
+      editor.selectOnly('b')
+      const onB = editor.selectedNodes() as AppearanceTarget<TextLayerEntry>[]
+      editor.cmdApplyStyle(onB, { color: '#ff0000' })
+
+      expect(styleOf(project, 'a').color).toBe(DEFAULT_TEXT_STYLE.color)
+      expect(styleOf(project, 'b').color).toBe('#ff0000')
+      editor.undo()
+      expect(styleOf(project, 'b').color).toBe(DEFAULT_TEXT_STYLE.color)
+    })
   })
 })
 

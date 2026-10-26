@@ -2350,15 +2350,30 @@ export const useEditorStore = defineStore('editor', () => {
     return targets.map(({ pageId, entry }) => ({ pageId, id: entry.id, style: { ...entry.body.style } }))
   }
 
+  function sameNodes(state: readonly { id: string }[], targets: readonly AppearanceTarget[]): boolean {
+    return state.length === targets.length && state.every((s, at) => s.id === targets[at]!.entry.id)
+  }
+
   /** What the objects held before a gesture started previewing, until it commits. */
   let stylePreviewedFrom: StyleState | null = null
 
-  /** The same arrangement as `previewEffects`, for a text object's style. */
-  function previewStyle(targets: readonly AppearanceTarget<TextLayerEntry>[], patch: Partial<TextStyle>) {
+  function writeStyles(states: StyleState) {
     const project = useProjectStore()
+    for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
+  }
+
+  /**
+   * The same arrangement as `previewEffects`, for a text object's style. A
+   * preview belongs to the objects it started on: reaching others first puts
+   * those back.
+   */
+  function previewStyle(targets: readonly AppearanceTarget<TextLayerEntry>[], patch: Partial<TextStyle>) {
+    if (stylePreviewedFrom !== null && !sameNodes(stylePreviewedFrom, targets)) {
+      writeStyles(stylePreviewedFrom)
+      stylePreviewedFrom = null
+    }
     stylePreviewedFrom ??= stylesOf(targets)
-    for (const { pageId, id, style } of stylePreviewedFrom)
-      project.setLabelStyle(pageId, id, { ...style, ...patch })
+    writeStyles(stylePreviewedFrom.map((s) => ({ ...s, style: { ...s.style, ...patch } })))
   }
 
   /**
@@ -2370,24 +2385,18 @@ export const useEditorStore = defineStore('editor', () => {
     targets: readonly AppearanceTarget<TextLayerEntry>[],
     patch: Partial<TextStyle>,
   ) {
-    const project = useProjectStore()
     const previewed = stylePreviewedFrom
     stylePreviewedFrom = null
+    if (previewed !== null && !sameNodes(previewed, targets)) writeStyles(previewed)
     if (targets.length === 0 || Object.keys(patch).length === 0) return
-    const sameNodes =
-      previewed !== null &&
-      previewed.length === targets.length &&
-      previewed.every((s, at) => s.id === targets[at]!.entry.id)
-    const before = sameNodes ? previewed : stylesOf(targets)
+    const before =
+      previewed !== null && sameNodes(previewed, targets) ? previewed : stylesOf(targets)
     const after = before.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     if (JSON.stringify(before) === JSON.stringify(after)) return
-    const write = (states: StyleState) => {
-      for (const { pageId, id, style } of states) project.setLabelStyle(pageId, id, style)
-    }
     pushCommand({
       label: `style ${targets.length}`,
-      do: () => write(after),
-      undo: () => write(before),
+      do: () => writeStyles(after),
+      undo: () => writeStyles(before),
     })
   }
 
@@ -2404,15 +2413,25 @@ export const useEditorStore = defineStore('editor', () => {
   /** What the nodes held before a gesture started previewing, until it commits. */
   let previewedFrom: EffectsState | null = null
 
+  function writeEffects(states: EffectsState) {
+    const project = useProjectStore()
+    for (const { pageId, id, effects: value } of states)
+      project.setLayerEffects(pageId, id, cloneEffects(value))
+  }
+
   /**
    * Writes straight through, outside history, while a gesture is still moving —
    * the commit that ends it is the one step undo sees, back to where it began.
+   * A preview belongs to the nodes it started on: reaching others first puts
+   * those back.
    */
   function previewEffects(targets: readonly AppearanceTarget[], effects: readonly LayerEffect[]) {
-    const project = useProjectStore()
+    if (previewedFrom !== null && !sameNodes(previewedFrom, targets)) {
+      writeEffects(previewedFrom)
+      previewedFrom = null
+    }
     previewedFrom ??= effectsOf(targets)
-    for (const { pageId, entry } of targets)
-      project.setLayerEffects(pageId, entry.id, cloneEffects(effects))
+    writeEffects(previewedFrom.map((s) => ({ ...s, effects: [...effects] })))
   }
 
   /**
@@ -2425,25 +2444,18 @@ export const useEditorStore = defineStore('editor', () => {
     targets: readonly AppearanceTarget[],
     effects: readonly LayerEffect[],
   ) {
-    const project = useProjectStore()
     const previewed = previewedFrom
     previewedFrom = null
+    if (previewed !== null && !sameNodes(previewed, targets)) writeEffects(previewed)
     if (targets.length === 0) return
-    const sameNodes =
-      previewed !== null &&
-      previewed.length === targets.length &&
-      previewed.every((s, at) => s.id === targets[at]!.entry.id)
-    const before = sameNodes ? previewed : effectsOf(targets)
+    const before =
+      previewed !== null && sameNodes(previewed, targets) ? previewed : effectsOf(targets)
     const after = before.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
     if (JSON.stringify(before) === JSON.stringify(after)) return
-    const write = (states: EffectsState) => {
-      for (const { pageId, id, effects: value } of states)
-        project.setLayerEffects(pageId, id, value)
-    }
     pushCommand({
       label: `effects ${targets.length}`,
-      do: () => write(after),
-      undo: () => write(before),
+      do: () => writeEffects(after),
+      undo: () => writeEffects(before),
     })
   }
 
