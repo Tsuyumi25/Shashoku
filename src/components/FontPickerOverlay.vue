@@ -273,22 +273,24 @@
                   &gt;
                 </button>
               </div>
-              <button
-                type="button"
-                class="cell-action"
-                title="按住不放：畫布上選取的文字暫時套這個字款預覽"
-                @mouseenter="picker.startPreview(shownFace(faces))"
-                @mouseleave="picker.endPreview()"
-              >
-                預覽
-              </button>
-              <button
-                type="button"
-                class="cell-action primary"
-                @click="picker.select(shownFace(faces), weightPx)"
-              >
-                選擇
-              </button>
+              <div class="action-row">
+                <button
+                  type="button"
+                  class="cell-action"
+                  title="按住不放：畫布上選取的文字暫時套這個字款預覽"
+                  @mouseenter="picker.startPreview(shownFace(faces))"
+                  @mouseleave="picker.endPreview()"
+                >
+                  預覽
+                </button>
+                <button
+                  type="button"
+                  class="cell-action primary"
+                  @click="picker.select(shownFace(faces), weightPx)"
+                >
+                  選擇
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -845,13 +847,19 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   font-size: 11px;
   color: var(--muted-foreground);
 }
+.action-row {
+  display: flex;
+  gap: 0.375rem;
+}
 .cell-action {
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2rem;
   border-radius: 0.25rem;
   border: 1px solid var(--border);
   background: var(--background);
-  padding: 0.125rem 0;
-  font-size: 11px;
+  padding: 0.375rem 0.5rem;
+  font-size: 12px;
   font-weight: 500;
   color: var(--foreground);
 }
