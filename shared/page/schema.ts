@@ -19,6 +19,8 @@ import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './typ
 import { normalizeEdges, type ReadingEdge } from './readingGraph'
 import type { TextSide } from './text'
 import { linesAt, placeOfBlock } from './units'
+import { escapeText } from './markup'
+import { textObjects } from './tree'
 import { parseEffects, serializeEffects } from '../effects/schema'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import type { TextStyle } from '../text-style/types'
@@ -45,6 +47,13 @@ export const BLEND_MODE_ALLOWLIST = [
   'color',
   'luminosity',
 ] as const
+
+/**
+ * The last version whose bodies held plain text. Everything it stored is read
+ * as the markup it would have been written as — escaping is the whole
+ * migration, because a `<` the user typed back then meant a `<` and not a tag.
+ */
+const PLAIN_TEXT_VERSION = 13
 
 
 export class PageParseError extends Error {}
@@ -537,7 +546,7 @@ export function parseManifest(raw: string): ManifestJson {
   const data = parseJson(raw, 'manifest.json')
   if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
 
-  if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
+  if (data.schemaVersion !== MANIFEST_SCHEMA_VERSION && data.schemaVersion !== PLAIN_TEXT_VERSION) {
     if (typeof data.schemaVersion === 'number' && data.schemaVersion > MANIFEST_SCHEMA_VERSION)
       fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
     fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
@@ -572,7 +581,7 @@ export function parseManifest(raw: string): ManifestJson {
   collectRasterFiles(layers, files)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
-  return {
+  const manifest: ManifestJson = {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision,
     name: data.name,
@@ -582,6 +591,14 @@ export function parseManifest(raw: string): ManifestJson {
     readingEdges: parseReadingEdges(data.readingEdges),
     layers,
   }
+  if (data.schemaVersion === PLAIN_TEXT_VERSION) {
+    for (const block of textObjects(manifest.layers))
+      block.body.lines = block.body.lines.map(escapeText)
+    for (const unit of manifest.translationUnits)
+      for (const candidate of unit.candidates)
+        candidate.pieces = candidate.pieces.map((piece) => piece.map(escapeText))
+  }
+  return manifest
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {

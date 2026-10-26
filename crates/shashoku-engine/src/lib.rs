@@ -17,7 +17,7 @@ mod render;
 mod stroke;
 pub mod tile;
 
-use render::{Align, BLACK, Phase, StrokePosition, StrokeSpec, parse_hex_rgba};
+use render::{Align, BLACK, Phase, SpanStyle, StrokePosition, StrokeSpec, parse_hex_rgba};
 
 #[napi]
 pub fn engine_version() -> String {
@@ -226,6 +226,43 @@ fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<Strok
     input.map(stroke_input_to_one).transpose()
 }
 
+/// One stretch of the text set differently from the call's own style.
+///
+/// `start` / `end` are UTF-8 byte offsets into the whole text, newlines
+/// included, so a span may cross a line break — layout cuts it at the break.
+/// Sorted and non-overlapping; everything no span covers keeps the call's own
+/// size, fill and weight, and a call with none renders exactly as it did
+/// before spans existed.
+#[napi(object)]
+pub struct EngineSpan {
+    pub start: u32,
+    pub end: u32,
+    pub size_px: f64,
+    /// "#RRGGBB" or "#RRGGBBAA".
+    pub color: String,
+    /// Moves the fill's own edge, in pixels, positive outward.
+    pub weight_px: f64,
+    /// 縱中橫. Vertical text only; horizontal text ignores it.
+    pub upright: bool,
+}
+
+fn spans_to_styles(spans: Option<Vec<EngineSpan>>) -> napi::Result<Vec<SpanStyle>> {
+    spans
+        .unwrap_or_default()
+        .into_iter()
+        .map(|span| {
+            Ok(SpanStyle {
+                start: span.start,
+                end: span.end,
+                size_px: span.size_px as f32,
+                color: parse_hex_rgba(&span.color).map_err(napi::Error::from_reason)?,
+                weight_px: span.weight_px as f32,
+                upright: span.upright,
+            })
+        })
+        .collect()
+}
+
 fn fill_from_opt(fill: Option<String>) -> napi::Result<render::Rgba> {
     match fill {
         None => Ok(BLACK),
@@ -358,6 +395,7 @@ pub fn render_text(
     // Moves the fill's own edge, in pixels, positive outward. Thins the
     // strokes when negative, which is the direction a large size needs.
     weight_px: Option<f64>,
+    spans: Option<Vec<EngineSpan>>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -374,6 +412,7 @@ pub fn render_text(
         fill,
         stroke_spec,
         weight_px.unwrap_or(0.0) as f32,
+        &spans_to_styles(spans)?,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -402,6 +441,7 @@ pub fn measure_text(
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
+    spans: Option<Vec<EngineSpan>>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_text(
@@ -413,6 +453,7 @@ pub fn measure_text(
         rotation.unwrap_or(0.0) as f32,
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
+        &spans_to_styles(spans)?,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))
@@ -923,6 +964,7 @@ pub fn render_vertical(
     // Moves the fill's own edge, in pixels, positive outward. Thins the
     // strokes when negative, which is the direction a large size needs.
     weight_px: Option<f64>,
+    spans: Option<Vec<EngineSpan>>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -939,6 +981,7 @@ pub fn render_vertical(
         fill,
         stroke_spec,
         weight_px.unwrap_or(0.0) as f32,
+        &spans_to_styles(spans)?,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -965,6 +1008,7 @@ pub fn measure_vertical(
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
+    spans: Option<Vec<EngineSpan>>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_vertical(
@@ -976,6 +1020,7 @@ pub fn measure_vertical(
         rotation.unwrap_or(0.0) as f32,
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
+        &spans_to_styles(spans)?,
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))

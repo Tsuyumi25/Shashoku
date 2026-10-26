@@ -5,7 +5,7 @@ import {
   type StackNode,
   type TextStackNode,
 } from '@shared/page/stack'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { layerWithEffects } from '@/lib/layerEffects'
@@ -121,15 +121,15 @@ export async function decodeLayerBitmaps(
 function drawTextWith(page: ManifestJson): StackPaint['drawText'] {
   return (ctx, node) => {
     const label = node.entry
-    const text = shownLinesOf(page, label).join('\n')
-    if (text.length === 0) return
+    const code = shownCodeOf(page, label)
+    if (code.length === 0) return
     const body = label.body
-    const drawn = drawnLabel(text, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
+    const drawn = drawnLabel(code, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
     // A family this machine lacks draws notdef boxes rather than nothing, so the
     // only way to arrive here without a bitmap is a catalogue that never
     // answered. Exporting the page short one label silently would be worse than
     // stopping, since the file would look finished.
-    if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${text}」`)
+    if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${drawn.plain}」`)
 
     // The engine already turned the outline, so there is nothing left to rotate
     // here and nothing to resample: the bitmap lands one pixel per pixel.

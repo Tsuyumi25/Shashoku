@@ -160,7 +160,7 @@
             :framed="connecting || painting"
             :handles="!connecting && !painting"
             :captioned="painting"
-            :text="object.text"
+            :code="object.code"
             :text-style="object.style"
             :effects="object.effects"
             :x="object.x"
@@ -174,11 +174,13 @@
             :in-selection="editor.isSelected(object.id)"
             :locked="object.locked"
             :editing="object.id === textEditingId"
-            :selection="object.id === textEditingId ? textRange : null"
+            :selection="object.id === textEditingId ? markup.plainRange.value : null"
             :caret-key="object.id === textEditingId ? caretKey : 0"
             @edit-at="beginCanvasTextEdit(object.id, $event)"
-            @select-text="(anchor, focus) => setTextRange(anchor, focus)"
+            @select-text="(anchor, focus) => markup.selectPlain(anchor, focus)"
             @cut="cutEditedText(object.id)"
+            @wrap="markup.apply({ kind: 'wrap', attrs: $event })"
+            @clear="markup.apply({ kind: 'clear' })"
             @pointerenter="pointedObjectId = object.id"
             @pointerleave="pointedObjectId = null"
             @contextmenu="onObjectMenu(object.id, $event)"
@@ -258,6 +260,29 @@
     </div>
 
     <!--
+      ⚠️ Outside the stage for the same reason the menu is: it is placed in the
+      window's own coordinates, and a transformed ancestor would resolve
+      `position: fixed` against the page instead.
+
+      The canvas's own box. It holds the words the engine is setting — no tags
+      — so typing here reads as typing on the page, and the markup it belongs
+      to is carried by the code underneath. Sized down to a sliver on the
+      insertion point, which is where the IME has to open its candidates; what
+      the reader sees is the engine's drawing, not this.
+    -->
+    <textarea
+      v-if="textEditingId !== null"
+      :ref="(el) => plainEditSurface.register(el as HTMLTextAreaElement | null)"
+      class="canvas-input"
+      spellcheck="false"
+      :style="plainInputStyle"
+      :value="markup.plain.value ?? ''"
+      @input="markup.writePlain(($event.target as HTMLTextAreaElement).value)"
+      @keydown="onCanvasInputKey"
+      @blur="onCanvasInputBlur"
+    />
+
+    <!--
       ⚠️ Outside the stage, and it has to be. A menu stands at the point that
       raised it, in the window's own coordinates — and `position: fixed` is
       resolved against the nearest transformed ancestor rather than the window,
@@ -294,6 +319,8 @@ import TranslationCards from '@/components/TranslationCards.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
+import { useMarkupSession } from '@/composables/useMarkupSession'
+import { plainEditSurface } from '@/composables/useTextEditSurface'
 import { useCutText } from '@/composables/useCutText'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
 import { previewedStyle } from '@/composables/useFontPicker'
@@ -301,7 +328,7 @@ import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { blocksOnSide, placeOfBlock, shownLinesOf, sideOf } from '@shared/page/units'
+import { blocksOnSide, placeOfBlock, shownCodeOf, sideOf } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -456,7 +483,7 @@ const objects = computed(() => {
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
-    text: shownLinesOf(file.page, label).join('\n'),
+    code: shownCodeOf(file.page, label),
     x: body.x,
     y: body.y,
     rotation: body.rotation,
@@ -633,17 +660,20 @@ function labelById(labelId: string): TextLayerEntry | undefined {
 
 /**
  * Typing on the canvas: a double click opens the object, and the pointer goes
- * on working on the text from there. What is typed goes into the translation
- * list's box, which never gives up focus while the pointer is on the label — so
- * the two surfaces are one edit rather than two copies of the text.
+ * on working on the text from there.
+ *
+ * The canvas has a box of its own, holding the words rather than the code the
+ * list's box holds. Both write to the one body — whichever has the keyboard is
+ * the writer and the other follows — so the two are one edit rather than two
+ * copies of the text.
  */
 const {
   editingId: textEditingId,
-  range: textRange,
   moved: caretKey,
   enterAt: enterTextEdit,
-  setRange: setTextRange,
 } = useCanvasTextEdit()
+
+const markup = useMarkupSession()
 
 function beginCanvasTextEdit(labelId: string, index: number) {
   const pageId = editor.currentPageId
@@ -657,8 +687,55 @@ const { cutSelection } = useCutText()
 function cutEditedText(labelId: string) {
   const pageId = editor.currentPageId
   if (pageId === null) return
-  const { start, end } = textRange.value
+  const { start, end } = markup.plainRange.value
   cutSelection(pageId, labelId, start, end)
+}
+
+/**
+ * What it takes to put a native control on the insertion point and leave it
+ * reachable by the IME.
+ *
+ * Turned about its own corner, because the position names where the run starts
+ * rather than where the box's middle would go. Faintly opaque rather than
+ * transparent: `visibility` and `opacity: 0` cost the IME its target in some
+ * environments, and the box is one or two pixels of a colour nothing is drawn
+ * in — invisible in practice without ever claiming to be hidden.
+ */
+const plainInputStyle = computed(() => {
+  const box = plainEditSurface.pinnedBox.value
+  if (box === null) return undefined
+  return {
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    transformOrigin: '0 0',
+    transform: `rotate(${box.angle}rad)`,
+    // The IME reads the control's direction, so a column of text gets a column
+    // of a box and its candidates open along the same axis the reader is on.
+    writingMode: box.vertical ? ('vertical-rl' as const) : ('horizontal-tb' as const),
+  }
+})
+
+function onCanvasInputKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    editor.commitTextEdit()
+    return
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    editor.editBy(e.shiftKey ? -1 : 1)
+  }
+}
+
+/**
+ * The keyboard leaving ends the visit — unless it only went to the other
+ * notation of the same body, or to the bar standing over the selection.
+ */
+function onCanvasInputBlur(e: FocusEvent) {
+  if (markup.keepsSession(e.relatedTarget)) return
+  editor.commitTextEdit()
 }
 
 /**
@@ -806,7 +883,7 @@ function sweepObjects() {
   for (const object of objects.value) {
     if (object.locked) continue
     const drawn = drawnLabel(
-      object.text,
+      object.code,
       object.style,
       object.effects,
       { x: object.x, y: object.y },
@@ -869,7 +946,7 @@ const objectBoxes = computed(() => {
   const out = new Map<string, FrameBox>()
   for (const object of objects.value) {
     const drawn = drawnLabel(
-      object.text,
+      object.code,
       object.style,
       object.effects,
       { x: object.x, y: object.y },
@@ -1850,6 +1927,34 @@ useEventListener(window, 'blur', () => {
 .page-checker {
   background: repeating-conic-gradient(#ffffff 0 25%, #cccccc 0 50%) 0 0 /
     calc(var(--px) * 16px) calc(var(--px) * 16px);
+}
+
+/*
+ * Pinned to the insertion point on the page: a real control, holding the real
+ * words and the real caret, sized down to a sliver. What the reader sees is
+ * the engine's own drawing; this is only what the platform's input needs to
+ * exist and to be somewhere.
+ *
+ * Not hidden, faint. A control that is `visibility: hidden`, `display: none`
+ * or fully transparent stops being an IME target in some environments, and
+ * being one is its entire job.
+ */
+.canvas-input {
+  position: fixed;
+  z-index: 50;
+  field-sizing: fixed;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  opacity: 0.01;
+  pointer-events: none;
+}
+.canvas-input:focus {
+  outline: none;
 }
 
 /*

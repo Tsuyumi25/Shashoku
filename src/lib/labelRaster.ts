@@ -1,3 +1,6 @@
+import type { EngineSpan } from '@shared/engine/types'
+import { parseMarkup, resolveSpans } from '@shared/page/markup'
+import { byteAt, byteOffsets } from './textProjection'
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { engineStrokeFor } from '@shared/effects/stroke'
@@ -78,14 +81,15 @@ function resolveFace(style: TextStyle) {
  * the text (see ADR 0001).
  */
 function requestFor(
-  text: string,
+  painted: PaintedText,
   style: TextStyle,
   effects: readonly LayerEffect[],
   phase: Point,
   rotation: number,
 ) {
   return {
-    text,
+    text: painted.plain,
+    spans: painted.spans,
     sizePx: style.fontSizePx,
     fillColor: style.color,
     stroke: engineStrokeFor(effects),
@@ -98,14 +102,54 @@ function requestFor(
   }
 }
 
-export function rasterFor(
-  text: string,
+/**
+ * A body's stored string read as what actually gets set: the text with its
+ * tags taken out, and the runs those tags describe in the engine's own byte
+ * offsets.
+ *
+ * The seam the markup crosses into the typesetter. Every surface hands the
+ * code in and nothing downstream of here has heard of a tag — which is what
+ * keeps the canvas, the export and the frame one answer rather than three
+ * parsers hoping to agree.
+ */
+export interface PaintedText {
+  plain: string
+  spans: EngineSpan[]
+}
+
+export function paintedText(code: string, style: TextStyle): PaintedText {
+  const markup = parseMarkup(code)
+  const resolved = resolveSpans(markup, {
+    fontSizePx: style.fontSizePx,
+    color: style.color,
+    weightPx: style.weightPx,
+  })
+  if (resolved.length === 0) return { plain: markup.plain, spans: [] }
+  // The engine counts in UTF-8 bytes of the plain text; a span counts in the
+  // JS string units a native input reports. Converted once here, where the
+  // plain text both of them describe is in hand.
+  const table = byteOffsets(markup.plain)
+  return {
+    plain: markup.plain,
+    spans: resolved.map((span) => ({
+      start: byteAt(table, span.start),
+      end: byteAt(table, span.end),
+      sizePx: span.sizePx,
+      color: span.color,
+      weightPx: span.weightPx,
+      upright: span.upright,
+    })),
+  }
+}
+
+function rasterFor(
+  painted: PaintedText,
   style: TextStyle,
   effects: readonly LayerEffect[],
   phase: Point = NO_PHASE,
   rotation = 0,
 ): LabelRaster {
-  if (text.length === 0) return NOTHING
+  if (painted.plain.length === 0) return NOTHING
 
   const entry = resolveFace(style)
   // Nothing to say while the catalogue is still being enumerated: the family
@@ -113,7 +157,7 @@ export function rasterFor(
   // would say the wrong one.
   if (!entry && !catalogLoaded.value) return NOTHING
 
-  const req = requestFor(text, style, effects, phase, rotation)
+  const req = requestFor(painted, style, effects, phase, rotation)
 
   if (entry) {
     try {
@@ -133,17 +177,17 @@ export function rasterFor(
  * would have no sample — the answer that decides is the same one.
  */
 function measured(
-  text: string,
+  painted: PaintedText,
   style: TextStyle,
   effects: readonly LayerEffect[],
   rotation = 0,
 ): { width: number; height: number } | null {
-  if (text.length === 0) return null
+  if (painted.plain.length === 0) return null
 
   const entry = resolveFace(style)
   if (!entry && !catalogLoaded.value) return null
 
-  const req = requestFor(text, style, effects, NO_PHASE, rotation)
+  const req = requestFor(painted, style, effects, NO_PHASE, rotation)
 
   if (entry) {
     try {
@@ -205,6 +249,14 @@ export interface DrawnLabel {
   box: { w: number; h: number }
   /** Where the bitmap's centre goes, so its corner lands on the page grid. */
   center: Point
+  /**
+   * The text the bitmap shows — the code's own words with its tags taken out.
+   *
+   * Published because every caret, click and selection on a drawn label is an
+   * offset into this and not into the code: the bitmap set it, so the bitmap
+   * is what says which string the cluster table counts in.
+   */
+  plain: string
 }
 
 /**
@@ -234,25 +286,27 @@ export interface DrawnLabel {
  * drag adds a handful rather than one per frame.
  */
 export function drawnLabel(
-  text: string,
+  code: string,
   style: TextStyle,
   effects: readonly LayerEffect[],
   at: Point,
   rotation = 0,
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
+  const painted = paintedText(code, style)
 
-  const upright = measured(text, style, effects)
+  const upright = measured(painted, style, effects)
   const box = labelBoxSize(style, upright)
   // The turned bitmap holds the run at its own middle, so both rectangles share
   // one centre and the frame is the same point as the ink.
   const middle = frameCenter(at, box, layoutOrigin(style), turn)
   if (!upright) {
-    return { sample: null, missingFamily: null, box, center: placeLabel(middle, box, turn).center }
+    const center = placeLabel(middle, box, turn).center
+    return { sample: null, missingFamily: null, box, center, plain: painted.plain }
   }
 
-  const spun = turn === 0 ? upright : measured(text, style, effects, turn)
+  const spun = turn === 0 ? upright : measured(painted, style, effects, turn)
   const blit = spun ? { w: spun.width, h: spun.height } : box
   const { center, phase } = placeLabel(middle, blit, turn)
-  return { ...rasterFor(text, style, effects, phase, turn), box, center }
+  return { ...rasterFor(painted, style, effects, phase, turn), box, center, plain: painted.plain }
 }

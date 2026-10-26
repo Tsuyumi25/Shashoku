@@ -23,7 +23,8 @@ import {
 import { clamp, screenToPagePx } from '@/lib/coords'
 import { blankTranslation, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
 import { linesOf, type TextSide } from '@shared/page/text'
-import { blocksOf, shownLinesOf } from '@shared/page/units'
+import { blocksOf, shownCodeOf } from '@shared/page/units'
+import { escapeText } from '@shared/page/markup'
 import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
@@ -851,7 +852,7 @@ export const useEditorStore = defineStore('editor', () => {
     const label = project.blockById(pending.pageId, pending.labelId)
     return page === undefined || label === undefined
       ? undefined
-      : shownLinesOf(page, label).join('\n')
+      : shownCodeOf(page, label)
   }
 
   /**
@@ -938,7 +939,7 @@ export const useEditorStore = defineStore('editor', () => {
     const manifest = project.pageById(page)?.page
     const label = project.blockById(page, id)
     if (!label || !manifest) return
-    beginTextEdit(page, id, shownLinesOf(manifest, label).join('\n'))
+    beginTextEdit(page, id, shownCodeOf(manifest, label))
   }
 
   /**
@@ -1339,7 +1340,7 @@ export const useEditorStore = defineStore('editor', () => {
       before.set(id, block.body)
       after.set(id, {
         ...block.body,
-        lines: linesOf(filling.text),
+        lines: linesOf(escapeText(filling.text)),
         from: filling.from,
         // ⚠️ Only the type, never the position. The block already stands where
         // it stands, and this is a correction to what it says.
@@ -1355,7 +1356,7 @@ export const useEditorStore = defineStore('editor', () => {
       sourceBlock.body = {
         ...emptyBody(read),
         by: 'auto',
-        lines: linesOf(spawn.text),
+        lines: linesOf(escapeText(spawn.text)),
         from: spawn.from,
       }
       // Placed by where the reading was, which is the middle of the balloon.
@@ -1474,7 +1475,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (before.from === reading.hash) return
     const after: SourceBody = {
       ...before,
-      lines: linesOf(reading.text),
+      lines: linesOf(escapeText(reading.text)),
       by: 'human',
       from: reading.hash,
     }
@@ -1510,7 +1511,7 @@ export const useEditorStore = defineStore('editor', () => {
     sourceBlock.body = {
       ...emptyBody(read),
       by: 'auto',
-      lines: linesOf(reading.text),
+      lines: linesOf(escapeText(reading.text)),
       from: reading.hash,
     }
     // Placed by its middle, as a run's own blocks are.

@@ -105,7 +105,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { findTextObject } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { generateId } from '@shared/page/schema'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
 import { drawnLabel } from '@/lib/labelRaster'
 import { screenToContentPx } from '@/lib/coords'
 import { vAutoGrow } from '@/lib/autoGrow'
@@ -196,7 +196,7 @@ function frameOf(entry: TextLayerEntry): Box {
   const body = entry.body
   const page = file.value?.page
   const drawn = drawnLabel(
-    page === undefined ? body.lines.join('\n') : shownLinesOf(page, entry).join('\n'),
+    page === undefined ? body.lines.join('\n') : shownCodeOf(page, entry),
     body.style,
     entry.effects,
     { x: body.x, y: body.y },

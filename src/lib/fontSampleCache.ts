@@ -1,4 +1,9 @@
-import type { EngineClusterRect, EngineMeasure, EngineStrokeSpec } from '@shared/engine/types'
+import type {
+  EngineClusterRect,
+  EngineMeasure,
+  EngineSpan,
+  EngineStrokeSpec,
+} from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextAlign } from '@shared/text-style/types'
 import { engineSourceFor, faceKey } from './fontCatalog'
@@ -39,6 +44,12 @@ export interface SampleRequest {
    * looking at the same picture.
    */
   weightPx?: number
+  /**
+   * Stretches set differently from the rest of the run, in UTF-8 byte offsets
+   * into `text`. Part of the identity of both the bitmap and the frame — a
+   * span carries its own size, so it moves what the run measures.
+   */
+  spans?: readonly EngineSpan[]
 }
 
 export interface Sample {
@@ -76,6 +87,50 @@ const MEASURE_CACHE_LIMIT = 1024
  */
 export function samplePadding(stroke?: EngineStrokeSpec, weightPx = 0): number {
   return 4 + Math.ceil(stroke?.width ?? 0) + Math.ceil(Math.max(0, weightPx))
+}
+
+/**
+ * The margin this request needs. A span may be thickened past the run's own
+ * weight, and the margin has to answer to the heaviest thing drawn rather than
+ * to the base — one span bolder than the rest would come back clipped.
+ */
+function paddingOf(req: SampleRequest): number {
+  let weight = req.weightPx ?? 0
+  for (const span of req.spans ?? []) weight = Math.max(weight, span.weightPx)
+  return samplePadding(req.stroke, weight)
+}
+
+/**
+ * The spans as one string, with or without what only painting sees. The two
+ * keys share it so they cannot drift about what a span is, while the measure
+ * key keeps the same promise the rest of it makes: a colour cannot move the
+ * frame, and a weight only reaches it through the padding that is already in
+ * that key.
+ */
+function spansKey(spans: readonly EngineSpan[] | undefined, paint: boolean): string {
+  if (!spans || spans.length === 0) return '-'
+  return spans
+    .map((s) => {
+      const shape = `${s.start}-${s.end}:${s.sizePx}:${s.upright ? 'u' : ''}`
+      return paint ? `${shape}:${s.color}:${s.weightPx}` : shape
+    })
+    .join(';')
+}
+
+/**
+ * Plain copies of the spans, or nothing when there are none — the same reason
+ * the stroke is copied below: a Vue reactive proxy cannot cross contextBridge.
+ */
+function engineSpans(spans: readonly EngineSpan[] | undefined): EngineSpan[] | undefined {
+  if (!spans || spans.length === 0) return undefined
+  return spans.map((s) => ({
+    start: s.start,
+    end: s.end,
+    sizePx: s.sizePx,
+    color: s.color,
+    weightPx: s.weightPx,
+    upright: s.upright,
+  }))
 }
 
 const cache = new Map<string, Sample>()
@@ -120,6 +175,7 @@ function keyOf(req: SampleRequest): string {
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
     req.weightPx ?? 0,
+    spansKey(req.spans, true),
     req.text,
   ].join('|')
 }
@@ -139,7 +195,7 @@ export function coverageFor(entry: FontEntry, text: string): number[] {
 }
 
 function rasterize(req: SampleRequest): Sample {
-  const padding = samplePadding(req.stroke, req.weightPx)
+  const padding = paddingOf(req)
   // Everything crossing contextBridge has to be structured-cloneable, and a
   // Vue reactive proxy is not — hence the explicit plain copy rather than
   // trusting every caller to hand over raw objects.
@@ -150,6 +206,7 @@ function rasterize(req: SampleRequest): Sample {
         position: req.stroke.position,
       }
     : undefined
+  const spans = engineSpans(req.spans)
 
   if (!req.entry) {
     const grid = window.engine.renderNotdef(
@@ -190,6 +247,7 @@ function rasterize(req: SampleRequest): Sample {
         req.phaseY,
         req.align,
         req.weightPx,
+        spans,
       )
     : window.engine.renderText(
         drawWith,
@@ -203,6 +261,7 @@ function rasterize(req: SampleRequest): Sample {
         req.phaseY,
         req.align,
         req.weightPx,
+        spans,
       )
 
   const missing = new Set(uncovered)
@@ -251,11 +310,13 @@ function measureKeyOf(req: SampleRequest, padding: number): string {
     req.align ?? 'start',
     req.rotation ?? 0,
     `${req.phaseX ?? 0},${req.phaseY ?? 0}`,
+    spansKey(req.spans, false),
     req.text,
   ].join('|')
 }
 
 function measure(req: SampleRequest, padding: number): EngineMeasure {
+  const spans = engineSpans(req.spans)
   if (!req.entry) {
     return window.engine.measureNotdef(
       req.text,
@@ -279,6 +340,7 @@ function measure(req: SampleRequest, padding: number): EngineMeasure {
         req.phaseX,
         req.phaseY,
         req.align,
+        spans,
       )
     : window.engine.measureText(
         drawWith,
@@ -289,6 +351,7 @@ function measure(req: SampleRequest, padding: number): EngineMeasure {
         req.phaseX,
         req.phaseY,
         req.align,
+        spans,
       )
 }
 
@@ -298,7 +361,7 @@ function measure(req: SampleRequest, padding: number): EngineMeasure {
  * so a caller cannot hand the two calls different geometry by accident.
  */
 export function measureFor(req: SampleRequest): EngineMeasure {
-  const padding = samplePadding(req.stroke, req.weightPx)
+  const padding = paddingOf(req)
   return remembered(measures, measureKeyOf(req, padding), MEASURE_CACHE_LIMIT, () =>
     measure(req, padding),
   )

@@ -8,7 +8,9 @@ import {
   isUntranslated,
   linesAt,
   placeOfBlock,
+  projectionCodeOf,
   projectionOf,
+  shownCodeOf,
   shownLinesOf,
   unitsInReadingOrder,
 } from './units'
@@ -127,6 +129,45 @@ describe('shownLinesOf', () => {
   it('leaves a source block reading its own words', () => {
     const manifest = page(SOUND, [SPLIT])
     expect(shownLinesOf(manifest, SOUND[0] as never)).toEqual(['ゴゴゴ'])
+  })
+})
+
+describe('the markup and the words in it', () => {
+  const MARKED = [
+    sourceBlock('s', ['&lt;ゴゴゴ&gt;']),
+    block('t1', ['<size=×2>轟']),
+    block('t2', ['隆</size>']),
+  ]
+
+  it('reads a block as its words and keeps its markup apart', () => {
+    const manifest = page(MARKED, [SPLIT])
+    expect(shownCodeOf(manifest, MARKED[1] as never)).toBe('<size=×2>轟')
+    expect(shownLinesOf(manifest, MARKED[1] as never)).toEqual(['轟'])
+    expect(shownLinesOf(manifest, MARKED[0] as never)).toEqual(['<ゴゴゴ&gt;'])
+  })
+
+  /** A tag may swallow the line break it spans, which is why the code is read whole. */
+  it('reads a block whose tag spans a line break as one line fewer', () => {
+    const manifest = page([sourceBlock('s', ['頭<size=×2', 'px>尾'])], [unit()])
+    expect(shownLinesOf(manifest, manifest.layers[0] as never)).toEqual(['頭尾'])
+  })
+
+  it('reads a side as its words and offers the markup to whoever wants it', () => {
+    expect(projectionOf(MARKED, SPLIT, 'translation')).toBe('轟隆')
+    expect(projectionCodeOf(MARKED, SPLIT, 'translation')).toBe('<size=×2>轟隆</size>')
+  })
+
+  /** The separator is the page's own text, so it is text in the code too. */
+  it('escapes a separator on the way into the markup', () => {
+    const spaced = unit({ translation: { members: ['t1', 't2'], separators: ['<>'] } })
+    expect(projectionCodeOf(MARKED, spaced, 'translation')).toBe('<size=×2>轟&lt;>隆</size>')
+    expect(projectionOf(MARKED, spaced, 'translation')).toBe('轟<>隆')
+  })
+
+  it('calls a translation holding nothing but a tag untranslated', () => {
+    expect(isUntranslated([sourceBlock('s', ['ゴ']), block('t', ['<size=×2></size>'])], unit())).toBe(
+      true,
+    )
   })
 })
 

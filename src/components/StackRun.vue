@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import type { TextLayerEntry } from '@shared/page/types'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { previewedStyle } from '@/composables/useFontPicker'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
@@ -166,9 +166,9 @@ const effectedRasters = computed(() => {
  * rather than the block's. A block drawn from its own words alone would keep
  * showing what somebody typed after they picked something else.
  */
-function linesShown(entry: TextLayerEntry): readonly string[] {
+function codeShown(entry: TextLayerEntry): string {
   const page = project.pageById(editor.currentPageId ?? '')?.page
-  return page === undefined ? entry.body.lines : shownLinesOf(page, entry)
+  return page === undefined ? entry.body.lines.join('\n') : shownCodeOf(page, entry)
 }
 
 const drawnTexts = computed(() => {
@@ -187,7 +187,7 @@ const drawnTexts = computed(() => {
     out.set(
       entry.id,
       drawnLabel(
-        linesShown(entry).join('\n'),
+        codeShown(entry),
         look.style,
         look.effects,
         { x: body.x, y: body.y },

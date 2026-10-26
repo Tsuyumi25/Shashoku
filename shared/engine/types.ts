@@ -52,6 +52,32 @@ export interface EngineStrokeSpec {
 }
 
 /**
+ * One stretch of a text object set differently from the object's own style.
+ *
+ * `start` / `end` are UTF-8 byte offsets into the whole text, newlines
+ * included, so a span may cross a line break — the engine cuts it at the
+ * break. Sorted and non-overlapping. Everything no span covers keeps the
+ * call's own size, fill and weight, and a call that passes none renders
+ * exactly as it did before spans existed.
+ *
+ * Bytes rather than UTF-16 units because that is what the shaper keys its
+ * clusters by, and the cluster rects a render reports are already in them —
+ * converting here would leave the two halves of the same answer in different
+ * units.
+ */
+export interface EngineSpan {
+  start: number;
+  end: number;
+  sizePx: number;
+  /** "#RRGGBB" or "#RRGGBBAA". */
+  color: string;
+  /** Moves the fill's own edge, in pixels, positive outward. */
+  weightPx: number;
+  /** 縱中橫. Vertical text only; horizontal text ignores it. */
+  upright: boolean;
+}
+
+/**
  * Where one cluster of the input string landed, in the unrotated space the
  * text was laid out in.
  *
@@ -248,6 +274,10 @@ export interface ShashokuEngineApi {
    * `align` places a line short of the longest one inside the block, along the
    * direction the text runs. It cannot change the size that comes back: the
    * block is as wide as its longest line and that line has no slack to spend.
+   *
+   * `spans` set stretches of the text differently from the call's own style.
+   * A line is as tall as the tallest thing set in it and a column as wide as
+   * the widest, so a span can change the size that comes back.
    */
   renderText(
     font: EngineFontSource,
@@ -261,6 +291,7 @@ export interface ShashokuEngineApi {
     phaseY?: number,
     align?: TextAlign,
     weightPx?: number,
+    spans?: EngineSpan[],
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -274,12 +305,14 @@ export interface ShashokuEngineApi {
     phaseY?: number,
     align?: TextAlign,
     weightPx?: number,
+    spans?: EngineSpan[],
   ): EngineBitmap;
   /**
    * The render call stopped where painting would start. Takes only the
    * arguments that shape the frame — colours, stroke and weight cannot move
    * it, though the padding sized for them can, and that stays the caller's to
-   * pass.
+   * pass. Spans are not a colour: they carry sizes, so they shape the frame
+   * and belong here.
    */
   measureText(
     font: EngineFontSource,
@@ -290,6 +323,7 @@ export interface ShashokuEngineApi {
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
+    spans?: EngineSpan[],
   ): EngineMeasure;
   measureVertical(
     font: EngineFontSource,
@@ -300,6 +334,7 @@ export interface ShashokuEngineApi {
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
+    spans?: EngineSpan[],
   ): EngineMeasure;
   /**
    * One box with an X through it per character — what there is to draw when

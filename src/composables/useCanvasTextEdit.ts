@@ -1,8 +1,8 @@
 import { computed, nextTick } from 'vue'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
 import { isHidden, isLocked } from '@shared/page/tree'
 import type { TextLayerEntry } from '@shared/page/types'
-import { useTextEditSurface } from '@/composables/useTextEditSurface'
+import { plainEditSurface, textWriter } from '@/composables/useTextEditSurface'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -11,9 +11,9 @@ import { useProjectStore } from '@/stores/projectStore'
 /**
  * Typing into a label from the canvas.
  *
- * The keyboard never comes here: the translation list's box takes it, and this
- * is only what points that box at a label and reads back where its caret ended
- * up. Nothing holds a second copy of the text, which is why there is nothing
+ * What points the canvas's own box at a label and refuses the objects it
+ * cannot be opened on. Nothing holds a second copy of the text: the box shows
+ * the words the code sets and writes back into that code, so there is nothing
  * to reconcile when the same edit is driven from the list instead.
  */
 export function useCanvasTextEdit() {
@@ -21,7 +21,6 @@ export function useCanvasTextEdit() {
   const editor = useEditorStore()
   const notices = useNoticeStore()
   const preferences = usePreferencesStore()
-  const surface = useTextEditSurface()
 
   /** Which label on the open page is being typed into, if any. */
   const editingId = computed(() => {
@@ -59,27 +58,31 @@ export function useCanvasTextEdit() {
   }
 
   /**
-   * The box arrives with the row it belongs to, which is a render away — one
-   * turn for the panel to put the list up, one for the row to swap its preview
-   * for an input.
+   * The box arrives with the session it belongs to, which is a render away.
    *
    * Always at least one turn, never an early return on whatever is registered
    * now: opening a second object while a first is open finds the first one's
-   * box still standing, and focusing that would put the caret in a row about to
-   * be taken away.
+   * box still standing, and focusing that would put the caret in a session
+   * about to be taken away.
    */
   async function fieldAppears(): Promise<HTMLTextAreaElement | null> {
     await nextTick()
-    if (surface.field.value === null) await nextTick()
-    return surface.field.value
+    if (plainEditSurface.field.value === null) await nextTick()
+    return plainEditSurface.field.value
   }
 
   /**
-   * Start typing into `label`, with the caret at `index`.
+   * Start typing into `label`, with the caret at `index` — an offset into the
+   * words on the page, which is what a double click on them lands on.
    *
-   * ⚠️ Transitional: the translation list has to be the panel on screen, since
-   * its box is what holds the keyboard. The line that switches panels goes when
-   * the tree and the list become one panel.
+   * The keyboard goes to the canvas's own box, since the work is happening
+   * there. The list's box opens on the same body at the same place and stands
+   * by: it is the code the canvas is a rendering of, and a click on it takes
+   * the keyboard back without anything being handed over.
+   *
+   * ⚠️ Transitional: the translation list is still brought up, so the body
+   * being typed into is readable as code while it is typed. The line that
+   * switches panels goes when the tree and the list become one panel.
    */
   async function enterAt(pageId: string, label: TextLayerEntry, index: number): Promise<void> {
     if (refuse(pageId, label)) return
@@ -87,21 +90,17 @@ export function useCanvasTextEdit() {
     if (page === undefined) return
     preferences.setSidePanel('labels')
     editor.revealLabel(pageId, label.id)
-    editor.beginTextEdit(pageId, label.id, shownLinesOf(page, label).join('\n'))
-    // The work is happening on the page, so the box goes to the page — pinned
-    // to the insertion point, where the IME will open its candidates.
-    surface.pin(true)
+    editor.beginTextEdit(pageId, label.id, shownCodeOf(page, label))
+    textWriter.value = 'plain'
     const field = await fieldAppears()
     if (field === null) return
     field.focus({ preventScroll: true })
-    surface.setRange(index)
+    plainEditSurface.setRange(index)
   }
 
   return {
     editingId,
-    range: surface.range,
-    moved: surface.moved,
+    moved: plainEditSurface.moved,
     enterAt,
-    setRange: surface.setRange,
   }
 }

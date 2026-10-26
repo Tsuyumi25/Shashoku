@@ -77,7 +77,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
       description:
         "Read-only. Lists every text object in the open Shashoku project, page by page " +
         "in reading order: the object's id, its source text (原文) and what it currently " +
-        "reads as (譯文). An empty 譯文 means the object is untranslated.",
+        "reads as (譯文). An empty 譯文 means the object is untranslated. Both are markup: " +
+        "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a literal " +
+        "`<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given.",
     },
     async () => {
       try {
@@ -98,7 +100,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "item lands in the object's candidate drawer. Where the object currently reads as " +
         "nothing at all, the new candidate also takes effect immediately; anywhere else the " +
         "person keeps what they chose and picks from the drawer. items[].lines is one array " +
-        "entry per rendered line — no embedded newlines.",
+        "entry per rendered line — no embedded newlines. Lines are markup, the same syntax " +
+        "get_texts shows: wrap a stretch in `<size=×1.3 color=#ff0000 weight=+1 upright>…</>` " +
+        "to set it apart, and write a literal `<` or `&` as `&lt;` or `&amp;`.",
       inputSchema: {
         page_id: z.string(),
         items: z

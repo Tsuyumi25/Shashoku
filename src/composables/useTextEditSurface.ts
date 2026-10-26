@@ -14,8 +14,11 @@ import { pinnedInputBox, type CaretOnScreen, type PinnedBox } from '@/lib/pinned
  * within the thing it is in, and the font picker's sample and a page's
  * translations are two different things — sharing a surface between them would
  * be one answer to two questions.
+ *
+ * `onFocus` is how a surface says it has become the one being written into,
+ * for the pair below that hold the same body in two notations.
  */
-export function createTextEditSurface() {
+export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
   const field = shallowRef<HTMLTextAreaElement | null>(null)
 
   const range = ref<{ start: number; end: number }>({ start: 0, end: 0 })
@@ -61,12 +64,18 @@ export function createTextEditSurface() {
   /** Everything that can move a caret without the application being told. */
   const WATCHED = ['keydown', 'keyup', 'input', 'select', 'pointerup', 'focus'] as const
 
+  function tookFocus(): void {
+    options.onFocus?.()
+  }
+
   function attach(el: HTMLTextAreaElement): void {
     for (const name of WATCHED) el.addEventListener(name, readSoon)
+    el.addEventListener('focus', tookFocus)
   }
 
   function detach(el: HTMLTextAreaElement): void {
     for (const name of WATCHED) el.removeEventListener(name, readSoon)
+    el.removeEventListener('focus', tookFocus)
   }
 
   /**
@@ -158,12 +167,38 @@ export function createTextEditSurface() {
 export type TextEditSurface = ReturnType<typeof createTextEditSurface>
 
 /**
- * The one every translation is typed into. Shared because the row that holds it
- * and the canvas that projects it are different components looking at the same
- * caret.
+ * Which of the two boxes below is the one being written into.
+ *
+ * A body is held in one string — the markup code — and shown in two notations
+ * at once: the code itself in the translation list, and the words it sets on
+ * the canvas. Both are real controls with real carets, so something has to say
+ * which caret is the user's and which is a projection of it. Focus says it,
+ * and this is focus remembered: a popover opened from the toolbar takes the
+ * keyboard for a moment without the session changing hands.
  */
-const translations = createTextEditSurface()
+export type TextWriter = 'code' | 'plain'
 
-export function useTextEditSurface(): TextEditSurface {
-  return translations
-}
+export const textWriter = ref<TextWriter>('code')
+
+/**
+ * The translation list's box, holding the code with its tags in it. Shared
+ * because the row that holds it and the canvas that projects its caret are
+ * different components looking at the same selection.
+ */
+export const codeEditSurface = createTextEditSurface({
+  onFocus: () => {
+    textWriter.value = 'code'
+  },
+})
+
+/**
+ * The canvas's own box, holding the plain words the engine sets. It is never
+ * anywhere but on the insertion point — being where the IME opens its
+ * candidates is the whole of its job — so it is pinned once and for good.
+ */
+export const plainEditSurface = createTextEditSurface({
+  onFocus: () => {
+    textWriter.value = 'plain'
+  },
+})
+plainEditSurface.pin(true)

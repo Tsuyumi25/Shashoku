@@ -34,7 +34,7 @@ pub struct TextMeasure {
     pub clusters: Vec<ClusterRect>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
 pub const BLACK: Rgba = Rgba(0, 0, 0, 255);
@@ -96,6 +96,24 @@ pub enum StrokePosition {
     Center,
     /// Stroke sits entirely INSIDE the glyph outline.
     Inside,
+}
+
+/// A stretch of the text set differently from the call's own style.
+///
+/// Offsets are UTF-8 bytes into the whole string, newlines included, so one
+/// span may cross a line break — layout cuts it at the break. Sorted and
+/// non-overlapping; everything outside every span keeps the call's own size,
+/// fill and weight.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct SpanStyle {
+    pub start: u32,
+    pub end: u32,
+    pub size_px: f32,
+    pub color: Rgba,
+    pub weight_px: f32,
+    /// 縱中橫: set horizontally inside one cell of a vertical column. Nothing
+    /// in horizontal text asks this question, so there it does nothing.
+    pub upright: bool,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -177,8 +195,9 @@ pub fn uncovered_clusters(
     // substitution needs a base glyph to replace, so it cannot turn a covered
     // character into a missing one.
     let mut flagged = Vec::new();
-    for (line_offset, glyphs) in shaped_lines(&hr_font, text, COVERAGE_SIZE_PX, 1.0, false) {
-        for glyph in glyphs {
+    let mut line_offset = 0u32;
+    for line in text.split('\n') {
+        for glyph in shape_line(&hr_font, line, COVERAGE_SIZE_PX, 1.0, false) {
             let blank = match outlines.get(GlyphId::new(glyph.gid)) {
                 None => true,
                 Some(outline) => {
@@ -193,6 +212,7 @@ pub fn uncovered_clusters(
                 flagged.push(line_offset + glyph.cluster);
             }
         }
+        line_offset += line.len() as u32 + 1;
     }
     Ok(reportable_offsets(text, &mut flagged))
 }
@@ -230,11 +250,78 @@ fn hex_pair(s: &str, i: usize) -> Result<u8, String> {
 // a single tiny-skia Path plus the canvas dimensions and baseline.
 
 struct BuiltRun {
+    /// Every glyph the run drew, which is what the stroke is grown from and
+    /// what paints the whole run when one style covers it.
     path: Option<Path>,
+    /// The same outlines split by the paint they take, when the spans ask for
+    /// more than one. Empty while the call's own fill and weight cover
+    /// everything — the case that must come back byte for byte as it did
+    /// before spans existed.
+    groups: Vec<PaintGroup>,
     width: u32,
     height: u32,
     baseline: f32,
     clusters: Vec<ClusterRect>,
+}
+
+/// The outlines one fill colour and one weight apply to.
+struct PaintGroup {
+    path: Path,
+    /// `None` is the call's own, so a group that only differs in size does not
+    /// need to know what the call will fill with.
+    color: Option<Rgba>,
+    weight: Option<f32>,
+}
+
+/// Collects outlines into one builder per distinct paint, in the order the
+/// paints are first asked for.
+///
+/// A run no span touches asks for one, and that one builder takes every glyph
+/// in draw order — the same single path the builder used to be.
+#[derive(Default)]
+struct GlyphGroups {
+    keyed: Vec<(Option<Rgba>, Option<f32>, PathBuilder)>,
+}
+
+impl GlyphGroups {
+    fn builder(&mut self, color: Option<Rgba>, weight: Option<f32>) -> &mut PathBuilder {
+        let at = match self
+            .keyed
+            .iter()
+            .position(|(c, w, _)| *c == color && *w == weight)
+        {
+            Some(at) => at,
+            None => {
+                self.keyed.push((color, weight, PathBuilder::new()));
+                self.keyed.len() - 1
+            }
+        };
+        &mut self.keyed[at].2
+    }
+
+    /// The union of everything drawn, and the groups — the latter only once
+    /// there are two paints to tell apart.
+    fn finish(self) -> (Option<Path>, Vec<PaintGroup>) {
+        let mut groups: Vec<PaintGroup> = Vec::with_capacity(self.keyed.len());
+        for (color, weight, builder) in self.keyed {
+            let Some(path) = builder.finish() else {
+                continue;
+            };
+            groups.push(PaintGroup {
+                path,
+                color,
+                weight,
+            });
+        }
+        if groups.len() < 2 {
+            return (groups.pop().map(|group| group.path), Vec::new());
+        }
+        let mut union = PathBuilder::new();
+        for group in &groups {
+            union.push_path(&group.path);
+        }
+        (union.finish(), groups)
+    }
 }
 
 /// Where one cluster of the input string landed on the bitmap.
@@ -333,23 +420,117 @@ fn shape_line(
         .collect()
 }
 
-/// Shapes each \n-separated line, pairing it with its byte offset in `text`.
-fn shaped_lines(
-    hr_font: &harfrust::FontRef,
-    text: &str,
+/// One run of one line, set in one style.
+struct Segment<'a> {
+    /// Byte offset of `text` in the whole string, which cluster keys are in.
+    offset: u32,
+    text: &'a str,
     size_px: f32,
-    scale: f32,
-    vertical: bool,
-) -> Vec<(u32, Vec<ShapedGlyph>)> {
-    let mut offset = 0u32;
-    let mut out = Vec::new();
-    for line in text.split('\n') {
-        out.push((offset, shape_line(hr_font, line, size_px, scale, vertical)));
-        offset += line.len() as u32 + 1;
+    /// `None` is the call's own fill / weight. Leaving it unanswered here is
+    /// what keeps a run no span touches in a single paint group.
+    color: Option<Rgba>,
+    weight: Option<f32>,
+    upright: bool,
+}
+
+/// `at` moved forward to the nearest character boundary of `line`.
+///
+/// Spans are counted in bytes by a caller that counts the text in some other
+/// unit, so a boundary landing inside a character is reachable. Moving every
+/// one of them the same way keeps them in order and keeps the slices valid.
+fn on_boundary(line: &str, line_offset: u32, at: u32) -> u32 {
+    let mut i = at.saturating_sub(line_offset) as usize;
+    if i >= line.len() {
+        return line_offset + line.len() as u32;
+    }
+    while !line.is_char_boundary(i) {
+        i += 1;
+    }
+    line_offset + i as u32
+}
+
+/// The pieces one line falls into under the spans that reach it, in text
+/// order. A line no span touches comes back as the single piece it is, which
+/// is what keeps an unspanned run shaped as one string.
+fn segments_of<'a>(
+    line: &'a str,
+    line_offset: u32,
+    size_px: f32,
+    spans: &[SpanStyle],
+) -> Vec<Segment<'a>> {
+    let line_end = line_offset + line.len() as u32;
+    let cut =
+        |from: u32, to: u32| &line[(from - line_offset) as usize..(to - line_offset) as usize];
+
+    let mut out: Vec<Segment<'a>> = Vec::new();
+    let mut at = line_offset;
+    for span in spans
+        .iter()
+        .filter(|span| span.end > line_offset && span.start < line_end)
+    {
+        let from = on_boundary(line, line_offset, span.start.max(at));
+        let to = on_boundary(line, line_offset, span.end.min(line_end));
+        if to <= from {
+            continue;
+        }
+        if from > at {
+            out.push(Segment {
+                offset: at,
+                text: cut(at, from),
+                size_px,
+                color: None,
+                weight: None,
+                upright: false,
+            });
+        }
+        out.push(Segment {
+            offset: from,
+            text: cut(from, to),
+            size_px: span.size_px,
+            color: Some(span.color),
+            weight: Some(span.weight_px),
+            upright: span.upright,
+        });
+        at = to;
+    }
+    if at < line_end || out.is_empty() {
+        out.push(Segment {
+            offset: at,
+            text: cut(at, line_end),
+            size_px,
+            color: None,
+            weight: None,
+            upright: false,
+        });
     }
     out
 }
 
+/// Ascent, descent below the baseline, and the box a line needs, all at one
+/// size — the three figures a segment contributes to the line holding it.
+fn size_metrics(sk_font: &FontRef, size_px: f32) -> (f32, f32, f32) {
+    let metrics = sk_font.metrics(Size::new(size_px), LocationRef::default());
+    let ascent = metrics.ascent;
+    let descent = -metrics.descent;
+    (
+        ascent,
+        descent,
+        (ascent + descent + metrics.leading).max(size_px),
+    )
+}
+
+struct LaidSegment<'a> {
+    seg: Segment<'a>,
+    glyphs: Vec<ShapedGlyph>,
+}
+
+/// How wide a vertical column is, as a multiple of the size set in it.
+const COLUMN_EM: f32 = 1.2;
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "layout takes what the public call takes, which is the addon's contract"
+)]
 fn build_horizontal_path(
     font_bytes: &[u8],
     text: &str,
@@ -358,80 +539,99 @@ fn build_horizontal_path(
     face_index: u32,
     phase: Phase,
     align: Align,
+    spans: &[SpanStyle],
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
     let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
 
-    let size = Size::new(size_px);
     let loc = LocationRef::default();
-    let metrics = sk_font.metrics(size, loc);
-    let upem = metrics.units_per_em as f32;
-    let scale = size_px / upem;
+    let upem = sk_font.metrics(Size::new(size_px), loc).units_per_em as f32;
 
-    let ascent = metrics.ascent;
-    let descent = -metrics.descent;
-    let leading = metrics.leading;
-    let line_height = (ascent + descent + leading).max(size_px);
+    // Empty lines are kept: each one still occupies a full line box. Each
+    // segment is shaped on its own, so harfrust's cluster offsets are
+    // segment-relative and need the segment's own offset added back to point
+    // into the whole string.
+    //
+    // A line is as tall as the tallest thing set in it and its baseline sits
+    // as deep as the deepest ascent asked for, so a larger span pushes the
+    // line down and the lines after it rather than overprinting its
+    // neighbours.
+    let mut lines: Vec<(Vec<LaidSegment>, f32, f32, f32)> = Vec::new();
+    let mut offset = 0u32;
+    for line in text.split('\n') {
+        let (mut width, mut ascent, mut height) = (0.0f32, 0.0f32, 0.0f32);
+        let mut laid: Vec<LaidSegment> = Vec::new();
+        for seg in segments_of(line, offset, size_px, spans) {
+            let (seg_ascent, _, seg_height) = size_metrics(&sk_font, seg.size_px);
+            ascent = ascent.max(seg_ascent);
+            height = height.max(seg_height);
+            let glyphs = shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false);
+            width += glyphs.iter().map(|g| g.x_advance).sum::<f32>();
+            laid.push(LaidSegment { seg, glyphs });
+        }
+        lines.push((laid, width, ascent, height));
+        offset += line.len() as u32 + 1;
+    }
 
-    // Empty lines are kept: each one still occupies a full line_height.
-    // Each line is shaped on its own, so harfrust's cluster offsets are
-    // line-relative and need the line's own offset added back to point into
-    // the whole string.
-    let lines: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, false);
-
-    let widths: Vec<f32> = lines
-        .iter()
-        .map(|(_, glyphs)| glyphs.iter().map(|g| g.x_advance).sum::<f32>())
-        .collect();
-    let max_width: f32 = widths.iter().copied().fold(0.0, f32::max);
-    let n_lines = lines.len();
-
-    let content_h = line_height * n_lines as f32;
+    let max_width: f32 = lines.iter().map(|line| line.1).fold(0.0, f32::max);
+    let content_h: f32 = lines.iter().map(|line| line.3).sum();
     let w = (max_width.ceil() as u32).max(1) + padding * 2;
     let h = (content_h.ceil() as u32).max(1) + padding * 2;
 
     let outlines = sk_font.outline_glyphs();
-    let mut builder = PathBuilder::new();
-
+    let mut groups = GlyphGroups::default();
     let mut clusters: Vec<ClusterRect> = Vec::new();
+    let mut top = padding as f32 + phase.y;
 
-    for (line_idx, (line_offset, glyphs)) in lines.iter().enumerate() {
-        let baseline_y = padding as f32 + phase.y + ascent + line_idx as f32 * line_height;
-        let mut pen_x = padding as f32 + phase.x + (max_width - widths[line_idx]) * align.share();
-        for g in glyphs {
-            let gid = GlyphId::new(g.gid);
-            if let Some(glyph) = outlines.get(gid) {
-                let mut pen = BaselinePen {
-                    builder: &mut builder,
-                    pen_x: pen_x + g.x_offset,
-                    baseline_y: baseline_y - g.y_offset,
-                };
-                glyph
-                    .draw(DrawSettings::unhinted(size, loc), &mut pen)
-                    .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+    for (laid, width, ascent, height) in &lines {
+        let baseline_y = top + ascent;
+        let mut pen_x = padding as f32 + phase.x + (max_width - width) * align.share();
+        for LaidSegment { seg, glyphs } in laid {
+            let size = Size::new(seg.size_px);
+            for g in glyphs {
+                let gid = GlyphId::new(g.gid);
+                if let Some(glyph) = outlines.get(gid) {
+                    let mut pen = BaselinePen {
+                        builder: groups.builder(seg.color, seg.weight),
+                        pen_x: pen_x + g.x_offset,
+                        baseline_y: baseline_y - g.y_offset,
+                        squeeze: 1.0,
+                    };
+                    glyph
+                        .draw(DrawSettings::unhinted(size, loc), &mut pen)
+                        .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+                }
+                clusters.push(ClusterRect {
+                    cluster: seg.offset + g.cluster,
+                    x: pen_x,
+                    y: top,
+                    width: g.x_advance,
+                    height: *height,
+                });
+                pen_x += g.x_advance;
             }
-            clusters.push(ClusterRect {
-                cluster: line_offset + g.cluster,
-                x: pen_x,
-                y: baseline_y - ascent,
-                width: g.x_advance,
-                height: line_height,
-            });
-            pen_x += g.x_advance;
         }
+        top += height;
     }
 
+    let baseline = padding as f32 + phase.y + lines[0].2;
+    let (path, groups) = groups.finish();
     Ok(BuiltRun {
-        path: builder.finish(),
+        path,
+        groups,
         width: w,
         height: h,
-        baseline: padding as f32 + phase.y + ascent,
+        baseline,
         clusters: merge_cluster_rects(&clusters),
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "layout takes what the public call takes, which is the addon's contract"
+)]
 fn build_vertical_path(
     font_bytes: &[u8],
     text: &str,
@@ -440,81 +640,148 @@ fn build_vertical_path(
     face_index: u32,
     phase: Phase,
     align: Align,
+    spans: &[SpanStyle],
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
     let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
 
-    let size = Size::new(size_px);
     let loc = LocationRef::default();
-    let metrics = sk_font.metrics(size, loc);
-    let upem = metrics.units_per_em as f32;
-    let scale = size_px / upem;
+    let upem = sk_font.metrics(Size::new(size_px), loc).units_per_em as f32;
 
     // One \n-separated segment per column. CJK vertical convention runs
-    // columns right to left.
-    let columns: Vec<(u32, Vec<ShapedGlyph>)> = shaped_lines(&hr_font, text, size_px, scale, true);
+    // columns right to left. A column is as wide as the widest thing set in
+    // it; an upright stretch is shaped across the column and takes one em of
+    // its own size going down, however many characters went into it.
+    let mut columns: Vec<(Vec<LaidSegment>, f32, f32)> = Vec::new();
+    let mut offset = 0u32;
+    for line in text.split('\n') {
+        let (mut height, mut width) = (0.0f32, 0.0f32);
+        let mut laid: Vec<LaidSegment> = Vec::new();
+        for seg in segments_of(line, offset, size_px, spans) {
+            width = width.max(seg.size_px * COLUMN_EM);
+            let glyphs = shape_line(
+                &hr_font,
+                seg.text,
+                seg.size_px,
+                seg.size_px / upem,
+                !seg.upright,
+            );
+            height += if seg.upright {
+                seg.size_px
+            } else {
+                glyphs.iter().map(|g| -g.y_advance).sum::<f32>()
+            };
+            laid.push(LaidSegment { seg, glyphs });
+        }
+        columns.push((laid, height, width));
+        offset += line.len() as u32 + 1;
+    }
 
-    let column_width = size_px * 1.2;
-    let heights: Vec<f32> = columns
-        .iter()
-        .map(|(_, glyphs)| glyphs.iter().map(|g| -g.y_advance).sum::<f32>())
-        .collect();
-    let max_height: f32 = heights.iter().copied().fold(0.0, f32::max);
-    let n_cols = columns.len();
-
-    let content_w = column_width * n_cols as f32;
+    let max_height: f32 = columns.iter().map(|col| col.1).fold(0.0, f32::max);
+    let content_w: f32 = columns.iter().map(|col| col.2).sum();
     let w = (content_w.ceil() as u32).max(1) + padding * 2;
     let h = (max_height.ceil() as u32).max(1) + padding * 2;
 
     let outlines = sk_font.outline_glyphs();
-    let mut builder = PathBuilder::new();
+    let mut groups = GlyphGroups::default();
     let origin_y = padding as f32 + phase.y;
-
     let mut clusters: Vec<ClusterRect> = Vec::new();
+    // Column 0 sits at the right edge, later columns walk leftward.
+    let mut right = (w as f32) - padding as f32 + phase.x;
 
-    for (col_idx, (col_offset, glyphs)) in columns.iter().enumerate() {
-        // Column 0 sits at the right edge, later columns walk leftward.
-        let col_center_x = (w as f32) - padding as f32 + phase.x
-            - column_width * 0.5
-            - (col_idx as f32) * column_width;
-        let col_origin_y = origin_y + (max_height - heights[col_idx]) * align.share();
+    for (laid, height, column_width) in &columns {
+        let col_center_x = right - column_width * 0.5;
+        let col_origin_y = origin_y + (max_height - height) * align.share();
         let mut pen_x = 0.0f32;
         let mut pen_y = 0.0f32;
-        for g in glyphs {
-            let baseline_x = col_center_x + pen_x + g.x_offset;
-            let baseline_y = col_origin_y + pen_y - g.y_offset;
-
-            let gid = GlyphId::new(g.gid);
-            if let Some(glyph) = outlines.get(gid) {
-                let mut pen = BaselinePen {
-                    builder: &mut builder,
-                    pen_x: baseline_x,
-                    baseline_y,
-                };
-                glyph
-                    .draw(DrawSettings::unhinted(size, loc), &mut pen)
-                    .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+        for LaidSegment { seg, glyphs } in laid {
+            let size = Size::new(seg.size_px);
+            if seg.upright {
+                let em = seg.size_px;
+                let natural: f32 = glyphs.iter().map(|g| g.x_advance).sum();
+                // Wider than one em is the case 縱中橫 exists for — two or
+                // three characters pressed into one cell. Narrower keeps its
+                // own width and is only centred.
+                let squeeze = if natural > em { em / natural } else { 1.0 };
+                let (ascent, descent, _) = size_metrics(&sk_font, em);
+                let cell_top = col_origin_y + pen_y;
+                // The band the face draws in, centred in the cell: the cell is
+                // one em and a line of text is taller than one.
+                let baseline_y = cell_top + (em - ascent - descent) * 0.5 + ascent;
+                let mut at_x = col_center_x - natural * squeeze * 0.5;
+                for g in glyphs {
+                    let gid = GlyphId::new(g.gid);
+                    if let Some(glyph) = outlines.get(gid) {
+                        let mut pen = BaselinePen {
+                            builder: groups.builder(seg.color, seg.weight),
+                            pen_x: at_x + g.x_offset * squeeze,
+                            baseline_y: baseline_y - g.y_offset,
+                            squeeze,
+                        };
+                        glyph
+                            .draw(DrawSettings::unhinted(size, loc), &mut pen)
+                            .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+                    }
+                    at_x += g.x_advance * squeeze;
+                }
+                // The cell's height split evenly between the characters in it,
+                // so a caret and a selection still have a box each to land on.
+                let mut ids: Vec<u32> = glyphs.iter().map(|g| g.cluster).collect();
+                ids.dedup();
+                let share = em / (ids.len().max(1) as f32);
+                for (nth, id) in ids.iter().enumerate() {
+                    clusters.push(ClusterRect {
+                        cluster: seg.offset + id,
+                        x: col_center_x - column_width * 0.5,
+                        y: cell_top + nth as f32 * share,
+                        width: *column_width,
+                        height: share,
+                    });
+                }
+                pen_y += em;
+                continue;
             }
-            clusters.push(ClusterRect {
-                cluster: col_offset + g.cluster,
-                x: col_center_x - column_width * 0.5,
-                y: col_origin_y + pen_y,
-                width: column_width,
-                height: -g.y_advance,
-            });
-            pen_x += g.x_advance;
-            pen_y -= g.y_advance;
+            for g in glyphs {
+                let baseline_x = col_center_x + pen_x + g.x_offset;
+                let baseline_y = col_origin_y + pen_y - g.y_offset;
+
+                let gid = GlyphId::new(g.gid);
+                if let Some(glyph) = outlines.get(gid) {
+                    let mut pen = BaselinePen {
+                        builder: groups.builder(seg.color, seg.weight),
+                        pen_x: baseline_x,
+                        baseline_y,
+                        squeeze: 1.0,
+                    };
+                    glyph
+                        .draw(DrawSettings::unhinted(size, loc), &mut pen)
+                        .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+                }
+                clusters.push(ClusterRect {
+                    cluster: seg.offset + g.cluster,
+                    x: col_center_x - column_width * 0.5,
+                    y: col_origin_y + pen_y,
+                    width: *column_width,
+                    height: -g.y_advance,
+                });
+                pen_x += g.x_advance;
+                pen_y -= g.y_advance;
+            }
         }
+        right -= column_width;
     }
 
+    let baseline = (w as f32) - padding as f32 + phase.x - columns[0].2 * 0.5;
+    let (path, groups) = groups.finish();
     Ok(BuiltRun {
-        path: builder.finish(),
+        path,
+        groups,
         width: w,
         height: h,
         clusters: merge_cluster_rects(&clusters),
-        baseline: (w as f32) - padding as f32 + phase.x - column_width * 0.5,
+        baseline,
     })
 }
 
@@ -626,6 +893,17 @@ fn spin(run: BuiltRun, radians: f32) -> BuiltRun {
 
     BuiltRun {
         path: run.path.and_then(|drawn| drawn.transform(turn)),
+        groups: run
+            .groups
+            .into_iter()
+            .filter_map(|group| {
+                Some(PaintGroup {
+                    path: group.path.transform(turn)?,
+                    color: group.color,
+                    weight: group.weight,
+                })
+            })
+            .collect(),
         width,
         height,
         baseline: run.baseline,
@@ -721,6 +999,17 @@ fn paint_run(
     stroke: Option<StrokeSpec>,
     weight: f32,
 ) -> Result<TextBitmap, String> {
+    // Groups that all land on the call's own fill and weight — spans that only
+    // changed a size, say — are one paint after all, and one paint is what the
+    // single path below is for.
+    if !run.groups.is_empty()
+        && !run.groups.iter().all(|group| {
+            group.color.unwrap_or(fill) == fill && group.weight.unwrap_or(weight) == weight
+        })
+    {
+        return paint_groups(run, fill, stroke, weight);
+    }
+
     let count = run.width as usize * run.height as usize;
 
     let Some(path) = run.path else {
@@ -802,6 +1091,119 @@ fn paint_run(
     })
 }
 
+/// One paint group's coverage, already read at its own weight, beside the
+/// colour it lays down.
+struct GroupLayer {
+    coverage: Vec<f32>,
+    color: (f32, f32, f32, f32),
+}
+
+/// The run painted in several colours and weights at once.
+///
+/// One stroke, around everything, read off the union of the glyphs at the
+/// call's own weight — a band per group would show as seams wherever two
+/// styles meet, and a stroke is a property of the object and not of a span.
+/// Each group's fill, though, is read at its own weight off its own distance
+/// field, which is what makes a bolder stretch bolder.
+fn paint_groups(
+    run: BuiltRun,
+    fill: Rgba,
+    stroke: Option<StrokeSpec>,
+    weight: f32,
+) -> Result<TextBitmap, String> {
+    let (w, h) = (run.width, run.height);
+    let count = w as usize * h as usize;
+
+    let Some(path) = run.path.as_ref() else {
+        return Ok(TextBitmap {
+            width: w,
+            height: h,
+            rgba: vec![0u8; count * 4],
+            baseline: run.baseline,
+            clusters: run.clusters,
+        });
+    };
+
+    let inked = stroke
+        .as_ref()
+        .is_some_and(|spec| spec.width > 0.0 && spec.color.3 != 0);
+    let (outer, inner) = stroke
+        .as_ref()
+        .map_or((0.0, 0.0), |spec| band_offsets(spec.position, spec.width));
+
+    let ink = inked
+        .then(|| -> Result<Vec<f32>, String> {
+            let coverage = coverage_of(path, w, h)?;
+            let field = signed_distance_field(&coverage, w as usize, h as usize);
+            Ok(field
+                .iter()
+                .map(|&distance| coverage_at(distance, outer + weight))
+                .collect())
+        })
+        .transpose()?;
+
+    let layers = run
+        .groups
+        .iter()
+        .map(|group| -> Result<GroupLayer, String> {
+            let coverage = coverage_of(&group.path, w, h)?;
+            let offset = inner + group.weight.unwrap_or(weight);
+            // The rasterizer's own coverage beats anything read back off the
+            // field, so it stands wherever the edge asked for is the glyph's.
+            let coverage = if offset == 0.0 {
+                coverage
+            } else {
+                signed_distance_field(&coverage, w as usize, h as usize)
+                    .iter()
+                    .map(|&distance| coverage_at(distance, offset))
+                    .collect()
+            };
+            Ok(GroupLayer {
+                coverage,
+                color: unit(group.color.unwrap_or(fill)),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let (ir, ig, ib, ia) = unit(stroke.as_ref().map_or(fill, |spec| spec.color));
+    let mut rgba = vec![0u8; count * 4];
+    for i in 0..count {
+        // The groups over one another, each bounded by its own coverage. They
+        // share no glyph, so the order only decides the overlap two outlines
+        // close enough to touch leave behind.
+        let (mut fr, mut fg, mut fb, mut fa) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for GroupLayer { coverage, color } in &layers {
+            let (r, g, b, a) = color;
+            let a = coverage[i] * a;
+            if a <= 0.0 {
+                continue;
+            }
+            fr = r * a + fr * (1.0 - a);
+            fg = g * a + fg * (1.0 - a);
+            fb = b * a + fb * (1.0 - a);
+            fa = a + fa * (1.0 - a);
+        }
+        let s = ink.as_ref().map_or(0.0, |ink| ink[i]) * ia;
+        let alpha = fa + s * (1.0 - fa);
+        if alpha <= 0.0 {
+            continue;
+        }
+        let under = s * (1.0 - fa);
+        rgba[i * 4] = to_u8((fr + ir * under) / alpha);
+        rgba[i * 4 + 1] = to_u8((fg + ig * under) / alpha);
+        rgba[i * 4 + 2] = to_u8((fb + ib * under) / alpha);
+        rgba[i * 4 + 3] = to_u8(alpha);
+    }
+
+    Ok(TextBitmap {
+        width: w,
+        height: h,
+        rgba,
+        baseline: run.baseline,
+        clusters: run.clusters,
+    })
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Public horizontal / vertical render — now with fill + stroke support
 
@@ -821,8 +1223,11 @@ pub fn render_text(
     fill: Rgba,
     stroke: Option<StrokeSpec>,
     weight: f32,
+    spans: &[SpanStyle],
 ) -> Result<TextBitmap, String> {
-    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    let run = build_horizontal_path(
+        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+    )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
@@ -842,8 +1247,11 @@ pub fn render_vertical(
     fill: Rgba,
     stroke: Option<StrokeSpec>,
     weight: f32,
+    spans: &[SpanStyle],
 ) -> Result<TextBitmap, String> {
-    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    let run = build_vertical_path(
+        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+    )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
 
@@ -851,6 +1259,7 @@ pub fn render_vertical(
 /// paint it, so the spin need not carry it either.
 fn measure_run(mut run: BuiltRun, rotation: f32) -> TextMeasure {
     run.path = None;
+    run.groups.clear();
     let run = spin(run, rotation);
     TextMeasure {
         width: run.width,
@@ -873,8 +1282,11 @@ pub fn measure_text(
     rotation: f32,
     phase: Phase,
     align: Align,
+    spans: &[SpanStyle],
 ) -> Result<TextMeasure, String> {
-    let run = build_horizontal_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    let run = build_horizontal_path(
+        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+    )?;
     Ok(measure_run(run, rotation))
 }
 
@@ -891,8 +1303,11 @@ pub fn measure_vertical(
     rotation: f32,
     phase: Phase,
     align: Align,
+    spans: &[SpanStyle],
 ) -> Result<TextMeasure, String> {
-    let run = build_vertical_path(font_bytes, text, size_px, padding, face_index, phase, align)?;
+    let run = build_vertical_path(
+        font_bytes, text, size_px, padding, face_index, phase, align, spans,
+    )?;
     Ok(measure_run(run, rotation))
 }
 
@@ -1059,6 +1474,7 @@ fn build_notdef_path(
 
     BuiltRun {
         path,
+        groups: Vec::new(),
         width: w,
         height: h,
         baseline: if vertical {
@@ -1117,11 +1533,15 @@ struct BaselinePen<'a> {
     builder: &'a mut PathBuilder,
     pen_x: f32,
     baseline_y: f32,
+    /// How much of its own width the glyph keeps. One everywhere but inside a
+    /// 縱中橫 cell, which is what pressing two or three characters into one em
+    /// of column amounts to.
+    squeeze: f32,
 }
 
 impl<'a> BaselinePen<'a> {
     fn map(&self, x: f32, y: f32) -> (f32, f32) {
-        (self.pen_x + x, self.baseline_y - y)
+        (self.pen_x + x * self.squeeze, self.baseline_y - y)
     }
 }
 
@@ -1629,8 +2049,17 @@ mod align_tests {
         const TEXT: &str = "WWW\nW";
         let (bytes, face) = drawing(TEXT);
         let run = |align| {
-            build_horizontal_path(&bytes, TEXT, SIZE, PADDING, face, Phase::default(), align)
-                .unwrap()
+            build_horizontal_path(
+                &bytes,
+                TEXT,
+                SIZE,
+                PADDING,
+                face,
+                Phase::default(),
+                align,
+                &[],
+            )
+            .unwrap()
         };
         let put = run(Align::Start);
         let moved = run(Align::End);
@@ -1677,6 +2106,7 @@ mod stroke_tests {
         pb.push_circle(CENTRE, CENTRE, radius);
         BuiltRun {
             path: pb.finish(),
+            groups: Vec::new(),
             width: SIZE,
             height: SIZE,
             baseline: 0.0,
@@ -1859,6 +2289,7 @@ mod stroke_tests {
         pb.close();
         let run = BuiltRun {
             path: pb.finish(),
+            groups: Vec::new(),
             width: SIZE,
             height: SIZE,
             baseline: 0.0,
@@ -1998,9 +2429,17 @@ mod stroke_tests {
         let (bytes, face) = drawing(TEXT);
         let ink = spec(4.0, StrokePosition::Outside);
         for size in [40.0f32, 200.0] {
-            let run =
-                build_horizontal_path(&bytes, TEXT, size, 8, face, Phase::default(), Align::Start)
-                    .unwrap();
+            let run = build_horizontal_path(
+                &bytes,
+                TEXT,
+                size,
+                8,
+                face,
+                Phase::default(),
+                Align::Start,
+                &[],
+            )
+            .unwrap();
             let Some(path) = run.path.clone() else {
                 continue;
             };
@@ -2056,6 +2495,7 @@ mod given_face {
             0,
             Phase::default(),
             Align::default(),
+            &[],
         )
         .unwrap_or_else(|err| panic!("the test font will not lay out {text:?}: {err}"));
         assert!(
@@ -2085,6 +2525,17 @@ mod measure_tests {
         })
     }
 
+    /// Across the line break and upright, so both the splitting and the
+    /// 縱中橫 cell are in what the two calls have to agree about.
+    const SPANS: [SpanStyle; 1] = [SpanStyle {
+        start: 1,
+        end: 4,
+        size_px: SIZE * 1.5,
+        color: Rgba(0, 128, 255, 255),
+        weight_px: 1.0,
+        upright: true,
+    }];
+
     fn agree(measured: &TextMeasure, rendered: &TextBitmap) {
         assert_eq!(measured.width, rendered.width);
         assert_eq!(measured.height, rendered.height);
@@ -2096,32 +2547,36 @@ mod measure_tests {
     fn a_measured_run_is_the_frame_its_render_comes_back_in() {
         let (bytes, face) = drawing("Hg\ngh");
         for turn in TURNS {
-            let m = measure_text(
-                &bytes,
-                "Hg\ngh",
-                SIZE,
-                PADDING,
-                face,
-                turn,
-                PHASE,
-                Align::Center,
-            )
-            .unwrap();
-            let r = render_text(
-                &bytes,
-                "Hg\ngh",
-                SIZE,
-                PADDING,
-                face,
-                turn,
-                PHASE,
-                Align::Center,
-                BLACK,
-                spec(),
-                -1.0,
-            )
-            .unwrap();
-            agree(&m, &r);
+            for spans in [&[][..], &SPANS[..]] {
+                let m = measure_text(
+                    &bytes,
+                    "Hg\ngh",
+                    SIZE,
+                    PADDING,
+                    face,
+                    turn,
+                    PHASE,
+                    Align::Center,
+                    spans,
+                )
+                .unwrap();
+                let r = render_text(
+                    &bytes,
+                    "Hg\ngh",
+                    SIZE,
+                    PADDING,
+                    face,
+                    turn,
+                    PHASE,
+                    Align::Center,
+                    BLACK,
+                    spec(),
+                    -1.0,
+                    spans,
+                )
+                .unwrap();
+                agree(&m, &r);
+            }
         }
     }
 
@@ -2129,32 +2584,36 @@ mod measure_tests {
     fn a_measured_column_is_the_frame_its_render_comes_back_in() {
         let (bytes, face) = drawing("Hg\ngh");
         for turn in TURNS {
-            let m = measure_vertical(
-                &bytes,
-                "Hg\ngh",
-                SIZE,
-                PADDING,
-                face,
-                turn,
-                PHASE,
-                Align::End,
-            )
-            .unwrap();
-            let r = render_vertical(
-                &bytes,
-                "Hg\ngh",
-                SIZE,
-                PADDING,
-                face,
-                turn,
-                PHASE,
-                Align::End,
-                BLACK,
-                spec(),
-                -1.0,
-            )
-            .unwrap();
-            agree(&m, &r);
+            for spans in [&[][..], &SPANS[..]] {
+                let m = measure_vertical(
+                    &bytes,
+                    "Hg\ngh",
+                    SIZE,
+                    PADDING,
+                    face,
+                    turn,
+                    PHASE,
+                    Align::End,
+                    spans,
+                )
+                .unwrap();
+                let r = render_vertical(
+                    &bytes,
+                    "Hg\ngh",
+                    SIZE,
+                    PADDING,
+                    face,
+                    turn,
+                    PHASE,
+                    Align::End,
+                    BLACK,
+                    spec(),
+                    -1.0,
+                    spans,
+                )
+                .unwrap();
+                agree(&m, &r);
+            }
         }
     }
 
@@ -2207,6 +2666,7 @@ mod phase_tests {
             BLACK,
             None,
             0.0,
+            &[],
         )
         .unwrap()
     }
@@ -2310,6 +2770,7 @@ mod phase_tests {
             BLACK,
             None,
             0.0,
+            &[],
         )
         .unwrap();
         let moved = render_vertical(
@@ -2324,12 +2785,188 @@ mod phase_tests {
             BLACK,
             None,
             0.0,
+            &[],
         )
         .unwrap();
 
         assert_eq!((at_rest.width, at_rest.height), (moved.width, moved.height));
         assert!((moved.baseline - at_rest.baseline - 0.25).abs() < 1e-4);
         assert!((moved.clusters[0].y - at_rest.clusters[0].y - 0.5).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::given_face::{PADDING, SIZE, drawing};
+    use super::*;
+
+    fn span(start: u32, end: u32, size_px: f32, color: Rgba, upright: bool) -> SpanStyle {
+        SpanStyle {
+            start,
+            end,
+            size_px,
+            color,
+            weight_px: 0.0,
+            upright,
+        }
+    }
+
+    fn drawn(bytes: &[u8], face: u32, text: &str, spans: &[SpanStyle]) -> TextBitmap {
+        render_text(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            BLACK,
+            None,
+            0.0,
+            spans,
+        )
+        .unwrap()
+    }
+
+    fn across(bytes: &[u8], face: u32, text: &str, spans: &[SpanStyle]) -> TextMeasure {
+        measure_text(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            spans,
+        )
+        .unwrap()
+    }
+
+    fn down(bytes: &[u8], face: u32, text: &str, spans: &[SpanStyle]) -> TextMeasure {
+        measure_vertical(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            spans,
+        )
+        .unwrap()
+    }
+
+    /// The promise the whole feature rests on: text no span changes is set
+    /// where it always was, down to the byte, however the spans cut it up.
+    #[test]
+    fn a_span_asking_for_the_call_s_own_style_changes_nothing() {
+        const TEXT: &str = "Hg\n8o";
+        let (bytes, face) = drawing(TEXT);
+        let plain = drawn(&bytes, face, TEXT, &[]);
+        // Crosses the line break, so both lines are laid out through the
+        // segment path rather than as whole lines.
+        let spanned = drawn(
+            &bytes,
+            face,
+            TEXT,
+            &[span(0, TEXT.len() as u32, SIZE, BLACK, false)],
+        );
+
+        assert_eq!((plain.width, plain.height), (spanned.width, spanned.height));
+        assert_eq!(plain.baseline, spanned.baseline);
+        assert_eq!(plain.clusters, spanned.clusters);
+        assert_eq!(plain.rgba, spanned.rgba);
+    }
+
+    #[test]
+    fn a_larger_span_grows_the_line_it_sits_in() {
+        const TEXT: &str = "HH";
+        let (bytes, face) = drawing(TEXT);
+        let plain = across(&bytes, face, TEXT, &[]);
+        let grown = across(&bytes, face, TEXT, &[span(1, 2, SIZE * 2.0, BLACK, false)]);
+
+        assert!(
+            grown.height > plain.height,
+            "{} is no taller than {}",
+            grown.height,
+            plain.height
+        );
+        assert!(
+            grown.width > plain.width,
+            "{} is no wider than {}",
+            grown.width,
+            plain.width
+        );
+        // The baseline follows the tallest ascent in the line.
+        assert!(grown.baseline > plain.baseline);
+    }
+
+    #[test]
+    fn a_larger_span_widens_the_column_it_sits_in() {
+        const TEXT: &str = "鬱鬱";
+        let (bytes, face) = drawing(TEXT);
+        let plain = down(&bytes, face, TEXT, &[]);
+        let grown = down(&bytes, face, TEXT, &[span(3, 6, SIZE * 2.0, BLACK, false)]);
+
+        assert!(
+            grown.width > plain.width,
+            "{} is no wider than {}",
+            grown.width,
+            plain.width
+        );
+        assert!(grown.height > plain.height);
+    }
+
+    #[test]
+    fn a_coloured_span_paints_its_own_colour() {
+        const TEXT: &str = "H8";
+        let (bytes, face) = drawing(TEXT);
+        let red = Rgba(255, 0, 0, 255);
+        let bmp = drawn(&bytes, face, TEXT, &[span(1, 2, SIZE, red, false)]);
+
+        let (mut base, mut spanned) = (0, 0);
+        for px in bmp.rgba.chunks_exact(4) {
+            if px[3] != 255 {
+                continue;
+            }
+            match (px[0], px[1], px[2]) {
+                (0, 0, 0) => base += 1,
+                (255, 0, 0) => spanned += 1,
+                other => panic!("neither the fill nor the span's colour: {other:?}"),
+            }
+        }
+        assert!(base > 0, "nothing was left in the call's own fill");
+        assert!(spanned > 0, "the span's colour was never laid down");
+    }
+
+    #[test]
+    fn an_upright_span_takes_one_em_and_splits_it_between_its_characters() {
+        const TEXT: &str = "鬱88";
+        let (bytes, face) = drawing(TEXT);
+        let m = down(&bytes, face, TEXT, &[span(3, 5, SIZE, BLACK, true)]);
+
+        assert_eq!(m.clusters.len(), 3);
+        let (han, first, second) = (m.clusters[0], m.clusters[1], m.clusters[2]);
+        assert_eq!((first.cluster, second.cluster), (3, 4));
+
+        // One em of column advance between them, split evenly, directly under
+        // the character before.
+        assert!((first.height + second.height - SIZE).abs() < 1e-3);
+        assert!((first.height - second.height).abs() < 1e-3);
+        assert!((first.y - (han.y + han.height)).abs() < 1e-3);
+        assert!((second.y - (first.y + first.height)).abs() < 1e-3);
+        // Still the whole column across, so a click anywhere in it lands.
+        assert_eq!((first.x, first.width), (han.x, han.width));
+        assert_eq!((second.x, second.width), (han.x, han.width));
+
+        let content = m.height as f32 - 2.0 * PADDING as f32;
+        assert!(
+            (content - (han.height + SIZE)).abs() <= 1.0,
+            "column of {content} is not the kanji plus one cell"
+        );
     }
 }
 

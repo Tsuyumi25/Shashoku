@@ -838,6 +838,21 @@ describe('pending text edit', () => {
     expect(editor.canUndo).toBe(false)
   })
 
+  /**
+   * The session works on the markup, not on what it reads as: an undo that put
+   * back the plain words would quietly strip the tags off the line it restored.
+   */
+  it('takes the markup back, tags and all, when a session is undone', () => {
+    const { project, editor } = openOnePage([label('a', '<size=×2>大</size>字')])
+    editor.beginTextEdit(PAGE, 'a', '<size=×2>大</size>字')
+    project.updateLabelText(PAGE, 'a', '<size=×2>大字</size>')
+    editor.commitTextEdit()
+    expect(textsOf(project)).toEqual(['大字'])
+
+    editor.undo()
+    expect(labelsOf(project)[0].body.lines).toEqual(['<size=×2>大</size>字'])
+  })
+
   it('records nothing when the text came back unchanged', () => {
     const { project, editor } = openOnePage([label('a', 'same')])
     editor.beginTextEdit(PAGE, 'a', 'same')

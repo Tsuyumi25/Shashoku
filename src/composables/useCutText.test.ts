@@ -4,7 +4,7 @@ import { blankBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { TranslationCandidate } from '@shared/page/types'
-import { projectionOf, shownLinesOf } from '@shared/page/units'
+import { projectionOf, shownCodeOf, shownLinesOf } from '@shared/page/units'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCutText } from '@/composables/useCutText'
@@ -67,6 +67,12 @@ const shown = (project: ReturnType<typeof useProjectStore>) =>
   unit(project).translation.members.map((id) =>
     shownLinesOf(page(project), project.blockById(PAGE, id)!).join('\n'),
   )
+const codes = () => {
+  const project = useProjectStore()
+  return unit(project).translation.members.map((id) =>
+    shownCodeOf(page(project), project.blockById(PAGE, id)!),
+  )
+}
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -125,5 +131,27 @@ describe('cutting a stretch of lettering into a block of its own', () => {
     expect(shown(project)).toEqual(['好痛啊', '！'])
     project.setLabelTranslation(PAGE, 'u', null)
     expect(reads(project)).toBe('自己打的')
+  })
+
+  /**
+   * The selection counts what is on the page, and the markup sits between those
+   * characters — cutting by the code's own offsets would slice a tag in half.
+   */
+  it('cuts by what is shown and sends each tag with the words it sets', () => {
+    const { project, cut } = open(['大<size=×2>字</size>小'])
+
+    cut.cutSelection(PAGE, 't', 1, 2)
+
+    expect(shown(project)).toEqual(['大', '字', '小'])
+    expect(codes()).toEqual(['大', '<size=×2>字</size>', '小'])
+  })
+
+  it('closes a tag the cut falls inside and opens it again on the other side', () => {
+    const { project, cut } = open(['<size=×2>大字小</size>'])
+
+    cut.cutSelection(PAGE, 't', 1, 2)
+
+    expect(shown(project)).toEqual(['大', '字', '小'])
+    expect(codes()).toEqual(['<size=×2>大</>', '<size=×2>字</>', '<size=×2>小</size>'])
   })
 })

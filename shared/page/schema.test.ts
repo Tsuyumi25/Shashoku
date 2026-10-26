@@ -19,6 +19,7 @@ import type {
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+import { shownLinesOf } from './units'
 
 /** One body, as it is written to disk. */
 const body = (over: Record<string, unknown> = {}) => ({
@@ -472,14 +473,14 @@ describe('parseManifest', () => {
     expect(() => parseManifest(older)).toThrow(PageParseError)
   })
 
-  // The version this one replaces kept every effect inside the text style,
-  // where this parser no longer looks. Reading such a page would silently drop
-  // the stroke off every object on it, so it is refused instead — and the
-  // refusal has to be the version's, since the style parser ignores keys it does
-  // not know and would raise nothing.
-  it('refuses the version before it rather than reading it and losing the strokes', () => {
+  // The style-era versions kept every effect inside the text style, where this
+  // parser no longer looks. Reading such a page would silently drop the stroke
+  // off every object on it, so it is refused instead — and the refusal has to be
+  // the version's, since the style parser ignores keys it does not know and
+  // would raise nothing.
+  it('refuses the last version that hid the strokes in the style', () => {
     const before = JSON.stringify({
-      schemaVersion: MANIFEST_SCHEMA_VERSION - 1,
+      schemaVersion: 12,
       revision: 0,
       name: 'p',
       width: 1200,
@@ -496,6 +497,41 @@ describe('parseManifest', () => {
       ],
     })
     expect(() => parseManifest(before)).toThrow(PageParseError)
+  })
+
+  /**
+   * v13 stored what the person typed; v14 stores markup, where `<` opens a tag.
+   * Reading an old page without escaping it would eat the angle brackets of
+   * every `<ゴゴゴ>` ever typed, and the words would be gone for good the next
+   * time the page was written out.
+   */
+  it('reads a page from the plain-text version as the markup it meant', () => {
+    const old = JSON.stringify({
+      schemaVersion: 13,
+      revision: 2,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      translationUnits: [
+        {
+          ...unitFor('a'),
+          candidates: [{ id: 'c1', pieces: [['Q&A', '<小聲>']] }],
+          chosen: 'c1',
+        },
+      ],
+      readingOrder: ['u-a'],
+      layers: [{ ...UPRIGHT, body: body({ lines: ['<b>這是', 'A&B'] }) }],
+    })
+    const page = parseManifest(old)
+    expect(page.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(firstText(page).body.lines).toEqual(['&lt;b>這是', 'A&amp;B'])
+    expect(page.translationUnits[0].candidates[0].pieces).toEqual([['Q&amp;A', '&lt;小聲>']])
+    expect(shownLinesOf(page, firstText(page))).toEqual(['Q&A', '<小聲>'])
+  })
+
+  it('leaves a page already stored as markup alone', () => {
+    const page = parseManifest(raw(withTranslation({ lines: ['<b>這是', 'A&amp;B'] })))
+    expect(firstText(page).body.lines).toEqual(['<b>這是', 'A&amp;B'])
   })
 
   /**

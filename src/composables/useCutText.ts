@@ -6,9 +6,10 @@ import { engineStrokeFor } from '@shared/effects/stroke'
 import { generateId } from '@shared/page/schema'
 import { linesOf } from '@shared/page/text'
 import { pathOf } from '@shared/page/tree'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
+import { plainOf, splitCode } from '@shared/page/markup'
 import { turnedAround, type Anchor } from '@/lib/coords'
-import { cutText } from '@/lib/cutText'
+import { cutText, type CutText } from '@/lib/cutText'
 import { samplePadding } from '@/lib/fontSampleCache'
 import { drawnLabel } from '@/lib/labelRaster'
 import { textProjection } from '@/lib/textProjection'
@@ -16,19 +17,19 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore, type RemovedEntry, type SideWords } from '@/stores/projectStore'
 
-/** Where the caret before character `index` stands on the page. */
+/** Where the caret before plain character `index` stands on the page. */
 function caretOnPage(
-  text: string,
+  code: string,
   style: TextStyle,
   effects: readonly LayerEffect[],
   at: Anchor,
   rotation: number,
   index: number,
 ): Anchor {
-  const { sample, box, center } = drawnLabel(text, style, effects, at, rotation)
+  const { sample, box, center } = drawnLabel(code, style, effects, at, rotation)
   const vertical = style.direction === 'vertical'
   const projection = textProjection({
-    text,
+    text: plainOf(code),
     clusters: sample?.clusters ?? [],
     vertical,
     padding: sample?.padding ?? samplePadding(engineStrokeFor(effects), style.weightPx),
@@ -37,6 +38,26 @@ function caretOnPage(
   const r = projection.caret(index)
   const out = turnedAround({ x: 0, y: 0 }, { x: r.x - box.w / 2, y: r.y - box.h / 2 }, rotation)
   return { x: center.x + out.x, y: center.y + out.y }
+}
+
+/**
+ * Each piece of a cut as the markup it was cut from.
+ *
+ * ⚠️ The cut is made on what the person sees, so its offsets count plain
+ * characters; the words themselves live in the code around them. Splitting
+ * there closes every tag still open at a seam and opens it again on the other
+ * side, so each piece is set exactly as that stretch was.
+ */
+function codeOfPieces(code: string, plainLength: number, cut: CutText): string[] {
+  const edges = new Set<number>()
+  for (const [i, piece] of cut.pieces.entries()) {
+    edges.add(cut.offsets[i]!)
+    edges.add(cut.offsets[i]! + piece.length)
+  }
+  const cuts = [...edges].sort((a, b) => a - b).filter((at) => at > 0 && at < plainLength)
+  const segments = splitCode(code, cuts)
+  const starts = [0, ...cuts]
+  return cut.pieces.map((_, i) => segments[starts.indexOf(cut.offsets[i]!)]!)
 }
 
 /**
@@ -60,7 +81,8 @@ export function useCutText() {
     const before = project.sideWordsOf(pageId, blockId)
     if (!file || !block || !place || path === null || !before) return
 
-    const text = shownLinesOf(file.page, block).join('\n')
+    const code = shownCodeOf(file.page, block)
+    const text = plainOf(code)
     const cut = cutText(text, start, end)
     if (cut === null) {
       notices.say('選一段字再剪，整段選起來就沒有東西可以剪')
@@ -68,10 +90,11 @@ export function useCutText() {
     }
 
     const chosen = before.pieces !== null
-    const pieces = cut.pieces.map(linesOf)
+    const codePieces = codeOfPieces(code, text.length, cut)
+    const pieces = codePieces.map(linesOf)
     const { style, x, y, rotation } = block.body
-    const copies: TextLayerEntry[] = cut.pieces.slice(1).map((piece, i) => {
-      const want = caretOnPage(text, style, block.effects, { x, y }, rotation, cut.offsets[i + 1]!)
+    const copies: TextLayerEntry[] = codePieces.slice(1).map((piece, i) => {
+      const want = caretOnPage(code, style, block.effects, { x, y }, rotation, cut.offsets[i + 1]!)
       const has = caretOnPage(piece, style, block.effects, { x, y }, rotation, 0)
       const body = {
         ...block.body,

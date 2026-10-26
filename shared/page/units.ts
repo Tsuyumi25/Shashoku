@@ -8,6 +8,8 @@ import type {
   TranslationUnitSide,
 } from './types'
 import type { TextSide } from './text'
+import { linesOf } from './text'
+import { escapeText, plainOf } from './markup'
 import { textObjects } from './tree'
 
 /**
@@ -136,7 +138,7 @@ export function linesAt(unit: TranslationUnit, at: number, own: readonly string[
 }
 
 /**
- * What one block reads as on the page, chosen candidate resolved.
+ * The markup one block holds on the page, chosen candidate resolved.
  *
  * ⭐ Every surface that draws lettering goes through here — the canvas, the
  * export compositor, the thumbnail's identity — so a chosen candidate cannot be
@@ -145,13 +147,27 @@ export function linesAt(unit: TranslationUnit, at: number, own: readonly string[
  * A source block says its own words and nothing else, which is the last
  * asymmetry between the two sides: nobody proposes readings of the artwork.
  */
+export function shownCodeOf(manifest: ManifestJson, block: TextLayerEntry): string {
+  if (block.side === 'source') return block.body.lines.join('\n')
+  const place = placeOfBlock(manifest, block.id)
+  const lines =
+    place === undefined ? block.body.lines : linesAt(place.unit, place.at, block.body.lines)
+  return lines.join('\n')
+}
+
+/**
+ * What one block reads as — the words without the markup around them.
+ *
+ * ⚠️ A tag may span a line break, so these are not the stored lines with their
+ * tags stripped one by one: the whole block is read as one stretch and broken
+ * again, and a block whose markup swallows a newline has fewer lines than it
+ * stores.
+ */
 export function shownLinesOf(
   manifest: ManifestJson,
   block: TextLayerEntry,
 ): readonly string[] {
-  if (block.side === 'source') return block.body.lines
-  const place = placeOfBlock(manifest, block.id)
-  return place === undefined ? block.body.lines : linesAt(place.unit, place.at, block.body.lines)
+  return linesOf(plainOf(shownCodeOf(manifest, block)))
 }
 
 /**
@@ -167,13 +183,27 @@ export function projectionOf(
   unit: TranslationUnit,
   side: TextSide,
 ): string {
-  const blocks = blocksOf(layers, unit, side)
-  return joinPieces(
-    blocks.map((block, at) =>
-      block.side === 'translation' ? linesAt(unit, at, block.body.lines) : block.body.lines,
-    ),
-    sideOf(unit, side).separators,
+  const read = blocksOf(layers, unit, side).map((block, at) => {
+    const code = block.side === 'translation' ? linesAt(unit, at, block.body.lines) : block.body.lines
+    return linesOf(plainOf(code.join('\n')))
+  })
+  return joinPieces(read, sideOf(unit, side).separators)
+}
+
+/**
+ * The same stretch with its markup still on, which is what an agent reads and
+ * writes. The separators belong to the page rather than to any body, so they
+ * are escaped on the way in — a separator holding a `<` is text, not a tag.
+ */
+export function projectionCodeOf(
+  layers: readonly LayerEntry[],
+  unit: TranslationUnit,
+  side: TextSide,
+): string {
+  const code = blocksOf(layers, unit, side).map((block, at) =>
+    block.side === 'translation' ? linesAt(unit, at, block.body.lines) : block.body.lines,
   )
+  return joinPieces(code, sideOf(unit, side).separators.map(escapeText))
 }
 
 /**

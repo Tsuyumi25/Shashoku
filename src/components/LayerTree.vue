@@ -183,6 +183,7 @@ import type {
 } from '@shared/page/types'
 import { findEntry } from '@shared/page/tree'
 import { shownLinesOf } from '@shared/page/units'
+import { plainOf } from '@shared/page/markup'
 import { layersDirOf } from '@shared/ssk/constants'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
@@ -379,7 +380,10 @@ function isUntitled(entry: LayerEntry): boolean {
  */
 function wordsOf(entry: TextLayerEntry): readonly string[] {
   const page = project.pageById(editor.currentPageId ?? '')?.page
-  return page === undefined ? entry.body.lines : shownLinesOf(page, entry)
+  if (page !== undefined) return shownLinesOf(page, entry)
+  // Off-page there is no unit to resolve, and the body is still code — a tree
+  // row is a name, so it says the words rather than the tags around them.
+  return entry.body.lines.map(plainOf)
 }
 
 /**

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ShashokuEngineApi } from "@shared/engine/types";
+import type { EngineSpan, ShashokuEngineApi } from "@shared/engine/types";
 import type { ShashokuInpaintApi } from "@shared/inpaint/types";
 import type { OcrProgress, OcrStatus, ShashokuOcrApi } from "@shared/ocr/types";
 import { CHANNELS, type ShashokuApi, type WritePageInput } from "@shared/ipc/channels";
@@ -12,6 +12,19 @@ import { CHANNELS, type ShashokuApi, type WritePageInput } from "@shared/ipc/cha
 type EngineAddon = Omit<ShashokuEngineApi, "version"> & { engineVersion(): string };
 
 const engine = require("@shashoku/engine") as EngineAddon;
+
+// Copied rather than passed through, the same reason `strokeLayer` copies: the
+// list comes off a Vue store, and structured clone refuses a Proxy with
+// nothing said but "an object could not be cloned".
+const plainSpans = (spans?: EngineSpan[]) =>
+  spans?.map((s) => ({
+    start: s.start,
+    end: s.end,
+    sizePx: s.sizePx,
+    color: s.color,
+    weightPx: s.weightPx,
+    upright: s.upright,
+  }));
 
 const api: ShashokuApi = {
   pickRoot: () => ipcRenderer.invoke(CHANNELS.pickRoot),
@@ -75,6 +88,7 @@ const engineApi: ShashokuEngineApi = {
     phaseY,
     align,
     weightPx,
+    spans,
   ) =>
     engine.renderText(
       font,
@@ -88,6 +102,7 @@ const engineApi: ShashokuEngineApi = {
       phaseY,
       align,
       weightPx,
+      plainSpans(spans),
     ),
   renderVertical: (
     font,
@@ -101,6 +116,7 @@ const engineApi: ShashokuEngineApi = {
     phaseY,
     align,
     weightPx,
+    spans,
   ) =>
     engine.renderVertical(
       font,
@@ -114,6 +130,7 @@ const engineApi: ShashokuEngineApi = {
       phaseY,
       align,
       weightPx,
+      plainSpans(spans),
     ),
   renderNotdef: (
     text,
@@ -141,10 +158,30 @@ const engineApi: ShashokuEngineApi = {
       align,
       weightPx,
     ),
-  measureText: (font, text, sizePx, padding, rotation, phaseX, phaseY, align) =>
-    engine.measureText(font, text, sizePx, padding, rotation, phaseX, phaseY, align),
-  measureVertical: (font, text, sizePx, padding, rotation, phaseX, phaseY, align) =>
-    engine.measureVertical(font, text, sizePx, padding, rotation, phaseX, phaseY, align),
+  measureText: (font, text, sizePx, padding, rotation, phaseX, phaseY, align, spans) =>
+    engine.measureText(
+      font,
+      text,
+      sizePx,
+      padding,
+      rotation,
+      phaseX,
+      phaseY,
+      align,
+      plainSpans(spans),
+    ),
+  measureVertical: (font, text, sizePx, padding, rotation, phaseX, phaseY, align, spans) =>
+    engine.measureVertical(
+      font,
+      text,
+      sizePx,
+      padding,
+      rotation,
+      phaseX,
+      phaseY,
+      align,
+      plainSpans(spans),
+    ),
   measureNotdef: (text, sizePx, padding, vertical, rotation, phaseX, phaseY, align) =>
     engine.measureNotdef(text, sizePx, padding, vertical, rotation, phaseX, phaseY, align),
   encodeImage: (rgba, width, height, input) => engine.encodeImage(rgba, width, height, input),

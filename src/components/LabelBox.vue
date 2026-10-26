@@ -43,19 +43,16 @@
         <div v-if="caretBox" :key="caretKey" class="text-caret" :style="caretBox" />
       </div>
 
-      <button
-        v-if="cutBarAt"
-        type="button"
-        class="cut-bar"
-        :style="cutBarStyle(counterTurn)"
-        title="把選起來的字剪成另一塊，留在原位"
-        @pointerdown.stop
-        @mousedown.prevent.stop
-        @click.stop="emit('cut')"
-      >
-        <Scissors :size="14" />
-        剪成一塊
-      </button>
+      <MarkupToolbar
+        v-if="barAt"
+        :placement="barStyle(counterTurn)"
+        :can-cut="canCut"
+        :vertical="vertical"
+        :color="textStyle.color"
+        @wrap="emit('wrap', $event)"
+        @clear="emit('clear')"
+        @cut="emit('cut')"
+      />
 
       <div
         v-if="tags.length > 0 && (hovered || inSelection || captioned)"
@@ -74,7 +71,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Scissors } from '@lucide/vue'
+import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import { cutText } from '@/lib/cutText'
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
@@ -96,7 +93,7 @@ import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 import { engineStrokeFor } from '@shared/effects/stroke'
 import { textProjection } from '@/lib/textProjection'
-import { useTextEditSurface } from '@/composables/useTextEditSurface'
+import { plainEditSurface } from '@/composables/useTextEditSurface'
 
 /**
  * A text object's frame: the shared one, over the arithmetic that is text's own.
@@ -113,7 +110,12 @@ import { useTextEditSurface } from '@/composables/useTextEditSurface'
  * empty label reachable instead of invisible.
  */
 const props = defineProps<{
-  text: string
+  /**
+   * The body's stored string: the markup code, tags and all. What gets set is
+   * the words it leaves once the tags are read, which is `drawn.plain` — and
+   * every offset this component deals in counts in that.
+   */
+  code: string
   /** The object's own complete style. */
   textStyle: TextStyle
   /** What the node carries on top of the text — a stroke, today. */
@@ -213,16 +215,20 @@ const emit = defineEmits<{
   rotateEnd: [from: TurnedLabel, to: TurnedLabel]
   /** Start typing, with the caret on the character the double click hit. */
   editAt: [index: number]
-  /** Where the pointer put the selection, as offsets into the object's text. */
+  /** Where the pointer put the selection, as offsets into the drawn words. */
   selectText: [anchor: number, focus: number]
   /** Cut the selected stretch out into a block of its own. */
   cut: []
+  /** Put a tag with these attributes round the selected words. */
+  wrap: [attrs: string]
+  /** Take every tag off the selected words. */
+  clear: []
 }>()
 
 // Turned, because where the frame's middle sits follows the object round once
 // the position names a point other than that middle.
 const drawn = computed(() =>
-  drawnLabel(props.text, props.textStyle, props.effects, { x: props.x, y: props.y }, props.rotation),
+  drawnLabel(props.code, props.textStyle, props.effects, { x: props.x, y: props.y }, props.rotation),
 )
 
 /**
@@ -329,7 +335,7 @@ function onScale(ratio: number) {
   const fontSizePx = clamp(Math.round(scaleFromPx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
   const style = { ...props.textStyle, fontSizePx }
   const grown = drawnLabel(
-    props.text,
+    props.code,
     style,
     props.effects,
     { x: props.x, y: props.y },
@@ -390,7 +396,6 @@ const CARET_PX = 2
 const CARET_ON_STAGE = `calc(${CARET_PX}px * var(--px))`
 
 const surfaceEl = ref<HTMLElement | null>(null)
-const surface = useTextEditSurface()
 
 /**
  * Whether the text answers the pointer. It defers to the frame's own answer as
@@ -415,7 +420,7 @@ const projection = computed(() => {
   const padding =
     sample?.padding ?? samplePadding(engineStrokeFor(props.effects), props.textStyle.weightPx)
   return textProjection({
-    text: props.text,
+    text: drawn.value.plain,
     clusters: sample?.clusters ?? [],
     vertical: vertical.value,
     padding,
@@ -460,24 +465,32 @@ const selectionBoxes = computed(() => {
 })
 
 /**
- * Where the cut button stands: just past the end of the selection, in the
- * frame's pixels. Only for a selection that leaves something on either side.
+ * Where the bar stands: just past the end of the selection, in the frame's
+ * pixels. Only while something is selected — there is nothing to put a tag on
+ * otherwise, and a menu standing over a bare caret would be in the way of the
+ * typing it interrupts.
  */
-const cutBarAt = computed(() => {
+const barAt = computed(() => {
   const at = props.selection
-  if (!props.editing || !at || cutText(props.text, at.start, at.end) === null) return null
+  if (!props.editing || !at || at.start === at.end) return null
   const last = projection.value.selection(at.start, at.end).at(-1)
   return last ? { x: last.x + last.width, y: last.y + last.height } : null
 })
 
-/** A gap between the selection's corner and the button, in screen pixels. */
-const CUT_BAR_GAP_PX = 6
+/** Cutting needs a selection that leaves something on either side of it. */
+const canCut = computed(() => {
+  const at = props.selection
+  return at !== null && at !== undefined && cutText(drawn.value.plain, at.start, at.end) !== null
+})
+
+/** A gap between the selection's corner and the bar, in screen pixels. */
+const BAR_GAP_PX = 6
 
 /** Upright and screen-sized however the page and the object are turned, as the caption is. */
-function cutBarStyle(counterTurn: number) {
-  const at = cutBarAt.value
+function barStyle(counterTurn: number): Record<string, string> {
+  const at = barAt.value
   if (!at) return {}
-  const gap = `${CUT_BAR_GAP_PX}px * var(--px)`
+  const gap = `${BAR_GAP_PX}px * var(--px)`
   return {
     left: `${at.x}px`,
     top: `${at.y}px`,
@@ -516,7 +529,7 @@ function publishCaret(): void {
   if (!center) return
   const r = projection.value.caret(at.end)
   const p = framePxToScreen(r.x, r.y, center, drawn.value.box, props.view.scale, turn.value)
-  surface.showCaretAt({
+  plainEditSurface.showCaretAt({
     x: p.x,
     y: p.y,
     width: vertical.value ? r.width * props.view.scale : CARET_PX,
@@ -533,7 +546,7 @@ watch(
     props.editing,
     props.selection?.start,
     props.selection?.end,
-    props.text,
+    props.code,
     props.textStyle,
     props.x,
     props.y,
@@ -554,7 +567,7 @@ onMounted(publishCaret)
 // The page turning takes the frame away without the session ending, and a
 // caret left standing would pin the input over a page it is not on.
 onBeforeUnmount(() => {
-  if (props.editing) surface.showCaretAt(null)
+  if (props.editing) plainEditSurface.showCaretAt(null)
 })
 
 /** Which character a client point is nearest to the near side of. */
@@ -626,7 +639,7 @@ function onTextUp(e: PointerEvent) {
  * It clears itself as the work is done: the frames go one by one as the lines
  * are typed, so the clutter only exists while it is the thing being looked for.
  */
-const untyped = computed(() => props.text.length === 0)
+const untyped = computed(() => drawn.value.plain.length === 0)
 
 /**
  * How far outside the top left corner the caption sits, on each axis. Out along
@@ -692,25 +705,6 @@ function captionStyle(counterTurn: number) {
   position: absolute;
   background: var(--primary);
   opacity: 0.3;
-}
-.cut-bar {
-  position: absolute;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: auto;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
-}
-.cut-bar:hover {
-  background: var(--secondary);
 }
 .text-caret {
   position: absolute;

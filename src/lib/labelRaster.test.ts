@@ -3,6 +3,7 @@ import type {
   EngineBitmap,
   EngineFontSource,
   EngineMeasure,
+  EngineSpan,
   EngineStrokeSpec,
 } from '@shared/engine/types'
 import type { LayerEffect } from '@shared/effects/types'
@@ -32,6 +33,8 @@ interface DrawCall {
   phaseX?: number
   phaseY?: number
   align?: TextAlign
+  /** The runs the markup asked for, in the engine's own byte offsets. */
+  spans?: readonly EngineSpan[]
   /** Which face got asked for, which is what resolution decides. */
   postscriptName?: string
 }
@@ -62,8 +65,10 @@ function renderText(
   phaseX?: number,
   phaseY?: number,
   align?: TextAlign,
+  _weightPx?: number,
+  spans?: EngineSpan[],
 ): EngineBitmap {
-  calls.push({ text, rotation, phaseX, phaseY, align, postscriptName: font.postscriptName })
+  calls.push({ text, rotation, phaseX, phaseY, align, spans, postscriptName: font.postscriptName })
   const size = turnedBitmap(BITMAP, rotation)
   return {
     ...size,
@@ -112,8 +117,17 @@ function measureText(
   phaseX?: number,
   phaseY?: number,
   align?: TextAlign,
+  spans?: EngineSpan[],
 ): EngineMeasure {
-  measureCalls.push({ text, rotation, phaseX, phaseY, align, postscriptName: font.postscriptName })
+  measureCalls.push({
+    text,
+    rotation,
+    phaseX,
+    phaseY,
+    align,
+    spans,
+    postscriptName: font.postscriptName,
+  })
   return { ...turnedBitmap(BITMAP, rotation), baseline: 0, clusters: [] }
 }
 
@@ -480,5 +494,69 @@ describe('drawnLabel', () => {
     expect(drawn.sample).toBeNull()
     expect(drawn.missingFamily).toBeNull()
     expect(notdefCalls).toHaveLength(0)
+  })
+
+  /**
+   * What a body stores is markup code, and what gets set is the words left
+   * once the tags are read. Everything here is about that seam: the engine
+   * must never be handed a tag, and the runs the tags describe have to arrive
+   * in the offsets the engine counts in.
+   */
+  describe('markup', () => {
+    it('sets the words rather than the code they are written in', () => {
+      const text = uniqueText()
+      const drawn = drawnLabel(`<size=×2>${text}</size>`, styleWith(), NONE, { x: 10, y: 10 })
+      expect(drawn.plain).toBe(text)
+      expect(calls.at(-1)?.text).toBe(text)
+    })
+
+    it('sets an escaped angle bracket as the character it stands for', () => {
+      const text = uniqueText()
+      const drawn = drawnLabel(`&lt;${text}&amp;`, styleWith(), NONE, { x: 10, y: 10 })
+      expect(drawn.plain).toBe(`<${text}&`)
+      expect(calls.at(-1)?.text).toBe(`<${text}&`)
+    })
+
+    it('counts a span in the bytes the engine counts in, not in string units', () => {
+      // 'あ' is three bytes, so a tag that starts on the second character
+      // starts at byte three — the one conversion this layer owns.
+      drawnLabel(`あ<size=×2>${uniqueText()}</size>`, styleWith(), NONE, { x: 10, y: 10 })
+      expect(calls.at(-1)?.spans?.[0]?.start).toBe(3)
+    })
+
+    it('resolves a relative size against the object own size', () => {
+      const style = styleWith({ fontSizePx: 40 })
+      drawnLabel(`<size=×1.5>${uniqueText()}</size>`, style, NONE, { x: 10, y: 10 })
+      expect(calls.at(-1)?.spans?.[0]?.sizePx).toBe(60)
+    })
+
+    it('asks for no spans at all for a body with no tags in it', () => {
+      // Which is what keeps an untagged object on the same cache key, and the
+      // same bitmap, as before there was any markup.
+      drawnLabel(uniqueText(), styleWith(), NONE, { x: 10, y: 10 })
+      expect(calls.at(-1)?.spans).toBeUndefined()
+    })
+
+    it('measures the frame with the spans, since a size moves what it fits', () => {
+      drawnLabel(`<size=×2>${uniqueText()}</size>`, styleWith(), NONE, { x: 10, y: 10 })
+      expect(measureCalls.at(-1)?.spans?.length).toBe(1)
+    })
+
+    it('draws nothing for a body that is all tags and no words', () => {
+      const drawn = drawnLabel('<size=×2></size>', styleWith(), NONE, { x: 10, y: 10 })
+      expect(drawn.plain).toBe('')
+      expect(drawn.sample).toBeNull()
+    })
+
+    it('shapes the notdef grid from the words, not from the tags round them', () => {
+      const text = uniqueText()
+      const drawn = drawnLabel(
+        `<color=#ff0000>${text}</color>`,
+        styleWith({ fontFamily: 'Absent' }),
+        NONE,
+        { x: 10, y: 10 },
+      )
+      expect(drawn.box).toEqual({ w: text.length * NOTDEF_EM, h: NOTDEF_EM })
+    })
   })
 })

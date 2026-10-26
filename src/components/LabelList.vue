@@ -215,29 +215,50 @@
                 >{{ asideText(element as LabelRow) || '—' }}</span>
 
                 <!--
-                  One box per session wherever it is standing. Pinned to the
-                  canvas it is the same element with the same text and the same
-                  caret, which is what makes the two ways of editing one edit.
+                  ⭐ The box holds the stored string itself — the markup code,
+                  tags and all. This is where a tag is read and corrected by
+                  hand; the canvas shows the words it sets. One session either
+                  way, so whichever of the two has the keyboard is writing and
+                  the other is drawn standing on the same text.
                 -->
-                <textarea
-                  v-if="isRowEditing(element as Row)"
-                  :ref="takeFocus"
-                  rows="1"
-                  spellcheck="false"
-                  :placeholder="blankLabel"
-                  class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
-                  :class="(element as Row).kind === 'label' && pinned && 'pinned'"
-                  :style="(element as Row).kind === 'label' ? pinnedStyle : undefined"
-                  :value="rowText(element as Row)"
-                  @input="onRowInput(element as Row, $event)"
-                  @keydown="onInputKey($event)"
-                  @blur="onRowBlur(element as Row)"
-                />
-                <!--
-                  The row goes on reading as a row while the box is away on the
-                  canvas — a body being typed elsewhere is still the body this
-                  row is about.
+                <div v-if="isRowEditing(element as Row)" class="relative">
+                  <textarea
+                    :ref="takeFocus"
+                    rows="1"
+                    spellcheck="false"
+                    :placeholder="blankLabel"
+                    class="label-input w-full resize-none bg-transparent text-sm leading-snug focus:outline-none placeholder:text-muted-foreground/50"
+                    :value="rowCode(element as Row)"
+                    @input="onRowInput($event)"
+                    @keydown="onInputKey($event)"
+                    @blur="onRowBlur($event)"
+                  />
+                  <!--
+                    What the code's caret is doing while the keyboard is on the
+                    canvas. A native caret is only drawn in a focused box, so
+                    the row would otherwise sit there saying nothing about where
+                    the typing is landing in the string it is showing.
+                  -->
+                  <template v-if="projecting">
+                    <div
+                      v-for="(box, i) in codeSelectionBoxes"
+                      :key="i"
+                      class="code-selection"
+                      :style="box"
+                    />
+                    <div :key="codeCaretKey" class="code-caret" :style="codeCaretBox" />
+                  </template>
+                  <MarkupToolbar
+                    v-if="barAt"
+                    :placement="barAt"
+                    :color="editingColor"
+                    :vertical="editingIsVertical"
+                    @wrap="markup.apply({ kind: 'wrap', attrs: $event })"
+                    @clear="markup.apply({ kind: 'clear' })"
+                  />
+                </div>
 
+                <!--
                   ⭐ A translation set in several blocks draws none of it here:
                   the block rows below say the whole of it, and saying it twice
                   would cost the row a line of height for a line nobody needs.
@@ -278,6 +299,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
+import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import PageRowThumb from '@/components/PageRowThumb.vue'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
@@ -293,11 +315,14 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEventListener } from '@vueuse/core'
 import { ownsKeyboard } from '@/lib/typingSurface'
-import { useTextEditSurface } from '@/composables/useTextEditSurface'
+import { codeEditSurface, plainEditSurface, textWriter } from '@/composables/useTextEditSurface'
+import { useMarkupSession } from '@/composables/useMarkupSession'
+import { textareaCaret, textareaSelection } from '@/lib/textareaMirror'
+import { shownCodeOf } from '@shared/page/units'
 
 const project = useProjectStore()
 const editor = useEditorStore()
-const surface = useTextEditSurface()
+const markup = useMarkupSession()
 
 /**
  * The whole chapter, not the open page. Translating and proofreading are read
@@ -455,18 +480,35 @@ function isRowEditing(row: Row): boolean {
   return row.kind === 'block' ? isEditingBlock(row) : isEditing(row)
 }
 
-function rowText(row: Row): string {
-  return row.kind === 'block' ? row.text : mainText(row)
+/**
+ * The stored string of the block this row is typed into — the code, which is
+ * what the box shows. Read off the page rather than off the row, because the
+ * rows carry the plain words every other line of the list is built from.
+ */
+function rowCode(row: Row): string {
+  const id = row.kind === 'block' ? row.block.id : soleBlock(row)
+  const page = fileOf(row.pageId)?.page
+  const block = id === null ? undefined : project.blockById(row.pageId, id)
+  return page === undefined || block === undefined ? '' : shownCodeOf(page, block)
 }
 
-function onRowInput(row: Row, e: Event) {
-  if (row.kind === 'block') onInputBlock(row, e)
-  else onInput(row, e)
+function onRowInput(e: Event) {
+  markup.writeCode((e.target as HTMLTextAreaElement).value)
 }
 
-function onRowBlur(row: Row) {
-  if (row.kind === 'block') commitBlockEdit()
-  else onInputBlur(row)
+/**
+ * A blur ends the visit only while the visit is still this row's, and only
+ * when the keyboard really left: the canvas's box and the bar over the
+ * selection are the same edit.
+ *
+ * Carrying the caret to the next row closes this session and opens that one,
+ * which unmounts this input — and unmounting something focused blurs it. Left
+ * unguarded, that blur would close the session just opened for the row being
+ * moved to, and the caret would arrive with nothing to type into.
+ */
+function onRowBlur(e: FocusEvent) {
+  if (markup.keepsSession(e.relatedTarget)) return
+  editor.commitTextEdit()
 }
 
 /**
@@ -476,7 +518,7 @@ function onRowBlur(row: Row) {
  */
 function showsReading(row: Row): boolean {
   if (row.kind === 'block') return !isEditingBlock(row)
-  return row.blocks.length < 2 && (!isEditing(row) || pinned.value)
+  return row.blocks.length < 2 && !isEditing(row)
 }
 
 function isRowBlank(row: Row): boolean {
@@ -572,65 +614,105 @@ function endsOnABreak(row: LabelRow): boolean {
 }
 
 /**
- * Focus follows the input into being, so Enter lands the caret without a click.
+ * Focus follows the input into being, so Enter lands the caret without a
+ * click — unless the keyboard is already on the canvas, which is the other
+ * half of the same session and the half the user is looking at.
  *
- * The same call publishes the box, because this is the one control a
- * translation is typed into and the canvas projects what it says. Only
- * arrivals: a template ref reports its element leaving as a bare `null`, and
- * carrying the caret to the next row swaps two of them in an order that would
- * let the departure clear the arrival.
+ * The same call publishes the box, because this is the control the code is
+ * typed into and the canvas projects what it says. Only arrivals: a template
+ * ref reports its element leaving as a bare `null`, and carrying the caret to
+ * the next row swaps two of them in an order that would let the departure
+ * clear the arrival.
  */
 function takeFocus(el: unknown) {
   if (!(el instanceof HTMLTextAreaElement)) return
-  surface.register(el)
-  if (document.activeElement !== el) el.focus()
+  codeEditSurface.register(el)
+  if (textWriter.value === 'code' && document.activeElement !== el) el.focus()
 }
 
 /**
  * The box exists exactly as long as the session does, so the session is what
- * withdraws it — one fact rather than two that can disagree. The pin goes with
- * it: where the box belongs is decided per session by whoever opened it.
+ * withdraws it — one fact rather than two that can disagree.
  */
 watch(
   () => editor.pendingTextEdit,
   (pending) => {
-    if (pending !== null) return
-    surface.register(null)
-    surface.pin(false)
-    surface.showCaretAt(null)
+    if (pending === null) codeEditSurface.register(null)
   },
 )
 
-const pinned = surface.pinned
+onBeforeUnmount(() => codeEditSurface.register(null))
+
+/** Whether the caret this row is showing belongs to the canvas's box. */
+const projecting = computed(() => textWriter.value === 'plain' && markup.editing.value !== null)
 
 /**
- * What it takes to put a native control on the insertion point and leave it
- * reachable by the IME.
- *
- * Turned about its own corner, because the position names where the run starts
- * rather than where the box's middle would go. Faintly opaque rather than
- * transparent: `visibility` and `opacity: 0` cost the IME its target in some
- * environments, and the box is one or two pixels of a colour nothing is drawn
- * in — invisible in practice without ever claiming to be hidden.
+ * Bumped whenever the canvas's caret moves, so the drawn one restarts its
+ * blink from the bright half — a caret that lands mid-blink reads as a
+ * keystroke that did not register.
  */
-const pinnedStyle = computed(() => {
-  const box = surface.pinnedBox.value
-  if (box === null) return undefined
-  return {
-    position: 'fixed' as const,
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${box.width}px`,
-    height: `${box.height}px`,
-    transformOrigin: '0 0',
-    transform: `rotate(${box.angle}rad)`,
-    // The IME reads the control's direction, so a column of text gets a column
-    // of a box and its candidates open along the same axis the reader is on.
-    writingMode: box.vertical ? ('vertical-rl' as const) : ('horizontal-tb' as const),
-  }
+const codeCaretKey = plainEditSurface.moved
+
+const codeCaretBox = ref<Record<string, string>>({})
+const codeSelectionBoxes = ref<Record<string, string>[]>([])
+const barAt = ref<Record<string, string> | null>(null)
+
+/** A gap between the selection and the bar standing under it, in pixels. */
+const BAR_GAP_PX = 4
+
+/**
+ * ⚠️ Measured after the patch, never during it. A textarea lays its own text
+ * out, so the only way to a rectangle is to set the same string in the same
+ * font somewhere else — and the string to set is the one the box is showing
+ * now, which during a render is still the one it was showing before.
+ */
+watch(
+  () => [projecting.value, markup.code.value, markup.codeRange.value] as const,
+  () => {
+    const el = codeEditSurface.field.value
+    const at = markup.codeRange.value
+    if (el === null || markup.editing.value === null) {
+      barAt.value = null
+      return
+    }
+    if (projecting.value) {
+      const caret = textareaCaret(el, at.end)
+      codeCaretBox.value = {
+        left: `${caret.x}px`,
+        top: `${caret.y}px`,
+        height: `${caret.height}px`,
+      }
+      codeSelectionBoxes.value = textareaSelection(el, at.start, at.end).map((r) => ({
+        left: `${r.x}px`,
+        top: `${r.y}px`,
+        width: `${r.width}px`,
+        height: `${r.height}px`,
+      }))
+    }
+    // The bar belongs to whichever box owns the selection: a menu over a
+    // projection would act on a stretch the user picked somewhere else.
+    const last = projecting.value || at.start === at.end
+      ? undefined
+      : textareaSelection(el, at.start, at.end).at(-1)
+    barAt.value =
+      last === undefined
+        ? null
+        : { left: `${last.x}px`, top: `${last.y + last.height + BAR_GAP_PX}px` }
+  },
+  { flush: 'post' },
+)
+
+/** The object being typed into, for what the bar has to offer about it. */
+const editingBlock = computed(() => {
+  const at = markup.editing.value
+  return at === null ? null : (project.blockById(at.pageId, at.labelId) ?? null)
 })
 
-onBeforeUnmount(() => surface.register(null))
+const editingColor = computed(() => editingBlock.value?.body.style.color ?? '#000000')
+
+const editingIsVertical = computed(
+  () => editingBlock.value?.body.style.direction === 'vertical',
+)
 
 function focusIn(selector: string) {
   scrollEl.value?.querySelector<HTMLElement>(selector)?.focus()
@@ -661,22 +743,22 @@ function onPickBlock(row: BlockRow, e: MouseEvent) {
 }
 
 /**
- * Opened from the list, so the box stays in the list. Where it belongs follows
- * from where the work was started, which is the one thing that says where the
- * user is looking.
+ * Opened from the list, so the list takes the keyboard. Which box is writing
+ * follows from where the work was started, which is the one thing that says
+ * where the user is looking.
  */
 function onEdit(row: LabelRow) {
   const sole = soleBlock(row)
   if (sole === null) return
   editor.revealLabel(row.pageId, sole)
-  editor.beginTextEdit(row.pageId, sole, row.main)
-  surface.pin(false)
+  editor.beginTextEdit(row.pageId, sole, rowCode(row))
+  textWriter.value = 'code'
 }
 
 function onEditBlock(row: BlockRow) {
   editor.revealLabel(row.pageId, row.block.id)
-  editor.beginTextEdit(row.pageId, row.block.id, row.text)
-  surface.pin(false)
+  editor.beginTextEdit(row.pageId, row.block.id, rowCode(row))
+  textWriter.value = 'code'
 }
 
 /**
@@ -785,23 +867,6 @@ useEventListener(window, 'keydown', (e) => {
   searchEl.value?.select()
 })
 
-/**
- * A blur ends the visit only while the visit is still this row's.
- *
- * Carrying the caret to the next row closes this session and opens that one,
- * which unmounts this input — and unmounting something focused blurs it. Left
- * unguarded, that blur would close the session just opened for the row being
- * moved to, and the caret would arrive with nothing to type into.
- */
-function onInputBlur(row: LabelRow) {
-  if (!isEditing(row)) return
-  editor.commitTextEdit()
-}
-
-function commitBlockEdit() {
-  editor.commitTextEdit()
-}
-
 /** The same two keys open a block as open the row it stands under. */
 function onBlockKey(row: BlockRow, e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -824,21 +889,6 @@ function onInputKey(e: KeyboardEvent) {
     e.preventDefault()
     editor.editBy(e.shiftKey ? -1 : 1)
   }
-}
-
-/**
- * Typing writes through so the canvas keeps up; what enters the undo stack is
- * the whole visit to this row, closed by whatever takes the caret away.
- */
-function onInput(row: LabelRow, e: Event) {
-  const sole = soleBlock(row)
-  if (sole === null || editor.isLayerLocked(sole)) return
-  project.updateLabelText(row.pageId, sole, (e.target as HTMLTextAreaElement).value)
-}
-
-function onInputBlock(row: BlockRow, e: Event) {
-  if (editor.isLayerLocked(row.block.id)) return
-  project.updateLabelText(row.pageId, row.block.id, (e.target as HTMLTextAreaElement).value)
 }
 
 /**
@@ -918,25 +968,29 @@ function orderedTags(tags: readonly string[]): string[] {
 }
 
 /*
- * Pinned to the insertion point on the canvas: a real control, holding the real
- * text and the real caret, sized down to a sliver. What the reader sees is the
- * engine's own drawing on the page; this is only what the platform's input
- * needs to exist and to be somewhere.
- *
- * Not hidden, faint. A control that is `visibility: hidden`, `display: none` or
- * fully transparent stops being an IME target in some environments, and being
- * one is its entire job.
+ * The code's own caret and selection, drawn rather than native: while the
+ * keyboard is on the canvas this box is not focused, and an unfocused control
+ * draws neither. They stand over the text in the same box, measured off a copy
+ * of it, so what they mark is the string this row is showing.
  */
-.label-input.pinned {
-  field-sizing: fixed;
-  z-index: 50;
-  padding: 0;
-  border: 0;
-  resize: none;
-  overflow: hidden;
-  white-space: pre;
-  opacity: 0.01;
+.code-caret,
+.code-selection {
+  position: absolute;
   pointer-events: none;
+}
+.code-caret {
+  width: 2px;
+  background: var(--primary);
+  animation: code-caret-blink 1.1s steps(1) infinite;
+}
+.code-selection {
+  background: var(--primary);
+  opacity: 0.25;
+}
+@keyframes code-caret-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 /*
