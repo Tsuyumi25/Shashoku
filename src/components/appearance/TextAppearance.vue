@@ -23,6 +23,7 @@
       :mixed="mixedFields"
       :effects="representativeEffects"
       :suggestions="suggestions"
+      :text="representativeText"
       @patch="onPatch"
     />
 
@@ -42,6 +43,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
+import { shownLinesOf } from '@shared/page/units'
 import StyleEditor from '@/components/StyleEditor.vue'
 import StrokeEditor from '@/components/appearance/StrokeEditor.vue'
 import { useStyleRecommendations } from '@/composables/useStyleRecommendations'
@@ -91,6 +93,13 @@ const mixedFields = computed(() =>
 const representativeEffects = computed<readonly LayerEffect[]>(
   () => props.targets[0]?.entry.effects ?? [],
 )
+
+/** What the first of them says, for the font picker to set its samples in. */
+const representativeText = computed(() => {
+  const first = props.targets[0]
+  const page = first && project.pageById(first.pageId)?.page
+  return first && page ? shownLinesOf(page, first.entry).join('\n') : ''
+})
 
 const effectsMixed = computed(
   () => sharedValue(props.targets.map((t) => t.entry), 'effects').kind === 'many',

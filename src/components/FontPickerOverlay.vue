@@ -354,7 +354,10 @@ const SAMPLE_PRESETS = [
  * spelled as was a single-line field's limitation, and it is gone with it.
  */
 const sampleText = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
-watch(sampleText, (text) => preferences.setFontSampleText(text))
+// An object's own words stand in for a visit and are not what was saved.
+watch(sampleText, (text) => {
+  if (text !== picker.request.value.text) preferences.setFontSampleText(text)
+})
 
 /**
  * The control the sample is typed into. It is never seen: the letters the user
@@ -747,6 +750,10 @@ watch(
     search.value = ''
     // No cell is being typed into yet, so the control goes back to its park.
     onSampleBlur()
+    const objectText = picker.request.value.text
+    sampleText.value = objectText?.trim()
+      ? objectText
+      : preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text
     // Fresh per opening, so every cell starts from the face the object names.
     shownKey.value = new Map()
     vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical

@@ -22,6 +22,8 @@ export interface FontPickerRequest {
   vertical?: boolean
   /** Signed pixels the strokes move by, so the grid previews what is set. */
   weightPx?: number
+  /** What the selected object says, shown as the sample in place of the saved one. */
+  text?: string
 }
 
 /**

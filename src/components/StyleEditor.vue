@@ -187,6 +187,8 @@ const props = defineProps<{
    * once whether this selection has a meaning, and every strip agrees.
    */
   suggestions?: StyleSuggestionSet | null
+  /** What the object says, so the picker sets its samples in those words. */
+  text?: string
 }>()
 
 /**
@@ -262,6 +264,7 @@ async function openFont() {
     vertical: props.value.direction === 'vertical',
     weightPx: isMixed('weightPx') ? 0 : props.value.weightPx,
     stroke: engineStrokeFor(props.effects),
+    text: props.text,
   })
   if (chosen === null) return
   const patch: Partial<TextStyle> = {}
