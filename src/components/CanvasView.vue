@@ -294,7 +294,7 @@ import CanvasMenu from '@/components/CanvasMenu.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
-import { previewedStyle, useFontPicker } from '@/composables/useFontPicker'
+import { previewedStyle } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
@@ -359,7 +359,6 @@ const ocr = useOcrStore()
 const ui = useUiStore()
 const raster = useRasterStore()
 const preferences = usePreferencesStore()
-const fontPicker = useFontPicker()
 
 const view = editor.view
 
@@ -1724,7 +1723,7 @@ function onLostPointerCapture(e: PointerEvent) {
 const ESCAPE_DOUBLE_MS = 400
 
 useEventListener(window, 'keydown', (e) => {
-  if (ui.view !== 'editor' || fontPicker.isOpen.value || ui.settingsOpen) return
+  if (ui.view !== 'editor' || ui.settingsOpen) return
   if (ownsKeyboard(document.activeElement)) return
   // The display's drag is held under Alt, so its way out has to be reached
   // before the guard below turns every other key off.

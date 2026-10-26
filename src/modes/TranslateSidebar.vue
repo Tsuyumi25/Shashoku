@@ -47,25 +47,3 @@ const preferences = usePreferencesStore()
 
 const section = ref<AppearanceSection>('look')
 </script>
-
-<style scoped>
-.side-tab {
-  flex: 1 1 0;
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-.side-tab:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.side-tab[data-state='active'],
-.side-tab[data-state='active']:hover {
-  border-bottom-color: transparent;
-  background: transparent;
-  color: var(--foreground);
-  box-shadow: inset 0 -2px 0 var(--primary);
-}
-</style>

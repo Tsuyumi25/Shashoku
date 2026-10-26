@@ -135,9 +135,7 @@
 import { computed } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
-import type { LayerEffect } from '@shared/effects/types'
 import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
-import { engineStrokeFor } from '@shared/effects/stroke'
 import StyleSuggestions from '@/components/appearance/StyleSuggestions.vue'
 import ColorField from '@/components/ColorField.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
@@ -172,19 +170,11 @@ const props = defineProps<{
    */
   mixed?: readonly (keyof TextStyle)[]
   /**
-   * What the node carries on top of its text. Read and never written: the
-   * picker draws its samples with whatever is already on the object, so a face
-   * is chosen against the stroke it will actually be seen through.
-   */
-  effects: readonly LayerEffect[]
-  /**
    * What to offer under each control, or null when there is nothing to count
    * under. Passed whole rather than per field so that the panel above decides
    * once whether this selection has a meaning, and every strip agrees.
    */
   suggestions?: StyleSuggestionSet | null
-  /** What the object says, so the picker sets its samples in those words. */
-  text?: string
 }>()
 
 /**
@@ -254,31 +244,8 @@ const emit = defineEmits<{
 
 const picker = useFontPicker()
 
-async function openFont() {
-  const chosen = await picker.open({
-    current: props.value.fontFamily,
-    currentFace: isMixed('fontFace') ? undefined : props.value.fontFace,
-    fillColor: props.value.color,
-    vertical: props.value.direction === 'vertical',
-    weightPx: isMixed('weightPx') ? 0 : props.value.weightPx,
-    stroke: engineStrokeFor(props.effects),
-    text: props.text,
-  })
-  if (chosen === null) return
-  const patch: Partial<TextStyle> = {}
-  // The three names travel together: a face left over from another family
-  // would keep drawing that family, whatever fontFamily now says.
-  if (isMixed('fontFamily') || chosen.face.postscriptName !== props.value.fontFace) {
-    patch.fontFamily = chosen.face.family
-    patch.fontFace = chosen.face.postscriptName
-    patch.fontStyleName = chosen.face.style
-  }
-  // The picker carries a weight slider, so a visit can change the thickness
-  // without changing the family — and then the family being the same one is
-  // not a reason to drop the answer.
-  if (isMixed('weightPx') || chosen.weightPx !== props.value.weightPx)
-    patch.weightPx = chosen.weightPx
-  if (Object.keys(patch).length > 0) emit('patch', patch)
+function openFont() {
+  picker.show()
 }
 
 function onNumber(key: 'fontSizePx' | 'leadingPercent', e: Event) {

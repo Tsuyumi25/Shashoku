@@ -70,14 +70,6 @@
       >
         字體資料夾{{ preferences.prefs.fontFolders.length ? `(${preferences.prefs.fontFolders.length})` : '' }}
       </button>
-      <button
-        type="button"
-        class="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-secondary"
-        title="Esc"
-        @click="picker.cancel()"
-      >
-        取消
-      </button>
 
       <label
         class="flex shrink-0 items-center gap-1.5"
@@ -286,7 +278,9 @@
                 <button
                   type="button"
                   class="cell-action primary"
-                  @click="picker.select(shownFace(faces), weightPx)"
+                  :disabled="targets.length === 0"
+                  :title="targets.length === 0 ? '先選一個文字物件' : undefined"
+                  @click="choose(shownFace(faces))"
                 >
                   選擇
                 </button>
@@ -322,12 +316,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { refDebounced, useElementSize, useEventListener } from '@vueuse/core'
+import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Star, X } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_SAMPLE_PX, MIN_FONT_SAMPLE_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
+import type { TextLayerEntry } from '@shared/page/types'
+import { shownLinesOf } from '@shared/page/units'
+import type { TextStyle } from '@shared/text-style/types'
+import { sharedValue } from '@shared/batch/value'
+import { engineStrokeFor } from '@shared/effects/stroke'
+import type { AppearanceTarget } from '@/lib/appearance'
+import { useEditorStore } from '@/stores/editorStore'
+import { useProjectStore } from '@/stores/projectStore'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { createTextEditSurface } from '@/composables/useTextEditSurface'
@@ -337,6 +339,26 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const picker = useFontPicker()
 const preferences = usePreferencesStore()
+const editor = useEditorStore()
+const project = useProjectStore()
+
+/** The text objects selected now, which is what the picker reads from and writes to. */
+const targets = computed(() =>
+  editor
+    .selectedNodes()
+    .filter((t): t is AppearanceTarget<TextLayerEntry> => t.entry.kind === 'text'),
+)
+const lead = computed(() => targets.value[0]?.entry)
+function agreed<K extends keyof TextStyle>(field: K): boolean {
+  return sharedValue(targets.value.map((t) => t.entry.body.style), field).kind !== 'many'
+}
+
+/** What the lead object says; the sample shows it and never writes it back. */
+const objectText = computed(() => {
+  const first = targets.value[0]
+  const page = first && project.pageById(first.pageId)?.page
+  return first && page ? shownLinesOf(page, first.entry).join('\n') : ''
+})
 
 type Group = 'all' | 'fav'
 const group = ref<Group>('all')
@@ -355,10 +377,15 @@ const SAMPLE_PRESETS = [
  * them is a `textarea` sitting on the sample itself — the `\n` they used to be
  * spelled as was a single-line field's limitation, and it is gone with it.
  */
-const sampleText = ref(preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text)
-// An object's own words stand in for a visit and are not what was saved.
+const savedSample = () => preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text
+const sampleText = ref(objectText.value.trim() ? objectText.value : savedSample())
+// An object's own words stand in while it is selected and are not what was saved.
 watch(sampleText, (text) => {
-  if (text !== picker.request.value.text) preferences.setFontSampleText(text)
+  if (text !== objectText.value) preferences.setFontSampleText(text)
+})
+// The selection's words lead; what was typed into the sample only lasts until it moves.
+watch(objectText, (text) => {
+  sampleText.value = text.trim() ? text : savedSample()
 })
 
 /**
@@ -464,16 +491,19 @@ const sampleStyle = computed(() => {
 const appliedSize = computed(() => preferences.prefs.fontSamplePx)
 
 /**
- * Direction is a property of the style being previewed, so it is re-read every
- * time the picker opens; toggling it here only lasts as long as this opening.
- * With no style behind the request, the last choice is remembered instead.
+ * Direction follows the selected object; toggling it here lasts until the
+ * selection moves. With nothing selected, the last choice is remembered instead.
  */
-const vertical = ref(preferences.prefs.fontSampleVertical)
+const objectVertical = computed<boolean | undefined>(() =>
+  lead.value ? lead.value.body.style.direction === 'vertical' : undefined,
+)
+const vertical = ref(objectVertical.value ?? preferences.prefs.fontSampleVertical)
+watch(objectVertical, (v) => (vertical.value = v ?? preferences.prefs.fontSampleVertical))
 
 function onDirection(v: unknown) {
   if (v !== 'horizontal' && v !== 'vertical') return
   vertical.value = v === 'vertical'
-  if (picker.request.value.vertical === undefined) {
+  if (objectVertical.value === undefined) {
     preferences.setFontSampleVertical(vertical.value)
   }
 }
@@ -565,12 +595,13 @@ const WEIGHT_MIN = -6
 const WEIGHT_MAX = 3
 
 /**
- * Local to this opening, seeded from the style that asked. Held here rather
- * than written straight back so that closing without choosing leaves the object
- * alone — the grid is a place to try weights, and trying is not deciding.
+ * Seeded from the selected object and written with the face on 選擇. Held here
+ * rather than written straight back: the grid is a place to try weights, and
+ * trying is not deciding.
  */
-const weightPx = ref(0)
-watch(picker.request, (req) => (weightPx.value = req.weightPx ?? 0), { immediate: true })
+const objectWeight = computed(() => (lead.value && agreed('weightPx') ? lead.value.body.style.weightPx : 0))
+const weightPx = ref(objectWeight.value)
+watch(objectWeight, (w) => (weightPx.value = w))
 
 const weightLabel = computed(() =>
   weightPx.value === 0 ? '0' : `${weightPx.value > 0 ? '+' : ''}${weightPx.value}`,
@@ -581,9 +612,22 @@ function onWeight(e: Event) {
   if (Number.isFinite(raw)) weightPx.value = raw
 }
 
-const currentFamily = computed(() => picker.request.value.current)
-const fillColor = computed(() => picker.request.value.fillColor)
-const stroke = computed(() => picker.request.value.stroke)
+const currentFamily = computed(() =>
+  lead.value && agreed('fontFamily') ? lead.value.body.style.fontFamily : '',
+)
+const fillColor = computed(() => lead.value?.body.style.color ?? '#000000')
+const stroke = computed(() => (lead.value ? engineStrokeFor(lead.value.effects) : undefined))
+
+/** Writes the face, and the weight tried beside it, to every selected text object. */
+function choose(face: FontEntry) {
+  const patch: Partial<TextStyle> = {
+    fontFamily: face.family,
+    fontFace: face.postscriptName,
+    fontStyleName: face.style,
+    weightPx: weightPx.value,
+  }
+  editor.cmdApplyStyle(targets.value, patch)
+}
 
 const enumerating = ref(false)
 const error = ref<string | null>(null)
@@ -638,7 +682,7 @@ function shownFace(faces: FontEntry[]): FontEntry {
     const face = faces.find((f) => faceKey(f) === held)
     if (face) return face
   }
-  const wanted = picker.request.value.currentFace
+  const wanted = lead.value && agreed('fontFace') ? lead.value.body.style.fontFace : undefined
   const current = wanted ? faces.findIndex((f) => f.postscriptName === wanted) : -1
   if (current >= 0) return faces[current]!
   const representative = representativeOf(faces)
@@ -752,13 +796,8 @@ watch(
     search.value = ''
     // No cell is being typed into yet, so the control goes back to its park.
     onSampleBlur()
-    const objectText = picker.request.value.text
-    sampleText.value = objectText?.trim()
-      ? objectText
-      : preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text
     // Fresh per opening, so every cell starts from the face the object names.
     shownKey.value = new Map()
-    vertical.value = picker.request.value.vertical ?? preferences.prefs.fontSampleVertical
     await nextTick()
     requestAnimationFrame(revealCurrentFamily)
   },
@@ -770,14 +809,6 @@ function revealCurrentFamily() {
   virtualizer.value.scrollToIndex(Math.floor(at / columns.value), { align: 'center' })
 }
 
-useEventListener(window, 'keydown', (e: KeyboardEvent) => {
-  if (!picker.isOpen.value) return
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    picker.cancel()
-  }
-})
 </script>
 
 <style scoped>

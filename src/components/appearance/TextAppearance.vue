@@ -21,9 +21,7 @@
     <StyleEditor
       :value="representative"
       :mixed="mixedFields"
-      :effects="representativeEffects"
       :suggestions="suggestions"
-      :text="representativeText"
       @preview="(patch) => editor.previewStyle(targets, patch)"
       @patch="onPatch"
     />
@@ -32,13 +30,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { LayerEffect } from '@shared/effects/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
-import { shownLinesOf } from '@shared/page/units'
 import StyleEditor from '@/components/StyleEditor.vue'
 import { useStyleRecommendations } from '@/composables/useStyleRecommendations'
 import type { AppearanceTarget } from '@/lib/appearance'
@@ -82,18 +78,6 @@ const representative = computed(() => styles.value[0]!)
 const mixedFields = computed(() =>
   TEXT_STYLE_FIELDS.filter((field) => sharedValue(styles.value, field).kind === 'many'),
 )
-
-/** The same standing-in, for what the nodes carry. */
-const representativeEffects = computed<readonly LayerEffect[]>(
-  () => props.targets[0]?.entry.effects ?? [],
-)
-
-/** What the first of them says, for the font picker to set its samples in. */
-const representativeText = computed(() => {
-  const first = props.targets[0]
-  const page = first && project.pageById(first.pageId)?.page
-  return first && page ? shownLinesOf(page, first.entry).join('\n') : ''
-})
 
 function onPatch(patch: Partial<TextStyle>) {
   editor.cmdApplyStyle(props.targets, patch)

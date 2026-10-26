@@ -15,17 +15,23 @@
             the tree holds a walk of the disk that is not worth doing again for
             a trip to the other side.
           -->
-          <div v-show="ui.view === 'editor' && !fontPicker.isOpen.value" class="flex min-h-0 flex-1 flex-col">
-            <ToolSidebar />
-          </div>
-          <!--
-            The picker takes the sidebar's whole height rather than covering the
-            canvas, so the page, the objects and their style stay in sight while a
-            face is chosen.
-          -->
-          <div v-show="ui.view === 'editor' && fontPicker.isOpen.value" class="flex min-h-0 flex-1 flex-col">
-            <FontPickerOverlay />
-          </div>
+          <TabsRoot
+            v-show="ui.view === 'editor'"
+            v-model="leftTab"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <TabsList class="flex h-7 shrink-0 select-none">
+              <TabsTrigger value="tools" class="side-tab">工具</TabsTrigger>
+              <TabsTrigger value="font" class="side-tab">字體</TabsTrigger>
+            </TabsList>
+            <!-- Both stay mounted: the picker keeps its catalogue and scroll across visits. -->
+            <div v-show="leftTab === 'tools'" class="flex min-h-0 flex-1 flex-col">
+              <ToolSidebar />
+            </div>
+            <div v-show="leftTab === 'font'" class="flex min-h-0 flex-1 flex-col">
+              <FontPickerOverlay />
+            </div>
+          </TabsRoot>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -68,8 +74,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import { SplitterGroup, SplitterPanel, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
@@ -106,6 +113,12 @@ const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
 const fontPicker = useFontPicker()
+const leftTab = computed({
+  get: () => (fontPicker.isOpen.value ? 'font' : 'tools'),
+  set: (tab: string) => {
+    fontPicker.isOpen.value = tab === 'font'
+  },
+})
 const fill = useFillSelection()
 const merge = useMergeLayers()
 const pixels = useSelectionPixels()

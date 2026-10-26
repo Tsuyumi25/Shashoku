@@ -276,32 +276,6 @@ function onAddLayer() {
 </script>
 
 <style scoped>
-/*
- * Each tab takes half the width, so which one is up is readable from the shape
- * of the row before any colour is compared. The active one carries the panel's
- * own background up to its edge and drops the rule under it, which is what
- * makes the tab and the list below read as one surface rather than two.
- */
-.side-tab {
-  flex: 1 1 0;
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-.side-tab:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.side-tab-active,
-.side-tab-active:hover {
-  border-bottom-color: transparent;
-  background: transparent;
-  color: var(--foreground);
-  box-shadow: inset 0 -2px 0 var(--primary);
-}
-
 .panel-action {
   display: flex;
   height: 1.25rem;
