@@ -317,6 +317,7 @@ import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferen
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownLinesOf } from '@shared/page/units'
+import { selectionWords } from '@/lib/selectionWords'
 import type { TextStyle } from '@shared/text-style/types'
 import { sharedValue } from '@shared/batch/value'
 import { engineStrokeFor } from '@shared/effects/stroke'
@@ -346,12 +347,24 @@ function agreed<K extends keyof TextStyle>(field: K): boolean {
   return sharedValue(targets.value.map((t) => t.entry.body.style), field).kind !== 'many'
 }
 
-/** What the lead object says; the sample shows it and never writes it back. */
-const objectText = computed(() => {
-  const first = targets.value[0]
-  const page = first && project.pageById(first.pageId)?.page
-  return first && page ? shownLinesOf(page, first.entry).join('\n') : ''
-})
+/** What the selection says, as one preview text. The sample shows it and never writes it back. */
+const objectText = computed(() =>
+  selectionWords(
+    targets.value.flatMap((t) => {
+      const page = project.pageById(t.pageId)?.page
+      if (!page) return []
+      const place = project.placeOf(t.pageId, t.entry.id)
+      return [
+        {
+          entry: t.entry,
+          sentence: place ? `${t.pageId}/${place.unit.id}/${place.side}` : null,
+          at: place?.at ?? 0,
+          lines: shownLinesOf(page, t.entry),
+        },
+      ]
+    }),
+  ),
+)
 
 type Group = 'all' | 'fav'
 const group = ref<Group>('all')
