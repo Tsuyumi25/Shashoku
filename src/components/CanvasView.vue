@@ -334,7 +334,7 @@ import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasSta
 import { previewedStyle } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { pageStack, stackedRasterNodes, stackedTextNodes } from '@shared/page/stack'
+import { pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { blocksOnSide, placeOfBlock, shownCodeOf, sideOf } from '@shared/page/units'
@@ -404,8 +404,15 @@ const currentFile = computed(() =>
   editor.currentPageId ? (project.pageById(editor.currentPageId) ?? null) : null,
 )
 
-/** What this page draws and in what order — the same answer the export reads. */
-const stack = computed(() => (currentFile.value ? pageStack(currentFile.value.page.layers, editor.textSide) : []))
+/**
+ * What this page draws and in what order — the same answer the export reads,
+ * less the text while the view is set to leave it out.
+ */
+const stack = computed(() => {
+  if (!currentFile.value) return []
+  const nodes = pageStack(currentFile.value.page.layers, editor.textSide)
+  return editor.textsHidden ? withoutText(nodes) : nodes
+})
 
 /**
  * Every layer the page draws, decoded once and kept until the page turns.

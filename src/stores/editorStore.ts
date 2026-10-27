@@ -575,6 +575,14 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * Every text object off the canvas at once, for looking at the artwork under
+   * it. A switch on the view alone: no object's own visibility is touched, so
+   * one that was already hidden is still hidden when the text comes back.
+   * Session state, and the export never reads it.
+   */
+  const textsHidden = ref(false)
+
+  /**
    * The colour the eyedropper puts away. Nothing reads it yet — it is here so
    * that sampling has somewhere to land rather than being invented alongside
    * the swatch that will show it.
@@ -2759,6 +2767,7 @@ export const useEditorStore = defineStore('editor', () => {
     setTool,
     textSide,
     setTextSide,
+    textsHidden,
     foreground,
     fontSize,
     adjustFontSize,

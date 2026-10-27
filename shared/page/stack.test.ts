@@ -7,7 +7,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { PASS_THROUGH } from './types'
-import { pageStack, stackedRasterNodes, stackedTextNodes, type StackNode } from './stack'
+import { pageStack, stackedRasterNodes, stackedTextNodes, withoutText, type StackNode } from './stack'
 import { blankBlock } from './schema'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
@@ -152,5 +152,31 @@ describe('a folder only becomes a buffer when it has to', () => {
   it('leaves out a raster layer a folder is hiding', () => {
     const page = [raster('a'), folder('g', [raster('b')], { visible: false })]
     expect(stackedRasterNodes(pageStack(page, 'translation')).map((n) => n.entry.id)).toEqual(['a'])
+  })
+})
+
+describe('the canvas with its text taken out', () => {
+  it('leaves the artwork, folders included, and none of the text', () => {
+    const stack = pageStack(
+      [raster('base'), text('a'), folder('g', [text('b'), raster('patch')], { blendMode: 'multiply' })],
+      'translation',
+    )
+
+    const shown = withoutText(stack)
+
+    expect(stackedTextNodes(shown)).toEqual([])
+    expect(stackedRasterNodes(shown).map((n) => n.entry.id)).toEqual(['base', 'patch'])
+  })
+
+  /** The switch belongs to the view, so what comes back is what was showing before. */
+  it('brings back exactly the text that was showing, a hidden object still hidden', () => {
+    const layers = [text('a'), text('b', { visible: false }), text('c')]
+    const before = idsOf(stackedTextNodes(pageStack(layers, 'translation')))
+
+    withoutText(pageStack(layers, 'translation'))
+
+    expect(idsOf(stackedTextNodes(pageStack(layers, 'translation')))).toEqual(before)
+    expect(before).toEqual(['a', 'c'])
+    expect(layers.map((l) => l.visible)).toEqual([true, false, true])
   })
 })

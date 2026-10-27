@@ -30,6 +30,16 @@
       >
         {{ inpaint.working.value ? '修補中…' : 'LaMa 修補' }}
       </button>
+      <button
+        type="button"
+        class="route-btn"
+        :aria-pressed="editor.textsHidden"
+        :class="editor.textsHidden && 'route-btn-on'"
+        title="畫布上暫時拿掉所有文字物件，看底下的圖。不改任何物件自己的顯示狀態，也不影響匯出"
+        @click="editor.textsHidden = !editor.textsHidden"
+      >
+        {{ editor.textsHidden ? '顯示文字' : '隱藏文字' }}
+      </button>
     </div>
   </div>
 </template>
@@ -90,5 +100,11 @@ function growBy5(): void {
 }
 .route-btn:disabled {
   opacity: 0.5;
+}
+.route-btn-on,
+.route-btn-on:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--foreground);
 }
 </style>

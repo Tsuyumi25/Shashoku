@@ -100,6 +100,21 @@ export function pageStack(layers: readonly LayerEntry[], side: TextSide): StackN
   return out
 }
 
+/**
+ * The stack with every text object taken out, buffers walked into. A view of
+ * the page, not a change to it: nothing an object says about its own
+ * visibility is read or written, so putting the text back puts back exactly
+ * what was showing.
+ */
+export function withoutText(nodes: readonly StackNode[]): StackNode[] {
+  const out: StackNode[] = []
+  for (const node of nodes) {
+    if (node.kind === 'text') continue
+    out.push(node.kind === 'buffer' ? { ...node, children: withoutText(node.children) } : node)
+  }
+  return out
+}
+
 /** Every text object that will be drawn, in drawing order, buffers walked into. */
 export function stackedTextNodes(nodes: readonly StackNode[]): TextStackNode[] {
   const out: TextStackNode[] = []
