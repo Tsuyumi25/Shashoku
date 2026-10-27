@@ -15,10 +15,15 @@ const reads: string[] = []
 /** Which files a read is refused for, so the failure path can be exercised. */
 const missing = new Set<string>()
 
+/** Reads held back until the test lets them land, by file. */
+const gated = new Map<string, () => void>()
+
 function readImage(_dir: string, file: string): Promise<Uint8Array> {
   reads.push(file)
   if (missing.has(file)) return Promise.reject(new Error('gone'))
-  return Promise.resolve(new Uint8Array([file.charCodeAt(0)]))
+  const bytes = new Uint8Array([file.charCodeAt(0)])
+  if (!gated.has(file)) return Promise.resolve(bytes)
+  return new Promise((resolve) => gated.set(file, () => resolve(bytes)))
 }
 
 /**
@@ -48,6 +53,7 @@ beforeEach(() => {
   decoded.length = 0
   reads.length = 0
   missing.clear()
+  gated.clear()
   vi.stubGlobal('window', { api: { readImage } })
   vi.stubGlobal('createImageBitmap', createFakeBitmap)
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -159,15 +165,35 @@ describe('useLayerBitmaps', () => {
     expect(held.closed).toBe(true)
   })
 
-  it('counts up as each read lands, so whoever draws is told to draw again', async () => {
+  it('keeps the old page until every layer of the new one is in, then swaps them together', async () => {
+    const dir = ref('one')
+    const files = ref<string[]>(['a.png'])
     const { bitmaps, dispose } = mount(
-      () => 'layers',
-      () => ['a.png', 'b.png'],
+      () => dir.value,
+      () => files.value,
     )
-    expect(bitmaps.revision.value).toBe(0)
+    await settle()
+    const before = bitmaps.revision.value
+
+    gated.set('c.png', () => {})
+    dir.value = 'two'
+    files.value = ['b.png', 'c.png']
     await settle()
 
-    expect(bitmaps.revision.value).toBe(2)
+    // b has landed, c has not: nothing of the new page shows yet, and the old
+    // page is still what is held.
+    expect(bitmaps.heldDir.value).toBe('one')
+    expect(bitmaps.get('b.png')).toBeUndefined()
+    expect((bitmaps.get('a.png') as unknown as FakeBitmap).file).toBe('a')
+
+    gated.get('c.png')?.()
+    await settle()
+
+    expect(bitmaps.heldDir.value).toBe('two')
+    expect((bitmaps.get('b.png') as unknown as FakeBitmap).file).toBe('b')
+    expect((bitmaps.get('c.png') as unknown as FakeBitmap).file).toBe('c')
+    expect(bitmaps.get('a.png')).toBeUndefined()
+    expect(bitmaps.revision.value).toBe(before + 1)
     dispose()
   })
 

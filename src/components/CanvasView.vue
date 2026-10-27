@@ -30,7 +30,7 @@
       -->
       <div v-if="pageReady && currentFile" class="pointer-events-none absolute inset-0">
         <PageStack
-          :nodes="stack"
+          :nodes="shownStack"
           :bitmaps="layerBitmaps"
           :container="editor.viewContainerSize"
           :view="view"
@@ -338,7 +338,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import LabelBox from '@/components/LabelBox.vue'
@@ -460,6 +460,21 @@ const layerBitmaps = useLayerBitmaps(
 )
 
 const placement = useLayerPlacement(layerBitmaps)
+
+/**
+ * What the page draws: the stack of the page whose layers are decoded. Across a
+ * page turn that is still the old page until the new one's pixels are all in,
+ * and then text, base map and patches change over together.
+ */
+const shownStack = shallowRef(stack.value)
+watch(
+  [stack, layerBitmaps.heldDir],
+  () => {
+    const dir = currentFile.value ? layersDirOf(currentFile.value.pageDir) : null
+    if (layerBitmaps.heldDir.value === dir) shownStack.value = stack.value
+  },
+  { immediate: true },
+)
 
 /**
  * Every region the last trip read, drawn once.
