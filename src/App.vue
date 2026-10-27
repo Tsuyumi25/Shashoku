@@ -19,6 +19,7 @@
             v-show="ui.view === 'editor'"
             v-model="leftTab"
             class="flex min-h-0 flex-1 flex-col"
+            @wheel="onWheelTabs($event, LEFT_TABS, leftTab, (t) => (leftTab = t))"
           >
             <TabsList class="flex h-7 shrink-0 select-none">
               <TabsTrigger value="tools" class="side-tab">工具</TabsTrigger>
@@ -103,6 +104,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
+import { onWheelTabs } from '@/lib/wheelTabs'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -113,6 +115,7 @@ const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
 const fontPicker = useFontPicker()
+const LEFT_TABS = ['tools', 'font'] as const
 const leftTab = computed({
   get: () => (fontPicker.isOpen.value ? 'font' : 'tools'),
   set: (tab: string) => {

@@ -15,7 +15,11 @@
     <ResizeHandle vertical />
 
     <SplitterPanel :order="2" :default-size="66" :min-size="15" class="flex min-h-0 flex-col">
-      <TabsRoot v-model="section" class="flex min-h-0 flex-1 flex-col">
+      <TabsRoot
+        v-model="section"
+        class="flex min-h-0 flex-1 flex-col"
+        @wheel="onWheelTabs($event, SECTIONS, section, (s) => (section = s))"
+      >
         <TabsList class="flex h-7 shrink-0 select-none">
           <TabsTrigger value="look" class="side-tab">外觀</TabsTrigger>
           <TabsTrigger value="effects" class="side-tab">效果</TabsTrigger>
@@ -34,6 +38,7 @@ import AppearancePanel from '@/components/AppearancePanel.vue'
 import BucketList from '@/components/BucketList.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import { usePreferencesStore } from '@/stores/preferencesStore'
+import { onWheelTabs } from '@/lib/wheelTabs'
 
 /**
  * What a selection means, and what it looks like — the two questions a batch
@@ -45,5 +50,6 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
  */
 const preferences = usePreferencesStore()
 
+const SECTIONS: readonly AppearanceSection[] = ['look', 'effects']
 const section = ref<AppearanceSection>('look')
 </script>

@@ -29,6 +29,14 @@
         :default-size="22"
         :min-size="12"
         class="flex min-w-0 flex-col border-l border-border bg-card"
+        @wheel="
+          onWheelTabs(
+            $event,
+            TABS.map((t) => t.panel),
+            preferences.prefs.sidePanel,
+            preferences.setSidePanel,
+          )
+        "
       >
         <!--
           The two of them where a title used to stand, each taking half the
@@ -189,6 +197,7 @@ import { generateId } from '@shared/page/schema'
 import { allEntries, pathOf } from '@shared/page/tree'
 import type { SidePanel } from '@shared/preferences/types'
 import { nextAutoName } from '@/lib/autoName'
+import { onWheelTabs } from '@/lib/wheelTabs'
 
 const TABS: { panel: SidePanel; title: string }[] = [
   { panel: 'layers', title: '圖層' },
