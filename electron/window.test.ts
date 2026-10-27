@@ -2,10 +2,20 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 class FakeWebContents extends EventEmitter {
-  toggleDevTools = vi.fn();
-  openDevTools = vi.fn();
+  opened = false;
+  openDevTools = vi.fn(() => {
+    this.opened = true;
+  });
+  closeDevTools = vi.fn(() => {
+    this.opened = false;
+    this.emit("devtools-closed");
+  });
+  isDevToolsOpened = vi.fn(() => this.opened);
+  setDevToolsWebContents = vi.fn();
   send = vi.fn();
 }
+
+const windows: FakeBrowserWindow[] = [];
 
 class FakeBrowserWindow extends EventEmitter {
   webContents = new FakeWebContents();
@@ -14,7 +24,15 @@ class FakeBrowserWindow extends EventEmitter {
   maximize = vi.fn();
   show = vi.fn();
   close = vi.fn();
-  isDestroyed = vi.fn(() => false);
+  destroyed = false;
+  destroy = vi.fn(() => {
+    this.destroyed = true;
+  });
+  isDestroyed = vi.fn(() => this.destroyed);
+  constructor() {
+    super();
+    windows.push(this);
+  }
 }
 
 // No Menu export at all: the fake stands in for the whole `electron` module,
@@ -39,27 +57,33 @@ function fireF12(wc: FakeWebContents, overrides: Partial<{ isAutoRepeat: boolean
 }
 
 describe("createWindow F12 devtools", () => {
-  it("toggles devtools on F12 keydown", () => {
+  it("opens devtools in a window of its own on F12 keydown", () => {
     const win = createWindow() as unknown as FakeBrowserWindow;
+    const before = windows.length;
     const event = fireF12(win.webContents);
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
-    expect(win.webContents.toggleDevTools).toHaveBeenCalledOnce();
+    expect(windows.length).toBe(before + 1);
+    const host = windows.at(-1)!;
+    expect(win.webContents.setDevToolsWebContents).toHaveBeenCalledWith(host.webContents);
+    expect(win.webContents.openDevTools).toHaveBeenCalledWith({ mode: "detach" });
   });
 
-  it("toggles again on a second F12 press, closing what the first opened", () => {
+  it("closes them on a second F12 press, window and all", () => {
     const win = createWindow() as unknown as FakeBrowserWindow;
     fireF12(win.webContents);
+    const host = windows.at(-1)!;
     fireF12(win.webContents);
 
-    expect(win.webContents.toggleDevTools).toHaveBeenCalledTimes(2);
+    expect(win.webContents.closeDevTools).toHaveBeenCalledOnce();
+    expect(host.destroyed).toBe(true);
   });
 
   it("ignores key repeat from a held F12 so it does not rapid-fire", () => {
     const win = createWindow() as unknown as FakeBrowserWindow;
     fireF12(win.webContents, { isAutoRepeat: true });
 
-    expect(win.webContents.toggleDevTools).not.toHaveBeenCalled();
+    expect(win.webContents.openDevTools).not.toHaveBeenCalled();
   });
 
   it("leaves Ctrl+Shift+I alone, since this app binds it to inverting the selection", () => {
@@ -73,7 +97,7 @@ describe("createWindow F12 devtools", () => {
       isAutoRepeat: false,
     });
 
-    expect(win.webContents.toggleDevTools).not.toHaveBeenCalled();
+    expect(win.webContents.openDevTools).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
@@ -86,6 +110,6 @@ describe("createWindow F12 devtools", () => {
       isAutoRepeat: false,
     });
 
-    expect(win.webContents.toggleDevTools).not.toHaveBeenCalled();
+    expect(win.webContents.openDevTools).not.toHaveBeenCalled();
   });
 });

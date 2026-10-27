@@ -15,6 +15,30 @@ const CLOSE_SILENCE_MS = 3000;
 /** Must match the title bar's rendered height, or the buttons sit off-row. */
 export const OVERLAY_HEIGHT = 36;
 
+/**
+ * Devtools in a window this app creates, rather than the one Chromium makes for
+ * an undocked panel. Chromium's sets an empty Wayland app ID, which a desktop
+ * then matches to whatever `.desktop` entry an empty name happens to find; a
+ * window of ours carries the app's own identity like the main one does.
+ */
+function toggleDevTools(win: BrowserWindow): void {
+  const contents = win.webContents;
+  if (contents.isDevToolsOpened()) {
+    contents.closeDevTools();
+    return;
+  }
+  const host = new BrowserWindow({ width: 1100, height: 760, title: "Shashoku DevTools" });
+  contents.setDevToolsWebContents(host.webContents);
+  contents.openDevTools({ mode: "detach" });
+  // Closing the panel from either end takes its window with it.
+  contents.once("devtools-closed", () => {
+    if (!host.isDestroyed()) host.destroy();
+  });
+  win.once("closed", () => {
+    if (!host.isDestroyed()) host.destroy();
+  });
+}
+
 export function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     // The size the window restores to; it starts maximized regardless.
@@ -59,7 +83,7 @@ export function createWindow(): BrowserWindow {
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || input.key !== "F12" || input.isAutoRepeat) return;
     event.preventDefault();
-    win.webContents.toggleDevTools();
+    toggleDevTools(win);
   });
 
   // Built hidden and revealed only once maximized, so the first frame on screen
@@ -118,9 +142,9 @@ export function createWindow(): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL);
-    // Undocked: docked-right devtools and the window controls overlay fight
-    // over the same corner (the trade VS Code accepted for WCO too).
-    win.webContents.openDevTools({ mode: "undocked" });
+    // In a window of its own: docked-right devtools and the window controls
+    // overlay fight over the same corner (the trade VS Code accepted for WCO too).
+    toggleDevTools(win);
   } else {
     win.loadFile(join(import.meta.dirname, "../renderer/index.html"));
   }
