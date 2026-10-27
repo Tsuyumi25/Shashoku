@@ -8,6 +8,8 @@
 
 A Photoshop-like desktop editor for cleaning, translating, and typesetting manga, inspired by the LabelPlus + PS workflow.
 
+This project is something I dogfood: I use it for my own typesetting work and fix whatever gets in my way first. How a drag, a handle, or a shortcut feels comes before generality; only once it feels right in my daily work will I think about how to make it general, or whether to at all.
+
 > [!CAUTION]
 > Early development. The on-disk format is still changing, and older projects will not open after an upgrade.
 
