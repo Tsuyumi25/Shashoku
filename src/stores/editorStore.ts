@@ -583,6 +583,12 @@ export const useEditorStore = defineStore('editor', () => {
   const textsHidden = ref(false)
 
   /**
+   * The canvas showing the original artwork alone, everything above it left
+   * out. Like `textsHidden`, a switch on the view: nothing on the page changes.
+   */
+  const showingOriginal = ref(false)
+
+  /**
    * The colour the eyedropper puts away. Nothing reads it yet — it is here so
    * that sampling has somewhere to land rather than being invented alongside
    * the swatch that will show it.
@@ -2768,6 +2774,7 @@ export const useEditorStore = defineStore('editor', () => {
     textSide,
     setTextSide,
     textsHidden,
+    showingOriginal,
     foreground,
     fontSize,
     adjustFontSize,

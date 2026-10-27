@@ -334,7 +334,7 @@ import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasSta
 import { previewedStyle } from '@/composables/useFontPicker'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
+import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { blocksOnSide, placeOfBlock, shownCodeOf, sideOf } from '@shared/page/units'
@@ -410,6 +410,7 @@ const currentFile = computed(() =>
  */
 const stack = computed(() => {
   if (!currentFile.value) return []
+  if (editor.showingOriginal) return originalStack(currentFile.value.page.layers)
   const nodes = pageStack(currentFile.value.page.layers, editor.textSide)
   return editor.textsHidden ? withoutText(nodes) : nodes
 })

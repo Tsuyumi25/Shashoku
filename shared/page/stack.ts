@@ -115,6 +115,33 @@ export function withoutText(nodes: readonly StackNode[]): StackNode[] {
   return out
 }
 
+/**
+ * The artwork as it arrived: the bottom raster, folders walked into. A new page
+ * puts its base map there, locked and byte for byte the source file, so this is
+ * the original unless someone has unlocked it and painted on it or slid another
+ * layer under it — and OCR reads the same layer, so both go wrong together.
+ */
+export function bottomRaster(layers: readonly LayerEntry[]): RasterLayerEntry | null {
+  for (const entry of layers) {
+    if (entry.kind === 'raster') return entry
+    if (entry.kind === 'group') {
+      const found = bottomRaster(entry.children)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
+ * The page as only its original, for looking at what the artwork said before
+ * anything was done to it. Drawn plainly whatever its own flags say: hiding or
+ * dimming the base map is a choice about the work, not about the original.
+ */
+export function originalStack(layers: readonly LayerEntry[]): StackNode[] {
+  const base = bottomRaster(layers)
+  return base === null ? [] : [{ kind: 'raster', entry: base, blendMode: 'normal', opacity: 1 }]
+}
+
 /** Every text object that will be drawn, in drawing order, buffers walked into. */
 export function stackedTextNodes(nodes: readonly StackNode[]): TextStackNode[] {
   const out: TextStackNode[] = []

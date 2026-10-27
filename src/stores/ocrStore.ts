@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { OcrModel, OcrPageResult, OcrProgress, OcrRegion } from '@shared/ocr/types'
 import type { LayerEntry, SourceTextLayerEntry } from '@shared/page/types'
+import { bottomRaster } from '@shared/page/stack'
 import { blocksOnSide } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { settleBreaks } from '@shared/ocr/breaks'
@@ -205,7 +206,7 @@ export const useOcrStore = defineStore('ocr', () => {
     if (busy(pageId)) return
     problem.value = null
 
-    const artwork = baseMapFile(layers)
+    const artwork = bottomRaster(layers)?.file ?? null
     if (!artwork) {
       problem.value = '這一頁底下沒有點陣圖層可以辨識'
       return
@@ -344,18 +345,3 @@ function lengthsOf(region: OcrRegion): number[] {
   return region.columns.map((column) => (region.vertical ? column.height : column.width))
 }
 
-/**
- * The bottom raster, not the composite: what has been lettered on top is our
- * own text, and feeding it back to a model that would then propose it as a
- * reading is a loop with nothing in it.
- */
-function baseMapFile(layers: readonly LayerEntry[]): string | null {
-  for (const entry of layers) {
-    if (entry.kind === 'raster') return entry.file
-    if (entry.kind === 'group') {
-      const found = baseMapFile(entry.children)
-      if (found) return found
-    }
-  }
-  return null
-}

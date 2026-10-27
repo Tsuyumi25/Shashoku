@@ -7,7 +7,7 @@ import type {
   TextLayerEntry,
 } from './types'
 import { PASS_THROUGH } from './types'
-import { pageStack, stackedRasterNodes, stackedTextNodes, withoutText, type StackNode } from './stack'
+import { pageStack, stackedRasterNodes, stackedTextNodes, originalStack, withoutText, type StackNode } from './stack'
 import { blankBlock } from './schema'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
@@ -178,5 +178,25 @@ describe('the canvas with its text taken out', () => {
     expect(idsOf(stackedTextNodes(pageStack(layers, 'translation')))).toEqual(before)
     expect(before).toEqual(['a', 'c'])
     expect(layers.map((l) => l.visible)).toEqual([true, false, true])
+  })
+})
+
+describe('the page as only its original', () => {
+  it('draws the bottom raster alone, plainly, even when it is hidden or dimmed', () => {
+    const layers = [
+      folder('g', [raster('base', { visible: false, opacity: 0.3, blendMode: 'multiply' }), text('x')]),
+      raster('retouch'),
+      text('a'),
+    ]
+
+    const shown = originalStack(layers)
+
+    expect(idsOf(shown)).toEqual(['base'])
+    expect(shown[0]).toMatchObject({ opacity: 1, blendMode: 'normal' })
+    expect(stackedTextNodes(shown)).toEqual([])
+  })
+
+  it('has nothing to show on a page with no raster at all', () => {
+    expect(originalStack([text('a')])).toEqual([])
   })
 })

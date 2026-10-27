@@ -40,6 +40,16 @@
       >
         {{ editor.textsHidden ? '顯示文字' : '隱藏文字' }}
       </button>
+      <button
+        type="button"
+        class="route-btn"
+        :aria-pressed="editor.showingOriginal"
+        :class="editor.showingOriginal && 'route-btn-on'"
+        title="畫布上只看最底下的底圖（原圖），其他圖層和文字都先拿掉。不改任何東西，也不影響匯出"
+        @click="editor.showingOriginal = !editor.showingOriginal"
+      >
+        {{ editor.showingOriginal ? '回到作業' : '看原圖' }}
+      </button>
     </div>
   </div>
 </template>
