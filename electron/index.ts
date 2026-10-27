@@ -9,10 +9,12 @@ import { registerWindowHandlers } from "./ipc/window";
 import { registerMcpBridge } from "./mcp/bridge";
 import { startMcpServer } from "./mcp/server";
 import { sweepThumbnails } from "./lib/thumbnailCache";
+import { claimDevDesktopEntry } from "./lib/devDesktopEntry";
 
 let mainWindow: BrowserWindow | null = null;
 
 Menu.setApplicationMenu(null);
+claimDevDesktopEntry();
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
