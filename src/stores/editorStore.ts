@@ -140,6 +140,14 @@ export interface ScaledLabel {
   y: number
 }
 
+/** Everything a gesture on a multiple selection can leave changed about one member. */
+export interface PlacedLabel {
+  style: TextStyle
+  x: number
+  y: number
+  rotation: number
+}
+
 /** Everything the rotation handle leaves changed about one label. */
 export interface TurnedLabel {
   rotation: number
@@ -1891,6 +1899,42 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * One gesture on a multiple selection, as one step however many members it
+   * carried. Both sides are snapshots taken by the gesture, which has already
+   * written the after; a drag that came back to where it began leaves nothing.
+   * A member locked since is stepped over rather than taking the rest down.
+   */
+  function cmdPlaceLabels(
+    pageId: string,
+    from: ReadonlyMap<string, PlacedLabel>,
+    to: ReadonlyMap<string, PlacedLabel>,
+  ) {
+    const ids = [...to.keys()].filter(
+      (id) => from.has(id) && JSON.stringify(from.get(id)) !== JSON.stringify(to.get(id)),
+    )
+    if (ids.length === 0) return
+    const project = useProjectStore()
+    const apply = (states: ReadonlyMap<string, PlacedLabel>) => {
+      for (const id of ids) {
+        if (isLayerLocked(id)) continue
+        const state = states.get(id)
+        if (!state) continue
+        project.setLabelStyle(pageId, id, state.style)
+        project.rotateLabel(pageId, id, state.rotation)
+        project.moveLabel(pageId, id, state.x, state.y)
+      }
+    }
+    pushCommand(
+      {
+        label: `place-labels ${ids.length}`,
+        do: () => apply(to),
+        undo: () => apply(from),
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
    * A blank layer arrives with no frame at all. The first write places one and
    * later writes that reach past it grow it — an AI erase patch extended by
    * hand has to grow the same way, so nothing here is owed to this button alone.
@@ -2836,6 +2880,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveCard,
     cmdDuplicateLabel,
     cmdMoveLabel,
+    cmdPlaceLabels,
     cmdPlaceLayer,
     cmdRotateLabel,
     cmdScaleLabel,

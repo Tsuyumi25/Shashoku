@@ -127,9 +127,8 @@ const props = defineProps<{
   /** The object's turn on the page, in radians. */
   rotation: number
   /**
-   * The cursor — the one a single-object command acts on, and the only one
-   * wearing handles. Canvas gestures still move one object at a time, so a
-   * second set of handles would be offering a drag nothing carries out.
+   * Wearing handles: the cursor when it stands alone, or the box round a
+   * multiple selection. Never both, so no two sets cover each other.
    */
   selected: boolean
   /** In the selection, cursor or not. Outlined, but without handles. */

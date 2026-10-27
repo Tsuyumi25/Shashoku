@@ -162,7 +162,7 @@
             :key="object.id"
             :pointer="framesTakePointer ? 'box' : 'none'"
             :framed="connecting || painting"
-            :handles="!connecting && !painting"
+            :handles="!connecting && !painting && groupFrame === null"
             :captioned="painting"
             :code="object.code"
             :text-style="object.style"
@@ -174,8 +174,8 @@
             :tags="object.tags"
             :natural="editor.viewContentSize"
             :view="view"
-            :selected="object.id === editor.cursorId"
-            :in-selection="editor.isSelected(object.id)"
+            :selected="object.id === editor.cursorId && !inGroup(object.id)"
+            :in-selection="editor.isSelected(object.id) && !inGroup(object.id)"
             :locked="object.locked"
             :editing="object.id === textEditingId"
             :selection="object.id === textEditingId ? markup.plainRange.value : null"
@@ -200,6 +200,30 @@
             @scale-end="commitLabelScale(object.id)"
             @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
             @rotate-end="(from, to) => commitLabelRotate(object.id, from, to)"
+          />
+          <!--
+            Several objects selected stand in one box, the way Photoshop draws
+            one round several layers: its handles scale and turn the set, and a
+            drag on any member moves it. Drawn last so its handles answer before
+            any member's frame.
+          -->
+          <ObjectFrame
+            v-if="groupFrame"
+            :box="groupFrame"
+            :view="view"
+            :rotation="groupTurn"
+            selected
+            in-selection
+            :locked="false"
+            handles
+            standing
+            :pointer="framesTakePointer ? 'handles' : 'none'"
+            @scale-start="beginGroup"
+            @scale="scaleGroupTo"
+            @scale-end="endGroup"
+            @rotate-start="beginGroup"
+            @rotate="rotateGroupTo"
+            @rotate-end="endGroup"
           />
         </div>
 
@@ -322,6 +346,8 @@ import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
 import PageStack from '@/components/PageStack.vue'
 import RasterFrame from '@/components/RasterFrame.vue'
+import ObjectFrame from '@/components/ObjectFrame.vue'
+import { useGroupTransform } from '@/composables/useGroupTransform'
 import SourceCards from '@/components/SourceCards.vue'
 import TranslationCards from '@/components/TranslationCards.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
@@ -651,13 +677,23 @@ onMounted(() => {
  */
 function moveLabelTo(labelId: string, to: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
+  if (groupIds.value.includes(labelId)) {
+    moveGroupWith(labelId, to)
+    return
+  }
   project.moveLabel(editor.currentPageId, labelId, to.x, to.y)
 }
 
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId) return
+  if (groupIds.value.includes(labelId)) {
+    endGroup()
+    return
+  }
   editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
 }
+
+
 
 /**
  * Shift adds, as it does on any canvas. There is no Ctrl here: a page has no
@@ -665,6 +701,8 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
  * label list's job.
  */
 function onSelectObject(id: string, additive: boolean) {
+  // A press on a member of the set is the start of moving the set.
+  if (!additive && groupIds.value.includes(id)) return
   if (additive) editor.toggleSelected(id)
   else editor.selectOnly(id)
 }
@@ -939,6 +977,42 @@ const connecting = computed(() => editor.tool === 'connect')
  * is what the move tool is for.
  */
 const painting = computed(() => editor.tool === 'tag-paint')
+
+/**
+ * The text objects on this page that move, scale and turn as one: two or more
+ * selected, none locked. A raster layer in the selection leaves the set
+ * without a box for now — its pixels are placed through a gesture that holds
+ * one layer at a time, so a box would carry the text and leave it behind.
+ */
+const groupIds = computed<string[]>(() => {
+  if (connecting.value || painting.value) return []
+  if (rasterFrames.value.some((layer) => editor.isSelected(layer.id))) return []
+  const ids = objects.value.filter((o) => editor.isSelected(o.id) && !o.locked).map((o) => o.id)
+  return ids.length >= 2 ? ids : []
+})
+
+/**
+ * A member of the boxed set draws no outline of its own: the box already says
+ * what is selected, and four more rectangles inside it only say it again.
+ * Pointing at one still outlines it, the way any object answers the pointer.
+ */
+function inGroup(id: string): boolean {
+  return groupFrame.value !== null && groupIds.value.includes(id)
+}
+
+const {
+  box: groupFrame,
+  turn: groupTurn,
+  begin: beginGroup,
+  scaleTo: scaleGroupTo,
+  rotateTo: rotateGroupTo,
+  moveWith: moveGroupWith,
+  end: endGroup,
+} = useGroupTransform({
+  pageId: () => editor.currentPageId,
+  ids: () => groupIds.value,
+  codeOf: (id) => objects.value.find((o) => o.id === id)?.code ?? null,
+})
 
 /**
  * The objects one gesture has already crossed. Held so that sweeping back over
