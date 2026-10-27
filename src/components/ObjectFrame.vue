@@ -28,6 +28,20 @@
         @pointercancel="onScaleUp"
       />
 
+      <template v-if="perAxis">
+        <div
+          v-for="edge in EDGES"
+          :key="edge.key"
+          class="absolute border border-primary bg-background"
+          :class="edge.cursor"
+          :style="cornerStyle(edge)"
+          @pointerdown.stop="onScaleDown($event, edge)"
+          @pointermove="onScaleMove"
+          @pointerup="onScaleUp"
+          @pointercancel="onScaleUp"
+        />
+      </template>
+
       <div class="pointer-events-none absolute bg-primary" :style="antennaStemStyle" />
       <div
         class="absolute flex cursor-grab items-center justify-center rounded-full"
@@ -167,9 +181,9 @@ const props = defineProps<{
   pointed?: boolean
   title?: string
   /**
-   * Whether Shift on a corner scales each axis on its own. Only for a frame
-   * whose owner answers `scaleAxes`; any other would stop following the hand
-   * while Shift is down.
+   * Whether this frame can scale each axis on its own: side handles, and Shift
+   * on a corner. Only for a frame whose owner answers `scaleAxes`; any other
+   * would stop following the hand.
    */
   perAxis?: boolean
 }>()
@@ -188,17 +202,18 @@ const emit = defineEmits<{
   /** Once on release, and only if the pointer actually travelled. */
   dragEnd: [d: Displacement]
   /**
-   * Once a corner drag turns out to be a drag, so the undo entry has a before.
+   * Once a handle's drag turns out to be a drag, so the undo entry has a before.
    * Carries which fractional point of the frame the drag is pinning: the handle
    * across from the one taken hold of, or the reference point under Alt.
    */
   scaleStart: [pin: Point]
   scale: [ratio: number]
   /**
-   * The same drag with Shift down, read as one ratio per frame axis. A separate
-   * event because the two mean different things to whoever receives them: one
-   * is how much bigger, the other is how much wider and how much taller, and a
-   * caller that could only answer the first must not be handed the second.
+   * A side handle, or Shift on a corner, read as one ratio per frame axis. A
+   * separate event because the two mean different things to whoever receives
+   * them: one is how much bigger, the other is how much wider and how much
+   * taller, and a caller that could only answer the first must not be handed
+   * the second.
    */
   scaleAxes: [ratio: Point]
   scaleEnd: []
@@ -292,8 +307,8 @@ const boxStyle = computed(() => ({
 
 interface Corner {
   key: string
-  kx: 0 | 1
-  ky: 0 | 1
+  kx: 0 | 0.5 | 1
+  ky: 0 | 0.5 | 1
   cursor: string
 }
 
@@ -303,6 +318,24 @@ const CORNERS: Corner[] = [
   { key: 'br', kx: 1, ky: 1, cursor: 'cursor-nwse-resize' },
   { key: 'bl', kx: 0, ky: 1, cursor: 'cursor-nesw-resize' },
 ]
+
+/**
+ * The middles of the four sides, for a frame that scales each axis on its own.
+ * A side only has one axis to pull along, so it stretches that one and leaves
+ * the other alone — Illustrator's and Figma's side handles, and Photoshop's
+ * before 2019 — with no modifier to hold.
+ */
+const EDGES: Corner[] = [
+  { key: 't', kx: 0.5, ky: 0, cursor: 'cursor-ns-resize' },
+  { key: 'r', kx: 1, ky: 0.5, cursor: 'cursor-ew-resize' },
+  { key: 'b', kx: 0.5, ky: 1, cursor: 'cursor-ns-resize' },
+  { key: 'l', kx: 0, ky: 0.5, cursor: 'cursor-ew-resize' },
+]
+
+/** Which axes a handle pulls along: a side, one; a corner, both. */
+function axesOf(handle: Corner): { x: boolean; y: boolean } {
+  return { x: handle.kx !== 0.5, y: handle.ky !== 0.5 }
+}
 
 /**
  * How far above the frame the rotation handle stands off, in screen pixels.
@@ -651,6 +684,12 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
 
 function reportScale() {
   const now = pageAt(scale.client.x, scale.client.y)
+  const axes = axesOf(scale.corner)
+  if (!axes.x || !axes.y) {
+    const ratio = axisScaleRatio(scale.pivot, scale.grab, now, props.rotation)
+    emit('scaleAxes', { x: axes.x ? ratio.x : 1, y: axes.y ? ratio.y : 1 })
+    return
+  }
   if (scale.perAxis) emit('scaleAxes', axisScaleRatio(scale.pivot, scale.grab, now, props.rotation))
   else emit('scale', uniformScaleRatio(scale.pivot, scale.grab, now))
 }

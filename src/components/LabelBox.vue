@@ -361,9 +361,10 @@ function onScale(ratio: number) {
 }
 
 /**
- * Shift reads the same drag as two percentages instead of a size. Rounded for
- * the same reason, and clamped by the same floor and ceiling the panel offers,
- * so a gesture cannot leave the object anywhere the panel could not put it.
+ * A side handle, or Shift on a corner, reads the drag as two percentages
+ * instead of a size. Rounded for the same reason, and clamped by the same
+ * floor and ceiling the panel offers, so a gesture cannot leave the object
+ * anywhere the panel could not put it.
  */
 function onScaleAxes(ratio: Point) {
   const scaleXPercent = clamp(
