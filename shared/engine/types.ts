@@ -284,6 +284,10 @@ export interface ShashokuEngineApi {
    * vertical scale. Advances follow the glyphs they belong to, so a scaled run
    * is still a run of text with its own frame and its own carets rather than a
    * squashed picture of one. Absent is one, which changes nothing.
+   *
+   * `leading` is how far apart lines sit, baseline to baseline, or columns
+   * sit, centre to centre, as a multiple of the largest size in the line —
+   * Photoshop's leading. Absent is 1.2.
    */
   renderText(
     font: EngineFontSource,
@@ -300,6 +304,7 @@ export interface ShashokuEngineApi {
     spans?: EngineSpan[],
     scaleX?: number,
     scaleY?: number,
+    leading?: number,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -316,6 +321,7 @@ export interface ShashokuEngineApi {
     spans?: EngineSpan[],
     scaleX?: number,
     scaleY?: number,
+    leading?: number,
   ): EngineBitmap;
   /**
    * The render call stopped where painting would start. Takes only the
@@ -336,6 +342,7 @@ export interface ShashokuEngineApi {
     spans?: EngineSpan[],
     scaleX?: number,
     scaleY?: number,
+    leading?: number,
   ): EngineMeasure;
   measureVertical(
     font: EngineFontSource,
@@ -349,6 +356,7 @@ export interface ShashokuEngineApi {
     spans?: EngineSpan[],
     scaleX?: number,
     scaleY?: number,
+    leading?: number,
   ): EngineMeasure;
   /**
    * One box with an X through it per character — what there is to draw when

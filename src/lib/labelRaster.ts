@@ -98,6 +98,7 @@ function requestFor(
     weightPx: style.weightPx,
     scaleX: style.scaleXPercent / 100,
     scaleY: style.scaleYPercent / 100,
+    leading: style.leadingPercent / 100,
     rotation,
     phaseX: phase.x,
     phaseY: phase.y,

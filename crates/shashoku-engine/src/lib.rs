@@ -407,6 +407,8 @@ pub fn render_text(
     // nominal size. 1 is unchanged.
     scale_x: Option<f64>,
     scale_y: Option<f64>,
+    // Line pitch as a multiple of the size; 1.2 when absent.
+    leading: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -425,6 +427,7 @@ pub fn render_text(
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
+        leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -456,6 +459,8 @@ pub fn measure_text(
     spans: Option<Vec<EngineSpan>>,
     scale_x: Option<f64>,
     scale_y: Option<f64>,
+    // Line pitch as a multiple of the size; 1.2 when absent.
+    leading: Option<f64>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_text(
@@ -469,6 +474,7 @@ pub fn measure_text(
         align_from_opt(align)?,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
+        leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))
@@ -982,6 +988,8 @@ pub fn render_vertical(
     spans: Option<Vec<EngineSpan>>,
     scale_x: Option<f64>,
     scale_y: Option<f64>,
+    // Line pitch as a multiple of the size; 1.2 when absent.
+    leading: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -1000,6 +1008,7 @@ pub fn render_vertical(
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
+        leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -1029,6 +1038,8 @@ pub fn measure_vertical(
     spans: Option<Vec<EngineSpan>>,
     scale_x: Option<f64>,
     scale_y: Option<f64>,
+    // Line pitch as a multiple of the size; 1.2 when absent.
+    leading: Option<f64>,
 ) -> napi::Result<TextMeasure> {
     let (data, face_index) = resolve_font(font)?;
     let m = render::measure_vertical(
@@ -1042,6 +1053,7 @@ pub fn measure_vertical(
         align_from_opt(align)?,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
+        leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(to_text_measure(m))

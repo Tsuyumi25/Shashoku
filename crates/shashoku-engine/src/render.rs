@@ -541,13 +541,29 @@ fn size_metrics(sk_font: &FontRef, size_px: f32) -> (f32, f32, f32) {
     )
 }
 
+/// Line pitch as a multiple of the size, for a caller that does not say: the
+/// figure a style starts at, and what vertical text was spaced by before the
+/// leading was a setting.
+pub const DEFAULT_LEADING: f32 = 1.2;
+
 struct LaidSegment<'a> {
     seg: Segment<'a>,
     glyphs: Vec<ShapedGlyph>,
 }
 
-/// How wide a vertical column is, as a multiple of the size set in it.
-const COLUMN_EM: f32 = 1.2;
+/// One line of horizontal text, measured before anything is drawn.
+#[derive(Default)]
+struct HorizontalLine<'a> {
+    laid: Vec<LaidSegment<'a>>,
+    width: f32,
+    ascent: f32,
+    /// The face's own line box, which is what the line's carets are as tall as.
+    height: f32,
+    /// How far this line's baseline sits below the previous one's.
+    pitch: f32,
+    /// From the top of the content, filled in once every line is measured.
+    baseline: f32,
+}
 
 #[expect(
     clippy::too_many_arguments,
@@ -563,6 +579,7 @@ fn build_horizontal_path(
     align: Align,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -578,40 +595,52 @@ fn build_horizontal_path(
     // into the whole string.
     //
     // A line is as tall as the tallest thing set in it and its baseline sits
-    // as deep as the deepest ascent asked for, so a larger span pushes the
-    // line down and the lines after it rather than overprinting its
-    // neighbours.
-    let mut lines: Vec<(Vec<LaidSegment>, f32, f32, f32)> = Vec::new();
+    // as deep as the deepest ascent asked for. Each baseline after the first
+    // sits the line's leading below the one before it — the largest size in
+    // the line times the leading, as Photoshop measures it — so a larger span
+    // pushes the lines after it down rather than overprinting them.
+    let mut lines: Vec<HorizontalLine> = Vec::new();
     let mut offset = 0u32;
     for line in text.split('\n') {
-        let (mut width, mut ascent, mut height) = (0.0f32, 0.0f32, 0.0f32);
-        let mut laid: Vec<LaidSegment> = Vec::new();
+        let mut l = HorizontalLine::default();
         for seg in segments_of(line, offset, size_px, spans) {
             let (seg_ascent, _, seg_height) = size_metrics(&sk_font, seg.size_px);
-            ascent = ascent.max(seg_ascent * scale.y);
-            height = height.max(seg_height * scale.y);
+            l.ascent = l.ascent.max(seg_ascent * scale.y);
+            l.height = l.height.max(seg_height * scale.y);
+            l.pitch = l.pitch.max(seg.size_px * leading * scale.y);
             let glyphs = shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false);
-            width += glyphs.iter().map(|g| g.x_advance).sum::<f32>() * scale.x;
-            laid.push(LaidSegment { seg, glyphs });
+            l.width += glyphs.iter().map(|g| g.x_advance).sum::<f32>() * scale.x;
+            l.laid.push(LaidSegment { seg, glyphs });
         }
-        lines.push((laid, width, ascent, height));
+        lines.push(l);
         offset += line.len() as u32 + 1;
     }
 
-    let max_width: f32 = lines.iter().map(|line| line.1).fold(0.0, f32::max);
-    let content_h: f32 = lines.iter().map(|line| line.3).sum();
+    let mut baseline_y = lines[0].ascent - lines[0].pitch;
+    for line in &mut lines {
+        baseline_y += line.pitch;
+        line.baseline = baseline_y;
+    }
+    let max_width: f32 = lines.iter().map(|line| line.width).fold(0.0, f32::max);
+    // As deep as whatever reaches lowest, which with a tight leading need not
+    // be the last line.
+    let content_h: f32 = lines
+        .iter()
+        .map(|line| line.baseline - line.ascent + line.height)
+        .fold(0.0, f32::max);
     let w = (max_width.ceil() as u32).max(1) + padding * 2;
     let h = (content_h.ceil() as u32).max(1) + padding * 2;
 
     let outlines = sk_font.outline_glyphs();
     let mut groups = GlyphGroups::default();
     let mut clusters: Vec<ClusterRect> = Vec::new();
-    let mut top = padding as f32 + phase.y;
+    let origin_y = padding as f32 + phase.y;
 
-    for (laid, width, ascent, height) in &lines {
-        let baseline_y = top + ascent;
-        let mut pen_x = padding as f32 + phase.x + (max_width - width) * align.share();
-        for LaidSegment { seg, glyphs } in laid {
+    for line in &lines {
+        let baseline_y = origin_y + line.baseline;
+        let top = baseline_y - line.ascent;
+        let mut pen_x = padding as f32 + phase.x + (max_width - line.width) * align.share();
+        for LaidSegment { seg, glyphs } in &line.laid {
             let size = Size::new(seg.size_px);
             for g in glyphs {
                 let gid = GlyphId::new(g.gid);
@@ -632,15 +661,14 @@ fn build_horizontal_path(
                     x: pen_x,
                     y: top,
                     width: g.x_advance * scale.x,
-                    height: *height,
+                    height: line.height,
                 });
                 pen_x += g.x_advance * scale.x;
             }
         }
-        top += height;
     }
 
-    let baseline = padding as f32 + phase.y + lines[0].2;
+    let baseline = origin_y + lines[0].baseline;
     let (path, groups) = groups.finish();
     Ok(BuiltRun {
         path,
@@ -666,6 +694,7 @@ fn build_vertical_path(
     align: Align,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<BuiltRun, String> {
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
@@ -676,8 +705,9 @@ fn build_vertical_path(
     let upem = sk_font.metrics(Size::new(size_px), loc).units_per_em as f32;
 
     // One \n-separated segment per column. CJK vertical convention runs
-    // columns right to left. A column is as wide as the widest thing set in
-    // it; an upright stretch is shaped across the column and takes one em of
+    // columns right to left. A column is the leading times the largest size
+    // set in it wide, so columns sit that far apart centre to centre; an
+    // upright stretch is shaped across the column and takes one em of
     // its own size going down, however many characters went into it.
     let mut columns: Vec<(Vec<LaidSegment>, f32, f32)> = Vec::new();
     let mut offset = 0u32;
@@ -685,7 +715,7 @@ fn build_vertical_path(
         let (mut height, mut width) = (0.0f32, 0.0f32);
         let mut laid: Vec<LaidSegment> = Vec::new();
         for seg in segments_of(line, offset, size_px, spans) {
-            width = width.max(seg.size_px * COLUMN_EM * scale.x);
+            width = width.max(seg.size_px * leading * scale.x);
             let glyphs = shape_line(
                 &hr_font,
                 seg.text,
@@ -1253,9 +1283,10 @@ pub fn render_text(
     weight: f32,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_horizontal_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
@@ -1278,9 +1309,10 @@ pub fn render_vertical(
     weight: f32,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_vertical_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
     paint_run(spin(run, rotation), fill, stroke, weight)
 }
@@ -1314,9 +1346,10 @@ pub fn measure_text(
     align: Align,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<TextMeasure, String> {
     let run = build_horizontal_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
     Ok(measure_run(run, rotation))
 }
@@ -1336,9 +1369,10 @@ pub fn measure_vertical(
     align: Align,
     spans: &[SpanStyle],
     scale: Scale,
+    leading: f32,
 ) -> Result<TextMeasure, String> {
     let run = build_vertical_path(
-        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale,
+        font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
     Ok(measure_run(run, rotation))
 }
@@ -2095,6 +2129,7 @@ mod align_tests {
                 align,
                 &[],
                 Scale::ONE,
+                DEFAULT_LEADING,
             )
             .unwrap()
         };
@@ -2476,6 +2511,7 @@ mod stroke_tests {
                 Align::Start,
                 &[],
                 Scale::ONE,
+                DEFAULT_LEADING,
             )
             .unwrap();
             let Some(path) = run.path.clone() else {
@@ -2535,6 +2571,7 @@ mod given_face {
             Align::default(),
             &[],
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap_or_else(|err| panic!("the test font will not lay out {text:?}: {err}"));
         assert!(
@@ -2598,6 +2635,7 @@ mod measure_tests {
                     Align::Center,
                     spans,
                     Scale::ONE,
+                    DEFAULT_LEADING,
                 )
                 .unwrap();
                 let r = render_text(
@@ -2614,6 +2652,7 @@ mod measure_tests {
                     -1.0,
                     spans,
                     Scale::ONE,
+                    DEFAULT_LEADING,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -2637,6 +2676,7 @@ mod measure_tests {
                     Align::End,
                     spans,
                     Scale::ONE,
+                    DEFAULT_LEADING,
                 )
                 .unwrap();
                 let r = render_vertical(
@@ -2653,6 +2693,7 @@ mod measure_tests {
                     -1.0,
                     spans,
                     Scale::ONE,
+                    DEFAULT_LEADING,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -2711,6 +2752,7 @@ mod phase_tests {
             0.0,
             &[],
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -2816,6 +2858,7 @@ mod phase_tests {
             0.0,
             &[],
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap();
         let moved = render_vertical(
@@ -2832,6 +2875,7 @@ mod phase_tests {
             0.0,
             &[],
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap();
 
@@ -2872,6 +2916,7 @@ mod span_tests {
             0.0,
             spans,
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -2888,6 +2933,7 @@ mod span_tests {
             Align::Start,
             spans,
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -2904,6 +2950,7 @@ mod span_tests {
             Align::Start,
             spans,
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -3146,7 +3193,9 @@ mod scale_tests {
     /// say what the bytes were. A deliberate change to how glyphs rasterize
     /// moves these, and re-recording them is the right answer then; a change
     /// that was not meant to touch unscaled text is the bug they are here for.
-    const UNSCALED_HORIZONTAL: (u32, u32, u64) = (61, 148, 0x8ecf_a27e_c008_e4ce);
+    /// The horizontal one was re-recorded when lines began stepping by the
+    /// leading rather than by the face's own line box.
+    const UNSCALED_HORIZONTAL: (u32, u32, u64) = (61, 136, 0xdaff_b37e_6cdf_62e7);
     const UNSCALED_VERTICAL: (u32, u32, u64) = (124, 88, 0xd3bf_3533_2150_a801);
 
     fn drew(bmp: &TextBitmap) -> (u32, u32, u64) {
@@ -3170,6 +3219,7 @@ mod scale_tests {
             0.0,
             &SPANS,
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap();
         let down = render_vertical(
@@ -3186,6 +3236,7 @@ mod scale_tests {
             0.0,
             &SPANS,
             Scale::ONE,
+            DEFAULT_LEADING,
         )
         .unwrap();
         assert_eq!(drew(&across), UNSCALED_HORIZONTAL);
@@ -3204,6 +3255,7 @@ mod scale_tests {
             Align::Start,
             &[],
             scale,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -3220,6 +3272,7 @@ mod scale_tests {
             Align::Start,
             spans,
             scale,
+            DEFAULT_LEADING,
         )
         .unwrap()
     }
@@ -3296,5 +3349,89 @@ mod scale_tests {
             content(full.width),
             content(wide.width)
         );
+    }
+}
+
+#[cfg(test)]
+mod leading_tests {
+    use super::given_face::{PADDING, SIZE, drawing};
+    use super::*;
+
+    const TEXT: &str = "Hg\ngh";
+
+    fn across(bytes: &[u8], face: u32, text: &str, leading: f32) -> TextMeasure {
+        measure_text(
+            bytes,
+            text,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            &[],
+            Scale::ONE,
+            leading,
+        )
+        .unwrap()
+    }
+
+    fn down(bytes: &[u8], face: u32, leading: f32) -> TextMeasure {
+        measure_vertical(
+            bytes,
+            TEXT,
+            SIZE,
+            PADDING,
+            face,
+            0.0,
+            Phase::default(),
+            Align::Start,
+            &[],
+            Scale::ONE,
+            leading,
+        )
+        .unwrap()
+    }
+
+    /// Where each line's carets start, top to bottom.
+    fn line_tops(m: &TextMeasure) -> Vec<f32> {
+        let mut tops: Vec<f32> = m.clusters.iter().map(|c| c.y).collect();
+        tops.sort_by(f32::total_cmp);
+        tops.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        tops
+    }
+
+    #[test]
+    fn horizontal_lines_sit_the_leading_apart() {
+        let (bytes, face) = drawing(TEXT);
+        for leading in [0.8, 1.2, 2.0] {
+            let tops = line_tops(&across(&bytes, face, TEXT, leading));
+            assert_eq!(tops.len(), 2);
+            assert!(
+                (tops[1] - tops[0] - SIZE * leading).abs() < 0.01,
+                "at {leading} the lines sit {} apart",
+                tops[1] - tops[0]
+            );
+        }
+    }
+
+    #[test]
+    fn a_single_line_is_the_same_at_any_leading() {
+        let (bytes, face) = drawing(TEXT);
+        let tight = across(&bytes, face, "Hg", 0.8);
+        let loose = across(&bytes, face, "Hg", 2.0);
+        assert_eq!(tight.height, loose.height);
+        assert_eq!(tight.baseline, loose.baseline);
+    }
+
+    #[test]
+    fn vertical_columns_widen_by_the_leading() {
+        let (bytes, face) = drawing(TEXT);
+        let tight = down(&bytes, face, 1.2);
+        let loose = down(&bytes, face, 2.0);
+        // Two columns, each 0.8 em wider.
+        let grew = loose.width as f32 - tight.width as f32;
+        assert!((grew - 2.0 * 0.8 * SIZE).abs() <= 1.0, "grew by {grew}");
+        assert_eq!(loose.height, tight.height);
     }
 }

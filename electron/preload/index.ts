@@ -91,6 +91,7 @@ const engineApi: ShashokuEngineApi = {
     spans,
     scaleX,
     scaleY,
+    leading,
   ) =>
     engine.renderText(
       font,
@@ -107,6 +108,7 @@ const engineApi: ShashokuEngineApi = {
       plainSpans(spans),
       scaleX,
       scaleY,
+      leading,
     ),
   renderVertical: (
     font,
@@ -123,6 +125,7 @@ const engineApi: ShashokuEngineApi = {
     spans,
     scaleX,
     scaleY,
+    leading,
   ) =>
     engine.renderVertical(
       font,
@@ -139,6 +142,7 @@ const engineApi: ShashokuEngineApi = {
       plainSpans(spans),
       scaleX,
       scaleY,
+      leading,
     ),
   renderNotdef: (
     text,
@@ -178,6 +182,7 @@ const engineApi: ShashokuEngineApi = {
     spans,
     scaleX,
     scaleY,
+    leading,
   ) =>
     engine.measureText(
       font,
@@ -191,6 +196,7 @@ const engineApi: ShashokuEngineApi = {
       plainSpans(spans),
       scaleX,
       scaleY,
+      leading,
     ),
   measureVertical: (
     font,
@@ -204,6 +210,7 @@ const engineApi: ShashokuEngineApi = {
     spans,
     scaleX,
     scaleY,
+    leading,
   ) =>
     engine.measureVertical(
       font,
@@ -217,6 +224,7 @@ const engineApi: ShashokuEngineApi = {
       plainSpans(spans),
       scaleX,
       scaleY,
+      leading,
     ),
   measureNotdef: (text, sizePx, padding, vertical, rotation, phaseX, phaseY, align) =>
     engine.measureNotdef(text, sizePx, padding, vertical, rotation, phaseX, phaseY, align),
