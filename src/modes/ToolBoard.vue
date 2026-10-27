@@ -10,12 +10,10 @@
     what is left has a height of its own again.
   -->
   <div class="flex min-h-0 flex-1 flex-col">
-    <RecognizerBar />
     <RetouchProbe />
   </div>
 </template>
 
 <script setup lang="ts">
-import RecognizerBar from '@/components/RecognizerBar.vue'
 import RetouchProbe from '@/components/RetouchProbe.vue'
 </script>
