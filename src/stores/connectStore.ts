@@ -1,6 +1,7 @@
 import { computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import { hasEdge, wouldCycle, type ReadingEdge } from '@shared/page/readingGraph'
+import { sideOf } from '@shared/page/units'
 import type { Point } from '@/lib/labelBox'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -70,6 +71,18 @@ export const useConnectStore = defineStore('connect', () => {
   }
 
   /**
+   * A line joins two translations, and a lock is put on the lettering — so a
+   * translation is held still when any block of it on the side being worked
+   * on is.
+   */
+  function unitLocked(page: string, unitId: string): boolean {
+    const editor = useEditorStore()
+    const unit = useProjectStore().unitById(page, unitId)
+    if (unit === undefined) return false
+    return sideOf(unit, editor.textSide).members.some((id) => editor.isLayerLocked(id))
+  }
+
+  /**
    * Whether the chain cannot reach this object. Asked while the pointer is
    * still moving, so a target that will be refused is drawn as refused instead
    * of the refusal being reported after the click.
@@ -79,8 +92,7 @@ export const useConnectStore = defineStore('connect', () => {
     if (g === null) return true
     // Where an object is read is one of the things a lock is put on to hold
     // still, and a line is a statement about exactly that.
-    const editor = useEditorStore()
-    if (editor.isLayerLocked(g.source) || editor.isLayerLocked(targetId)) return true
+    if (unitLocked(g.page, g.source) || unitLocked(g.page, targetId)) return true
     return wouldCycle(standing(), { from: g.source, to: targetId })
   }
 

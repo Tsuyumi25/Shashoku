@@ -1080,7 +1080,7 @@ const drawnLines = computed(() => {
   return out
 })
 
-/** What the pointer is over while a chain is being drawn. */
+/** The translation the pointer is over while a chain is being drawn. */
 const hoverTargetId = ref<string | null>(null)
 
 /**
@@ -1148,10 +1148,22 @@ function lineAt(p: Anchor): ReadingEdge | null {
  * since the refusal is already drawn on the preview and saying it twice would
  * be saying it once too often.
  */
+/**
+ * The translation a page point is on. A line joins translations, so this is
+ * what the connecting tool aims at — a press lands on a block, and the line
+ * belongs to the unit the block letters.
+ */
+function unitAt(p: Anchor): string | null {
+  const id = objectAt(p)
+  const page = currentFile.value?.page
+  if (id === null || page === undefined) return null
+  return placeOfBlock(page, id)?.unit.id ?? null
+}
+
 function onConnectDown(p: Anchor) {
   const page = editor.currentPageId
   if (page === null) return
-  const hit = objectAt(p)
+  const hit = unitAt(p)
   if (connect.isDrawing) {
     if (hit !== null) connect.reach(hit)
     else connect.commit()
@@ -1165,7 +1177,7 @@ function onConnectDown(p: Anchor) {
 }
 
 function onConnectMove(p: Anchor) {
-  hoverTargetId.value = objectAt(p)
+  hoverTargetId.value = unitAt(p)
   connect.track(p)
 }
 
