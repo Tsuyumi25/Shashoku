@@ -16,6 +16,23 @@
     <slot :counter-turn="-turn" :hovered="hovered" />
 
     <template v-if="handles && selected && !locked">
+      <!--
+        A band all the way round the outside, under the handles: a press on a
+        handle scales, a press a little further out turns. No mode to enter
+        first — the selected object is always ready to be turned.
+      -->
+      <div
+        v-for="zone in TURN_ZONES"
+        :key="`turn-${zone.key}`"
+        class="absolute"
+        :style="turnZoneStyle(zone)"
+        @pointerdown.stop="onRotateDown"
+        @dblclick.stop
+        @pointermove="onRotateMove"
+        @pointerup="onRotateUp"
+        @pointercancel="onRotateUp"
+      />
+
       <div
         v-for="corner in CORNERS"
         :key="corner.key"
@@ -41,18 +58,6 @@
           @pointercancel="onScaleUp"
         />
       </template>
-
-      <div class="pointer-events-none absolute bg-primary" :style="antennaStemStyle" />
-      <div
-        class="absolute flex cursor-grab items-center justify-center rounded-full"
-        :style="antennaHandleStyle"
-        @pointerdown.stop="onRotateDown"
-        @pointermove="onRotateMove"
-        @pointerup="onRotateUp"
-        @pointercancel="onRotateUp"
-      >
-        <div class="rounded-full border border-primary bg-background" :style="dotStyle" />
-      </div>
 
       <div
         class="absolute flex cursor-move items-center justify-center"
@@ -84,6 +89,7 @@ import {
   type ViewTransform,
 } from '@/lib/coords'
 import { angleAround, angleDelta, axisScaleRatio, uniformScaleRatio, type Point } from '@/lib/labelBox'
+import { rotateCursor } from '@/lib/rotateCursor'
 import { useViewportOrigin } from '@/composables/useCanvasStage'
 
 /**
@@ -98,8 +104,8 @@ import { useViewportOrigin } from '@/composables/useCanvasStage'
  * when its handles are pushed.
  *
  * Every gesture reports and never writes. A drag gives how far the page point
- * it grabbed has travelled, a corner gives a ratio, the antenna gives an angle;
- * each caller turns those into its own units.
+ * it grabbed has travelled, a handle gives a ratio, the band just outside the
+ * frame gives an angle; each caller turns those into its own units.
  *
  * All of them are measured on the page rather than on the screen, so a view
  * that zooms, pans or turns mid-gesture leaves what is held exactly where it
@@ -338,16 +344,10 @@ function axesOf(handle: Corner): { x: boolean; y: boolean } {
 }
 
 /**
- * How far above the frame the rotation handle stands off, in screen pixels.
- * Shorter than the 40 to 50 that general purpose canvas libraries default to,
- * because a line of dialogue is often only a few tens of pixels tall and a stem
- * that long would be taller than the object it belongs to. Constant on screen
- * rather than scaled with the view, so it stays reachable at any zoom.
+ * How far out from the frame a press turns the object instead of missing it,
+ * in screen pixels. Constant on screen so it stays reachable at any zoom.
  */
-const ANTENNA_LENGTH_PX = 24
-
-/** Transparent margin around the dot, so a 10px target is not a 10px target. */
-const ANTENNA_HANDLE_HIT_PX = 20
+const TURN_ZONE_PX = 18
 
 function cornerStyle(corner: Corner) {
   return {
@@ -362,27 +362,31 @@ function cornerStyle(corner: Corner) {
 }
 
 /**
- * Both parts hang off the top edge's midpoint and inherit the frame's rotation,
- * which is what points the antenna at the object's own up rather than at the
- * top of the screen — the view's turn is already folded into that rotation, so
- * a page lying on its side takes its objects' handles with it.
+ * Photoshop turns from anywhere just outside the box, not only past a corner:
+ * four squares off the corners and four strips along the sides between them.
  */
-const antennaStemStyle = computed(() => ({
-  left: '50%',
-  top: '0px',
-  width: 'calc(1px * var(--px))',
-  height: `calc(${ANTENNA_LENGTH_PX}px * var(--px))`,
-  transform: 'translate(-50%, -100%)',
-}))
+const TURN_ZONES: Corner[] = [...CORNERS, ...EDGES]
 
-const antennaHandleStyle = computed(() => ({
-  left: '50%',
-  top: '0px',
-  width: `calc(${ANTENNA_HANDLE_HIT_PX}px * var(--px))`,
-  height: `calc(${ANTENNA_HANDLE_HIT_PX}px * var(--px))`,
-  transform: `translate(-50%, calc(-50% - ${ANTENNA_LENGTH_PX}px * var(--px)))`,
-  pointerEvents: handlePointer.value,
-}))
+/**
+ * One piece of the band, laid against the outside of the frame: a corner's
+ * square diagonally out from it, a side's strip as long as the side. Turned
+ * with the frame, so the band follows the object however it is lying, and the
+ * cursor bows away from the part of the frame it hangs off.
+ */
+function turnZoneStyle(zone: Corner) {
+  const along = (k: number) => (k === 0.5 ? '100%' : `calc(${TURN_ZONE_PX}px * var(--px))`)
+  const at = (k: number) => (k === 0.5 ? '0%' : `${k * 100}%`)
+  const out = (k: number) => (k === 0 ? '-100%' : '0')
+  return {
+    left: at(zone.kx),
+    top: at(zone.ky),
+    width: along(zone.kx),
+    height: along(zone.ky),
+    transform: `translate(${out(zone.kx)}, ${out(zone.ky)})`,
+    cursor: rotateCursor(Math.atan2(zone.ky - 0.5, zone.kx - 0.5) + turn.value),
+    pointerEvents: handlePointer.value,
+  }
+}
 
 /**
  * The frame's centre in client coordinates. A rotated element still reports an
