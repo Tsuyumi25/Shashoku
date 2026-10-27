@@ -232,3 +232,24 @@ describe('the line being looked at', () => {
     expect(connect.eraseSelected()).toBe(false)
   })
 })
+
+describe('lines touching a locked translation', () => {
+  it('cannot be drawn by the command, even when the chain was laid before the lock', () => {
+    const { project, editor } = openPage(['a', 'b'])
+    editor.cmdSetLayerLocked(PAGE, 'b', true)
+
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'u-a', to: 'u-b' }])
+
+    expect(edgesOf(project)).toEqual([])
+  })
+
+  it('cannot be erased', () => {
+    const { project, editor } = openPage(['a', 'b'])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'u-a', to: 'u-b' }])
+    editor.cmdSetLayerLocked(PAGE, 'a', true)
+
+    editor.cmdEraseReadingEdges(PAGE, [{ from: 'u-a', to: 'u-b' }])
+
+    expect(edgesOf(project)).toEqual([{ from: 'u-a', to: 'u-b' }])
+  })
+})

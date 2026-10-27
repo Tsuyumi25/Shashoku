@@ -23,7 +23,7 @@ import {
 import { clamp, screenToPagePx } from '@/lib/coords'
 import { blankTranslation, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
 import { linesOf, type TextSide } from '@shared/page/text'
-import { blocksOf, shownCodeOf } from '@shared/page/units'
+import { blocksOf, shownCodeOf, sideOf } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
 import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
@@ -2006,6 +2006,17 @@ export const useEditorStore = defineStore('editor', () => {
     return file ? isLocked(file.page.layers, id) : false
   }
 
+  /**
+   * A reading line joins translations and a lock is put on lettering, so a
+   * translation is held still when any block of it on the side being worked on
+   * is.
+   */
+  function isUnitLocked(pageId: string, unitId: string): boolean {
+    const unit = useProjectStore().unitById(pageId, unitId)
+    if (unit === undefined) return false
+    return sideOf(unit, textSide.value).members.some((id) => isLayerLocked(id))
+  }
+
   /** Whatever is selected that a change is still allowed to reach. */
   function unlockedSelection(): string[] {
     return [...selectedIds.value].filter((id) => !isLayerLocked(id))
@@ -2600,7 +2611,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     // Where an object is read is one of the things a lock is put on to hold
     // still, and a line is a statement about exactly that.
-    const allowed = edges.filter((e) => !isLayerLocked(e.from) && !isLayerLocked(e.to))
+    const allowed = edges.filter((e) => !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to))
     const taken = project.addReadingEdges(pageId, allowed)
     if (taken.length === 0) return
     pushCommand(
@@ -2619,7 +2630,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const held = project.readingEdgesOf(pageId)
     const going = edges.filter(
-      (e) => hasEdge(held, e) && !isLayerLocked(e.from) && !isLayerLocked(e.to),
+      (e) => hasEdge(held, e) && !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to),
     )
     if (going.length === 0) return
     pushCommand({
@@ -2836,6 +2847,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetLayerLocked,
     cmdSetLayerAlphaLocked,
     isLayerLocked,
+    isUnitLocked,
     cmdRenameLayer,
     cmdSetOpacity,
     cmdSetBlendMode,
