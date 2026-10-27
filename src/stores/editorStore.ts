@@ -798,7 +798,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!currentPageId.value) return
     const file = project.pageById(currentPageId.value)
     if (!file) return
-    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value)
+    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value, textSide.value)
     if (rows.length === 0) return
     const index = rows.findIndex((r) => r.entry.id === cursorId.value)
     if (index === -1) {

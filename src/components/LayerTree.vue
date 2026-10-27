@@ -221,7 +221,7 @@ function missingFamilyOf(entry: LayerEntry): string | null {
 
 const rows = computed(() =>
   (currentFile.value
-    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value)
+    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value, editor.textSide)
     : []
   ).map((row) => ({ ...row, missingFamily: missingFamilyOf(row.entry) })),
 )
