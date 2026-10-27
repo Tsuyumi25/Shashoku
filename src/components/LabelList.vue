@@ -162,6 +162,7 @@
               :style="rowStyle(element as Row)"
               @mousedown="onRowDown(element as Row, $event)"
               @dblclick="onRowOpen(element as Row)"
+              @contextmenu.prevent="onRowMenu(element as Row, $event)"
               @keydown="onRowKeys(element as Row, $event)"
             >
               <!--
@@ -292,6 +293,7 @@
       </div>
     </template>
   </div>
+  <CanvasMenu :at="rowMenuAt" :items="ROW_MENU" @pick="onRowMenuPick" @close="closeRowMenu" />
   </div>
 </template>
 
@@ -300,6 +302,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Lock, Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
 import MarkupToolbar from '@/components/MarkupToolbar.vue'
+import CanvasMenu from '@/components/CanvasMenu.vue'
+import { generateId } from '@shared/page/schema'
 import PageRowThumb from '@/components/PageRowThumb.vue'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
@@ -435,6 +439,36 @@ function isRowLocked(row: LabelRow | BlockRow): boolean {
 type Row = LabelRow | BlockRow
 
 /** What the canvas selects when this row is picked — its first block. */
+/**
+ * What a right-click on a row offers. A first translation candidate is rare
+ * enough to live here rather than on the canvas, whose right button is the
+ * style fan's; once an object has a list, the list carries its own button.
+ */
+const ROW_MENU = [{ id: 'add-translation', label: '新增譯文候選' }] as const
+const rowMenuAt = ref<{ x: number; y: number } | null>(null)
+const rowMenuFor = ref<string | null>(null)
+
+function onRowMenu(row: Row, e: MouseEvent) {
+  // The source's candidates are the run's, and not anybody's to invent.
+  const id = rowId(row)
+  if (editor.textSide !== 'translation' || id === undefined) return
+  rowMenuFor.value = id
+  rowMenuAt.value = { x: e.clientX, y: e.clientY }
+}
+
+function closeRowMenu() {
+  rowMenuAt.value = null
+  rowMenuFor.value = null
+}
+
+function onRowMenuPick(id: string) {
+  const objectId = rowMenuFor.value
+  const pageId = objectId === null ? null : project.pageOfEntry(objectId)
+  closeRowMenu()
+  if (id !== 'add-translation' || pageId === null || objectId === null) return
+  editor.cmdAddTranslationCandidate(pageId, objectId, generateId())
+}
+
 function rowId(row: Row): string | undefined {
   return row.kind === 'block' ? row.block.id : row.blocks[0]?.id
 }

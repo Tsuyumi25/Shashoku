@@ -88,9 +88,8 @@
     </div>
 
     <!--
-      Where "I want another one" is pressed, with the hand already here. The
-      right-click on the object stays what it was, for the object that has no
-      card yet to press.
+      Where "I want another one" is pressed, with the hand already here. An
+      object with no card yet gets its first from its row in the label list.
     -->
     <button type="button" class="trans-foot" @pointerdown.stop @click="propose(card.objectId)">
       ＋ 新增候選
@@ -364,9 +363,9 @@ function propose(objectId: string) {
  * The caret follows a blank proposal to wherever one appears.
  *
  * ⭐ A rule about the state rather than a step in the button that made it, so
- * the footer here and the right-click on the object both land the same way —
+ * the footer here and the label list's row menu both land the same way —
  * asking for a blank and then having to go and find it says the request meant
- * nothing, and the right-click is the one that has no card to look at yet.
+ * nothing, and the row menu is the one that has no card to look at yet.
  *
  * "Chosen, not the object's own, and empty" is only ever the blank somebody has
  * just asked for: creating one picks it, and nothing else on a card is empty.

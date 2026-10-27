@@ -187,7 +187,6 @@
             @clear="markup.apply({ kind: 'clear' })"
             @pointerenter="pointedObjectId = object.id"
             @pointerleave="pointedObjectId = null"
-            @contextmenu="onObjectMenu(object.id, $event)"
             @select="onSelectObject(object.id, $event)"
             @move="moveLabelTo(object.id, $event)"
             @move-end="(from, to) => commitLabelMove(object.id, from, to)"
@@ -315,21 +314,6 @@
     />
 
     <!--
-      ⚠️ Outside the stage, and it has to be. A menu stands at the point that
-      raised it, in the window's own coordinates — and `position: fixed` is
-      resolved against the nearest transformed ancestor rather than the window,
-      so inside the stage it would be laid out from the page's top left corner
-      and carry the view's pan and zoom with it. On a fitted page that is most of
-      a page's width away from the pointer.
-    -->
-    <CanvasMenu
-      :at="objectMenuAt"
-      :items="OBJECT_MENU"
-      @pick="onObjectMenuPick"
-      @close="closeObjectMenu"
-    />
-
-    <!--
       Outside the page's branch: a refusal is worth saying whether or not there
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
@@ -350,7 +334,6 @@ import ObjectFrame from '@/components/ObjectFrame.vue'
 import { useGroupTransform } from '@/composables/useGroupTransform'
 import SourceCards from '@/components/SourceCards.vue'
 import TranslationCards from '@/components/TranslationCards.vue'
-import CanvasMenu from '@/components/CanvasMenu.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { useMarkupSession } from '@/composables/useMarkupSession'
@@ -382,7 +365,6 @@ import {
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { sourceLook } from '@/lib/sourceLook'
-import { generateId } from '@shared/page/schema'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
@@ -565,42 +547,6 @@ const objects = computed(() => {
 const pointedObjectId = ref<string | null>(null)
 
 const linkedObjectId = computed(() => pointedObjectId.value ?? editor.cursorId)
-
-/**
- * The menu a right-click on an object raises, and which object raised it.
- *
- * ⭐ On the object rather than on its list, because until a second candidate
- * exists there is no list to press — and a list only appears once there is a
- * choice to make. One gesture either way: the same item on an object that
- * already has a list adds another row to the list it has.
- */
-const objectMenuAt = ref<{ x: number; y: number } | null>(null)
-const objectMenuFor = ref<string | null>(null)
-
-const OBJECT_MENU = [{ id: 'add-translation', label: '新增譯文候選' }] as const
-
-function onObjectMenu(objectId: string, event: MouseEvent) {
-  // Nothing here belongs to the source, whose candidates are the run's and not
-  // anybody's to invent.
-  if (editor.textSide !== 'translation') return
-  event.preventDefault()
-  event.stopPropagation()
-  objectMenuFor.value = objectId
-  objectMenuAt.value = { x: event.clientX, y: event.clientY }
-}
-
-function closeObjectMenu() {
-  objectMenuAt.value = null
-  objectMenuFor.value = null
-}
-
-function onObjectMenuPick(id: string) {
-  const objectId = objectMenuFor.value
-  const pageId = editor.currentPageId
-  closeObjectMenu()
-  if (id !== 'add-translation' || pageId === null || objectId === null) return
-  editor.cmdAddTranslationCandidate(pageId, objectId, generateId())
-}
 
 /**
  * The raster layers wearing a frame: every one that is drawn and can be taken
