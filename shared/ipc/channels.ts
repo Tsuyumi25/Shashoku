@@ -1,6 +1,7 @@
 import type { ScannedScanPoint } from "../project/library";
 import type { DirEntry, FolderContents, WorkspaceScan } from "../project/workspace";
 import type { McpQuery, McpReply } from "../mcp/types";
+import type { WallScene } from "../wall/scene";
 
 export const CHANNELS = {
   pickRoot: "shashoku:pick-root",
@@ -42,6 +43,13 @@ export const CHANNELS = {
   mcpQuery: "mcp:query",
   mcpReply: "mcp:reply",
   mcpReady: "mcp:ready",
+  wallOpen: "wall:open",
+  wallState: "wall:state",
+  wallScene: "wall:scene",
+  wallSceneWanted: "wall:scene-wanted",
+  wallReveal: "wall:reveal",
+  wallSelect: "wall:select",
+  wallBrush: "wall:brush",
 } as const;
 
 export interface ScanRootResult {
@@ -188,4 +196,24 @@ export interface ShashokuApi {
    * that has not attached its handler yet is simply gone.
    */
   mcpReady(): void;
+  /** Opens the wall in a window of its own, or brings it forward if it is open. */
+  wallOpen(): void;
+  /** Told whenever the wall window comes or goes, so nothing is gathered for nobody. */
+  onWallState(handler: (open: boolean) => void): void;
+  /** The editor's side: the chapter as it now stands, for the wall to draw. */
+  wallPublish(scene: WallScene): void;
+  /** The wall has just loaded and has nothing yet; publish now. */
+  onWallSceneWanted(handler: () => void): void;
+  /** A piece on the wall was pointed at; show it where it stands. */
+  onWallReveal(handler: (pageId: string, id: string) => void): void;
+  /** The wall's side: ask for the scene, take it, and point back at a piece. */
+  wallWantScene(): void;
+  onWallScene(handler: (scene: WallScene) => void): void;
+  wallReveal(pageId: string, id: string): void;
+  /** The wall picked a bucket or a meaning; select those objects in the editor. */
+  wallSelect(ids: string[]): void;
+  onWallSelect(handler: (ids: string[]) => void): void;
+  /** The wall loaded a meaning onto the tag brush. */
+  wallBrush(tags: string[]): void;
+  onWallBrush(handler: (tags: string[]) => void): void;
 }

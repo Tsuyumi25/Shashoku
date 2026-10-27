@@ -7,289 +7,100 @@
           :key="choice.scope"
           type="button"
           class="rounded px-1.5 py-0.5"
-          :class="
-            scope === choice.scope
-              ? 'bg-accent text-accent-foreground'
-              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-          "
+          :class="wallScope === choice.scope ? on : off"
           :title="choice.title"
-          @click="chooseScope(choice.scope)"
+          @click="wallScope = choice.scope"
         >
           {{ choice.label }}
         </button>
-
+        <span class="ml-auto text-muted-foreground">大小</span>
         <button
-          v-if="scope === 'series'"
-          type="button"
-          class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :title="series.loading.value ? '讀取中…' : '重新讀取其他話'"
-          :disabled="series.loading.value"
-          @click="series.load()"
-        >
-          <RefreshCw :size="12" :class="series.loading.value && 'animate-spin'" />
-        </button>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-1">
-        <span class="text-muted-foreground">比較</span>
-        <button
-          v-for="f in TEXT_STYLE_FIELDS"
-          :key="f"
+          v-for="choice in SIZES"
+          :key="choice.size"
           type="button"
           class="rounded px-1.5 py-0.5"
-          :class="
-            fields.has(f)
-              ? 'bg-accent text-accent-foreground'
-              : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-          "
-          @click="toggleField(f)"
+          :class="wallSize === choice.size ? on : off"
+          :title="choice.title"
+          @click="wallSize = choice.size"
         >
-          {{ TEXT_STYLE_FIELD_NAMES[f] }}
+          {{ choice.label }}
         </button>
       </div>
-
-      <p v-if="scopeNote" class="text-[10px] text-muted-foreground">{{ scopeNote }}</p>
-    </div>
-
-    <div class="min-h-0 flex-1 overflow-y-auto p-1.5">
-      <p v-if="groups.length === 0" class="px-0.5 text-xs text-muted-foreground">
-        這個範圍裡沒有文字物件
-      </p>
-
-      <div v-for="group in groups" :key="group.key" class="mb-2">
-        <div class="flex w-full min-w-0 items-center gap-1 rounded hover:bg-secondary/50">
-        <!--
-          Loading the brush rather than taking hold of anything. A bucket in the
-          series scope reaches chapters that are not open, so its objects cannot
-          be selected — but a meaning is only a set of names, and that crosses a
-          chapter boundary where the objects do not.
-        -->
-        <button
-          type="button"
-          class="row-action"
-          :title="`用「${group.tags.join('、') || '未標記'}」裝上標記畫筆`"
-          @click="loadBrush(group.tags)"
-        >
-          <Palette :size="12" />
+      <div class="flex flex-wrap items-center gap-1">
+        <span class="text-muted-foreground">比較</span>
+        <button type="button" class="rounded px-1.5 py-0.5" :class="wallFields.has('fontFamily') ? on : off" @click="toggleField('fontFamily')">
+          {{ TEXT_STYLE_FIELD_NAMES.fontFamily }}
         </button>
-        <button
-          type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded px-0.5 py-0.5 text-left text-xs"
-          :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件`"
-          @click="selectIds(group.buckets.flatMap((b) => b.ids))"
-        >
-          <span v-if="group.tags.length === 0" class="truncate text-muted-foreground">
-            未標記
-          </span>
-          <span
-            v-for="tag in group.tags"
-            :key="tag"
-            class="flex min-w-0 items-center gap-1"
+        <template v-if="rareOpen">
+          <button
+            v-for="f in WALL_RARE_FIELDS"
+            :key="f"
+            type="button"
+            class="rounded px-1.5 py-0.5"
+            :class="wallFields.has(f) ? on : off"
+            @click="toggleField(f)"
           >
-            <span
-              class="h-2 w-2 shrink-0 rounded-full"
-              :style="{ backgroundColor: tagColor(tag, project.header.tags) }"
-            />
-            <span class="min-w-0 truncate font-medium">{{ tag }}</span>
-          </span>
-          <span
-            v-if="group.manyStyles"
-            class="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-500"
-            title="意思相同，但分成好幾種樣式"
-          >
-            樣式群 {{ group.buckets.length }}
-          </span>
-          <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{ group.count }}</span>
-        </button>
-        </div>
-
-        <template v-for="bucket in group.buckets" :key="bucket.key">
-          <div
-            class="mt-0.5 flex w-full min-w-0 items-center gap-1 rounded text-xs hover:bg-secondary/50"
-          >
-            <button
-              type="button"
-              class="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-              :title="expanded.has(bucket.key) ? '收合' : '展開其餘欄位'"
-              @click="toggleExpanded(bucket.key)"
-            >
-              <ChevronRight
-                :size="11"
-                class="transition-transform"
-                :class="expanded.has(bucket.key) && 'rotate-90'"
-              />
-            </button>
-
-            <button
-              type="button"
-              class="min-w-0 flex-1 truncate py-1 text-left"
-              :title="`選中這一堆的 ${bucket.ids.length} 個物件`"
-              @click="selectIds(bucket.ids)"
-            >
-              {{ bucketTitle(bucket) }}
-            </button>
-
-            <span class="shrink-0 pr-1 tabular-nums text-muted-foreground">
-              {{ bucket.ids.length }}
-            </span>
-          </div>
-
-          <div
-            v-if="expanded.has(bucket.key)"
-            class="mb-0.5 ml-5 flex flex-col text-[10px] text-muted-foreground"
-          >
-            <span v-for="line in details(bucket)" :key="line" class="truncate">{{ line }}</span>
-            <span v-if="details(bucket).length === 0">沒有其他比較中的欄位</span>
-          </div>
+            {{ TEXT_STYLE_FIELD_NAMES[f] }}
+          </button>
         </template>
+        <button type="button" class="rounded px-1.5 py-0.5" :class="off" @click="rareOpen = !rareOpen">
+          {{ rareOpen ? '收起' : `其他欄位${rareOn ? `（${rareOn}）` : ''}` }}
+        </button>
       </div>
     </div>
+    <WallView
+      class="min-h-0 flex-1"
+      dense
+      :scene="scene"
+      @reveal="revealPiece"
+      @select="selectPieces"
+      @brush="brushMeaning"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ChevronRight, Palette, RefreshCw } from '@lucide/vue'
+import { computed, ref } from 'vue'
 import type { TextStyle } from '@shared/text-style/types'
-import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
-import { SKELETON_FIELDS } from '@shared/text-style/fields'
-import { tagColor } from '@shared/tags/set'
-import {
-  bucketObjectsOf,
-  groupByValue,
-  type BucketObject,
-  type StyleBucket,
-} from '@/lib/valueBuckets'
-import { styleFieldText, TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
-import { useSeriesObjects } from '@/composables/useSeriesObjects'
+import WallView from '@/components/wall/WallView.vue'
+import { TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
+import { WALL_RARE_FIELDS, wallFields, wallScope, wallSize, type WallScope, type WallSize } from '@/lib/wall'
+import { brushMeaning, revealPiece, selectPieces } from '@/lib/wallActions'
+import { wallSceneOf } from '@/lib/wallScene'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
-type Scope = 'page' | 'chapter' | 'series'
+/**
+ * The semantic buckets drawn as the wall draws them: gathered by what each
+ * translation means and then by face, every piece shown as it is set. Picking
+ * a bucket or a meaning still selects its objects, as the list did.
+ */
+const project = useProjectStore()
+const editor = useEditorStore()
 
 const SCOPES = [
   { scope: 'page', label: '本頁', title: '只看目前這一頁' },
   { scope: 'chapter', label: '本話', title: '整個開啟的專案' },
-  { scope: 'series', label: '全書', title: '同一層資料夾下的其他話，從磁碟讀' },
-] as const satisfies readonly { scope: Scope; label: string; title: string }[]
+] as const satisfies readonly { scope: WallScope; label: string; title: string }[]
 
-const project = useProjectStore()
-const editor = useEditorStore()
-const series = useSeriesObjects()
+const SIZES = [
+  { size: 'uniform', label: '統一', title: '每句一樣大，只比字型' },
+  { size: 'eased', label: '緩和', title: '大的還是大，但差距拉近，一屏裝得下' },
+  { size: 'proportional', label: '等比', title: '照字級的比例縮小' },
+] as const satisfies readonly { size: WallSize; label: string; title: string }[]
 
-const scope = ref<Scope>('chapter')
-// The skeleton to begin with, which is where the reasons for leaving fields out
-// now live: size spreads because it is computed, and the two font names split
-// buckets a reader sees as identical. Leading starts off as well, and is a
-// toggle away.
-const fields = ref(
-  new Set<keyof TextStyle>(SKELETON_FIELDS.filter((f) => f !== 'leadingPercent')),
-)
-const expanded = ref(new Set<string>())
+const on = 'bg-accent text-accent-foreground'
+const off = 'text-muted-foreground hover:bg-secondary hover:text-foreground'
 
-function chooseScope(next: Scope) {
-  scope.value = next
-  if (next === 'series' && series.loadedFor.value !== project.rootPath) void series.load()
-}
+const scene = computed(() => wallSceneOf(project.files, project.header.tags, editor.currentPageId))
+
+/** Folded away while none of them is in use, since a face is nearly always what a bucket is. */
+const rareOn = computed(() => WALL_RARE_FIELDS.filter((f) => wallFields.value.has(f)).length)
+const rareOpen = ref(rareOn.value > 0)
 
 function toggleField(field: keyof TextStyle) {
-  const next = new Set(fields.value)
+  const next = new Set(wallFields.value)
   if (!next.delete(field)) next.add(field)
-  fields.value = next
-}
-
-function toggleExpanded(key: string) {
-  const next = new Set(expanded.value)
-  if (!next.delete(key)) next.add(key)
-  expanded.value = next
-}
-
-/**
- * A bucket's identity is the values its members hold, so narrowing what counts
- * as looking alike rebuilds every one of them — and what was open was open on
- * groupings that no longer exist.
- */
-watch([scope, fields], () => {
-  expanded.value = new Set()
-})
-
-const chapterObjects = computed<BucketObject[]>(() =>
-  project.files.flatMap((file) => bucketObjectsOf(file.pageId, file.page, 'translation')),
-)
-
-const objects = computed<BucketObject[]>(() => {
-  if (scope.value === 'page') {
-    const file = editor.currentPageId ? project.pageById(editor.currentPageId) : null
-    return file ? bucketObjectsOf(file.pageId, file.page, 'translation') : []
-  }
-  if (scope.value === 'chapter') return chapterObjects.value
-  return [...chapterObjects.value, ...series.objects.value]
-})
-
-const comparedFields = computed(() => TEXT_STYLE_FIELDS.filter((f) => fields.value.has(f)))
-
-const groups = computed(() =>
-  groupByValue(objects.value, comparedFields.value, project.header.tags),
-)
-
-const scopeNote = computed(() => {
-  if (scope.value !== 'series') return ''
-  if (series.loading.value) return '讀取其他話中…'
-  const skipped = series.skipped.value
-  const read = `另外讀了 ${series.chapters.value} 話`
-  return skipped.length === 0 ? read : `${read}；讀不開：${skipped.join('、')}`
-})
-
-/**
- * Whichever field is being compared first — never a fixed one. A row carrying
- * all seven was unreadable in a sidebar this wide, but leading with a field
- * nobody is comparing would say something that has nothing to do with what
- * makes this bucket a bucket.
- */
-const titleField = computed<keyof TextStyle | null>(() => comparedFields.value[0] ?? null)
-
-function bucketTitle(bucket: StyleBucket): string {
-  const field = titleField.value
-  if (field === null) return '未比較任何欄位'
-  return `${TEXT_STYLE_FIELD_NAMES[field]} ${styleFieldText(bucket.style, field)}`
-}
-
-/** Everything else being compared, which is what opening the row is for. */
-function details(bucket: StyleBucket): string[] {
-  return comparedFields.value
-    .filter((f) => f !== titleField.value)
-    .map((f) => `${TEXT_STYLE_FIELD_NAMES[f]} ${styleFieldText(bucket.style, f)}`)
-}
-
-/**
- * Only the objects this window is actually holding. A bucket in the series
- * scope reaches into chapters that are not open, and selecting an id from one
- * of those would name something nothing on screen can show.
- */
-function loadBrush(tags: readonly string[]) {
-  editor.loadPaintTags(tags)
-  editor.setTool('tag-paint')
-}
-
-function selectIds(ids: readonly string[]) {
-  const here = new Set(chapterObjects.value.map((o) => o.id))
-  editor.selectMany(ids.filter((id) => here.has(id)), false)
+  wallFields.value = next
 }
 </script>
-
-<style scoped>
-.row-action {
-  display: flex;
-  height: 1.25rem;
-  width: 1.25rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-  color: var(--muted-foreground);
-}
-.row-action:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-</style>

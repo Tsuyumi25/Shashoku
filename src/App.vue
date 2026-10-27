@@ -96,6 +96,7 @@ import { isTypingSurface, ownsKeyboard } from '@/lib/typingSurface'
 import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
+import { useWallPublisher } from '@/composables/useWallPublisher'
 import ToolSidebar from '@/modes/ToolSidebar.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
@@ -114,6 +115,7 @@ const connect = useConnectStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
+useWallPublisher()
 const fontPicker = useFontPicker()
 const LEFT_TABS = ['tools', 'font'] as const
 const leftTab = computed({

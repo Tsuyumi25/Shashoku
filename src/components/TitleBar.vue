@@ -86,7 +86,16 @@
         </button>
       </div>
 
-      <div class="tb-center-side" />
+      <!--
+        Not a face of the pill: the wall opens in a window of its own, for a
+        second screen, and leaves the view here as it was.
+      -->
+      <div class="tb-center-side">
+        <button class="tb-lib no-drag" title="在另一個視窗打開全覽" @click="openWall">
+          <LayoutGrid :size="14" />
+          <span>全覽</span>
+        </button>
+      </div>
     </div>
 
     <!--
@@ -104,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { LibraryBig, Menu, Save, Settings } from '@lucide/vue'
+import { LayoutGrid, LibraryBig, Menu, Save, Settings } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -126,6 +135,10 @@ const FACES: { view: AppView; title: string }[] = [
   { view: 'editor', title: '編輯器' },
   { view: 'export', title: '匯出' },
 ]
+
+function openWall() {
+  window.api.wallOpen()
+}
 
 async function onSave() {
   try {

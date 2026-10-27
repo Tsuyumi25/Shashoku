@@ -70,6 +70,30 @@ const api: ShashokuApi = {
   },
   mcpReply: (reply) => ipcRenderer.send(CHANNELS.mcpReply, reply),
   mcpReady: () => ipcRenderer.send(CHANNELS.mcpReady),
+  wallOpen: () => ipcRenderer.send(CHANNELS.wallOpen),
+  onWallState: (handler) => {
+    ipcRenderer.on(CHANNELS.wallState, (_e, open: boolean) => handler(open));
+  },
+  wallPublish: (scene) => ipcRenderer.send(CHANNELS.wallScene, scene),
+  onWallSceneWanted: (handler) => {
+    ipcRenderer.on(CHANNELS.wallSceneWanted, () => handler());
+  },
+  onWallReveal: (handler) => {
+    ipcRenderer.on(CHANNELS.wallReveal, (_e, pageId: string, id: string) => handler(pageId, id));
+  },
+  wallWantScene: () => ipcRenderer.send(CHANNELS.wallSceneWanted),
+  onWallScene: (handler) => {
+    ipcRenderer.on(CHANNELS.wallScene, (_e, scene) => handler(scene));
+  },
+  wallReveal: (pageId, id) => ipcRenderer.send(CHANNELS.wallReveal, pageId, id),
+  wallSelect: (ids) => ipcRenderer.send(CHANNELS.wallSelect, ids),
+  onWallSelect: (handler) => {
+    ipcRenderer.on(CHANNELS.wallSelect, (_e, ids: string[]) => handler(ids));
+  },
+  wallBrush: (tags) => ipcRenderer.send(CHANNELS.wallBrush, tags),
+  onWallBrush: (handler) => {
+    ipcRenderer.on(CHANNELS.wallBrush, (_e, tags: string[]) => handler(tags));
+  },
 };
 
 const engineApi: ShashokuEngineApi = {

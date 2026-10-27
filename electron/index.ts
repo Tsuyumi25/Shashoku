@@ -5,6 +5,7 @@ import { registerOcrHandlers } from "./ipc/ocr";
 import { registerPreferencesHandlers } from "./ipc/preferences";
 import { registerProjectHandlers } from "./ipc/project";
 import { registerShashokuProjectHandlers } from "./ipc/shashokuProject";
+import { closeWall, registerWallHandlers } from "./wall";
 import { registerWindowHandlers } from "./ipc/window";
 import { registerMcpBridge } from "./mcp/bridge";
 import { startMcpServer } from "./mcp/server";
@@ -34,11 +35,15 @@ app.whenReady().then(() => {
   registerProjectHandlers();
   registerShashokuProjectHandlers();
   registerWindowHandlers();
+  registerWallHandlers();
   registerMcpBridge(() => mainWindow);
   startMcpServer();
   mainWindow = createWindow();
   mainWindow.once("closed", () => {
     mainWindow = null;
+    // The wall draws what the editor hands it; with the editor gone it would
+    // stand there holding a chapter nobody is working on.
+    closeWall();
   });
 
   // Left unawaited and after the window: reclaiming disk is never the reason
