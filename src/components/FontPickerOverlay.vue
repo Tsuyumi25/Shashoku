@@ -60,14 +60,6 @@
         @dblclick="setWeight(0)"
       />
       <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
-      <button
-        type="button"
-        class="shrink-0 rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-secondary"
-        :class="showFolders ? 'border-primary text-primary' : ''"
-        @click="showFolders = !showFolders"
-      >
-        字體資料夾{{ preferences.prefs.fontFolders.length ? `(${preferences.prefs.fontFolders.length})` : '' }}
-      </button>
 
       <label
         class="flex shrink-0 items-center gap-1.5"
@@ -100,43 +92,6 @@
         />
         標記缺字
       </label>
-    </div>
-
-    <div
-      v-if="showFolders"
-      class="flex shrink-0 gap-4 border-b border-border bg-card px-3 py-2 text-xs"
-    >
-      <div class="min-w-0 flex-1">
-        <ul v-if="preferences.prefs.fontFolders.length" class="mb-1.5 flex flex-col gap-1">
-          <li
-            v-for="folder in preferences.prefs.fontFolders"
-            :key="folder"
-            class="flex items-center gap-2"
-          >
-            <span class="min-w-0 flex-1 truncate font-mono" :title="folder">{{ folder }}</span>
-            <button
-              type="button"
-              class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-              title="從清單移除，不會刪除任何檔案"
-              @click="removeFolder(folder)"
-            >
-              <X :size="12" />
-            </button>
-          </li>
-        </ul>
-        <p v-else class="mb-1.5 text-muted-foreground">尚未加入資料夾。</p>
-        <button
-          type="button"
-          class="rounded border border-border bg-background px-2 py-0.5 hover:bg-secondary"
-          @click="addFolder()"
-        >
-          新增資料夾…
-        </button>
-      </div>
-      <p class="max-w-80 shrink-0 leading-relaxed text-muted-foreground">
-        這些資料夾裡的字體檔會留在原處，Shashoku 直接讀取，不會複製一份。放在機械硬碟上，樣張會慢一些；放在外接裝置上，裝置沒接上時這些字體不會出現在清單裡。內接
-        SSD 不會有這兩種情況。
-      </p>
     </div>
 
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
@@ -292,7 +247,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Star, X } from '@lucide/vue'
+import { Star } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
@@ -368,7 +323,6 @@ const usedCounts = computed(() => {
 })
 const group = ref<Group>('all')
 
-const showFolders = ref(false)
 
 /** What the cells say before anything is selected or typed. */
 const FALLBACK_SAMPLE = '等一下……你是說真的嗎！？\n等一下……你是说真的吗！？'
@@ -825,17 +779,6 @@ async function refreshCatalog() {
   } finally {
     enumerating.value = false
   }
-}
-
-async function addFolder() {
-  const chosen = await window.api.pickFontFolder()
-  if (chosen === null) return
-  if (preferences.addFontFolder(chosen)) await refreshCatalog()
-}
-
-async function removeFolder(path: string) {
-  preferences.removeFontFolder(path)
-  await refreshCatalog()
 }
 
 watch(
