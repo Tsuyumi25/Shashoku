@@ -27,24 +27,16 @@
         </button>
       </div>
       <div class="flex flex-wrap items-center gap-1">
-        <span class="text-muted-foreground">比較</span>
-        <button type="button" class="rounded px-1.5 py-0.5" :class="wallFields.has('fontFamily') ? on : off" @click="toggleField('fontFamily')">
-          {{ TEXT_STYLE_FIELD_NAMES.fontFamily }}
-        </button>
-        <template v-if="rareOpen">
-          <button
-            v-for="f in WALL_RARE_FIELDS"
-            :key="f"
-            type="button"
-            class="rounded px-1.5 py-0.5"
-            :class="wallFields.has(f) ? on : off"
-            @click="toggleField(f)"
-          >
-            {{ TEXT_STYLE_FIELD_NAMES[f] }}
-          </button>
-        </template>
-        <button type="button" class="rounded px-1.5 py-0.5" :class="off" @click="rareOpen = !rareOpen">
-          {{ rareOpen ? '收起' : `其他欄位${rareOn ? `（${rareOn}）` : ''}` }}
+        <span class="text-muted-foreground">依</span>
+        <button
+          v-for="a in WALL_ATTRIBUTES"
+          :key="a.id"
+          type="button"
+          class="rounded px-1.5 py-0.5"
+          :class="wallAttribute === a.id ? on : off"
+          @click="wallAttribute = a.id"
+        >
+          {{ a.label }}
         </button>
       </div>
     </div>
@@ -60,11 +52,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { TextStyle } from '@shared/text-style/types'
+import { computed } from 'vue'
 import WallView from '@/components/wall/WallView.vue'
-import { TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
-import { WALL_RARE_FIELDS, wallFields, wallScope, wallSize, type WallScope, type WallSize } from '@/lib/wall'
+import { wallAttribute, wallScope, wallSize, type WallScope, type WallSize } from '@/lib/wall'
+import { WALL_ATTRIBUTES } from '@/lib/wallAttributes'
 import { brushMeaning, revealPiece, selectPieces } from '@/lib/wallActions'
 import { wallSceneOf } from '@/lib/wallScene'
 import { useEditorStore } from '@/stores/editorStore'
@@ -94,13 +85,4 @@ const off = 'text-muted-foreground hover:bg-secondary hover:text-foreground'
 
 const scene = computed(() => wallSceneOf(project.files, project.header.tags, editor.currentPageId))
 
-/** Folded away while none of them is in use, since a face is nearly always what a bucket is. */
-const rareOn = computed(() => WALL_RARE_FIELDS.filter((f) => wallFields.value.has(f)).length)
-const rareOpen = ref(rareOn.value > 0)
-
-function toggleField(field: keyof TextStyle) {
-  const next = new Set(wallFields.value)
-  if (!next.delete(field)) next.add(field)
-  wallFields.value = next
-}
 </script>

@@ -1,6 +1,5 @@
 import { ref } from 'vue'
-import type { TextStyle } from '@shared/text-style/types'
-import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
+import type { WallAttribute } from '@/lib/wallAttributes'
 
 /** How a piece of text is shown on the wall, against the size it is set at. */
 export type WallSize = 'uniform' | 'eased' | 'proportional'
@@ -9,15 +8,11 @@ export type WallSize = 'uniform' | 'eased' | 'proportional'
 export const wallSize = ref<WallSize>('eased')
 
 /**
- * What counts as looking alike. The face alone to begin with: gathering by
- * face is nearly all the wall is asked for, while size and scale are read off
- * the pieces themselves — square-root sizing shows them without splitting
- * anything apart. The rest stay a toggle away.
+ * The one attribute the buckets gather by. One at a time, so every bucket names
+ * a single value and its name says exactly what picking it picks; the face to
+ * begin with, which is nearly all it is asked for.
  */
-export const wallFields = ref(new Set<keyof TextStyle>(['fontFamily']))
-
-/** The fields besides the face, which are rarely what a bucket is made of. */
-export const WALL_RARE_FIELDS = TEXT_STYLE_FIELDS.filter((f) => f !== 'fontFamily')
+export const wallAttribute = ref<WallAttribute>('font')
 
 export type WallScope = 'page' | 'chapter'
 export const wallScope = ref<WallScope>('chapter')

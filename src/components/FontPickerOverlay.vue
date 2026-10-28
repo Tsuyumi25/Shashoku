@@ -199,6 +199,13 @@
                 >
                   目前
                 </span>
+                <span
+                  v-if="usedCounts.has(faces[0]!.family)"
+                  class="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                  :title="`這一話有 ${usedCounts.get(faces[0]!.family)} 句用這個字型`"
+                >
+                  {{ usedCounts.get(faces[0]!.family) }}
+                </span>
               </span>
               <button
                 type="button"
@@ -316,7 +323,7 @@ import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextLayerEntry } from '@shared/page/types'
-import { shownLinesOf } from '@shared/page/units'
+import { blocksOnSide, shownLinesOf } from '@shared/page/units'
 import { selectionWords } from '@/lib/selectionWords'
 import type { TextStyle } from '@shared/text-style/types'
 import { sharedValue } from '@shared/batch/value'
@@ -366,7 +373,25 @@ const objectText = computed(() =>
   ),
 )
 
-type Group = 'all' | 'fav'
+type Group = 'all' | 'fav' | 'used'
+
+/**
+ * How many translations in the open chapter each family sets — the faces this
+ * work already reaches for, most used first, each drawn with the selection's
+ * own words. Only families this machine has can be drawn, so one the chapter
+ * names but the catalogue lacks is not in the list.
+ */
+const usedCounts = computed(() => {
+  const out = new Map<string, number>()
+  for (const file of project.files) {
+    if (file.badge !== 'ok') continue
+    for (const block of blocksOnSide(file.page.layers, 'translation')) {
+      const family = block.body.style.fontFamily
+      if (family) out.set(family, (out.get(family) ?? 0) + 1)
+    }
+  }
+  return out
+})
 const group = ref<Group>('all')
 
 const showFolders = ref(false)
@@ -694,6 +719,7 @@ const appliedSearch = refDebounced(search, 200)
 const displayed = computed(() => {
   let list = catalog.value
   if (group.value === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
+  if (group.value === 'used') list = list.filter((e) => usedCounts.value.has(e.family))
   if (hidingUndrawable.value) {
     // Checking the whole catalogue costs a few milliseconds now that coverage
     // is a cmap read on a mapped file, so there is nothing to schedule.
@@ -711,6 +737,10 @@ const displayed = computed(() => {
     const held = families.at(-1)
     if (held && held[0]!.family === entry.family) held.push(entry)
     else families.push([entry])
+  }
+  if (group.value === 'used') {
+    // Stable, so families used equally often keep the catalogue's order.
+    families.sort((a, b) => (usedCounts.value.get(b[0]!.family) ?? 0) - (usedCounts.value.get(a[0]!.family) ?? 0))
   }
   return families
 })
@@ -768,12 +798,18 @@ const familyCount = computed(() => new Set(catalog.value.map((e) => e.family)).s
 const groupTabs = computed(() => [
   { id: 'all' as Group, label: 'All', count: familyCount.value },
   { id: 'fav' as Group, label: 'Fav', count: preferences.prefs.fontFavorites.length },
+  { id: 'used' as Group, label: '本話', count: displayedUsed.value },
 ])
+
+const displayedUsed = computed(
+  () => new Set(catalog.value.filter((e) => usedCounts.value.has(e.family)).map((e) => e.family)).size,
+)
 
 const emptyMessage = computed(() => {
   if (enumerating.value) return '載入中…'
   if (appliedSearch.value.trim()) return `沒有符合「${appliedSearch.value.trim()}」的字體。`
   if (group.value === 'fav') return '尚無最愛。'
+  if (group.value === 'used') return '這一話還沒有用到這台機器上有的字型。'
   return '系統沒有回報任何字體。'
 })
 

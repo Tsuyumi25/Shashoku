@@ -49,13 +49,6 @@
               <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: tagColor(tag, scene.registry) }" />
               <span class="truncate font-medium">{{ tag }}</span>
             </span>
-            <span
-              v-if="group.manyStyles"
-              class="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] text-amber-600"
-              title="意思相同，但分成好幾種樣式"
-            >
-              樣式群 {{ group.buckets.length }}
-            </span>
             <span class="ml-auto shrink-0 tabular-nums text-muted-foreground">{{ group.count }}</span>
           </button>
         </div>
@@ -68,7 +61,7 @@
               <button
                 type="button"
                 class="cluster-label"
-                :title="`選中這一堆的 ${lane.items.length} 個物件${lane.details ? `\n${lane.details}` : ''}`"
+                :title="`選中這一堆的 ${lane.items.length} 個物件`"
                 @click="emit('select', lane.items.map((i) => i.id))"
               >
                 <span class="truncate">{{ lane.title }}</span>
@@ -97,21 +90,18 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import { useElementSize } from '@vueuse/core'
 import { ChevronRight, Palette } from '@lucide/vue'
-import type { TextStyle } from '@shared/text-style/types'
-import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { tagColor } from '@shared/tags/set'
 import type { WallScene } from '@shared/wall/scene'
 import WallPiece from '@/components/wall/WallPiece.vue'
 import { drawnLabel } from '@/lib/labelRaster'
 import type { Sample } from '@/lib/fontSampleCache'
-import { styleFieldText, TEXT_STYLE_FIELD_NAMES } from '@/lib/textStyleFields'
-import { groupByValue } from '@/lib/valueBuckets'
-import { shownEm, wallFields, wallScope, wallSize } from '@/lib/wall'
+import { groupByAttribute } from '@/lib/wallAttributes'
+import { shownEm, wallAttribute, wallScope, wallSize } from '@/lib/wall'
 
 /**
  * Every translation in the open chapter on one surface, each drawn as the page
- * draws it, gathered the way the semantic buckets gather them: by what it
- * means, then by how it looks on the fields being compared. So a missing face,
+ * draws it, gathered by what it means and then by the one value it holds for
+ * the attribute chosen. So a missing face,
  * a size that wandered and a meaning that split into several looks can all be
  * read at a glance. Packed tight, each bucket a cluster, the biggest first.
  *
@@ -183,24 +173,15 @@ const fit = computed(() => {
 
 const missingCount = computed(() => pieces.value.filter((p) => p.missing).length)
 
-const comparedFields = computed(() => TEXT_STYLE_FIELDS.filter((f) => wallFields.value.has(f)))
-
-function laneTitle(style: TextStyle): { title: string; details: string } {
-  const [first, ...rest] = comparedFields.value
-  if (!first) return { title: '未比較任何欄位', details: '' }
-  const say = (f: keyof TextStyle) => `${TEXT_STYLE_FIELD_NAMES[f]} ${styleFieldText(style, f)}`
-  return { title: styleFieldText(style, first), details: rest.map(say).join('、') }
-}
-
 const groups = computed(() => {
   const byId = new Map(pieces.value.map((p) => [p.id, p]))
-  const objects = shown.value.map((e) => ({ id: e.id, pageId: e.pageId, tags: e.tags, style: e.style }))
-  return groupByValue(objects, comparedFields.value, props.scene.registry).map((group) => ({
+  return groupByAttribute(shown.value, wallAttribute.value, props.scene.registry).map((group) => ({
     ...group,
-    lanes: group.buckets.map((bucket) => {
-      const items = bucket.ids.map((id) => byId.get(id)).filter((p): p is Item => p !== undefined)
-      return { key: bucket.key, ...laneTitle(bucket.style), items }
-    }),
+    lanes: group.buckets.map((bucket) => ({
+      key: bucket.key,
+      title: bucket.label,
+      items: bucket.ids.map((id) => byId.get(id)).filter((p): p is Item => p !== undefined),
+    })),
   }))
 })
 
