@@ -47,9 +47,10 @@ export interface WallObject {
  * the bucket says it.
  *
  * Sizes alone are gathered in bands. Nearly every line sits at a size of its
- * own — 63 sizes among 94 lines in one chapter — so a bucket per size would be
- * a bucket per line. Bands a tenth wide, fixed so a size always lands in the
- * same one, keep 55 and 59 together and 47 apart from 70.
+ * own — one chapter sets 96 lines at 65 sizes, 46 of them held once — so a
+ * bucket per size would be a bucket per line. Bands a tenth wide, fixed so a
+ * size always lands in the same one, keep 55 and 59 together and 47 apart from
+ * 70; that chapter falls into 20.
  */
 export function valueOf(object: WallObject, attribute: WallAttribute): { key: string; label: string } {
   const s = object.style
