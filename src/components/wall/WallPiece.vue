@@ -2,7 +2,7 @@
   <button
     type="button"
     class="piece"
-    :class="missing && 'piece-missing'"
+    :class="[missing && 'piece-missing', selected && 'piece-selected']"
     :style="{ width: `${w}px`, height: `${h}px` }"
     :title="title"
     @click="emit('open')"
@@ -26,6 +26,7 @@ const props = defineProps<{
   /** Screen pixels per page pixel. */
   scale: number
   missing: boolean
+  selected: boolean
   title: string
 }>()
 
@@ -63,6 +64,11 @@ watch([() => props.sample, cw, ch], paint, { flush: 'post' })
 .piece:hover {
   outline-color: var(--primary);
   background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+.piece-selected,
+.piece-selected:hover {
+  outline: 2px solid var(--primary);
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
 }
 .piece-missing {
   outline: 2px solid oklch(0.6 0.2 25);

@@ -52,7 +52,29 @@ export interface WallObject {
  * size always lands in the same one, keep 55 and 59 together and 47 apart from
  * 70; that chapter falls into 20.
  */
-export function valueOf(object: WallObject, attribute: WallAttribute): { key: string; label: string } {
+export interface WallValue {
+  key: string
+  label: string
+  /** Where it falls on a scale, for the attributes that have one. */
+  order?: number
+  /** The colour it names, drawn beside the label. */
+  swatch?: string
+}
+
+/**
+ * The attributes that are amounts. Their buckets read as a scale, smallest
+ * first, so 61–66px sits between 55–60px and 67–72px however many lines each
+ * holds; the rest are kinds, and the biggest kind leads.
+ */
+export const ORDERED_ATTRIBUTES: ReadonlySet<WallAttribute> = new Set([
+  'size',
+  'weight',
+  'scaleX',
+  'scaleY',
+  'leading',
+])
+
+export function valueOf(object: WallObject, attribute: WallAttribute): WallValue {
   const s = object.style
   switch (attribute) {
     case 'font': {
@@ -63,13 +85,17 @@ export function valueOf(object: WallObject, attribute: WallAttribute): { key: st
     case 'stroke': {
       const stroke = object.effects.find((e) => e.kind === 'stroke')
       if (!stroke || stroke.kind !== 'stroke') return { key: 'none', label: '無描邊' }
-      return { key: `${stroke.color}|${stroke.width}`, label: `${stroke.color} ${stroke.width}px` }
+      return {
+        key: `${stroke.color}|${stroke.width}`,
+        label: `${stroke.color} ${stroke.width}px`,
+        swatch: stroke.color,
+      }
     }
     case 'size': {
       const band = Math.floor(Math.log(s.fontSizePx) / Math.log(1.1))
       const lo = Math.ceil(1.1 ** band)
       const hi = Math.floor(1.1 ** (band + 1) - 1e-9)
-      return { key: String(band), label: lo >= hi ? `${lo}px` : `${lo}–${hi}px` }
+      return { key: String(band), label: lo >= hi ? `${lo}px` : `${lo}–${hi}px`, order: band }
     }
     case 'align':
       // The wording follows the direction while the stored value does not, so a
@@ -78,21 +104,23 @@ export function valueOf(object: WallObject, attribute: WallAttribute): { key: st
     case 'direction':
       return { key: s.direction, label: styleFieldText(s, 'direction') }
     case 'color':
-      return { key: s.color, label: s.color }
+      return { key: s.color, label: s.color, swatch: s.color }
     case 'weight':
-      return { key: String(s.weightPx), label: String(s.weightPx) }
+      return { key: String(s.weightPx), label: String(s.weightPx), order: s.weightPx }
     case 'scaleX':
-      return { key: String(s.scaleXPercent), label: `${s.scaleXPercent}%` }
+      return { key: String(s.scaleXPercent), label: `${s.scaleXPercent}%`, order: s.scaleXPercent }
     case 'scaleY':
-      return { key: String(s.scaleYPercent), label: `${s.scaleYPercent}%` }
+      return { key: String(s.scaleYPercent), label: `${s.scaleYPercent}%`, order: s.scaleYPercent }
     case 'leading':
-      return { key: String(s.leadingPercent), label: `${s.leadingPercent}%` }
+      return { key: String(s.leadingPercent), label: `${s.leadingPercent}%`, order: s.leadingPercent }
   }
 }
 
 export interface WallBucket {
   key: string
   label: string
+  swatch?: string
+  order?: number
   ids: string[]
 }
 
@@ -106,8 +134,8 @@ export interface WallGroup {
 /**
  * The objects gathered by what they mean, then by the one value they hold for
  * an attribute — so every bucket names a single value, and picking one picks
- * every line holding it. The biggest bucket first in each meaning; meanings in
- * the project's own order, the untagged last.
+ * every line holding it. Amounts run smallest first, kinds biggest first;
+ * meanings in the project's own order, the untagged last.
  */
 export function groupByAttribute(
   objects: readonly WallObject[],
@@ -128,9 +156,13 @@ export function groupByAttribute(
       const value = valueOf(object, attribute)
       const held = byValue.get(value.key)
       if (held) held.ids.push(object.id)
-      else byValue.set(value.key, { key: `${key}|${value.key}`, label: value.label, ids: [object.id] })
+      else byValue.set(value.key, { ...value, key: `${key}|${value.key}`, ids: [object.id] })
     }
-    const buckets = [...byValue.values()].sort((a, b) => b.ids.length - a.ids.length)
+    const buckets = [...byValue.values()].sort(
+      ORDERED_ATTRIBUTES.has(attribute)
+        ? (a, b) => (a.order ?? 0) - (b.order ?? 0)
+        : (a, b) => b.ids.length - a.ids.length,
+    )
     groups.push({ key, tags: tagsInRegistryOrder(members[0]!.tags, registry), count: members.length, buckets })
   }
   const rank = (g: WallGroup) => registry.findIndex((t) => g.tags.includes(t.name))

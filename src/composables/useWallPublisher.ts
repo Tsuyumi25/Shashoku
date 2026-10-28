@@ -33,7 +33,18 @@ export function useWallPublisher(): void {
   const sendSoon = useDebounceFn(send, 200)
 
   watch(scene, sendSoon)
-  window.api.onWallSceneWanted(send)
+
+  // Apart from the scene and at once: a selection changes on every click, and
+  // nothing about it needs the chapter drawn again.
+  const sendSelection = () => {
+    if (open.value) window.api.wallPublishSelection([...editor.selectedIds])
+  }
+  watch(() => editor.selectedIds, sendSelection)
+
+  window.api.onWallSceneWanted(() => {
+    send()
+    sendSelection()
+  })
 
   window.api.onWallReveal((pageId, id) => revealPiece(pageId, id))
   window.api.onWallSelect((ids) => selectPieces(ids))

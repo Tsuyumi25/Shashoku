@@ -61,11 +61,16 @@
               <button
                 type="button"
                 class="cluster-label"
+                :class="pickedIn(lane.items) === lane.items.length && 'cluster-label-on'"
                 :title="`選中這一堆的 ${lane.items.length} 個物件`"
                 @click="emit('select', lane.items.map((i) => i.id))"
               >
+                <span v-if="lane.swatch" class="swatch" :style="{ backgroundColor: lane.swatch }" />
                 <span class="truncate">{{ lane.title }}</span>
-                <span class="tabular-nums text-muted-foreground">{{ lane.items.length }}</span>
+                <span class="tabular-nums opacity-70">
+                  <template v-if="pickedIn(lane.items) > 0 && pickedIn(lane.items) < lane.items.length">
+                    {{ pickedIn(lane.items) }}/</template>{{ lane.items.length }}
+                </span>
               </button>
               <div class="flex flex-wrap items-center gap-1">
                 <WallPiece
@@ -74,6 +79,7 @@
                   :sample="item.sample"
                   :scale="item.scale * fit"
                   :missing="item.missing"
+                  :selected="selected.has(item.id)"
                   :title="item.title"
                   @open="open(item)"
                 />
@@ -110,6 +116,8 @@ import { shownEm, wallAttribute, wallScope, wallSize } from '@/lib/wall'
  */
 const props = defineProps<{
   scene: WallScene
+  /** What the editor has selected, marked where it stands. */
+  selected: ReadonlySet<string>
   /** Tighter margins, for a column rather than a window. */
   dense?: boolean
 }>()
@@ -180,6 +188,7 @@ const groups = computed(() => {
     lanes: group.buckets.map((bucket) => ({
       key: bucket.key,
       title: bucket.label,
+      swatch: bucket.swatch,
       items: bucket.ids.map((id) => byId.get(id)).filter((p): p is Item => p !== undefined),
     })),
   }))
@@ -193,6 +202,12 @@ function toggleGroup(key: string) {
   const next = new Set(folded.value)
   if (!next.delete(key)) next.add(key)
   folded.value = next
+}
+
+function pickedIn(items: readonly Item[]): number {
+  let n = 0
+  for (const item of items) if (props.selected.has(item.id)) n++
+  return n
 }
 
 function bySizeDown(items: readonly Item[]): Item[] {
@@ -240,7 +255,9 @@ function open(item: Item) {
 .cluster {
   max-width: 100%;
   border-radius: 6px;
-  background: white;
+  /* Grey rather than paper: white text, white strokes and black ones all
+     have to show against it, and on white the first two vanish. */
+  background: oklch(0.66 0 0);
   padding: 0.5rem;
 }
 .cluster-label {
@@ -251,9 +268,24 @@ function open(item: Item) {
   gap: 0.4rem;
   margin-bottom: 0.3rem;
   font-size: 11px;
-  color: #444;
+  color: #1f1f1f;
 }
 .cluster-label:hover {
-  background: var(--secondary);
+  background: oklch(0.74 0 0);
+}
+.cluster-label-on {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.cluster-label-on:hover {
+  background: var(--primary);
+}
+.swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  align-self: center;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
 </style>

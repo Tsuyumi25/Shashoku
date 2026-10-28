@@ -78,6 +78,11 @@ export function registerWallHandlers(): void {
     wallWindow.webContents.send(CHANNELS.wallScene, scene);
   });
 
+  ipcMain.on(CHANNELS.wallSelection, (e, ids: string[]) => {
+    if (fromWall(e) || !wallWindow || wallWindow.isDestroyed()) return;
+    wallWindow.webContents.send(CHANNELS.wallSelection, ids);
+  });
+
   for (const channel of [CHANNELS.wallSelect, CHANNELS.wallBrush]) {
     ipcMain.on(channel, (e, payload: string[]) => {
       if (!fromWall(e)) return;

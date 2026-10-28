@@ -50,6 +50,7 @@ export const CHANNELS = {
   wallReveal: "wall:reveal",
   wallSelect: "wall:select",
   wallBrush: "wall:brush",
+  wallSelection: "wall:selection",
 } as const;
 
 export interface ScanRootResult {
@@ -216,4 +217,7 @@ export interface ShashokuApi {
   /** The wall loaded a meaning onto the tag brush. */
   wallBrush(tags: string[]): void;
   onWallBrush(handler: (tags: string[]) => void): void;
+  /** The editor's selection, so the wall marks the pieces it holds. */
+  wallPublishSelection(ids: string[]): void;
+  onWallSelection(handler: (ids: string[]) => void): void;
 }

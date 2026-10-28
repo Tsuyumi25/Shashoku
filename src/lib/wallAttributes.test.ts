@@ -37,6 +37,15 @@ describe('groupByAttribute', () => {
     )
     expect(groups[0]!.buckets).toHaveLength(2)
   })
+
+  it('runs amounts smallest first however many lines each holds', () => {
+    const groups = groupByAttribute(
+      [obj('a', { fontSizePx: 70 }), obj('b', { fontSizePx: 70 }), obj('c', { fontSizePx: 63 }), obj('d', { fontSizePx: 56 })],
+      'size',
+      [],
+    )
+    expect(groups[0]!.buckets.map((b) => b.ids)).toEqual([['d'], ['c'], ['a', 'b']])
+  })
 })
 
 describe('valueOf', () => {

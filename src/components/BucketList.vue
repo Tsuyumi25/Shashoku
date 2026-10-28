@@ -44,6 +44,7 @@
       class="min-h-0 flex-1"
       dense
       :scene="scene"
+      :selected="editor.selectedIds"
       @reveal="revealPiece"
       @select="selectPieces"
       @brush="brushMeaning"

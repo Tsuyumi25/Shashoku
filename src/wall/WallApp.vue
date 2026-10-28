@@ -6,6 +6,7 @@
     <div class="min-w-0 flex-1">
       <WallView
         :scene="scene"
+        :selected="selected"
         @reveal="reveal"
         @select="select"
         @brush="brush"
@@ -32,6 +33,10 @@ useDark({ initialValue: 'light' })
 const scene = shallowRef<WallScene>({ entries: [], registry: [], currentPageId: null })
 window.api.onWallScene((next) => {
   scene.value = next
+})
+const selected = shallowRef<ReadonlySet<string>>(new Set())
+window.api.onWallSelection((ids) => {
+  selected.value = new Set(ids)
 })
 window.api.wallWantScene()
 
