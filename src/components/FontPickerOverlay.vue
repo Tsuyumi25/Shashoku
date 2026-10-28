@@ -1,21 +1,89 @@
 <template>
   <div class="flex h-full w-full flex-col bg-background text-sm">
+    <!--
+      Two rows, so the row of groups is a row of its own: what is looked at
+      leads, what changes how it is drawn sits behind one button, and the one
+      control that writes to the selection stays out where it can be seen.
+    -->
     <div
-      class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-card px-3 py-1.5 text-xs text-muted-foreground"
+      class="flex shrink-0 flex-col gap-1.5 border-b border-border bg-card px-3 py-1.5 text-xs text-muted-foreground"
     >
-      <input
-        v-model="search"
-        type="search"
-        spellcheck="false"
-        placeholder="搜尋字型…"
-        class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
-      />
-      <div class="flex shrink-0 gap-1">
+      <div class="flex items-center gap-2">
+        <input
+          v-model="search"
+          type="search"
+          spellcheck="false"
+          placeholder="搜尋字型…"
+          class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
+        />
+        <ToggleGroupRoot
+          type="single"
+          class="seg shrink-0"
+          :model-value="vertical ? 'vertical' : 'horizontal'"
+          @update:model-value="onDirection"
+        >
+          <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
+          <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
+        </ToggleGroupRoot>
+        <PopoverRoot>
+          <PopoverTrigger
+            class="shrink-0 rounded p-1 hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground"
+            title="顯示選項"
+          >
+            <SlidersHorizontal :size="14" />
+          </PopoverTrigger>
+          <PopoverPortal>
+            <PopoverContent class="picker-options" side="bottom" align="end" :side-offset="6">
+              <label class="flex items-center gap-2">
+                <span class="shrink-0">顯示大小</span>
+                <input
+                  type="range"
+                  :min="MIN_FONT_PICKER_BOX_PX"
+                  :max="MAX_FONT_PICKER_BOX_PX"
+                  step="1"
+                  :value="preferences.prefs.fontPickerBoxPx"
+                  class="min-w-0 flex-1 accent-[var(--primary)]"
+                  @input="onBoxSize($event)"
+                />
+              </label>
+              <label class="flex items-center gap-1.5" title="畫不出當前樣本文字的字體，不列在清單裡">
+                <input
+                  type="checkbox"
+                  class="h-3.5 w-3.5 accent-primary"
+                  :checked="hidingUndrawable"
+                  @change="onHideUndrawable($event)"
+                />
+                隱藏缺字的字體
+              </label>
+              <label
+                class="flex items-center gap-1.5"
+                :class="hidingUndrawable ? 'cursor-not-allowed opacity-40' : ''"
+                :title="
+                  hidingUndrawable
+                    ? '清單裡沒有缺字的字體了，沒有東西可以標記'
+                    : '把畫不出來的那幾個字框起來'
+                "
+              >
+                <input
+                  type="checkbox"
+                  class="h-3.5 w-3.5 accent-primary"
+                  :checked="preferences.prefs.markMissingGlyphs"
+                  :disabled="hidingUndrawable"
+                  @change="onMarkMissing($event)"
+                />
+                標記缺字
+              </label>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
+      </div>
+
+      <div class="flex items-center gap-1">
         <button
           v-for="g in groupTabs"
           :key="g.id"
           type="button"
-          class="rounded px-2 py-0.5 text-xs"
+          class="shrink-0 rounded px-2 py-0.5 text-xs"
           :class="
             group === g.id
               ? 'bg-primary text-primary-foreground'
@@ -23,75 +91,22 @@
           "
           @click="group = g.id"
         >
-          {{ g.label }}({{ g.count }})
+          {{ g.label }}<span class="ml-1 tabular-nums opacity-60">{{ g.count }}</span>
         </button>
+        <span class="ml-auto shrink-0 pl-2" title="寫進選取的物件；雙擊歸零">字粗</span>
+        <input
+          type="range"
+          :min="WEIGHT_MIN"
+          :max="WEIGHT_MAX"
+          step="0.25"
+          :value="weightPx"
+          class="w-20 min-w-0 accent-[var(--primary)]"
+          @input="onWeight($event)"
+          @change="commitWeight"
+          @dblclick="setWeight(0)"
+        />
+        <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
       </div>
-      <ToggleGroupRoot
-        type="single"
-        class="seg shrink-0"
-        :model-value="vertical ? 'vertical' : 'horizontal'"
-        @update:model-value="onDirection"
-      >
-        <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
-        <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
-      </ToggleGroupRoot>
-
-      <span class="shrink-0">顯示大小</span>
-      <input
-        type="range"
-        :min="MIN_FONT_PICKER_BOX_PX"
-        :max="MAX_FONT_PICKER_BOX_PX"
-        step="1"
-        :value="preferences.prefs.fontPickerBoxPx"
-        class="w-32 shrink-0 accent-[var(--primary)]"
-        @input="onBoxSize($event)"
-      />
-
-      <span class="shrink-0">字粗</span>
-      <input
-        type="range"
-        :min="WEIGHT_MIN"
-        :max="WEIGHT_MAX"
-        step="0.25"
-        :value="weightPx"
-        class="w-24 shrink-0 accent-[var(--primary)]"
-        @input="onWeight($event)"
-        @change="commitWeight"
-        @dblclick="setWeight(0)"
-      />
-      <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
-
-      <label
-        class="flex shrink-0 items-center gap-1.5"
-        title="畫不出當前樣本文字的字體，不列在清單裡"
-      >
-        <input
-          type="checkbox"
-          class="h-3.5 w-3.5 accent-primary"
-          :checked="hidingUndrawable"
-          @change="onHideUndrawable($event)"
-        />
-        隱藏缺字的字體
-      </label>
-
-      <label
-        class="flex shrink-0 items-center gap-1.5"
-        :class="hidingUndrawable ? 'cursor-not-allowed opacity-40' : ''"
-        :title="
-          hidingUndrawable
-            ? '清單裡沒有缺字的字體了，沒有東西可以標記'
-            : '把畫不出來的那幾個字框起來'
-        "
-      >
-        <input
-          type="checkbox"
-          class="h-3.5 w-3.5 accent-primary"
-          :checked="preferences.prefs.markMissingGlyphs"
-          :disabled="hidingUndrawable"
-          @change="onMarkMissing($event)"
-        />
-        標記缺字
-      </label>
     </div>
 
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
@@ -247,8 +262,15 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Star } from '@lucide/vue'
-import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
+import { SlidersHorizontal, Star } from '@lucide/vue'
+import {
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
+  ToggleGroupItem,
+  ToggleGroupRoot,
+} from 'reka-ui'
 import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextLayerEntry } from '@shared/page/types'
@@ -924,5 +946,23 @@ function revealCurrentFamily() {
  */
 .cell-sample.vertical {
   justify-content: flex-end;
+}
+</style>
+
+<style>
+/* Portalled out of the component, so the scoped block does not reach it. */
+.picker-options {
+  z-index: 50;
+  display: flex;
+  width: 15rem;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 0.75rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 </style>
