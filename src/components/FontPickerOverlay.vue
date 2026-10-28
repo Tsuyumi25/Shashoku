@@ -103,32 +103,6 @@
     </div>
 
     <div
-      class="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-card px-3 py-1 text-xs"
-    >
-      <!--
-        Held down rather than clicked away: taking the press's default is what
-        keeps the caret in whichever cell it is in, so swapping the sample does
-        not also end the editing session.
-      -->
-      <button
-        v-for="p in SAMPLE_PRESETS"
-        :key="p.label"
-        type="button"
-        class="shrink-0 rounded px-2 py-0.5"
-        :class="
-          sampleText === p.text
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-accent text-accent-foreground hover:bg-secondary'
-        "
-        :title="p.text"
-        @mousedown.prevent
-        @click="sampleText = p.text"
-      >
-        {{ p.label }}
-      </button>
-    </div>
-
-    <div
       v-if="showFolders"
       class="flex shrink-0 gap-4 border-b border-border bg-card px-3 py-2 text-xs"
     >
@@ -396,19 +370,15 @@ const group = ref<Group>('all')
 
 const showFolders = ref(false)
 
-const SAMPLE_PRESETS = [
-  { label: '對白', text: '等一下……你是說真的嗎！？\n等一下……你是说真的吗！？' },
-  { label: '喊叫', text: '哇啊啊啊——不要過來啊！！' },
-  { label: '日文', text: 'わかっているのか？ 撃っていいのは、撃たれる覚悟のある奴だけだ！' },
-  { label: '檢字', text: '永字八法 體鬱龍書\n哎呀啊喔 体郁龙书\nあアぐグ Ag123 0O1Il' },
-] as const
+/** What the cells say before anything is selected or typed. */
+const FALLBACK_SAMPLE = '等一下……你是說真的嗎！？\n等一下……你是说真的吗！？'
 
 /**
  * The sample every cell draws. Line breaks are real, because the box holding
  * them is a `textarea` sitting on the sample itself — the `\n` they used to be
  * spelled as was a single-line field's limitation, and it is gone with it.
  */
-const savedSample = () => preferences.prefs.fontSampleText || SAMPLE_PRESETS[0].text
+const savedSample = () => preferences.prefs.fontSampleText || FALLBACK_SAMPLE
 const sampleText = ref(objectText.value.trim() ? objectText.value : savedSample())
 // An object's own words stand in while it is selected and are not what was saved.
 watch(sampleText, (text) => {
@@ -482,7 +452,7 @@ function onSampleInput(e: Event) {
 }
 
 /**
- * A preset replaces the text under the caret without an `input` event to say
+ * A new selection replaces the text under the caret without an `input` event to say
  * so, so the control's own selection is what the projection has to be told
  * about — the browser has already clamped it by the time this runs.
  */
