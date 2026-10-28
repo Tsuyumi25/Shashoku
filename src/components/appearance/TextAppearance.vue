@@ -9,11 +9,11 @@
         <span class="min-w-0 truncate font-medium">{{ tag }}</span>
       </span>
       <span v-if="tagState.value.length === 0" class="text-muted-foreground">
-        未標記，統計整話
+        未標記
       </span>
     </template>
     <span v-else-if="tagState.kind === 'many'" class="text-muted-foreground">
-      標記不一致，沒有推薦。用「按語意分堆」點一組就能收窄到同類
+      標記不一致
     </span>
   </div>
 
@@ -21,7 +21,6 @@
     <StyleEditor
       :value="representative"
       :mixed="mixedFields"
-      :suggestions="suggestions"
       @preview="(patch) => editor.previewStyle(targets, patch)"
       @patch="onPatch"
     />
@@ -36,25 +35,19 @@ import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
 import StyleEditor from '@/components/StyleEditor.vue'
-import { useStyleRecommendations } from '@/composables/useStyleRecommendations'
+import { useSelectionTags } from '@/composables/useSelectionTags'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
  * What a selection of text objects can be adjusted about: how the text is set,
- * what the project already sets for the same fields, and what the object
- * carries on top of both.
+ * and what it means.
  *
  * How a disagreement is drawn is decided here rather than by whoever handed the
  * selection over. Which fields disagree is mechanical and the same question
  * everywhere; what to show for one is an interface decision, and this consumer
  * shows the field itself saying it has no single answer.
- *
- * The tags lead, because they are what the counts below are taken under. A
- * selection meaning more than one thing keeps every control and loses every
- * candidate — the controls answer for the objects, the candidates answer for a
- * kind, and a selection like that has objects but no kind.
  */
 const props = defineProps<{ targets: readonly AppearanceTarget<TextLayerEntry>[] }>()
 
@@ -62,7 +55,7 @@ const editor = useEditorStore()
 const project = useProjectStore()
 
 const targets = computed(() => props.targets)
-const { tagState, suggestions } = useStyleRecommendations(targets)
+const tagState = useSelectionTags(targets)
 
 const styles = computed(() =>
   props.targets.map((t) => t.entry.body.style),

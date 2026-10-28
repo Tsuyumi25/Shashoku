@@ -12,7 +12,6 @@
     >{{ isMixed('fontFamily') ? MIXED_TEXT : value.fontFamily || '選擇字型' }}</span>
     <ChevronDown :size="12" class="shrink-0 text-muted-foreground" />
   </button>
-  <StyleSuggestions field="fontFamily" :set="suggestions ?? null" @pick="onPick" />
 
   <template v-if="weightFaces">
     <label class="text-muted-foreground">字重</label>
@@ -54,7 +53,6 @@
     />
     <span class="text-muted-foreground">px</span>
   </div>
-  <StyleSuggestions field="fontSizePx" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">方向</label>
   <ToggleGroupRoot
@@ -66,7 +64,6 @@
     <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
     <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
   </ToggleGroupRoot>
-  <StyleSuggestions field="direction" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">對齊</label>
   <ToggleGroupRoot
@@ -84,7 +81,6 @@
       {{ choice.label }}
     </ToggleGroupItem>
   </ToggleGroupRoot>
-  <StyleSuggestions field="align" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">文字色</label>
   <ColorField
@@ -94,7 +90,6 @@
     @input="(color) => emit('preview', { color })"
     @update:model-value="(color) => emit('patch', { color })"
   />
-  <StyleSuggestions field="color" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">行距</label>
   <div class="flex items-center gap-1">
@@ -109,7 +104,6 @@
     />
     <span class="text-muted-foreground">%</span>
   </div>
-  <StyleSuggestions field="leadingPercent" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">字粗</label>
   <div class="flex items-center gap-1.5">
@@ -128,7 +122,6 @@
       :class="isMixed('weightPx') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
     >{{ isMixed('weightPx') ? '—' : weightLabel }}</span>
   </div>
-  <StyleSuggestions field="weightPx" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">水平</label>
   <div class="flex items-center gap-1">
@@ -143,7 +136,6 @@
     />
     <span class="text-muted-foreground">%</span>
   </div>
-  <StyleSuggestions field="scaleXPercent" :set="suggestions ?? null" @pick="onPick" />
 
   <label class="text-muted-foreground">垂直</label>
   <div class="flex items-center gap-1">
@@ -165,7 +157,6 @@
       @click="onScaleReset"
     >100%</button>
   </div>
-  <StyleSuggestions field="scaleYPercent" :set="suggestions ?? null" @pick="onPick" />
 </template>
 
 <script setup lang="ts">
@@ -175,17 +166,14 @@ import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import {
   MAX_SCALE_PERCENT,
   MIN_SCALE_PERCENT,
-  type TextAlign,
-  type TextDirection,
   type TextStyle,
 } from '@shared/text-style/types'
-import StyleSuggestions from '@/components/appearance/StyleSuggestions.vue'
 import ColorField from '@/components/ColorField.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
-import type { StyleSuggestionSet } from '@/composables/useStyleRecommendations'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
 import { MIXED_TEXT } from '@/lib/appearanceText'
+import { ALIGN_LABELS } from '@/lib/textStyleFields'
 
 /**
  * How the text is set — everything about typesetting and nothing about what is
@@ -213,22 +201,7 @@ const props = defineProps<{
    * for a selection also holding 48s would turn a glance into an edit.
    */
   mixed?: readonly (keyof TextStyle)[]
-  /**
-   * What to offer under each control, or null when there is nothing to count
-   * under. Passed whole rather than per field so that the panel above decides
-   * once whether this selection has a meaning, and every strip agrees.
-   */
-  suggestions?: StyleSuggestionSet | null
 }>()
-
-/**
- * A candidate applied through the same channel a control uses. The two of them
- * writing by different routes is exactly how a panel and a command come to
- * disagree about which objects a change reaches.
- */
-function onPick(patch: Partial<TextStyle>) {
-  emit('patch', patch)
-}
 
 function isMixed(field: keyof TextStyle): boolean {
   return props.mixed?.includes(field) ?? false
@@ -303,17 +276,6 @@ function onDirection(v: unknown) {
   if (v !== 'horizontal' && v !== 'vertical') return
   if (!isMixed('direction') && v === props.value.direction) return
   emit('patch', { direction: v })
-}
-
-/**
- * What each alignment is called, which follows the direction the text runs
- * while the value stored does not. Somebody setting a vertical block is asking
- * for the top, not for "start" — and the same file read the other way round has
- * to keep meaning the same thing, which is why only the wording turns.
- */
-const ALIGN_LABELS: Record<TextDirection, Record<TextAlign, string>> = {
-  horizontal: { start: '左', center: '中', end: '右' },
-  vertical: { start: '上', center: '中', end: '下' },
 }
 
 const alignChoices = computed(() =>

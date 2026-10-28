@@ -1,4 +1,15 @@
-import type { TextStyle } from '@shared/text-style/types'
+import type { TextAlign, TextDirection, TextStyle } from '@shared/text-style/types'
+
+/**
+ * What each alignment is called, which follows the direction the text runs
+ * while the value stored does not. Somebody setting a vertical block is asking
+ * for the top, not for "start" — and the same file read the other way round has
+ * to keep meaning the same thing, which is why only the wording turns.
+ */
+export const ALIGN_LABELS: Record<TextDirection, Record<TextAlign, string>> = {
+  horizontal: { start: '左', center: '中', end: '右' },
+  vertical: { start: '上', center: '中', end: '下' },
+}
 
 /**
  * What each style field is called where a person reads it — in the compare
@@ -28,6 +39,6 @@ export function styleFieldText(style: TextStyle, field: keyof TextStyle): string
   if (field === 'leadingPercent' || field === 'scaleXPercent' || field === 'scaleYPercent')
     return `${value as number}%`
   if (field === 'direction') return value === 'vertical' ? '直排' : '橫排'
-  if (field === 'align') return { start: '起', center: '中', end: '末' }[value as string] ?? ''
+  if (field === 'align') return ALIGN_LABELS[style.direction][value as TextAlign] ?? ''
   return String(value)
 }

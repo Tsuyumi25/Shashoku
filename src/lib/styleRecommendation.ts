@@ -1,7 +1,7 @@
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
-import { FONT_FIELDS, SKELETON_FIELDS, SKIN_FIELDS } from '@shared/text-style/fields'
+import { FONT_FIELDS, SKELETON_FIELDS } from '@shared/text-style/fields'
 import { groupByValue, type BucketObject, type StyleBucket, type TagGroup } from '@/lib/valueBuckets'
 
 /**
@@ -38,56 +38,11 @@ export function tagChain(tags: readonly string[], registry: TagRegistry): string
   return out
 }
 
-/**
- * What one object contributes to one row of the panel — and, unchanged, what
- * clicking that candidate applies.
- */
-interface RowSpec {
-  field: keyof TextStyle
-  /** Whether the family in use narrows the sample this row is drawn from. */
-  narrowed: boolean
-  patch: (style: TextStyle) => Partial<TextStyle>
-}
-
 /** Fields lifted off one object to be put on another. */
 function pick(style: TextStyle, fields: readonly (keyof TextStyle)[]): Partial<TextStyle> {
   const out: Partial<TextStyle> = {}
   for (const field of fields) Object.assign(out, { [field]: style[field] })
   return out
-}
-
-/**
- * A row per parameter, in the order the style editor shows them, built from the
- * field split so that a field added to a style cannot be left out of here.
- *
- * Only the family narrows the others, and it is the one row it cannot narrow.
- * The reason is causal rather than a ranking of importance: a heavy face at
- * 14px reads like a light one at 16px, how much ink a weight offset adds
- * depends on how heavy the face already is, and a stroke sits on the strokes of
- * the letter. Nothing about the colour or the alignment decides a size. And a
- * font row narrowed by the font in use could only ever offer the font in use.
- */
-const ROWS: readonly RowSpec[] = [
-  { field: 'fontFamily', narrowed: false, patch: (s) => pick(s, FONT_FIELDS) },
-  ...[...SKIN_FIELDS, ...SKELETON_FIELDS.filter((f) => f !== 'fontFamily')].map((field) => ({
-    field,
-    narrowed: true,
-    patch: (s: TextStyle) => pick(s, [field]),
-  })),
-]
-
-export interface StyleCandidate {
-  /** Applied as it stands — the existing batch command already takes this shape. */
-  patch: Partial<TextStyle>
-  /** How many objects in the bucket it came from hold it. */
-  count: number
-  /** The station of the chain that produced it, in the project's own tag order. */
-  from: string[]
-}
-
-export interface StyleRow {
-  field: keyof TextStyle
-  candidates: StyleCandidate[]
 }
 
 interface Tallied<T> {
@@ -178,71 +133,4 @@ export function deriveStyle(
   }
 
   return { ...seedStyle }
-}
-
-/**
- * A list of candidates per parameter, the project's own statistics offered as a
- * prescription rather than as an audit.
- *
- * Every row shows all of it. A threshold decides only whether a size is applied
- * on its own; showing costs nothing, and the few sizes a scattered category
- * keeps reaching for are still worth reading.
- *
- * Candidates are ordered by the size of the bucket that produced them and a
- * repeat is kept only where it first appears. Ordering by how often a value
- * occurs in total would put a value at the head of a row that the derivation
- * did not write, and the first entry of every row read down together would be a
- * combination nobody has ever set.
- */
-export function recommendStyle(
-  objects: readonly BucketObject[],
-  tags: readonly string[],
-  registry: TagRegistry,
-  fontFamily: string,
-): StyleRow[] {
-  const byId = indexById(objects)
-  const chain = tagChain(tags, registry)
-  /**
-   * An object with no tags has no meaning to be counted under — untagged is not
-   * a category, which is why the derivation's chain stops before it. The
-   * chapter as a whole is counted instead: not what this object's kind looks
-   * like, but what the work looks like, which is the only true thing left to
-   * say. Stripping the tags puts every object in one group and leaves the rest
-   * of this function with nothing to know about the difference.
-   */
-  const sample = chain.length > 0 ? objects : objects.map((o) => ({ ...o, tags: [] }))
-  const stations: string[][] = chain.length > 0 ? chain : [[]]
-  const all = groupsByTagSet(sample, registry)
-  // Empty means no face has been chosen, so there is nothing to narrow by —
-  // which is also the state an object is in at the moment it is auto-styled.
-  const narrowed =
-    fontFamily === ''
-      ? all
-      : groupsByTagSet(
-          sample.filter((o) => o.style.fontFamily === fontFamily),
-          registry,
-        )
-
-  return ROWS.map((row) => {
-    const groups = row.narrowed ? narrowed : all
-    const candidates: StyleCandidate[] = []
-    const seen = new Set<string>()
-
-    for (const station of stations) {
-      const group = groups.get(tagSetKey(station))
-      if (!group) continue
-      for (const bucket of group.buckets) {
-        for (const { value, count } of tally(stylesOf(bucket, byId), (s) =>
-          JSON.stringify(row.patch(s)),
-        )) {
-          const key = JSON.stringify(row.patch(value))
-          if (seen.has(key)) continue
-          seen.add(key)
-          candidates.push({ patch: row.patch(value), count, from: station })
-        }
-      }
-    }
-
-    return { field: row.field, candidates }
-  })
 }
