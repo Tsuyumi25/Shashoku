@@ -34,18 +34,6 @@
           </PopoverTrigger>
           <PopoverPortal>
             <PopoverContent class="picker-options" side="bottom" align="end" :side-offset="6">
-              <label class="flex items-center gap-2">
-                <span class="shrink-0">顯示大小</span>
-                <input
-                  type="range"
-                  :min="MIN_FONT_PICKER_BOX_PX"
-                  :max="MAX_FONT_PICKER_BOX_PX"
-                  step="1"
-                  :value="preferences.prefs.fontPickerBoxPx"
-                  class="min-w-0 flex-1 accent-[var(--primary)]"
-                  @input="onBoxSize($event)"
-                />
-              </label>
               <label class="flex items-center gap-1.5" title="畫不出當前樣本文字的字體，不列在清單裡">
                 <input
                   type="checkbox"
@@ -93,20 +81,30 @@
         >
           {{ g.label }}<span class="ml-1 tabular-nums opacity-60">{{ g.count }}</span>
         </button>
-        <span class="ml-auto shrink-0 pl-2" title="寫進選取的物件；雙擊歸零">字粗</span>
-        <input
-          type="range"
+        <span class="ml-auto shrink-0 pl-2" title="每按一下就寫進選取的物件">字粗</span>
+        <NumberStepper
+          class="shrink-0"
+          :model-value="weightPx"
+          label="字粗"
           :min="WEIGHT_MIN"
           :max="WEIGHT_MAX"
-          step="0.25"
-          :value="weightPx"
-          class="w-20 min-w-0 accent-[var(--primary)]"
-          @input="onWeight($event)"
-          @change="commitWeight"
-          @dblclick="setWeight(0)"
+          :step="0.25"
+          @update:model-value="setWeight"
         />
-        <span class="w-8 shrink-0 text-right tabular-nums">{{ weightLabel }}</span>
       </div>
+
+      <label class="flex items-center gap-2">
+        <span class="shrink-0">顯示大小</span>
+        <input
+          type="range"
+          :min="MIN_FONT_PICKER_BOX_PX"
+          :max="MAX_FONT_PICKER_BOX_PX"
+          step="1"
+          :value="preferences.prefs.fontPickerBoxPx"
+          class="min-w-0 flex-1 accent-[var(--primary)]"
+          @input="onBoxSize($event)"
+        />
+      </label>
     </div>
 
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto">
@@ -283,6 +281,7 @@ import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
+import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { createTextEditSurface } from '@/composables/useTextEditSurface'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
@@ -586,28 +585,14 @@ const objectWeight = computed(() => (lead.value && agreed('weightPx') ? lead.val
 const weightPx = ref(objectWeight.value)
 watch(objectWeight, (w) => (weightPx.value = w))
 
-const weightLabel = computed(() =>
-  weightPx.value === 0 ? '0' : `${weightPx.value > 0 ? '+' : ''}${weightPx.value}`,
-)
-
 /**
- * The weight is live on the selection: dragging previews it on the page, letting
- * go is one step of history. With nothing selected it only changes the samples.
+ * Each step is one step of history on the selection. With nothing selected it
+ * only changes the samples.
  */
-function onWeight(e: Event) {
-  const raw = (e.target as HTMLInputElement).valueAsNumber
-  if (!Number.isFinite(raw)) return
-  weightPx.value = raw
-  if (targets.value.length > 0) editor.previewStyle(targets.value, { weightPx: raw })
-}
-
-function commitWeight() {
-  if (targets.value.length > 0) editor.cmdApplyStyle(targets.value, { weightPx: weightPx.value })
-}
-
 function setWeight(px: number) {
+  if (px === weightPx.value) return
   weightPx.value = px
-  commitWeight()
+  if (targets.value.length > 0) editor.cmdApplyStyle(targets.value, { weightPx: px })
 }
 
 const currentFamily = computed(() =>

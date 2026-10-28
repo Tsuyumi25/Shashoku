@@ -106,21 +106,24 @@
   </div>
 
   <label class="text-muted-foreground">字粗</label>
-  <div class="flex items-center gap-1.5">
-    <input
-      type="range"
+  <div class="flex items-center gap-1">
+    <NumberStepper
+      :model-value="isMixed('weightPx') ? null : value.weightPx"
+      label="字粗"
       :min="WEIGHT_MIN"
       :max="WEIGHT_MAX"
-      step="0.25"
-      class="h-6 min-w-0 flex-1 accent-primary"
-      :value="isMixed('weightPx') ? 0 : value.weightPx"
-      @input="onWeight($event)"
-      @dblclick="onWeightReset"
+      :step="0.25"
+      :placeholder="isMixed('weightPx') ? MIXED_TEXT : ''"
+      @update:model-value="onWeight"
     />
-    <span
-      class="w-10 shrink-0 text-right font-mono tabular-nums"
-      :class="isMixed('weightPx') ? 'text-muted-foreground/60' : 'text-muted-foreground'"
-    >{{ isMixed('weightPx') ? '—' : weightLabel }}</span>
+    <span class="text-muted-foreground">px</span>
+    <button
+      type="button"
+      class="ml-auto h-6 rounded border border-input px-1.5 hover:border-primary disabled:opacity-40 disabled:hover:border-input"
+      :disabled="!isMixed('weightPx') && value.weightPx === 0"
+      title="字粗回到 0"
+      @click="onWeight(0)"
+    >0</button>
   </div>
 
   <label class="text-muted-foreground">水平</label>
@@ -294,28 +297,14 @@ function onAlign(v: unknown) {
 /**
  * Asymmetric on purpose. Thinning holds its shape as far down as the strokes
  * survive, while thickening welds neighbouring strokes into a blob early on
- * CJK, so the slider is given less room in the direction that stops behaving.
+ * CJK, so the control is given less room in the direction that stops behaving.
  */
 const WEIGHT_MIN = -6
 const WEIGHT_MAX = 3
 
-const weightLabel = computed(() => {
-  const v = props.value.weightPx
-  return v === 0 ? '0' : `${v > 0 ? '+' : ''}${v}`
-})
-
-// On input rather than on change: the whole point of a slider here is watching
-// the letter answer while it is being dragged.
-function onWeight(e: Event) {
-  const raw = (e.target as HTMLInputElement).valueAsNumber
-  if (!Number.isFinite(raw)) return
-  if (!isMixed('weightPx') && raw === props.value.weightPx) return
-  emit('patch', { weightPx: raw })
-}
-
-function onWeightReset() {
-  if (!isMixed('weightPx') && props.value.weightPx === 0) return
-  emit('patch', { weightPx: 0 })
+function onWeight(px: number) {
+  if (!isMixed('weightPx') && px === props.value.weightPx) return
+  emit('patch', { weightPx: px })
 }
 
 function onScalePercent(key: 'scaleXPercent' | 'scaleYPercent', raw: number) {
