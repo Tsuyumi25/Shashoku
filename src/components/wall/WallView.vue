@@ -41,8 +41,8 @@
           <button
             type="button"
             class="flex min-w-0 flex-1 items-center gap-2 text-left"
-            :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件`"
-            @click="emit('select', group.buckets.flatMap((b) => b.ids))"
+            :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件；Shift 加進或拿出目前的選取`"
+            @click="pick(group.buckets.flatMap((b) => b.ids), $event)"
           >
             <span v-if="group.tags.length === 0" class="text-muted-foreground">未標記</span>
             <span v-for="tag in group.tags" :key="tag" class="flex min-w-0 items-center gap-1">
@@ -62,8 +62,8 @@
                 type="button"
                 class="cluster-label"
                 :class="pickedIn(lane.items) === lane.items.length && 'cluster-label-on'"
-                :title="`選中這一堆的 ${lane.items.length} 個物件`"
-                @click="emit('select', lane.items.map((i) => i.id))"
+                :title="`選中這一堆的 ${lane.items.length} 個物件；Shift 加進或拿出目前的選取`"
+                @click="pick(lane.items.map((i) => i.id), $event)"
               >
                 <span v-if="lane.swatch" class="swatch" :style="{ backgroundColor: lane.swatch }" />
                 <span class="truncate">{{ lane.title }}</span>
@@ -81,7 +81,7 @@
                   :missing="item.missing"
                   :selected="selected.has(item.id)"
                   :title="item.title"
-                  @open="open(item)"
+                  @open="(e: MouseEvent) => onPiece(item, e)"
                 />
               </div>
             </div>
@@ -214,9 +214,39 @@ function bySizeDown(items: readonly Item[]): Item[] {
   return [...items].sort((a, b) => b.sizePx - a.sizePx)
 }
 
-/** Back to the page in the editor's window, with the piece selected where it stands. */
-function open(item: Item) {
-  emit('reveal', item.pageId, item.id)
+// Shift, as on the canvas: this is a picture of objects, not a list with an
+// order a range could run along.
+const adding = (e: MouseEvent) => e.shiftKey
+
+/**
+ * A plain click takes the editor to the piece; with Shift it joins or leaves the
+ * selection where it is, so lines from any page can be gathered without
+ * leaving the wall.
+ */
+function onPiece(item: Item, e: MouseEvent) {
+  if (!adding(e)) {
+    emit('reveal', item.pageId, item.id)
+    return
+  }
+  const next = new Set(props.selected)
+  if (!next.delete(item.id)) next.add(item.id)
+  emit('select', [...next])
+}
+
+/**
+ * A bucket or a meaning picked whole. With Shift it is added to what is held, or
+ * taken back out when every piece of it is already there — the same press
+ * undoes itself.
+ */
+function pick(ids: readonly string[], e: MouseEvent) {
+  if (!adding(e)) {
+    emit('select', [...ids])
+    return
+  }
+  const next = new Set(props.selected)
+  if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id)
+  else for (const id of ids) next.add(id)
+  emit('select', [...next])
 }
 </script>
 

@@ -5,7 +5,7 @@
     :class="[missing && 'piece-missing', selected && 'piece-selected']"
     :style="{ width: `${w}px`, height: `${h}px` }"
     :title="title"
-    @click="emit('open')"
+    @click="emit('open', $event)"
   >
     <canvas ref="canvasEl" :width="cw" :height="ch" :style="{ width: `${w}px`, height: `${h}px` }" />
     <span v-if="missing" class="badge">缺</span>
@@ -30,7 +30,7 @@ const props = defineProps<{
   title: string
 }>()
 
-const emit = defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: [event: MouseEvent] }>()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 const dpr = window.devicePixelRatio || 1
