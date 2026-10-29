@@ -18,49 +18,12 @@
       @mouseenter="holding = true"
       @mouseleave="release"
     >
-      <div v-if="kind === 'stroke'" class="dots">
-        <button
-          v-for="v in shown"
-          :key="v.key"
-          type="button"
-          class="dot"
-          :class="v.key === currentKey && 'on'"
-          :title="`${v.label} · 本話 ${v.count} 句`"
-          :disabled="!targets.length"
-          @mouseenter="preview(v)"
-          @mouseleave="endPreview"
-          @click="apply(v)"
-        >
-          <span class="ring" :style="ringStyle(v)" />
-          <span class="tabular-nums">{{ v.stroke ? `${v.stroke.width}px` : '無' }} · {{ v.count }}</span>
-        </button>
-      </div>
-
-      <div v-else-if="kind === 'color'" class="flex flex-wrap gap-2">
-        <button
-          v-for="v in shown"
-          :key="v.key"
-          type="button"
-          class="swatch"
-          :class="v.key === currentKey && 'on'"
-          :title="`${v.label} · 本話 ${v.count} 句`"
-          :disabled="!targets.length"
-          @mouseenter="preview(v)"
-          @mouseleave="endPreview"
-          @click="apply(v)"
-        >
-          <span class="chip-colour" :style="{ backgroundColor: v.key }" />
-          <span class="font-mono text-xs">{{ v.label }}</span>
-          <span class="text-[10px] tabular-nums text-muted-foreground">{{ v.count }}</span>
-        </button>
-      </div>
-
       <!--
-        A ladder: every value a row, smallest at the top, each drawn on the
-        words being set at that value. Going down always reaches something to
-        look at, which a grid of numbers never showed.
+        A ladder: every value a row, each drawn on the words being set at that
+        value. Going down always reaches something to look at, which a grid of
+        numbers never showed.
       -->
-      <div v-else class="flex flex-col">
+      <div class="flex flex-col">
         <button
           v-for="v in shown"
           :key="v.key"
@@ -73,7 +36,7 @@
           @mouseleave="endPreview"
           @click="apply(v)"
         >
-          <span class="rung-sample">
+          <span class="rung-sample" :class="(kind === 'stroke' || kind === 'color') && 'on-grey'">
             <WallPiece
               v-if="rungs.get(v.key)"
               class="pointer-events-none"
@@ -84,7 +47,10 @@
               title=""
             />
           </span>
-          <span class="tabular-nums">{{ v.label }}</span>
+          <span class="flex min-w-0 items-center gap-1 tabular-nums">
+            <span v-if="swatchOf(v)" class="swatch" :style="{ backgroundColor: swatchOf(v)! }" />
+            <span class="truncate">{{ v.label }}</span>
+          </span>
           <span class="flex items-center gap-1.5">
             <span class="rung-bar" :style="{ width: `${barWidth(v.count)}px` }" />
             <span class="text-[10px] tabular-nums text-muted-foreground">{{ v.count }}</span>
@@ -113,10 +79,9 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
- * The values this chapter already holds for one property, each drawn as the
- * least that tells it apart — a ring for a stroke, a swatch for a colour, the
- * number for an amount. What it looks like on the letters is shown where the
- * letters are: pointing at a value tries it on the selection, pressing gives it.
+ * The values this chapter already holds for one property, as a ladder: every
+ * value a row drawn on the words being set. Pointing at a row tries it on the
+ * selection, pressing gives it.
  */
 const props = defineProps<{ kind: Exclude<ValueKind, 'font'> }>()
 
@@ -285,15 +250,22 @@ const ladderSource = computed(() => {
 })
 
 /** On screen, every rung but the size's is set at one em; sizes keep their order, eased. */
+const swatchOf = (v: Value) => (props.kind === 'color' ? v.key : (v.stroke?.color ?? null))
 const RUNG_EM = 22
 
 const rungs = computed(() => {
   const out = new Map<string, { sample: Sample | null; scale: number; missing: boolean }>()
   const source = ladderSource.value
-  if (!source || props.kind === 'stroke' || props.kind === 'color') return out
+  if (!source) return out
   for (const v of shown.value) {
-    const style = { ...source.entry.body.style, [props.kind]: v.amount }
-    const drawn = drawnLabel(source.code, style, source.entry.effects, { x: 0, y: 0 }, 0)
+    const style =
+      props.kind === 'stroke'
+        ? source.entry.body.style
+        : props.kind === 'color'
+          ? { ...source.entry.body.style, color: v.key }
+          : { ...source.entry.body.style, [props.kind]: v.amount }
+    const effects = props.kind === 'stroke' ? effectsFor(v) : source.entry.effects
+    const drawn = drawnLabel(source.code, style, effects, { x: 0, y: 0 }, 0)
     const em = props.kind === 'fontSizePx' ? 3.2 * Math.sqrt(style.fontSizePx) : RUNG_EM
     out.set(v.key, {
       sample: drawn.sample,
@@ -306,63 +278,13 @@ const rungs = computed(() => {
 
 const mostUsed = computed(() => Math.max(1, ...shown.value.map((v) => v.count)))
 const barWidth = (count: number) => Math.max(3, 40 * Math.sqrt(count / mostUsed.value))
-
-/** The stroke's own colour, drawn as thick as it is set, on the grey every colour shows against. */
-function ringStyle(v: Value) {
-  if (!v.stroke) return { border: '1px dashed currentColor', background: 'transparent' }
-  return { border: `${Math.min(16, v.stroke.width * 1.4)}px solid ${v.stroke.color}` }
-}
 </script>
 
 <style scoped>
-.dots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  border-radius: 6px;
-  background: oklch(0.66 0 0);
-  padding: 10px;
-}
-.dot {
-  display: flex;
-  width: 3.5rem;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #1f1f1f;
-}
-.ring {
-  display: block;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 9999px;
-  background: oklch(0.55 0 0);
-}
-.dot:hover:not(:disabled) .ring {
-  box-shadow: 0 0 0 2px var(--primary);
-}
-.dot.on .ring {
-  box-shadow: 0 0 0 2px var(--primary-foreground), 0 0 0 4px var(--primary);
-}
-.swatch {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--card);
-  padding: 0.3rem 0.6rem;
-}
-.chip-colour {
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 4px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
-}
 .rung {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 3.5rem 4rem;
+  /* The sample takes what it needs up to a cap; what it is called always shows. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.25rem;
@@ -373,28 +295,33 @@ function ringStyle(v: Value) {
 .rung-sample {
   display: flex;
   min-width: 0;
+  max-width: 9rem;
   overflow: hidden;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+/* White letters and white strokes have to show against something. */
+.rung-sample.on-grey {
+  background: oklch(0.66 0 0);
+}
+.swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
 .rung-bar {
   height: 6px;
   border-radius: 3px;
   background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
 }
-.swatch:hover:not(:disabled) {
-  border-color: var(--primary);
-}
 .rung:hover:not(:disabled) {
   background: var(--secondary);
-}
-.swatch.on {
-  border-color: var(--primary);
-  background: color-mix(in oklch, var(--primary) 15%, var(--card));
 }
 .rung.on {
   box-shadow: inset 0 0 0 2px var(--primary);
 }
-.dot:disabled,
-.swatch:disabled,
 .rung:disabled {
   cursor: default;
 }
