@@ -91,6 +91,9 @@
     @update:model-value="(color) => emit('patch', { color })"
   />
 
+  <!-- The stroke, seated with the colour it is read against. -->
+  <slot name="after-color" />
+
   <button type="button" class="value-key" title="在左欄列出本話用過的行距" @click="valuePicker.show('leadingPercent')">行距</button>
   <div class="flex items-center gap-1">
     <input

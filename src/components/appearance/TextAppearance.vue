@@ -23,7 +23,11 @@
       :mixed="mixedFields"
       @preview="(patch) => editor.previewStyle(targets, patch)"
       @patch="onPatch"
-    />
+    >
+      <template #after-color>
+        <EffectsAppearance :targets="targets" />
+      </template>
+    </StyleEditor>
   </div>
 </template>
 
@@ -35,6 +39,7 @@ import { TEXT_STYLE_FIELDS } from '@shared/text-style/schema'
 import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
 import StyleEditor from '@/components/StyleEditor.vue'
+import EffectsAppearance from '@/components/appearance/EffectsAppearance.vue'
 import { useSelectionTags } from '@/composables/useSelectionTags'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'

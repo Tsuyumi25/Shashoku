@@ -42,6 +42,9 @@
               <Copy v-else :size="12" />
             </button>
           </div>
+          <button v-if="clearable" type="button" class="color-clear" @click="clear">
+            <X :size="12" /> 清除
+          </button>
         </PopoverContent>
       </PopoverPortal>
     </PopoverRoot>
@@ -63,7 +66,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useClipboard, useEventListener } from '@vueuse/core'
-import { Check, Copy } from '@lucide/vue'
+import { Check, Copy, X } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import 'vanilla-colorful/hex-color-picker.js'
 import { MIXED_TEXT } from '@/lib/appearanceText'
@@ -78,12 +81,16 @@ const props = defineProps<{
   label: string
   /** The selection disagrees: nothing is shown as the value, and any pick writes. */
   mixed?: boolean
+  /** Offer taking the colour away altogether, for a property that can be absent. */
+  clearable?: boolean
 }>()
 const emit = defineEmits<{
   /** Every step of a drag, for the canvas to follow. */
   input: [value: string]
   /** The settled colour, once per gesture. */
   'update:modelValue': [value: string]
+  /** Asked for no colour at all; only offered when `clearable`. */
+  clear: []
 }>()
 
 const open = ref(false)
@@ -109,8 +116,12 @@ let moving = false
 useEventListener(window, 'pointerup', () => {
   if (moving) commit()
 })
+// Cleared rather than closed: there is no colour left to settle.
+let clearing = false
 watch(open, (now) => {
-  if (!now) commit()
+  if (now) return
+  if (clearing) clearing = false
+  else commit()
 })
 onBeforeUnmount(() => {
   if (moving) commit()
@@ -123,6 +134,13 @@ function onPicked(e: Event) {
   picking.value = hex
   moving = true
   emit('input', hex)
+}
+
+function clear() {
+  moving = false
+  clearing = true
+  open.value = false
+  emit('clear')
 }
 
 function write(hex: string) {
@@ -262,6 +280,19 @@ function rgbOf(hex: string): string {
   background: var(--secondary);
 }
 .color-copy:hover {
+  background: var(--accent);
+}
+.color-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  background: var(--secondary);
+  font-size: 12px;
+}
+.color-clear:hover {
   background: var(--accent);
 }
 </style>

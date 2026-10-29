@@ -1,12 +1,11 @@
 <template>
-  <div class="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-xs">
-    <StrokeEditor
-      :effects="representativeEffects"
-      :mixed="effectsMixed"
-      @preview="(effects) => editor.previewEffects(targets, effects)"
-      @patch="onEffects"
-    />
-  </div>
+  <!-- Rows only: the caller's grid holds them, beside whatever else it sets. -->
+  <StrokeEditor
+    :effects="representativeEffects"
+    :mixed="effectsMixed"
+    @preview="(effects) => editor.previewEffects(targets, effects)"
+    @patch="onEffects"
+  />
 </template>
 
 <script setup lang="ts">

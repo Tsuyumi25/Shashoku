@@ -16,9 +16,6 @@ export interface AppearanceTarget<T extends LayerEntry = LayerEntry> {
   entry: T
 }
 
-/** Which of the panel's two tabs is up: the node's own look, or its effects. */
-export type AppearanceSection = 'look' | 'effects'
-
 /**
  * Who a selection is handed to. `mixed` is a selection that disagrees about
  * what its nodes are; `group` is a folder, which agrees and simply has nothing
