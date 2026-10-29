@@ -1,5 +1,5 @@
 <template>
-  <label class="text-muted-foreground">字型</label>
+  <button type="button" class="value-key" title="在左欄列出字型" @click="openFont">字型</button>
   <button
     type="button"
     class="flex h-6 w-full min-w-0 items-center justify-between gap-1 rounded border border-input bg-background px-1.5 text-left hover:border-primary"
@@ -40,7 +40,7 @@
     </div>
   </template>
 
-  <label class="text-muted-foreground">字級</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的字級" @click="valuePicker.show('fontSizePx')">字級</button>
   <div class="flex items-center gap-1">
     <input
       type="number"
@@ -82,7 +82,7 @@
     </ToggleGroupItem>
   </ToggleGroupRoot>
 
-  <label class="text-muted-foreground">文字色</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的文字色" @click="valuePicker.show('color')">文字色</button>
   <ColorField
     :model-value="value.color"
     label="文字色"
@@ -91,7 +91,7 @@
     @update:model-value="(color) => emit('patch', { color })"
   />
 
-  <label class="text-muted-foreground">行距</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的行距" @click="valuePicker.show('leadingPercent')">行距</button>
   <div class="flex items-center gap-1">
     <input
       type="number"
@@ -105,7 +105,7 @@
     <span class="text-muted-foreground">%</span>
   </div>
 
-  <label class="text-muted-foreground">字粗</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的字粗" @click="valuePicker.show('weightPx')">字粗</button>
   <div class="flex items-center gap-1">
     <NumberStepper
       :model-value="isMixed('weightPx') ? null : value.weightPx"
@@ -126,7 +126,7 @@
     >0</button>
   </div>
 
-  <label class="text-muted-foreground">水平</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的水平" @click="valuePicker.show('scaleXPercent')">水平</button>
   <div class="flex items-center gap-1">
     <NumberStepper
       :model-value="isMixed('scaleXPercent') ? null : value.scaleXPercent"
@@ -140,7 +140,7 @@
     <span class="text-muted-foreground">%</span>
   </div>
 
-  <label class="text-muted-foreground">垂直</label>
+  <button type="button" class="value-key" title="在左欄列出本話用過的垂直" @click="valuePicker.show('scaleYPercent')">垂直</button>
   <div class="flex items-center gap-1">
     <NumberStepper
       :model-value="isMixed('scaleYPercent') ? null : value.scaleYPercent"
@@ -174,6 +174,7 @@ import {
 import ColorField from '@/components/ColorField.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { useValuePicker } from '@/composables/useValuePicker'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
 import { MIXED_TEXT } from '@/lib/appearanceText'
 import { ALIGN_LABELS } from '@/lib/textStyleFields'
@@ -263,6 +264,7 @@ const emit = defineEmits<{
 }>()
 
 const picker = useFontPicker()
+const valuePicker = useValuePicker()
 
 function openFont() {
   picker.show()

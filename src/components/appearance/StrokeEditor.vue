@@ -1,5 +1,12 @@
 <template>
-  <label class="text-muted-foreground">描邊</label>
+  <button
+    type="button"
+    class="value-key"
+    title="在左欄列出這一話用過的描邊"
+    @click="valuePicker.show('stroke')"
+  >
+    描邊
+  </button>
   <div class="flex items-center gap-1.5">
     <input
       ref="toggleEl"
@@ -50,6 +57,7 @@ import type { LayerEffect, StrokeEffect, StrokePosition } from '@shared/effects/
 import { DEFAULT_STROKE } from '@shared/effects/types'
 import { strokeOf, withStroke } from '@shared/effects/stroke'
 import { MIXED_TEXT } from '@/lib/appearanceText'
+import { useValuePicker } from '@/composables/useValuePicker'
 
 /**
  * The stroke controls, over whatever node carries them.
@@ -77,6 +85,8 @@ const emit = defineEmits<{
   preview: [effects: LayerEffect[]]
   patch: [effects: LayerEffect[]]
 }>()
+
+const valuePicker = useValuePicker()
 
 const toggleEl = useTemplateRef<HTMLInputElement>('toggleEl')
 

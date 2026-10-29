@@ -165,6 +165,27 @@ html, body, #app {
   height: 100%;
 }
 
+/* A property's name in the appearance panel that opens its values in the
+   left column. Reads as the label it was; the dotted rule says it answers. */
+.value-key {
+  justify-self: stretch;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin: -0.125rem -0.375rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  text-align: left;
+  color: var(--muted-foreground);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.value-key:hover {
+  background: var(--secondary);
+  color: var(--primary);
+  text-decoration-style: solid;
+}
+
 /* Segmented control. Global rather than scoped so the style editor and the
    font picker share one definition instead of drifting apart. */
 .seg {

@@ -2446,6 +2446,13 @@ export const useEditorStore = defineStore('editor', () => {
     writeStyles(stylePreviewedFrom.map((s) => ({ ...s, style: { ...s.style, ...patch } })))
   }
 
+  /** A style preview let go of without committing: the objects get back what they held. */
+  function endStylePreview() {
+    if (stylePreviewedFrom === null) return
+    writeStyles(stylePreviewedFrom)
+    stylePreviewedFrom = null
+  }
+
   /**
    * One act, however many objects it touched. Undoing a batch has to put every
    * one of them back at once — anything else would leave the selection half
@@ -2502,6 +2509,13 @@ export const useEditorStore = defineStore('editor', () => {
     }
     previewedFrom ??= effectsOf(targets)
     writeEffects(previewedFrom.map((s) => ({ ...s, effects: [...effects] })))
+  }
+
+  /** A preview let go of without committing: the nodes get back what they held. */
+  function endEffectsPreview() {
+    if (previewedFrom === null) return
+    writeEffects(previewedFrom)
+    previewedFrom = null
   }
 
   /**
@@ -2906,8 +2920,10 @@ export const useEditorStore = defineStore('editor', () => {
     appearanceKind,
     cmdApplyStyle,
     previewStyle,
+    endStylePreview,
     cmdApplyEffects,
     previewEffects,
+    endEffectsPreview,
     cmdReorderMembers,
     cmdPaintTags,
     paintTags,

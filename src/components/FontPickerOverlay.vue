@@ -624,6 +624,13 @@ watch(
   (face) => (face ? picker.startPreview(face) : picker.endPreview()),
 )
 onBeforeUnmount(() => picker.endPreview())
+// Put away while a face was pointed at: the leave event never comes.
+watch(
+  () => picker.isOpen.value,
+  (open) => {
+    if (!open) hovered.value = null
+  },
+)
 
 /** Writes the face to every selected text object; the weight is already theirs. */
 function choose(face: FontEntry) {

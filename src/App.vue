@@ -15,24 +15,31 @@
             the tree holds a walk of the disk that is not worth doing again for
             a trip to the other side.
           -->
-          <TabsRoot
+          <!--
+            Values to give the selection above, verbs to run below. Which
+            property's values is asked for by name from the appearance panel;
+            the font stays mounted so the picker keeps its catalogue and scroll.
+          -->
+          <SplitterGroup
             v-show="ui.view === 'editor'"
-            v-model="leftTab"
-            class="flex min-h-0 flex-1 flex-col"
-            @wheel="onWheelTabs($event, LEFT_TABS, leftTab, (t) => (leftTab = t))"
+            direction="vertical"
+            class="min-h-0 flex-1"
+            auto-save-id="translate:left:v1"
+            :storage="preferences.panelStorage"
           >
-            <TabsList class="flex h-7 shrink-0 select-none">
-              <TabsTrigger value="tools" class="side-tab">工具</TabsTrigger>
-              <TabsTrigger value="font" class="side-tab">字體</TabsTrigger>
-            </TabsList>
-            <!-- Both stay mounted: the picker keeps its catalogue and scroll across visits. -->
-            <div v-show="leftTab === 'tools'" class="flex min-h-0 flex-1 flex-col">
-              <ToolSidebar />
-            </div>
-            <div v-show="leftTab === 'font'" class="flex min-h-0 flex-1 flex-col">
-              <FontPickerOverlay />
-            </div>
-          </TabsRoot>
+            <SplitterPanel :order="1" :default-size="65" :min-size="20" class="flex min-h-0">
+              <div v-show="valuePicker.shown.value === 'font'" class="flex min-w-0 flex-1 flex-col">
+                <FontPickerOverlay />
+              </div>
+              <div v-if="valuePicker.shown.value !== 'font'" class="flex min-w-0 flex-1 flex-col">
+                <ValuePicker :kind="valuePicker.shown.value" />
+              </div>
+            </SplitterPanel>
+            <ResizeHandle vertical />
+            <SplitterPanel :order="2" :default-size="35" :min-size="10" class="flex min-h-0 flex-col">
+              <ToolBoard />
+            </SplitterPanel>
+          </SplitterGroup>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -75,9 +82,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { SplitterGroup, SplitterPanel, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
@@ -89,6 +96,7 @@ import TitleBar from '@/components/TitleBar.vue'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
+import { useValuePicker } from '@/composables/useValuePicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
@@ -97,7 +105,8 @@ import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import { useWallPublisher } from '@/composables/useWallPublisher'
-import ToolSidebar from '@/modes/ToolSidebar.vue'
+import ToolBoard from '@/modes/ToolBoard.vue'
+import ValuePicker from '@/components/ValuePicker.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -105,7 +114,6 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
-import { onWheelTabs } from '@/lib/wheelTabs'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -117,12 +125,12 @@ const exportSelection = useExportStore()
 const ui = useUiStore()
 useWallPublisher()
 const fontPicker = useFontPicker()
-const LEFT_TABS = ['tools', 'font'] as const
-const leftTab = computed({
-  get: () => (fontPicker.isOpen.value ? 'font' : 'tools'),
-  set: (tab: string) => {
-    fontPicker.isOpen.value = tab === 'font'
-  },
+const valuePicker = useValuePicker()
+// The font picker's own "open" follows the column, and "choose a font" from
+// anywhere brings the column back to fonts.
+watch(valuePicker.shown, (kind) => (fontPicker.isOpen.value = kind === 'font'), { immediate: true })
+watch(fontPicker.isOpen, (open) => {
+  if (open) valuePicker.show('font')
 })
 const fill = useFillSelection()
 const merge = useMergeLayers()
@@ -397,3 +405,4 @@ if (devProject) {
   })
 }
 </script>
+
