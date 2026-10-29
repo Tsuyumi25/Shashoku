@@ -1,6 +1,7 @@
 <template>
   <div
     ref="containerRef"
+    data-region="canvas"
     class="relative h-full min-h-0 w-full touch-none overflow-hidden bg-muted select-none"
     :class="[canvasCursor]"
     @wheel.prevent="onWheel"
@@ -332,6 +333,7 @@ import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch }
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import PropertyWheel from '@/components/PropertyWheel.vue'
+import { logActivity } from '@/lib/activityLog'
 import { useValuePicker, type ValueKind } from '@/composables/useValuePicker'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
@@ -693,6 +695,7 @@ function openWheel(e: PointerEvent) {
 
 function chooseFromWheel(kind: ValueKind) {
   wheelAt.value = null
+  logActivity('wheel', { pick: kind })
   valuePicker.show(kind)
 }
 

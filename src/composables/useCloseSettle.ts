@@ -1,3 +1,4 @@
+import { flushActivity } from '@/lib/activityLog'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -28,6 +29,7 @@ export function useCloseSettle() {
       project.flush(),
       bookMeta.flushAll(),
       preferences.flush(),
+      flushActivity(),
     ])
     const refused = tried.find((one) => one.status === 'rejected')
     if (refused) throw refused.reason

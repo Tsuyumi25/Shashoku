@@ -26,6 +26,25 @@
         </button>
       </div>
     </section>
+
+    <section class="mt-3 rounded border border-border p-3">
+      <label class="flex cursor-pointer items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          :checked="preferences.prefs.activityLog"
+          @change="preferences.prefs.activityLog = ($event.target as HTMLInputElement).checked"
+        />
+        <span>
+          記錄操作
+          <span class="block text-muted-foreground">
+            每一次按鍵、點擊、換工具、選取、打的字、套的樣式都寫進本機的
+            <code>logs/日期.jsonl</code>，不寫進專案資料夾。移動畫布不記。
+            之後可以交給 agent 問哪裡不夠有效率。
+          </span>
+        </span>
+      </label>
+    </section>
   </div>
 </template>
 

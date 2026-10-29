@@ -55,6 +55,7 @@ export function parsePreferences(raw: string): Preferences {
     defaultFontFamily,
     fontPickerBoxPx,
     uiZoomLevel,
+    activityLog,
     fontSampleText,
     fontSampleVertical,
     missingGlyphMode,
@@ -93,6 +94,7 @@ export function parsePreferences(raw: string): Preferences {
       Math.max(MIN_FONT_PICKER_BOX_PX, Math.round(fontPickerBoxPx)),
     );
   }
+  if (typeof activityLog === "boolean") prefs.activityLog = activityLog;
   if (typeof uiZoomLevel === "number" && Number.isFinite(uiZoomLevel)) {
     prefs.uiZoomLevel = clampUiZoomLevel(uiZoomLevel);
   }
@@ -166,6 +168,7 @@ export function serializePreferences(prefs: Preferences): string {
       defaultFontFamily: prefs.defaultFontFamily,
       fontPickerBoxPx: prefs.fontPickerBoxPx,
       uiZoomLevel: prefs.uiZoomLevel,
+      activityLog: prefs.activityLog,
       fontSampleText: prefs.fontSampleText,
       fontSampleVertical: prefs.fontSampleVertical,
       missingGlyphMode: prefs.missingGlyphMode,

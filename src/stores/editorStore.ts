@@ -42,6 +42,7 @@ import { cloneEffects } from '@shared/effects/clone'
 import { normalizeTagSet, sameTagSet, tagSetKey } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
+import { logActivity } from '@/lib/activityLog'
 
 /**
  * Which registry an external record a command depends on lives in.
@@ -82,6 +83,8 @@ export type CommandResult = boolean | void
 export interface Command {
 
   label: string
+  /** What the step did, for the activity log: the words before and after, a style's patch. */
+  detail?: Record<string, unknown>
   /**
    * Applies the step. A `false` back means the write was refused — checked
    * before anything was touched, the same way every writer behind this
@@ -1022,6 +1025,7 @@ export const useEditorStore = defineStore('editor', () => {
     for (const gone of history.redo) gone.forget?.()
     setHistory(book, { undo: kept, redo: [] })
     historyStep.value++
+    logActivity('step', { label: cmd.label, ...cmd.detail })
     return true
   }
 
@@ -1136,6 +1140,7 @@ export const useEditorStore = defineStore('editor', () => {
       redo: [...after.redo, cmd],
     })
     historyStep.value++
+    logActivity('undo', { label: cmd.label })
     settleBook(cmd, book)
   }
 
@@ -1162,6 +1167,7 @@ export const useEditorStore = defineStore('editor', () => {
       redo: after.redo.filter((c) => c !== cmd),
     })
     historyStep.value++
+    logActivity('redo', { label: cmd.label })
     settleBook(cmd, book)
   }
 
@@ -2241,6 +2247,7 @@ export const useEditorStore = defineStore('editor', () => {
     const was = wasTheirs ?? held?.human === true
     pushCommand({
       label: `update-text ${labelId}`,
+      detail: { page: pageId, id: labelId, from: oldText, to: newText },
       do: () => project.updateLabelText(pageId, labelId, newText),
       undo: () => {
         project.updateLabelText(pageId, labelId, oldText)
@@ -2454,6 +2461,7 @@ export const useEditorStore = defineStore('editor', () => {
       stylePreviewedFrom = null
     }
     stylePreviewedFrom ??= stylesOf(targets)
+    logActivity('preview', { n: targets.length, patch })
     writeStyles(stylePreviewedFrom.map((s) => ({ ...s, style: { ...s.style, ...patch } })))
   }
 
@@ -2483,6 +2491,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (JSON.stringify(before) === JSON.stringify(after)) return
     pushCommand({
       label: `style ${targets.length}`,
+      detail: { ids: targets.map((t) => t.entry.id), patch },
       do: () => writeStyles(after),
       undo: () => writeStyles(before),
     })

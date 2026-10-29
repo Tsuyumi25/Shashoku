@@ -57,6 +57,7 @@ const api: ShashokuApi = {
   writeThumbnail: (key, bytes) => ipcRenderer.invoke(CHANNELS.writeThumbnail, key, bytes),
   readPreferences: () => ipcRenderer.invoke(CHANNELS.readPreferences),
   writePreferences: (raw) => ipcRenderer.invoke(CHANNELS.writePreferences, raw),
+  appendActivity: (lines) => ipcRenderer.invoke(CHANNELS.appendActivity, lines),
   setZoomLevel: (level) => webFrame.setZoomLevel(level),
   windowSetOverlay: (color, symbolColor) =>
     ipcRenderer.send(CHANNELS.windowSetOverlay, color, symbolColor),

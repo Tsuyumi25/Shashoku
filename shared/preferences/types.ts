@@ -114,6 +114,8 @@ export interface Preferences {
    * zoom steps. 0 is as built.
    */
   uiZoomLevel: number;
+  /** Whether everything the hand does is written to the activity log. */
+  activityLog: boolean;
   /** Empty means the picker's first preset; the presets are localizable UI. */
   fontSampleText: string;
   /**
@@ -180,6 +182,7 @@ export function defaultPreferences(): Preferences {
     defaultFontFamily: "",
     fontPickerBoxPx: 120,
     uiZoomLevel: 0,
+    activityLog: true,
     fontSampleText: "",
     fontSampleVertical: false,
     missingGlyphMode: "tofu",

@@ -81,6 +81,7 @@ import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import { useActivityLog } from '@/composables/useActivityLog'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
@@ -123,6 +124,7 @@ const fill = useFillSelection()
 const merge = useMergeLayers()
 const pixels = useSelectionPixels()
 const closing = useCloseSettle()
+useActivityLog()
 
 /** Comfortably inside the silence the window tolerates, which is three seconds. */
 const CLOSE_BEAT_MS = 1000

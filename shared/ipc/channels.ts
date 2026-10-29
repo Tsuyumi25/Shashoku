@@ -28,6 +28,7 @@ export const CHANNELS = {
   writeThumbnail: "thumbnails:write",
   readPreferences: "preferences:read",
   writePreferences: "preferences:write",
+  appendActivity: "activity:append",
   ocrModels: "ocr:models",
   ocrReadPage: "ocr:read-page",
   ocrUnload: "ocr:unload",
@@ -162,6 +163,8 @@ export interface ShashokuApi {
   /** Raw preferences.json contents; "" on first run. */
   readPreferences(): Promise<string>;
   writePreferences(raw: string): Promise<void>;
+  /** Newline-terminated JSON lines for today's activity log. */
+  appendActivity(lines: string): Promise<void>;
   /** Draws this window's whole document larger or smaller, in Chromium's zoom steps. */
   setZoomLevel(level: number): void;
   /**
