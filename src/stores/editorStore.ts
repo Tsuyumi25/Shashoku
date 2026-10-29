@@ -1830,6 +1830,57 @@ export const useEditorStore = defineStore('editor', () => {
 
 
   /**
+   * The arrow keys' move: every selected object on the page, text and raster
+   * alike, by whole page pixels. Locked ones stay where they are.
+   *
+   * ⭐ A run of presses is one step, as in Photoshop. A press that follows the
+   * last one on the same objects, with nothing taken onto the history between,
+   * adds its travel to the step already there instead of stacking another —
+   * so ten presses and one undo puts the objects back where the run began.
+   */
+  let lastNudge: { key: string; cmd: Command; total: { x: number; y: number } } | null = null
+
+  function cmdNudge(dx: number, dy: number) {
+    const page = currentPageId.value
+    if (page === null) return
+    const project = useProjectStore()
+    const ids = [...selectedIds.value]
+      .filter((id) => !isLayerLocked(id) && project.pageOfEntry(id) === page)
+      .sort()
+    if (ids.length === 0) return
+
+    const shift = (by: { x: number; y: number }) => {
+      for (const id of ids) {
+        const entry = project.entryById(id)
+        if (entry?.kind === 'text') {
+          project.moveLabel(page, id, entry.body.x + by.x, entry.body.y + by.y)
+        } else if (entry?.kind === 'raster' && entry.w > 0) {
+          project.placeLayer(page, id, { ...entry, x: entry.x + by.x, y: entry.y + by.y })
+        }
+      }
+    }
+
+    const key = `${page}|${ids.join(',')}`
+    const top = historyOf(currentBook.value).undo.at(-1)
+    if (lastNudge !== null && lastNudge.key === key && top === lastNudge.cmd) {
+      shift({ x: dx, y: dy })
+      lastNudge.total.x += dx
+      lastNudge.total.y += dy
+      return
+    }
+
+    const total = { x: dx, y: dy }
+    const cmd: Command = {
+      label: `nudge ${ids.length}`,
+      detail: { ids, dx, dy },
+      do: () => shift(total),
+      undo: () => shift({ x: -total.x, y: -total.y }),
+    }
+    if (!pushCommand(cmd)) return
+    lastNudge = { key, cmd, total }
+  }
+
+  /**
    * A raster layer's new placement, which arrives whole rather than written
    * through: the gesture previewed itself and left the entry alone, so this is
    * the first and only write.
@@ -2916,6 +2967,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDuplicateLabel,
     cmdMoveLabel,
     cmdPlaceLabels,
+    cmdNudge,
     cmdPlaceLayer,
     cmdRotateLabel,
     cmdScaleLabel,

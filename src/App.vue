@@ -328,6 +328,30 @@ useEventListener(window, 'blur', () => {
   editor.overrideHeld = false
 })
 
+const ARROW_STEPS: Record<string, { x: number; y: number }> = {
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+}
+
+/**
+ * Where the hand last pressed, which is what the arrows answer to: the page
+ * means the objects on it, a list means its rows and the pages. Anywhere else
+ * leaves the answer as it was.
+ */
+let lastPressed: 'canvas' | 'list' = 'list'
+useEventListener(
+  window,
+  'pointerdown',
+  (e: PointerEvent) => {
+    if (!(e.target instanceof Element)) return
+    if (e.target.closest('[data-region="canvas"]')) lastPressed = 'canvas'
+    else if (e.target.closest('[data-region="list"]')) lastPressed = 'list'
+  },
+  { capture: true },
+)
+
 useEventListener(window, 'keydown', (e) => {
   if (ui.settingsOpen) return
   if (ui.view !== 'editor') return
@@ -345,6 +369,16 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     if (preferences.prefs.sidePanel === 'layers') editor.selectLayerBy(offset)
     else editor.selectLabelBy(offset)
+  }
+
+  // Pressed last on the page with something selected, the arrows move it,
+  // as Photoshop's do: a pixel, or ten with Shift.
+  const nudge = ARROW_STEPS[e.key]
+  if (nudge && lastPressed === 'canvas' && editor.selectedIds.size > 0) {
+    e.preventDefault()
+    const by = e.shiftKey ? 10 : 1
+    editor.cmdNudge(nudge.x * by, nudge.y * by)
+    return
   }
 
   if (e.key === 'ArrowUp' || e.key === 'k') byRow(-1)

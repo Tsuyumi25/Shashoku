@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col select-none">
+  <div data-region="list" class="flex h-full min-h-0 flex-col select-none">
     <div class="min-h-0 flex-1 overflow-y-auto" @dragover.prevent @drop.prevent="onDrop">
       <div v-if="rows.length === 0" class="px-2 py-4 text-center text-xs text-muted-foreground">
         {{ editor.currentPageId ? '本頁沒有圖層' : '尚未開啟頁面' }}

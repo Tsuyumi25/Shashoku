@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div data-region="list" class="flex h-full min-h-0 flex-col">
     <div class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-2">
       <Search :size="12" class="shrink-0 text-muted-foreground" />
       <input
