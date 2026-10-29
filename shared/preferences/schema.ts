@@ -1,6 +1,8 @@
 import {
   MAX_FONT_PICKER_BOX_PX,
+  MAX_UI_ZOOM_LEVEL,
   MIN_FONT_PICKER_BOX_PX,
+  MIN_UI_ZOOM_LEVEL,
   MIN_UNDO_PIXEL_BYTES,
   MIN_UNDO_PIXEL_STEPS,
   defaultOcrPreference,
@@ -52,6 +54,7 @@ export function parsePreferences(raw: string): Preferences {
     fontFolders,
     defaultFontFamily,
     fontPickerBoxPx,
+    uiZoomLevel,
     fontSampleText,
     fontSampleVertical,
     missingGlyphMode,
@@ -89,6 +92,9 @@ export function parsePreferences(raw: string): Preferences {
       MAX_FONT_PICKER_BOX_PX,
       Math.max(MIN_FONT_PICKER_BOX_PX, Math.round(fontPickerBoxPx)),
     );
+  }
+  if (typeof uiZoomLevel === "number" && Number.isFinite(uiZoomLevel)) {
+    prefs.uiZoomLevel = clampUiZoomLevel(uiZoomLevel);
   }
   if (typeof fontSampleText === "string") {
     prefs.fontSampleText = sampleWithRealBreaks(fontSampleText);
@@ -148,6 +154,10 @@ export function parsePreferences(raw: string): Preferences {
   return prefs;
 }
 
+export function clampUiZoomLevel(level: number): number {
+  return Math.min(MAX_UI_ZOOM_LEVEL, Math.max(MIN_UI_ZOOM_LEVEL, Math.round(level)));
+}
+
 export function serializePreferences(prefs: Preferences): string {
   return JSON.stringify(
     {
@@ -155,6 +165,7 @@ export function serializePreferences(prefs: Preferences): string {
       fontFolders: prefs.fontFolders,
       defaultFontFamily: prefs.defaultFontFamily,
       fontPickerBoxPx: prefs.fontPickerBoxPx,
+      uiZoomLevel: prefs.uiZoomLevel,
       fontSampleText: prefs.fontSampleText,
       fontSampleVertical: prefs.fontSampleVertical,
       missingGlyphMode: prefs.missingGlyphMode,

@@ -154,6 +154,30 @@ window.api.onWillClose(() => {
 
 // All three listeners stand down while the settings panel is up: these keys
 // act on the document, and the document is underneath it.
+// The interface's size, VS Code's keys for it. Read on the way down so it works
+// with focus anywhere, a text field included, and so the keypad's 0 never also
+// reaches the canvas, which takes Ctrl+0 to fit the page.
+useEventListener(
+  window,
+  'keydown',
+  (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+    const step =
+      e.key === '=' || e.key === '+' || e.code === 'NumpadAdd'
+        ? 1
+        : (e.key === '-' && !e.shiftKey) || e.code === 'NumpadSubtract'
+          ? -1
+          : e.code === 'Numpad0'
+            ? 0
+            : null
+    if (step === null) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    preferences.zoomUi(step)
+  },
+  { capture: true },
+)
+
 useEventListener(window, 'keydown', (e) => {
   if (ui.settingsOpen) return
   if (!e.ctrlKey && !e.metaKey) return

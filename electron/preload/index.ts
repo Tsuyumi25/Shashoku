@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 import type { EngineSpan, ShashokuEngineApi } from "@shared/engine/types";
 import type { ShashokuInpaintApi } from "@shared/inpaint/types";
 import type { OcrProgress, OcrStatus, ShashokuOcrApi } from "@shared/ocr/types";
@@ -57,6 +57,7 @@ const api: ShashokuApi = {
   writeThumbnail: (key, bytes) => ipcRenderer.invoke(CHANNELS.writeThumbnail, key, bytes),
   readPreferences: () => ipcRenderer.invoke(CHANNELS.readPreferences),
   writePreferences: (raw) => ipcRenderer.invoke(CHANNELS.writePreferences, raw),
+  setZoomLevel: (level) => webFrame.setZoomLevel(level),
   windowSetOverlay: (color, symbolColor) =>
     ipcRenderer.send(CHANNELS.windowSetOverlay, color, symbolColor),
   onWillClose: (handler) => {

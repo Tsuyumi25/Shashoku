@@ -1,5 +1,8 @@
 export const MIN_FONT_PICKER_BOX_PX = 60;
 export const MAX_FONT_PICKER_BOX_PX = 240;
+/** Chromium's zoom steps: each one is a factor of 1.2, so ±5 is 40%–249%. */
+export const MIN_UI_ZOOM_LEVEL = -5;
+export const MAX_UI_ZOOM_LEVEL = 5;
 
 /**
  * What the picker does with a family that cannot draw the current sample.
@@ -106,6 +109,11 @@ export interface Preferences {
    * the text has.
    */
   fontPickerBoxPx: number;
+  /**
+   * How large the whole interface is drawn, the page included, in Chromium's
+   * zoom steps. 0 is as built.
+   */
+  uiZoomLevel: number;
   /** Empty means the picker's first preset; the presets are localizable UI. */
   fontSampleText: string;
   /**
@@ -171,6 +179,7 @@ export function defaultPreferences(): Preferences {
     fontFolders: [],
     defaultFontFamily: "",
     fontPickerBoxPx: 120,
+    uiZoomLevel: 0,
     fontSampleText: "",
     fontSampleVertical: false,
     missingGlyphMode: "tofu",

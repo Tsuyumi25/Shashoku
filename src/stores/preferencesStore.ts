@@ -1,7 +1,11 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { SplitterGroupProps } from 'reka-ui'
-import { parsePreferences, serializePreferences } from '@shared/preferences/schema'
+import {
+  clampUiZoomLevel,
+  parsePreferences,
+  serializePreferences,
+} from '@shared/preferences/schema'
 import {
   MAX_FONT_PICKER_BOX_PX,
   MIN_FONT_PICKER_BOX_PX,
@@ -61,6 +65,18 @@ export const usePreferencesStore = defineStore('preferences', () => {
     }
     Object.assign(prefs, parsePreferences(raw))
     hydrated.value = true
+    // Watched from here so the level read from disk takes effect the same way
+    // one pressed does, and only in a window that read one.
+    watch(
+      () => prefs.uiZoomLevel,
+      (level) => window.api.setZoomLevel(level),
+      { immediate: true },
+    )
+  }
+
+  /** One step larger or smaller; 0 puts it back as built. */
+  function zoomUi(step: 1 | -1 | 0) {
+    prefs.uiZoomLevel = step === 0 ? 0 : clampUiZoomLevel(prefs.uiZoomLevel + step)
   }
 
   const panelStorage: PanelGroupStorage = {
@@ -173,6 +189,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   return {
     prefs,
     hydrate,
+    zoomUi,
     flush,
     panelStorage,
     favorites,

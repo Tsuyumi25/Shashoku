@@ -162,6 +162,8 @@ export interface ShashokuApi {
   /** Raw preferences.json contents; "" on first run. */
   readPreferences(): Promise<string>;
   writePreferences(raw: string): Promise<void>;
+  /** Draws this window's whole document larger or smaller, in Chromium's zoom steps. */
+  setZoomLevel(level: number): void;
   /**
    * Recolors the system-drawn window buttons. They are painted by Chromium
    * outside the DOM, so the theme cannot reach them through CSS.
