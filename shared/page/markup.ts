@@ -413,8 +413,9 @@ export function wrapCode(
   end: number,
   attrs: string,
 ): { code: string; start: number; end: number } {
-  const from = Math.max(0, Math.min(start, code.length))
-  const to = Math.max(from, Math.min(end, code.length))
+  // A selection dragged backwards arrives end first; the words are the same.
+  const from = Math.max(0, Math.min(start, end, code.length))
+  const to = Math.min(Math.max(start, end), code.length)
   const opening = `<${attrs}>`
   const closing = `</${closerFor(attrs)}>`
   return {
@@ -424,7 +425,9 @@ export function wrapCode(
   }
 }
 
-export function unwrapPlainRange(code: string, start: number, end: number): string {
+export function unwrapPlainRange(code: string, from: number, to: number): string {
+  const start = Math.min(from, to)
+  const end = Math.max(from, to)
   const m = parseMarkup(code)
   const cuts: [number, number][] = []
   for (const tag of m.tags) {

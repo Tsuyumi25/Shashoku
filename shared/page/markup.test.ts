@@ -226,6 +226,20 @@ describe('wrapping and clearing', () => {
     expect(plainOf(w.code)).toBe('abcd')
   })
 
+  it('wraps the same words whichever way the selection was dragged', () => {
+    const code = '真是的…\n拿你沒辦法!?'
+    const m = parseMarkup(code)
+    // Dragged from after "!?" back to before it: the range arrives end first.
+    const backward = codeSelection(m, m.plain.length, m.plain.length - 2)
+    expect(wrapCode(code, backward.start, backward.end, 'upright').code).toBe(
+      '真是的…\n拿你沒辦法<upright>!?</upright>',
+    )
+  })
+
+  it('clears the same tags whichever way the selection was dragged', () => {
+    expect(unwrapPlainRange('<b weight=+1>ab</b>cd', 2, 0)).toBe('abcd')
+  })
+
   it('clears every tag the plain range holds', () => {
     expect(unwrapPlainRange('<b weight=+1>ab</b>cd', 0, 2)).toBe('abcd')
     expect(unwrapPlainRange('a<b weight=+1>b</b>c', 0, 3)).toBe('abc')
