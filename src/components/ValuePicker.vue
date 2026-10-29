@@ -15,7 +15,7 @@
     -->
     <div
       class="min-h-0 flex-1 overflow-y-auto p-3"
-      @mouseenter="holding = true"
+      @mouseenter="hold"
       @mouseleave="release"
     >
       <!--
@@ -29,7 +29,6 @@
           :key="v.key"
           type="button"
           class="rung"
-          :class="v.key === currentKey && 'on'"
           :title="`${v.label} · 本話 ${v.count} 句`"
           :disabled="!targets.length"
           @mouseenter="preview(v)"
@@ -50,6 +49,12 @@
           <span class="flex min-w-0 items-center gap-1 tabular-nums">
             <span v-if="swatchOf(v)" class="swatch" :style="{ backgroundColor: swatchOf(v)! }" />
             <span class="truncate">{{ v.label }}</span>
+            <span
+              v-if="v.key === currentKey"
+              class="shrink-0 rounded-sm bg-primary/20 px-1 text-[10px] text-primary"
+            >
+              目前
+            </span>
           </span>
           <span class="flex items-center gap-1.5">
             <span class="rung-bar" :style="{ width: `${barWidth(v.count)}px` }" />
@@ -178,10 +183,24 @@ function release() {
 }
 
 /** The value every selected object shares, if they share one. */
-const currentKey = computed(() => {
+/** The value every selected object shares, read off the objects as they stand. */
+const liveKey = computed(() => {
   const keys = new Set(targets.value.map((t) => valueOf(t.entry).key))
   return keys.size === 1 ? [...keys][0] : null
 })
+
+/**
+ * What 目前 marks. Held while the pointer is in the list, because trying a
+ * value writes it onto the objects — read live, the mark would follow the
+ * pointer and say the same thing the frame already does.
+ */
+const heldKey = shallowRef<string | null>(null)
+const currentKey = computed(() => (holding.value ? heldKey.value : liveKey.value))
+
+function hold() {
+  heldKey.value = liveKey.value
+  holding.value = true
+}
 
 const effectsFor = (v: Value): LayerEffect[] => (v.stroke ? [{ ...v.stroke }] : [])
 function patchFor(v: Value): Partial<TextStyle> {
@@ -222,6 +241,7 @@ onBeforeUnmount(endPreview)
 
 function apply(v: Value) {
   if (!targets.value.length) return
+  heldKey.value = v.key
   if (props.kind === 'stroke') editor.cmdApplyEffects(targets.value, effectsFor(v))
   else editor.cmdApplyStyle(targets.value, patchFor(v))
 }
@@ -316,10 +336,9 @@ const barWidth = (count: number) => Math.max(3, 40 * Math.sqrt(count / mostUsed.
   border-radius: 3px;
   background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
 }
+/* The frame is the value being tried; what the selection holds is said in words beside it. */
 .rung:hover:not(:disabled) {
   background: var(--secondary);
-}
-.rung.on {
   box-shadow: inset 0 0 0 2px var(--primary);
 }
 .rung:disabled {
