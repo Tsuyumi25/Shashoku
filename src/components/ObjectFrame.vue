@@ -7,7 +7,7 @@
     :title="title || undefined"
     @pointerenter="entered = true"
     @pointerleave="entered = false"
-    @pointerdown.stop="onDown"
+    @pointerdown="onDown"
     @pointermove="onMove"
     @pointerup="onUp"
     @pointercancel="onUp"
@@ -26,7 +26,7 @@
         :key="`turn-${zone.key}`"
         class="absolute"
         :style="turnZoneStyle(zone)"
-        @pointerdown.stop="onRotateDown"
+        @pointerdown="ownPress($event) && onRotateDown($event)"
         @dblclick.stop
         @pointermove="onRotateMove"
         @pointerup="onRotateUp"
@@ -39,7 +39,7 @@
         class="absolute border border-primary bg-background"
         :class="corner.cursor"
         :style="cornerStyle(corner)"
-        @pointerdown.stop="onScaleDown($event, corner)"
+        @pointerdown="ownPress($event) && onScaleDown($event, corner)"
         @pointermove="onScaleMove"
         @pointerup="onScaleUp"
         @pointercancel="onScaleUp"
@@ -52,7 +52,7 @@
           class="absolute border border-primary bg-background"
           :class="edge.cursor"
           :style="cornerStyle(edge)"
-          @pointerdown.stop="onScaleDown($event, edge)"
+          @pointerdown="ownPress($event) && onScaleDown($event, edge)"
           @pointermove="onScaleMove"
           @pointerup="onScaleUp"
           @pointercancel="onScaleUp"
@@ -62,7 +62,7 @@
       <div
         class="absolute flex cursor-move items-center justify-center"
         :style="referenceStyle"
-        @pointerdown.stop="onReferenceDown"
+        @pointerdown="ownPress($event) && onReferenceDown($event)"
         @pointermove="onReferenceMove"
         @pointerup="onReferenceUp"
         @pointercancel="onReferenceUp"
@@ -585,8 +585,19 @@ const drag = {
 }
 let dragEngaged = false
 
+/**
+ * Whether a press on the frame or one of its handles is the frame's. The right
+ * button goes on to the canvas, whose ring of properties acts on the object it
+ * was pressed over; every other press stops here.
+ */
+function ownPress(e: PointerEvent): boolean {
+  if (e.button === 2) return false
+  e.stopPropagation()
+  return true
+}
+
 function onDown(e: PointerEvent) {
-  if (e.button !== 0) return
+  if (!ownPress(e) || e.button !== 0) return
   capture(e)
   dragging.value = true
   dragEngaged = false

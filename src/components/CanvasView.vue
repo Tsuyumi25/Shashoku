@@ -315,6 +315,14 @@
       Outside the page's branch: a refusal is worth saying whether or not there
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
+    <PropertyWheel
+      v-if="wheelAt !== null"
+      :at="wheelAt"
+      :origin="wheelOrigin"
+      @choose="chooseFromWheel"
+      @close="wheelAt = null"
+    />
+
     <Notice />
   </div>
 </template>
@@ -323,6 +331,8 @@
 import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
+import PropertyWheel from '@/components/PropertyWheel.vue'
+import { useValuePicker, type ValueKind } from '@/composables/useValuePicker'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
@@ -660,6 +670,32 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
  * order to reach a range over, so building one out of scattered objects is the
  * label list's job.
  */
+const valuePicker = useValuePicker()
+
+/** Where the right button's ring of properties stands, or null when it is down. */
+const wheelAt = ref<{ x: number; y: number } | null>(null)
+const wheelOrigin = ref({ left: 0, top: 0 })
+
+/**
+ * The ring acts on the selection, so pressing it over an object that is not
+ * part of the selection makes that object the selection first — the object
+ * under the hand is the one a reader means.
+ */
+function openWheel(e: PointerEvent) {
+  const pointed = pointedObjectId.value
+  if (pointed !== null && !editor.isSelected(pointed)) editor.selectOnly(pointed)
+  if (editor.selectedIds.size === 0) return
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return
+  wheelOrigin.value = { left: rect.left, top: rect.top }
+  wheelAt.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+function chooseFromWheel(kind: ValueKind) {
+  wheelAt.value = null
+  valuePicker.show(kind)
+}
+
 function onSelectObject(id: string, additive: boolean) {
   // A press on a member of the set is the start of moving the set.
   if (!additive && groupIds.value.includes(id)) return
@@ -1635,6 +1671,10 @@ function onPointerDown(e: PointerEvent) {
     el.setPointerCapture(e.pointerId)
     const rect = containerRef.value.getBoundingClientRect()
     beginBrushHud(hudMode, e.clientX - rect.left, e.clientY - rect.top)
+    return
+  }
+  if (e.button === 2 && !e.altKey) {
+    openWheel(e)
     return
   }
   if (e.button !== 0) {
