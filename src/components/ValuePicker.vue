@@ -55,12 +55,17 @@
         </button>
       </div>
 
-      <div v-else class="flex flex-wrap gap-1.5">
+      <!--
+        A ladder: every value a row, smallest at the top, each drawn on the
+        words being set at that value. Going down always reaches something to
+        look at, which a grid of numbers never showed.
+      -->
+      <div v-else class="flex flex-col">
         <button
           v-for="v in shown"
           :key="v.key"
           type="button"
-          class="amount"
+          class="rung"
           :class="v.key === currentKey && 'on'"
           :title="`${v.label} · 本話 ${v.count} 句`"
           :disabled="!targets.length"
@@ -68,7 +73,22 @@
           @mouseleave="endPreview"
           @click="apply(v)"
         >
-          {{ v.label }}<span class="ml-1 text-[10px] text-muted-foreground">{{ v.count }}</span>
+          <span class="rung-sample">
+            <WallPiece
+              v-if="rungs.get(v.key)"
+              class="pointer-events-none"
+              :sample="rungs.get(v.key)!.sample"
+              :scale="rungs.get(v.key)!.scale"
+              :missing="rungs.get(v.key)!.missing"
+              :selected="false"
+              title=""
+            />
+          </span>
+          <span class="tabular-nums">{{ v.label }}</span>
+          <span class="flex items-center gap-1.5">
+            <span class="rung-bar" :style="{ width: `${barWidth(v.count)}px` }" />
+            <span class="text-[10px] tabular-nums text-muted-foreground">{{ v.count }}</span>
+          </span>
         </button>
       </div>
     </div>
@@ -80,7 +100,11 @@ import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vu
 import { useEventListener } from '@vueuse/core'
 import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
 import type { TextLayerEntry } from '@shared/page/types'
-import { blocksOnSide } from '@shared/page/units'
+import { blocksOnSide, shownLinesOf } from '@shared/page/units'
+import { escapeText } from '@shared/page/markup'
+import WallPiece from '@/components/wall/WallPiece.vue'
+import { drawnLabel } from '@/lib/labelRaster'
+import type { Sample } from '@/lib/fontSampleCache'
 import { visibleStrokeOf } from '@shared/effects/stroke'
 import type { TextStyle } from '@shared/text-style/types'
 import type { AppearanceTarget } from '@/lib/appearance'
@@ -237,6 +261,52 @@ function apply(v: Value) {
   else editor.cmdApplyStyle(targets.value, patchFor(v))
 }
 
+/**
+ * What every rung is drawn on: the selection's first object — or, with nothing
+ * selected, the chapter's first — cut to its first two lines of four, enough
+ * for a leading or a scale to show without a rung standing taller than a hand.
+ */
+const ladderSource = computed(() => {
+  const lead = targets.value[0]
+  const pick = lead
+    ? { pageId: lead.pageId, entry: lead.entry }
+    : project.files
+        .filter((f) => f.badge === 'ok')
+        .flatMap((f) => blocksOnSide(f.page.layers, 'translation').map((entry) => ({ pageId: f.pageId, entry })))
+        .find((p) => p.entry.body.style.fontFamily)
+  if (!pick) return null
+  const page = project.pageById(pick.pageId)?.page
+  if (!page) return null
+  const lines = shownLinesOf(page, pick.entry)
+    .slice(0, 2)
+    .map((line) => line.slice(0, 4))
+    .filter(Boolean)
+  return lines.length ? { entry: pick.entry, code: lines.map(escapeText).join('\n') } : null
+})
+
+/** On screen, every rung but the size's is set at one em; sizes keep their order, eased. */
+const RUNG_EM = 22
+
+const rungs = computed(() => {
+  const out = new Map<string, { sample: Sample | null; scale: number; missing: boolean }>()
+  const source = ladderSource.value
+  if (!source || props.kind === 'stroke' || props.kind === 'color') return out
+  for (const v of shown.value) {
+    const style = { ...source.entry.body.style, [props.kind]: v.amount }
+    const drawn = drawnLabel(source.code, style, source.entry.effects, { x: 0, y: 0 }, 0)
+    const em = props.kind === 'fontSizePx' ? 3.2 * Math.sqrt(style.fontSizePx) : RUNG_EM
+    out.set(v.key, {
+      sample: drawn.sample,
+      scale: em / style.fontSizePx,
+      missing: drawn.missingFamily !== null,
+    })
+  }
+  return out
+})
+
+const mostUsed = computed(() => Math.max(1, ...shown.value.map((v) => v.count)))
+const barWidth = (count: number) => Math.max(3, 40 * Math.sqrt(count / mostUsed.value))
+
 /** The stroke's own colour, drawn as thick as it is set, on the grey every colour shows against. */
 function ringStyle(v: Value) {
   if (!v.stroke) return { border: '1px dashed currentColor', background: 'transparent' }
@@ -290,26 +360,42 @@ function ringStyle(v: Value) {
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
-.amount {
-  border: 1px solid var(--border);
+.rung {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.5rem 4rem;
+  align-items: center;
+  gap: 0.5rem;
   border-radius: 0.25rem;
-  background: var(--card);
-  padding: 0.2rem 0.55rem;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
-.swatch:hover:not(:disabled),
-.amount:hover:not(:disabled) {
+.rung-sample {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+.rung-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+}
+.swatch:hover:not(:disabled) {
   border-color: var(--primary);
 }
-.swatch.on,
-.amount.on {
+.rung:hover:not(:disabled) {
+  background: var(--secondary);
+}
+.swatch.on {
   border-color: var(--primary);
   background: color-mix(in oklch, var(--primary) 15%, var(--card));
 }
+.rung.on {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
 .dot:disabled,
 .swatch:disabled,
-.amount:disabled {
+.rung:disabled {
   cursor: default;
 }
 </style>
