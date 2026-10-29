@@ -672,6 +672,13 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const histories = shallowRef<Map<BookId, BookHistory>>(new Map())
 
+  /**
+   * How many things the hand has done to the history: a step taken, undone,
+   * redone, or the stack wiped. Trimming what falls off the bottom is not one.
+   * A brush's line start holds only while this has not moved.
+   */
+  const historyStep = ref(0)
+
   function historyOf(book: BookId): BookHistory {
     return histories.value.get(book) ?? EMPTY_HISTORY
   }
@@ -1014,6 +1021,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     for (const gone of history.redo) gone.forget?.()
     setHistory(book, { undo: kept, redo: [] })
+    historyStep.value++
     return true
   }
 
@@ -1127,6 +1135,7 @@ export const useEditorStore = defineStore('editor', () => {
       undo: after.undo.filter((c) => c !== cmd),
       redo: [...after.redo, cmd],
     })
+    historyStep.value++
     settleBook(cmd, book)
   }
 
@@ -1152,6 +1161,7 @@ export const useEditorStore = defineStore('editor', () => {
       undo: [...after.undo, cmd],
       redo: after.redo.filter((c) => c !== cmd),
     })
+    historyStep.value++
     settleBook(cmd, book)
   }
 
@@ -1161,6 +1171,7 @@ export const useEditorStore = defineStore('editor', () => {
     const history = historyOf(book)
     for (const gone of [...history.undo, ...history.redo]) gone.forget?.()
     setHistory(book, { undo: [], redo: [] })
+    historyStep.value++
     pendingTextEdit.value = null
   }
 
@@ -2875,6 +2886,7 @@ export const useEditorStore = defineStore('editor', () => {
     beginReadingEdit,
     editBy,
     pushCommand,
+    historyStep,
     forgetJournals,
     undo,
     redo,

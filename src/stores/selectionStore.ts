@@ -43,6 +43,7 @@ import {
   type Rect,
 } from '@/lib/selection/rect'
 import { traceMaskOutlines } from '@/lib/selection/trace'
+import { linePressure, rememberStrokeEnd, settleStrokeEnd } from '@/lib/selection/strokeEnd'
 
 export type { MaskTarget }
 
@@ -543,6 +544,8 @@ export const useSelectionStore = defineStore('selection', () => {
      */
     record: string | null
     dirty: Rect
+    /** Where the hand is now, which is where it lets go. */
+    at: Point
   }
   let stroke: Stroke | null = null
 
@@ -572,6 +575,7 @@ export const useSelectionStore = defineStore('selection', () => {
     mode: MaskBrushMode,
     at: Point,
     pressure = 1,
+    from: Point | null = null,
   ): void {
     const opened: string[] = []
     if (!isHeldFor(target)) {
@@ -584,8 +588,14 @@ export const useSelectionStore = defineStore('selection', () => {
       DEFAULT_BRUSH_SPACING_RATIO,
       brushStabilizationFor(mode),
     )
-    stroke = { target, mode, shape, sampler, opened, record: null, dirty: EMPTY_RECT }
-    stamp(sampler.begin({ x: at.x, y: at.y, pressure, time: performance.now() }))
+    stroke = { target, mode, shape, sampler, opened, record: null, dirty: EMPTY_RECT, at }
+    const time = performance.now()
+    if (from === null) {
+      stamp(sampler.begin({ x: at.x, y: at.y, pressure, time }))
+    } else {
+      const p = linePressure(pressure)
+      stamp(sampler.beginLine({ ...from, pressure: p, time }, { ...at, pressure: p, time }))
+    }
   }
 
   /**
@@ -653,6 +663,7 @@ export const useSelectionStore = defineStore('selection', () => {
     const s = stroke
     if (s === null) return
     stamp(s.sampler.push([{ x: at.x, y: at.y, pressure, time: performance.now() }]))
+    s.at = at
   }
 
   /**
@@ -704,6 +715,7 @@ export const useSelectionStore = defineStore('selection', () => {
     // reading, so the tail keeps the width the hand actually ended on.
     if (stroke !== null && at !== undefined) {
       stamp(stroke.sampler.end({ x: at.x, y: at.y, pressure, time: performance.now() }))
+      stroke.at = at
     }
     const s = stroke
     stroke = null
@@ -729,6 +741,8 @@ export const useSelectionStore = defineStore('selection', () => {
       [...s.opened, s.record],
       s.target.page,
     )
+    const editor = useEditorStore()
+    settleStrokeEnd(rememberStrokeEnd(`mask:${s.mode}`, s.target.page, s.at), editor.historyStep)
   }
 
   /**

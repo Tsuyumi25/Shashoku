@@ -7,6 +7,13 @@ import { screenToContentPx } from '@/lib/coords'
 import { pressureFrom } from '@/lib/selection/brushInput'
 import { stampMaskCircle } from '@/lib/selection/brushMask'
 import {
+  forgetStrokeEnd,
+  linePressure,
+  lineStartOn,
+  rememberStrokeEnd,
+  settleStrokeEnd,
+} from '@/lib/selection/strokeEnd'
+import {
   createBrushSampler,
   DEFAULT_BRUSH_SPACING_RATIO,
   type BrushSample,
@@ -84,6 +91,8 @@ interface Stroke {
   taken: Promise<void>
   /** This stroke's claim on the overlay, which only it may take down. */
   shown: number
+  /** Where the hand is now, which is where it lets go. */
+  at: Point
 }
 
 /**
@@ -396,10 +405,18 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       dirty: EMPTY_RECT,
       taken,
       shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
+      at,
     }
     stroke = opened
     editor.beginStroke()
-    applyDabs(opened.sampler.begin(sampleAt(at, e)))
+    const from = e.shiftKey ? lineStartOn(`layer:${mode}`, page, editor.historyStep) : null
+    if (from === null) {
+      applyDabs(opened.sampler.begin(sampleAt(at, e)))
+    } else {
+      const pressure = linePressure(pressureFrom(e))
+      const time = performance.now()
+      applyDabs(opened.sampler.beginLine({ ...from, pressure, time }, { ...at, pressure, time }))
+    }
     return true
   }
 
@@ -421,7 +438,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const s = stroke
     if (s === null) return false
     if (e.pointerId !== s.pointerId) return true
-    applyDabs(s.sampler.push(moveBatch(e, s.pointerId)))
+    const batch = moveBatch(e, s.pointerId)
+    applyDabs(s.sampler.push(batch))
+    const tail = batch.at(-1)
+    if (tail !== undefined) s.at = { x: tail.x, y: tail.y }
     return true
   }
 
@@ -448,6 +468,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const at = pageAt(e)
     if (at !== null && Number.isFinite(at.x) && Number.isFinite(at.y)) {
       applyDabs(s.sampler.end(sampleAt(at, e)))
+      s.at = at
     }
     /*
      * Taken here rather than inside the release, because the release is queued
@@ -477,8 +498,14 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   }
 
   async function endStroke(s: Stroke): Promise<void> {
+    const kind = `layer:${s.mode}` as const
+    const end = rememberStrokeEnd(kind, s.page, s.at)
     try {
-      await bank(s)
+      if (await bank(s)) settleStrokeEnd(end, editor.historyStep)
+      else forgetStrokeEnd(kind, end)
+    } catch (err) {
+      forgetStrokeEnd(kind, end)
+      throw err
     } finally {
       // A backstop. The happy path takes it down where the write goes up, so
       // that no frame is drawn holding both; this is for the paths that never
@@ -488,13 +515,14 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     }
   }
 
-  async function bank(s: Stroke): Promise<void> {
+  /** Whether the stroke became a step. */
+  async function bank(s: Stroke): Promise<boolean> {
     /*
      * A press that drew nothing — a brush sized to nothing, a click out past
      * the page — is not a step. Nothing has been handed to the engine yet, so
      * there is nothing to take back either.
      */
-    if (isEmptyRect(s.dirty)) return
+    if (isEmptyRect(s.dirty)) return false
 
     const at = s.dirty
     // Outside a selection the stroke was cut to nothing as it was drawn, so
@@ -529,7 +557,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     overlay.end(s.shown)
     // Coverage that came to nothing once the selection had cut it, or a fully
     // transparent colour. Neither is a failure and neither is a step.
-    if (patch === null) return
+    if (patch === null) return false
     raster.paste(s.entry.id, patch)
     await raster.owe(s.entry.id)
 
@@ -551,6 +579,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       },
       { alreadyApplied: true },
     )
+    return true
   }
 
   return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLostPointerCapture }

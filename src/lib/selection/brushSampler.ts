@@ -49,6 +49,9 @@ export const DEFAULT_BRUSH_SPACING_RATIO = 0.125
 export interface BrushSampler {
   /** The press. Always yields exactly one dab, at the sample itself. */
   begin(sample: BrushSample): Dab[]
+  /** A press that opens as a straight run from `from` to `to`, unsmoothed:
+   * Shift and a click, drawing on from where the last stroke ended. */
+  beginLine(from: BrushSample, to: BrushSample): Dab[]
   /** A batch of samples since the last call, oldest first. */
   push(samples: BrushSample[]): Dab[]
   /** The release. Unlike `push`, walks straight to this sample's own
@@ -156,6 +159,9 @@ export function createBrushSampler(
 
   return {
     begin: open,
+    beginLine(from, to) {
+      return [...open(from), ...walkTo(condition(to))]
+    },
     push(samples) {
       const dabs: Dab[] = []
       for (const sample of samples) {

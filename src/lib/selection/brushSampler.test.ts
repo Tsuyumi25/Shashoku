@@ -380,3 +380,24 @@ describe('createBrushSampler', () => {
     })
   })
 })
+
+describe('a line from where the last stroke ended', () => {
+  it('runs dab by dab from the start to the end, both included', () => {
+    const sampler = createBrushSampler({ radius: 4, opacity: 1 })
+    const dabs = sampler.beginLine(
+      { x: 0, y: 0, pressure: 1, time: 0 },
+      { x: 100, y: 0, pressure: 1, time: 0 },
+    )
+    expect(dabs[0]).toMatchObject({ x: 0, y: 0 })
+    expect(dabs.at(-1)!.x).toBeGreaterThan(99)
+    expect(dabs.every((d) => d.y === 0)).toBe(true)
+    for (let i = 1; i < dabs.length; i++) expect(dabs[i].x - dabs[i - 1].x).toBeCloseTo(1)
+  })
+
+  it('goes on from the end as a freehand stroke', () => {
+    const sampler = createBrushSampler({ radius: 4, opacity: 1 })
+    sampler.beginLine({ x: 0, y: 0, pressure: 1, time: 0 }, { x: 10, y: 0, pressure: 1, time: 0 })
+    const next = sampler.push([{ x: 10, y: 10, pressure: 1, time: 1 }])
+    expect(next.every((d) => d.x === 10)).toBe(true)
+  })
+})

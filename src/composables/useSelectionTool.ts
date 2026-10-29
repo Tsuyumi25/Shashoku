@@ -5,6 +5,7 @@ import { pressureFrom } from '@/lib/selection/brushInput'
 import { heldSinceStart } from '@/lib/selection/marquee'
 import type { SelectionOp } from '@/lib/selection/mask'
 import type { Point } from '@/lib/selection/rect'
+import { lineStartOn } from '@/lib/selection/strokeEnd'
 import { magicWandRaster } from '@/lib/selection/wand'
 import { maskBrushModeOf, useEditorStore, type CanvasTool } from '@/stores/editorStore'
 import {
@@ -171,7 +172,10 @@ export function useSelectionTool(
     }
     const brushMode = maskBrushModeOf(editor.tool)
     if (brushMode !== null) {
-      selection.beginStroke(target, brushMode, at, pressureFrom(e))
+      const from = e.shiftKey
+        ? lineStartOn(`mask:${brushMode}`, target.page, editor.historyStep)
+        : null
+      selection.beginStroke(target, brushMode, at, pressureFrom(e), from)
       return true
     }
 
