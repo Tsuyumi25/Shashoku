@@ -3,15 +3,21 @@
     Focus never leaves the box being typed into. A press that moved it would
     end the visit under the hand that is still working on it, so every item
     refuses the default of its own mousedown and acts on the click instead.
+    Two quick presses on a stepper are a double click as well, and the frame
+    underneath reads one as "put the caret here" — so it stops at the bar.
     The colour picker is the one thing here that really does want the keyboard;
     it is let through, and the session knows to stay open for it.
   -->
   <div
+    ref="bar"
     class="markup-bar"
     data-markup-toolbar
     :style="placement"
     @pointerdown.stop
     @mousedown.prevent
+    @dblclick.stop
+    @pointerenter="hold"
+    @pointerleave="release"
   >
     <button
       v-if="canCut"
@@ -79,6 +85,7 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, useTemplateRef, watch } from 'vue'
 import { Minus, Plus, Scissors } from '@lucide/vue'
 import type { SteppedField } from '@shared/page/markup'
 import ColorField from '@/components/ColorField.vue'
@@ -92,7 +99,7 @@ import { useMarkupSession } from '@/composables/useMarkupSession'
  * placed by whoever owns the selection and says nothing about where it is
  * standing.
  */
-defineProps<{
+const props = defineProps<{
   /** Where the bar goes, in the coordinates of whatever is placing it. */
   placement: Record<string, string>
   /** Cutting is the canvas's alone: it is about blocks, not about lettering. */
@@ -111,6 +118,62 @@ const emit = defineEmits<{
 }>()
 
 const markup = useMarkupSession()
+
+/*
+ * ⭐ Held where it stood while the pointer is on it. The bar follows the end of
+ * the selection, and a step that resizes the words moves that end — so without
+ * this, the button just pressed slides out from under the cursor and the next
+ * press lands on something else. Measured rather than worked out, because what
+ * moves it is the frame it stands in as much as the words.
+ *
+ * ⚠️ Corrected in the same turn as the move, before anything is painted. Put
+ * right a frame later, the bar stood for one layout where the words had sent
+ * it, and the hover the browser works out after a layout landed on whatever
+ * was under the cursor there — a different item, kept until the mouse moved.
+ * Written straight onto the element for the same reason: a reactive nudge is
+ * another render away.
+ */
+const barEl = useTemplateRef<HTMLElement>('bar')
+let standing: DOMRect | null = null
+let frame = 0
+
+function correct(): void {
+  const el = barEl.value
+  if (el === null || standing === null) return
+  const base = props.placement.transform ?? ''
+  el.style.transform = base
+  const now = el.getBoundingClientRect()
+  // The placement turns the bar upright and scales it evenly, so a step at the
+  // end of its transform is the same step on screen times that one scale.
+  const scale = el.offsetWidth > 0 ? now.width / el.offsetWidth : 1
+  const x = (standing.left - now.left) / scale
+  const y = (standing.top - now.top) / scale
+  el.style.transform = `${base} translate(${x}px, ${y}px)`.trim()
+}
+
+/** What moves the frame without moving the words — a pan — is caught here. */
+function keep(): void {
+  correct()
+  frame = requestAnimationFrame(keep)
+}
+
+function hold(): void {
+  const el = barEl.value
+  if (el === null) return
+  standing = el.getBoundingClientRect()
+  frame = requestAnimationFrame(keep)
+}
+
+function release(): void {
+  cancelAnimationFrame(frame)
+  standing = null
+  const el = barEl.value
+  if (el !== null) el.style.transform = props.placement.transform ?? ''
+}
+
+watch(() => props.placement, correct, { flush: 'post' })
+
+onBeforeUnmount(release)
 
 /**
  * Relative rather than absolute everywhere it can be: a tag written as a
