@@ -4,9 +4,12 @@ import {
   codeSelection,
   parseMarkup,
   plainCaret,
+  stepCode,
+  steppedValue,
   unwrapPlainRange,
   wrapCode,
   type Markup,
+  type SteppedField,
 } from '@shared/page/markup'
 import { shownCodeOf } from '@shared/page/units'
 import {
@@ -25,7 +28,10 @@ import { useProjectStore } from '@/stores/projectStore'
  * selection or every tag inside it taken off, and saying so in one type is what
  * keeps the bar from growing a branch per button.
  */
-export type MarkupAction = { kind: 'wrap'; attrs: string } | { kind: 'clear' }
+export type MarkupAction =
+  | { kind: 'wrap'; attrs: string }
+  | { kind: 'step'; field: SteppedField; dir: 1 | -1 }
+  | { kind: 'clear' }
 
 export interface MarkupSession {
   /** Which block is being typed into, or nothing when no visit is open. */
@@ -37,6 +43,8 @@ export interface MarkupSession {
   markup: ComputedRef<Markup | null>
   codeRange: ComputedRef<TextSelection>
   plainRange: ComputedRef<TextSelection>
+  /** What the selected words' own size and weight tags say, for the bar's steppers. */
+  stepped: ComputedRef<{ size: number; weight: number }>
   writeCode(next: string): void
   writePlain(next: string): void
   selectPlain(anchor: number, focus: number): void
@@ -123,6 +131,16 @@ function createMarkupSession(): MarkupSession {
     { flush: 'post' },
   )
 
+  const stepped = computed(() => {
+    const m = markup.value
+    if (m === null) return { size: 1, weight: 0 }
+    const { from, to } = spanOf(plainRange.value)
+    return {
+      size: steppedValue(m, from, to, 'size'),
+      weight: steppedValue(m, from, to, 'weight'),
+    }
+  })
+
   /** What the list's box typed, which is the stored string itself. */
   function writeCode(next: string): void {
     const at = editing.value
@@ -153,10 +171,11 @@ function createMarkupSession(): MarkupSession {
     if (action.kind === 'wrap') {
       return span.from === span.to ? null : wrapCode(from, span.from, span.to, action.attrs)
     }
-    // Clearing is asked in plain offsets, since what it takes off is every tag
-    // whose words lie inside the selection rather than every tag the code
+    // Clearing and stepping are asked in plain offsets: what they look for is
+    // the tags whose words lie inside the selection, not whatever the code
     // happens to hold between two code offsets.
     const words = { start: plainCaret(m, span.from), end: plainCaret(m, span.to) }
+    if (action.kind === 'step') return stepCode(from, words.start, words.end, action.field, action.dir)
     const cleared = unwrapPlainRange(from, words.start, words.end)
     const after = parseMarkup(cleared)
     return { code: cleared, ...codeSelection(after, words.start, words.end) }
@@ -220,6 +239,7 @@ function createMarkupSession(): MarkupSession {
     markup,
     codeRange,
     plainRange,
+    stepped,
     writeCode,
     writePlain,
     selectPlain,

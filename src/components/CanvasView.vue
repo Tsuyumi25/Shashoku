@@ -181,6 +181,7 @@
             @select-text="(anchor, focus) => markup.selectPlain(anchor, focus)"
             @cut="cutEditedText(object.id)"
             @wrap="markup.apply({ kind: 'wrap', attrs: $event })"
+            @step="(field, dir) => markup.apply({ kind: 'step', field, dir })"
             @clear="markup.apply({ kind: 'clear' })"
             @pointerenter="pointedObjectId = object.id"
             @pointerleave="pointedObjectId = null"

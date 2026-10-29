@@ -9,6 +9,7 @@ import {
   plainOf,
   resolveSpans,
   splitCode,
+  stepCode,
   unwrapPlainRange,
   wrapCode,
   type ResolvedSpan,
@@ -328,5 +329,53 @@ describe('a selection made on the words', () => {
   it('lands an empty selection where typing would continue the previous character', () => {
     const m = parseMarkup('咦<upright>!?</upright>')
     expect(codeSelection(m, 3, 3)).toEqual({ start: 12, end: 12 })
+  })
+})
+
+describe('stepping a size or weight', () => {
+  const step = (code: string, from: number, to: number, field: 'size' | 'weight', dir: 1 | -1) =>
+    stepCode(code, from, to, field, dir)!.code
+
+  it('edits the tag the words already have instead of wrapping another round it', () => {
+    let code = '而且那個也想做'
+    code = step(code, 2, 4, 'size', -1)
+    code = step(code, 2, 4, 'size', -1)
+    expect(code).toBe('而且<size=×0.64>那個</size>也想做')
+  })
+
+  it('comes back to the bare words after as many steps back', () => {
+    let code = '而且那個也想做'
+    for (let i = 0; i < 10; i++) code = step(code, 2, 4, 'size', -1)
+    expect(code).toBe('而且<size=×0.1074>那個</size>也想做')
+    for (let i = 0; i < 10; i++) code = step(code, 2, 4, 'size', 1)
+    expect(code).toBe('而且那個也想做')
+  })
+
+  it('steps weight by one and drops the tag at zero', () => {
+    let code = step('ab', 0, 2, 'weight', 1)
+    expect(code).toBe('<weight=+1>ab</weight>')
+    code = step(code, 0, 2, 'weight', -1)
+    expect(code).toBe('ab')
+  })
+
+  it('nests when the words are only part of what a tag covers', () => {
+    expect(step('<size=×0.8>而且那個</size>', 2, 4, 'size', -1)).toBe(
+      '<size=×0.8>而且<size=×0.8>那個</size></size>',
+    )
+  })
+
+  it('leaves a tag that says more than the one thing alone', () => {
+    expect(step('<size=×0.8 color=#ff0000>ab</size>', 0, 2, 'size', -1)).toBe(
+      '<size=×0.8 color=#ff0000><size=×0.8>ab</size></size>',
+    )
+  })
+
+  it('multiplies a size typed off the ladder', () => {
+    expect(step('<size=×0.9>ab</size>', 0, 2, 'size', -1)).toBe('<size=×0.72>ab</size>')
+  })
+
+  it('selects the same words afterwards', () => {
+    const next = stepCode('而且那個', 2, 4, 'size', -1)!
+    expect(next.code.slice(next.start, next.end)).toBe('那個')
   })
 })

@@ -52,6 +52,7 @@
         :vertical="vertical"
         :color="textStyle.color"
         @wrap="emit('wrap', $event)"
+        @step="(field, dir) => emit('step', field, dir)"
         @clear="emit('clear')"
         @cut="emit('cut')"
       />
@@ -77,6 +78,7 @@ import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import { cutText } from '@/lib/cutText'
 import { isCollapsed, spanOf, type TextSelection } from '@/lib/textSelection'
 import type { LayerEffect } from '@shared/effects/types'
+import type { SteppedField } from '@shared/page/markup'
 import {
   MAX_SCALE_PERCENT,
   MIN_SCALE_PERCENT,
@@ -230,6 +232,8 @@ const emit = defineEmits<{
   cut: []
   /** Put a tag with these attributes round the selected words. */
   wrap: [attrs: string]
+  /** Step the selected words' own size or weight tag once. */
+  step: [field: SteppedField, dir: 1 | -1]
   /** Take every tag off the selected words. */
   clear: []
 }>()

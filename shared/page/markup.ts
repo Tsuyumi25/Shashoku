@@ -446,6 +446,91 @@ export function unwrapPlainRange(code: string, from: number, to: number): string
   return out + code.slice(at)
 }
 
+/** The two tags the bar steps rather than wraps: how big, and how heavy. */
+export type SteppedField = 'size' | 'weight'
+
+/** A size step is a quarter up or a fifth down — the same step, either way. */
+const SIZE_STEP = 1.25
+
+/**
+ * The tag that is these words' own for `field`: it covers exactly them, says
+ * nothing else, and is relative. Innermost first, so a stack of them is
+ * stepped from the one nearest the words. An unnamed tag only — a named one
+ * lends its fields to every later use of the name.
+ */
+function ownTag(m: Markup, from: number, to: number, field: SteppedField): MarkupTag | null {
+  for (let i = m.tags.length - 1; i >= 0; i--) {
+    const tag = m.tags[i]
+    if (tag.name !== null || tag.plainStart !== from || tag.plainEnd !== to) continue
+    const keys = keysOf(tag.fields)
+    if (keys.length !== 1 || keys[0] !== field) continue
+    const { size, weight } = tag.fields
+    if (field === 'size' && size !== undefined && 'scale' in size) return tag
+    if (field === 'weight' && weight !== undefined && 'add' in weight) return tag
+  }
+  return null
+}
+
+/** What the words' own tag for `field` says: a multiple for size, a step count for weight. */
+export function steppedValue(m: Markup, from: number, to: number, field: SteppedField): number {
+  const tag = ownTag(m, from, to, field)
+  const size = tag?.fields.size
+  const weight = tag?.fields.weight
+  if (field === 'size') return size !== undefined && 'scale' in size ? size.scale : 1
+  return weight !== undefined && 'add' in weight ? weight.add : 0
+}
+
+/**
+ * One size step on from `scale`. On the ladder of whole steps it lands on the
+ * next rung, so ten down and ten back up is 1 again rather than whatever the
+ * rounding left; a multiple typed by hand off the ladder is multiplied.
+ */
+function nextScale(scale: number, dir: 1 | -1): number {
+  const rung = Math.round(Math.log(scale) / Math.log(SIZE_STEP))
+  const onLadder = Math.abs(SIZE_STEP ** rung - scale) <= scale * 1e-3
+  return Number(((onLadder ? SIZE_STEP ** rung : scale) * SIZE_STEP ** dir).toPrecision(4))
+}
+
+/**
+ * Step the selected words' size or weight once, in plain offsets, by editing
+ * the tag that is already theirs rather than wrapping another round it. A step
+ * back to where the words started takes the tag away. The words come back
+ * selected, in code offsets.
+ */
+export function stepCode(
+  code: string,
+  from: number,
+  to: number,
+  field: SteppedField,
+  dir: 1 | -1,
+): { code: string; start: number; end: number } | null {
+  if (from === to) return null
+  const m = parseMarkup(code)
+  const tag = ownTag(m, from, to, field)
+  const now = steppedValue(m, from, to, field)
+  const next = field === 'size' ? nextScale(now, dir) : now + dir
+  const fields: MarkupFields = field === 'size' ? { size: { scale: next } } : { weight: { add: next } }
+  const neutral = field === 'size' ? next === 1 : next === 0
+  const opening = `<${fieldTokens(fields).join(' ')}>`
+
+  let out: string
+  if (tag === null) {
+    const at = codeSelection(m, from, to)
+    out = wrapCode(code, at.start, at.end, opening.slice(1, -1)).code
+  } else if (!neutral) {
+    out = code.slice(0, tag.codeStart) + opening + code.slice(tag.codeEnd)
+  } else if (tag.closeStart === null || tag.closeEnd === null) {
+    out = code.slice(0, tag.codeStart) + code.slice(tag.codeEnd)
+  } else {
+    out =
+      code.slice(0, tag.codeStart) +
+      code.slice(tag.codeEnd, tag.closeStart) +
+      code.slice(tag.closeEnd)
+  }
+  const at = codeSelection(parseMarkup(out), from, to)
+  return { code: out, start: at.start, end: at.end }
+}
+
 /** A tag's opening text, written out in full when its own text only borrowed a name. */
 function openingTextOf(m: Markup, tag: MarkupTag): string {
   const own = m.code.slice(tag.codeStart, tag.codeEnd)

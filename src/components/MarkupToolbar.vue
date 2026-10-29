@@ -24,17 +24,27 @@
       剪成一塊
     </button>
 
-    <button
-      v-for="item in TAGS"
-      :key="item.attrs"
-      type="button"
-      class="markup-item"
-      :title="item.title"
-      @click.stop="emit('wrap', item.attrs)"
-    >
+    <!--
+      Steppers rather than presses: each press edits the one tag the words
+      already have, so ten steps down is one tag saying how small, and as many
+      back takes it off again.
+    -->
+    <div v-for="item in STEPPERS" :key="item.field" class="markup-item">
       <span class="markup-key">{{ item.key }}</span>
-      {{ item.label }}
-    </button>
+      <span class="flex-1">{{ item.label }}</span>
+      <button
+        type="button"
+        class="markup-step"
+        :title="item.down"
+        @click.stop="emit('step', item.field, -1)"
+      >
+        <Minus :size="11" />
+      </button>
+      <span class="markup-value">{{ item.shown(markup.stepped.value[item.field]) }}</span>
+      <button type="button" class="markup-step" :title="item.up" @click.stop="emit('step', item.field, 1)">
+        <Plus :size="11" />
+      </button>
+    </div>
 
     <button
       v-if="vertical"
@@ -69,8 +79,10 @@
 </template>
 
 <script setup lang="ts">
-import { Scissors } from '@lucide/vue'
+import { Minus, Plus, Scissors } from '@lucide/vue'
+import type { SteppedField } from '@shared/page/markup'
 import ColorField from '@/components/ColorField.vue'
+import { useMarkupSession } from '@/composables/useMarkupSession'
 
 /**
  * What can be put on a stretch of text, over whichever box is holding it.
@@ -93,21 +105,43 @@ defineProps<{
 
 const emit = defineEmits<{
   wrap: [attrs: string]
+  step: [field: SteppedField, dir: 1 | -1]
   clear: []
   cut: []
 }>()
+
+const markup = useMarkupSession()
 
 /**
  * Relative rather than absolute everywhere it can be: a tag written as a
  * multiple goes on meaning the same thing after the object is resized, which
  * is the point of the object's size being the one the typesetter set.
  */
-const TAGS = [
-  { key: '粗', label: '加粗', title: '把選起來的字加粗', attrs: 'weight=+1' },
-  { key: '細', label: '變細', title: '把選起來的字變細', attrs: 'weight=-1' },
-  { key: '大', label: '放大', title: '把選起來的字放大 1.25 倍', attrs: 'size=×1.25' },
-  { key: '小', label: '縮小', title: '把選起來的字縮成 0.8 倍', attrs: 'size=×0.8' },
-] as const
+const STEPPERS: {
+  field: SteppedField
+  key: string
+  label: string
+  down: string
+  up: string
+  shown: (value: number) => string
+}[] = [
+  {
+    field: 'size',
+    key: '大',
+    label: '字級',
+    down: '縮成 0.8 倍',
+    up: '放大 1.25 倍',
+    shown: (scale) => `×${Number(scale.toPrecision(3))}`,
+  },
+  {
+    field: 'weight',
+    key: '粗',
+    label: '字粗',
+    down: '變細一級',
+    up: '加粗一級',
+    shown: (add) => (add === 0 ? '±0' : add > 0 ? `+${add}` : `${add}`),
+  },
+]
 </script>
 
 <style scoped>
@@ -153,5 +187,23 @@ button.markup-item:hover {
 }
 .markup-color {
   gap: 6px;
+}
+.markup-step {
+  display: flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--muted-foreground);
+}
+.markup-step:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.markup-value {
+  min-width: 3.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 </style>
