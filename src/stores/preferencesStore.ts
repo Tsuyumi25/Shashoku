@@ -74,9 +74,13 @@ export const usePreferencesStore = defineStore('preferences', () => {
     )
   }
 
+  function setUiZoomLevel(level: number) {
+    prefs.uiZoomLevel = clampUiZoomLevel(level)
+  }
+
   /** One step larger or smaller; 0 puts it back as built. */
   function zoomUi(step: 1 | -1 | 0) {
-    prefs.uiZoomLevel = step === 0 ? 0 : clampUiZoomLevel(prefs.uiZoomLevel + step)
+    setUiZoomLevel(step === 0 ? 0 : prefs.uiZoomLevel + step)
   }
 
   const panelStorage: PanelGroupStorage = {
@@ -190,6 +194,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs,
     hydrate,
     zoomUi,
+    setUiZoomLevel,
     flush,
     panelStorage,
     favorites,

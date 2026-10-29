@@ -31,6 +31,8 @@
         <div class="settings-body">
           <FontSettings v-if="active === 'fonts'" />
 
+          <InterfaceSettings v-else-if="active === 'interface'" />
+
           <OcrSettings v-else-if="active === 'ocr'" />
 
           <div v-else-if="active === 'about'">
@@ -60,18 +62,20 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'reka-ui'
-import { Info, ScanText, Type, X } from '@lucide/vue'
+import { Info, Monitor, ScanText, Type, X } from '@lucide/vue'
 import FontSettings from '@/components/FontSettings.vue'
+import InterfaceSettings from '@/components/InterfaceSettings.vue'
 import OcrSettings from '@/components/OcrSettings.vue'
 import { useUiStore } from '@/stores/uiStore'
 import { version as VERSION } from '../../package.json'
 
 const ui = useUiStore()
 
-type TabKey = 'fonts' | 'ocr' | 'about'
+type TabKey = 'fonts' | 'interface' | 'ocr' | 'about'
 
 const TABS: { key: TabKey; title: string; icon: Component }[] = [
   { key: 'fonts', title: '字體', icon: Type },
+  { key: 'interface', title: '介面', icon: Monitor },
   { key: 'ocr', title: '文字辨識', icon: ScanText },
   { key: 'about', title: '關於', icon: Info },
 ]
