@@ -3,8 +3,8 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
 /**
- * What a gesture on the wall does in the editor, whichever surface the wall is
- * standing on — the sidebar of this window or a window of its own.
+ * What a gesture on the wall does in the editor. The wall stands in a window of
+ * its own, so these run here when it says so.
  */
 
 /** Back to the page, with the piece selected where it stands. */

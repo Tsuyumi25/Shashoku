@@ -18,7 +18,7 @@
       {{ scene.currentPageId === null ? '主視窗還沒翻到任何一頁' : '這一頁沒有譯文' }}
     </p>
 
-    <div v-else ref="bodyEl" class="min-h-0 flex-1 overflow-auto" :class="dense ? 'p-1.5' : 'p-4'">
+    <div v-else ref="bodyEl" class="min-h-0 flex-1 overflow-auto p-4">
       <section v-for="group in groups" :key="group.key" class="group">
         <!-- What it means first, as the semantic buckets read; how it looks under it. -->
         <div class="group-head">
@@ -55,7 +55,7 @@
 
         <template v-if="!folded.has(group.key)">
           <!-- Every piece packed tight, each bucket a cluster, the biggest bucket first. -->
-          <div class="flex flex-wrap items-start" :class="dense ? 'gap-1.5' : 'gap-4'">
+          <div class="flex flex-wrap items-start gap-4">
             <div v-for="lane in group.lanes" :key="lane.key" class="cluster">
               <!-- The bucket's name picks the whole bucket, as a row of the semantic buckets did. -->
               <button
@@ -118,8 +118,6 @@ const props = defineProps<{
   scene: WallScene
   /** What the editor has selected, marked where it stands. */
   selected: ReadonlySet<string>
-  /** Tighter margins, for a column rather than a window. */
-  dense?: boolean
 }>()
 const emit = defineEmits<{
   reveal: [pageId: string, id: string]
@@ -171,7 +169,7 @@ const { width: bodyW } = useElementSize(bodyEl)
 /**
  * One factor for every piece, so the largest is at most half the width it
  * stands in. The sizes keep their proportion to each other; only the whole is
- * brought within reach, which is what lets a 300px column hold a 368px shout.
+ * brought within reach, which is what lets a narrow window hold a 368px shout.
  */
 const fit = computed(() => {
   const widest = Math.max(1, ...pieces.value.map((p) => (p.sample?.image.width ?? 40) * p.scale))
