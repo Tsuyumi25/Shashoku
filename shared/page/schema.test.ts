@@ -393,6 +393,18 @@ describe('the effects a node carries', () => {
     }
   })
 
+  /** Turned down to nothing, a stroke keeps its colour for when it is turned up again. */
+  it('round trips a stroke of no width with its colour and position', () => {
+    const resting = { ...STROKE, width: 0 }
+    expect(firstEntry(parseManifest(raw({ ...UPRIGHT, effects: [resting] }))).effects).toEqual([resting])
+  })
+
+  it('refuses a stroke of negative width', () => {
+    expect(() =>
+      parseManifest(raw({ ...UPRIGHT, effects: [{ ...STROKE, width: -1 }] })),
+    ).toThrow(PageParseError)
+  })
+
   it('refuses an effect of a kind it has never heard of', () => {
     expect(() => parseManifest(raw({ ...UPRIGHT, effects: [{ kind: 'glow' }] }))).toThrow(
       PageParseError,

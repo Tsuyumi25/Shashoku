@@ -11,6 +11,16 @@ export function strokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
   return effects.find((e) => e.kind === 'stroke') ?? null
 }
 
+/**
+ * The stroke as it shows: one turned down to no width is held for its colour
+ * and position, and draws as nothing — so anything counting looks counts it
+ * with the objects that have none.
+ */
+export function visibleStrokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
+  const stroke = strokeOf(effects)
+  return stroke && stroke.width > 0 ? stroke : null
+}
+
 function specOf(stroke: StrokeEffect): EngineStrokeSpec {
   return { width: stroke.width, color: stroke.color, position: stroke.position }
 }

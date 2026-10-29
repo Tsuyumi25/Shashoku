@@ -63,8 +63,9 @@ import { useValuePicker } from '@/composables/useValuePicker'
  * own heading above them and its own fields below.
  *
  * Always ready to use. There is no switch: setting a colour, a position or a
- * width on an object without a stroke gives it one, and a width of zero is
- * having none.
+ * width on an object without a stroke gives it one. A width of zero draws
+ * nothing but keeps the colour and position for when it is turned up again;
+ * taking the stroke away altogether is the clear inside its colour picker.
  */
 const props = defineProps<{
   /**
@@ -93,11 +94,8 @@ function commit(next: StrokeEffect | null) {
 }
 
 function onWidth(width: number) {
-  if (width <= 0) {
-    if (stroke.value !== null || props.mixed) commit(null)
-    return
-  }
-  if (!props.mixed && width === stroke.value?.width) return
+  if (width < 0) return
+  if (!props.mixed && width === (stroke.value?.width ?? 0)) return
   commit({ ...shown.value, width })
 }
 

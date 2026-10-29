@@ -59,5 +59,7 @@ describe('valueOf', () => {
     const stroked = obj('x', {}, [], [{ kind: 'stroke', width: 5, color: '#000000', position: 'outside' }] as LayerEffect[])
     expect(valueOf(stroked, 'stroke').label).toBe('#000000 5px')
     expect(valueOf(obj('y', {}), 'stroke').label).toBe('無描邊')
+    const resting = obj('z', {}, [], [{ kind: 'stroke', width: 0, color: '#ffffff', position: 'outside' }] as LayerEffect[])
+    expect(valueOf(resting, 'stroke').key).toBe('none')
   })
 })

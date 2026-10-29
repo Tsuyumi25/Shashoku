@@ -13,8 +13,9 @@ function parseStrokePosition(v: unknown, at: string, fail: Fail): StrokePosition
 
 function parseStrokeEffect(v: Record<string, unknown>, at: string, fail: Fail): StrokeEffect {
   const { width, color, position } = v
-  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0)
-    fail(`${at}.width 必須是正數`)
+  // Zero is a stroke turned down to nothing, kept for its colour and position.
+  if (typeof width !== 'number' || !Number.isFinite(width) || width < 0)
+    fail(`${at}.width 必須是非負數`)
   if (typeof color !== 'string' || color.length === 0)
     fail(`${at}.color 必須是非空字串`)
   return {

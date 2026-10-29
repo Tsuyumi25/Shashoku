@@ -1,4 +1,5 @@
 import type { LayerEffect } from '@shared/effects/types'
+import { visibleStrokeOf } from '@shared/effects/stroke'
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
@@ -83,8 +84,8 @@ export function valueOf(object: WallObject, attribute: WallAttribute): WallValue
       return { key: `${s.fontFamily}|${s.fontStyleName}`, label: named ? `${family} ${s.fontStyleName}` : family }
     }
     case 'stroke': {
-      const stroke = object.effects.find((e) => e.kind === 'stroke')
-      if (!stroke || stroke.kind !== 'stroke') return { key: 'none', label: '無描邊' }
+      const stroke = visibleStrokeOf(object.effects)
+      if (!stroke) return { key: 'none', label: '無描邊' }
       return {
         key: `${stroke.color}|${stroke.width}`,
         label: `${stroke.color} ${stroke.width}px`,

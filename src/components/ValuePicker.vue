@@ -81,6 +81,7 @@ import { useEventListener } from '@vueuse/core'
 import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { blocksOnSide } from '@shared/page/units'
+import { visibleStrokeOf } from '@shared/effects/stroke'
 import type { TextStyle } from '@shared/text-style/types'
 import type { AppearanceTarget } from '@/lib/appearance'
 import type { AmountField, ValueKind } from '@/composables/useValuePicker'
@@ -124,8 +125,7 @@ interface Value {
   amount?: number
 }
 
-const strokeOf = (entry: TextLayerEntry) =>
-  (entry.effects.find((e) => e.kind === 'stroke') as StrokeEffect | undefined) ?? null
+const strokeOf = (entry: TextLayerEntry) => visibleStrokeOf(entry.effects)
 const strokeKey = (stroke: StrokeEffect | null) =>
   stroke ? `${stroke.color}|${stroke.width}|${stroke.position}` : 'none'
 
