@@ -104,6 +104,11 @@ export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
    *
    * Clamped, because the text can have been replaced under a caret that was
    * standing past the end of what replaced it.
+   *
+   * `start` is where a drag began and `end` where it is now, so the two can come
+   * in either order. The field is handed them ordered with a direction: given
+   * end first, it collapses the selection to that end, and a paste or a typed
+   * key then lands beside the words instead of replacing them.
    */
   function setRange(start: number, end = start): void {
     const el = field.value
@@ -111,7 +116,7 @@ export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
     const limit = el.value.length
     const from = Math.max(0, Math.min(start, limit))
     const to = Math.max(0, Math.min(end, limit))
-    el.setSelectionRange(from, to)
+    el.setSelectionRange(Math.min(from, to), Math.max(from, to), to < from ? 'backward' : 'forward')
     publish(from, to)
   }
 
