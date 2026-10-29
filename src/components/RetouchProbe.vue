@@ -72,13 +72,15 @@
 
     <div class="flex flex-wrap gap-1 px-2 pt-1 pb-2">
       <button
+        v-for="px in GROW_STEPS"
+        :key="px"
         type="button"
         class="route-btn"
         :disabled="!hasSelection"
-        title="沿著選區的邊往外推 5 像素，轉角是圓的"
-        @click="growBy5"
+        :title="`沿著選區的邊往外推 ${px} 像素，轉角是圓的`"
+        @click="grow(px)"
       >
-        選區 +5px
+        選區 +{{ px }}px
       </button>
       <button
         type="button"
@@ -123,8 +125,8 @@ import { useOcrStore } from '@/stores/ocrStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
-/** What the probe was written to try. Five is the amount the notes settled on. */
-const GROW_PX = 5
+/** Five is the amount the notes settled on; one is for the edge that is nearly there. */
+const GROW_STEPS = [1, 5] as const
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
@@ -156,10 +158,10 @@ const standing = computed(() => {
   return `${bounds.w}×${bounds.h}`
 })
 
-function growBy5(): void {
+function grow(px: number): void {
   const target = editor.maskTarget
   if (target === null) return
-  selection.grow(target, GROW_PX)
+  selection.grow(target, px)
 }
 </script>
 
