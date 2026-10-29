@@ -43,6 +43,7 @@ import type { FontEntry } from '@shared/fonts/types'
 import { cachedSample, sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
 import { enqueueSample } from '@/lib/sampleQueue'
 import { textProjection } from '@/lib/textProjection'
+import { spanOf, type TextSelection } from '@/lib/textSelection'
 import type { CaretOnScreen } from '@/lib/pinnedInput'
 
 const props = defineProps<{
@@ -70,7 +71,7 @@ const props = defineProps<{
    */
   editing?: boolean
   /** The control's selection, in UTF-16 offsets, while this is the cell. */
-  selection?: { start: number; end: number } | null
+  selection?: TextSelection | null
   /**
    * Bumped on every caret move, so the blink restarts from the bright half.
    *
@@ -165,7 +166,7 @@ function shown(value: number): number {
 const caretBox = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return null
-  const r = projection.value.caret(at.end)
+  const r = projection.value.caret(at.focus)
   return vertical.value
     ? {
         left: `${shown(r.x)}px`,
@@ -189,7 +190,8 @@ const caretBox = computed(() => {
 const selectionBoxes = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return []
-  return projection.value.selection(at.start, at.end).map((box) => ({
+  const { from, to } = spanOf(at)
+  return projection.value.selection(from, to).map((box) => ({
     left: `${shown(box.x)}px`,
     top: `${shown(box.y)}px`,
     width: `${shown(box.width)}px`,
@@ -232,7 +234,7 @@ function onPointerDown(e: PointerEvent) {
   // Capturing keeps the drag alive once the pointer leaves the cell, which is
   // exactly when a selection is being extended past the last character.
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-  anchor = e.shiftKey && props.editing ? (props.selection?.start ?? at) : at
+  anchor = e.shiftKey && props.editing ? (props.selection?.anchor ?? at) : at
   emit('selectText', anchor, at)
 }
 
@@ -270,7 +272,7 @@ function publishCaret(): void {
   if (!props.editing || !at) return
   const rect = boxEl.value?.getBoundingClientRect()
   if (!rect) return
-  const r = projection.value.caret(at.end)
+  const r = projection.value.caret(at.focus)
   emit('caretAt', {
     x: rect.left + shown(r.x),
     y: rect.top + shown(r.y),
@@ -282,7 +284,7 @@ function publishCaret(): void {
 }
 
 watch(
-  () => [props.editing, props.selection?.start, props.selection?.end, props.text, current.value],
+  () => [props.editing, props.selection?.anchor, props.selection?.focus, props.text, current.value],
   publishCaret,
   { flush: 'post' },
 )

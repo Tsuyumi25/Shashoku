@@ -1,5 +1,6 @@
 import { computed, readonly, ref, shallowRef } from 'vue'
 import { pinnedInputBox, type CaretOnScreen, type PinnedBox } from '@/lib/pinnedInput'
+import type { TextSelection } from '@/lib/textSelection'
 
 /**
  * A native control something is being typed into, and where its caret stands.
@@ -21,7 +22,7 @@ import { pinnedInputBox, type CaretOnScreen, type PinnedBox } from '@/lib/pinned
 export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
   const field = shallowRef<HTMLTextAreaElement | null>(null)
 
-  const range = ref<{ start: number; end: number }>({ start: 0, end: 0 })
+  const range = ref<TextSelection>({ anchor: 0, focus: 0 })
 
   /**
    * Bumped whenever the caret moves, so a projection can restart its blink from
@@ -30,17 +31,21 @@ export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
    */
   const moved = ref(0)
 
-  function publish(start: number, end: number): void {
+  function publish(anchor: number, focus: number): void {
     const held = range.value
-    if (held.start === start && held.end === end) return
-    range.value = { start, end }
+    if (held.anchor === anchor && held.focus === focus) return
+    range.value = { anchor, focus }
     moved.value += 1
   }
 
+  /** The field keeps its ends ordered and says which one moves; this undoes that. */
   function read(): void {
     const el = field.value
     if (!el) return
-    publish(el.selectionStart ?? 0, el.selectionEnd ?? 0)
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    if (el.selectionDirection === 'backward') publish(end, start)
+    else publish(start, end)
   }
 
   let pending = 0
@@ -105,17 +110,16 @@ export function createTextEditSurface(options: { onFocus?: () => void } = {}) {
    * Clamped, because the text can have been replaced under a caret that was
    * standing past the end of what replaced it.
    *
-   * `start` is where a drag began and `end` where it is now, so the two can come
-   * in either order. The field is handed them ordered with a direction: given
-   * end first, it collapses the selection to that end, and a paste or a typed
+   * The field is handed the ends ordered with a direction: given the larger
+   * first, it collapses the selection to the smaller, and a paste or a typed
    * key then lands beside the words instead of replacing them.
    */
-  function setRange(start: number, end = start): void {
+  function setRange(anchor: number, focus = anchor): void {
     const el = field.value
     if (!el) return
     const limit = el.value.length
-    const from = Math.max(0, Math.min(start, limit))
-    const to = Math.max(0, Math.min(end, limit))
+    const from = Math.max(0, Math.min(anchor, limit))
+    const to = Math.max(0, Math.min(focus, limit))
     el.setSelectionRange(Math.min(from, to), Math.max(from, to), to < from ? 'backward' : 'forward')
     publish(from, to)
   }

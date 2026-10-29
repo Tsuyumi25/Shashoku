@@ -322,6 +322,7 @@ import { ownsKeyboard } from '@/lib/typingSurface'
 import { codeEditSurface, plainEditSurface, textWriter } from '@/composables/useTextEditSurface'
 import { useMarkupSession } from '@/composables/useMarkupSession'
 import { textareaCaret, textareaSelection } from '@/lib/textareaMirror'
+import { isCollapsed, spanOf } from '@/lib/textSelection'
 import { shownCodeOf } from '@shared/page/units'
 
 const project = useProjectStore()
@@ -710,13 +711,14 @@ watch(
       return
     }
     if (projecting.value) {
-      const caret = textareaCaret(el, at.end)
+      const caret = textareaCaret(el, at.focus)
       codeCaretBox.value = {
         left: `${caret.x}px`,
         top: `${caret.y}px`,
         height: `${caret.height}px`,
       }
-      codeSelectionBoxes.value = textareaSelection(el, at.start, at.end).map((r) => ({
+      const span = spanOf(at)
+      codeSelectionBoxes.value = textareaSelection(el, span.from, span.to).map((r) => ({
         left: `${r.x}px`,
         top: `${r.y}px`,
         width: `${r.width}px`,
@@ -725,9 +727,10 @@ watch(
     }
     // The bar belongs to whichever box owns the selection: a menu over a
     // projection would act on a stretch the user picked somewhere else.
-    const last = projecting.value || at.start === at.end
+    const span = spanOf(at)
+    const last = projecting.value || isCollapsed(at)
       ? undefined
-      : textareaSelection(el, at.start, at.end).at(-1)
+      : textareaSelection(el, span.from, span.to).at(-1)
     barAt.value =
       last === undefined
         ? null

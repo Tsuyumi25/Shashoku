@@ -75,6 +75,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import { cutText } from '@/lib/cutText'
+import { isCollapsed, spanOf, type TextSelection } from '@/lib/textSelection'
 import type { LayerEffect } from '@shared/effects/types'
 import {
   MAX_SCALE_PERCENT,
@@ -198,7 +199,7 @@ const props = defineProps<{
    */
   editing?: boolean
   /** The field's selection, in UTF-16 offsets, while this is the object. */
-  selection?: { start: number; end: number } | null
+  selection?: TextSelection | null
   /**
    * Bumped whenever the caret moves, so the blink can restart from the bright
    * half. A caret that lands mid-blink reads as a keystroke that did not
@@ -470,7 +471,7 @@ const projection = computed(() => {
 const caretBox = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return null
-  const r = projection.value.caret(at.end)
+  const r = projection.value.caret(at.focus)
   return vertical.value
     ? {
         left: `${r.x}px`,
@@ -489,7 +490,8 @@ const caretBox = computed(() => {
 const selectionBoxes = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return []
-  return projection.value.selection(at.start, at.end).map((r) => ({
+  const { from, to } = spanOf(at)
+  return projection.value.selection(from, to).map((r) => ({
     left: `${r.x}px`,
     top: `${r.y}px`,
     width: `${r.width}px`,
@@ -505,15 +507,18 @@ const selectionBoxes = computed(() => {
  */
 const barAt = computed(() => {
   const at = props.selection
-  if (!props.editing || !at || at.start === at.end) return null
-  const last = projection.value.selection(at.start, at.end).at(-1)
+  if (!props.editing || !at || isCollapsed(at)) return null
+  const { from, to } = spanOf(at)
+  const last = projection.value.selection(from, to).at(-1)
   return last ? { x: last.x + last.width, y: last.y + last.height } : null
 })
 
 /** Cutting needs a selection that leaves something on either side of it. */
 const canCut = computed(() => {
   const at = props.selection
-  return at !== null && at !== undefined && cutText(drawn.value.plain, at.start, at.end) !== null
+  if (!at) return false
+  const { from, to } = spanOf(at)
+  return cutText(drawn.value.plain, from, to) !== null
 })
 
 /** A gap between the selection's corner and the bar, in screen pixels. */
@@ -560,7 +565,7 @@ function publishCaret(): void {
   if (!props.editing || !at) return
   const center = centerOnScreen()
   if (!center) return
-  const r = projection.value.caret(at.end)
+  const r = projection.value.caret(at.focus)
   const p = framePxToScreen(r.x, r.y, center, drawn.value.box, props.view.scale, turn.value)
   plainEditSurface.showCaretAt({
     x: p.x,
@@ -577,8 +582,8 @@ function publishCaret(): void {
 watch(
   () => [
     props.editing,
-    props.selection?.start,
-    props.selection?.end,
+    props.selection?.anchor,
+    props.selection?.focus,
     props.code,
     props.textStyle,
     props.x,
@@ -646,7 +651,7 @@ function onTextDown(e: PointerEvent) {
   // Capturing keeps the drag alive once the pointer leaves the frame, which is
   // exactly when a selection is being extended past the last character.
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-  textAnchor = e.shiftKey ? (props.selection?.start ?? at) : at
+  textAnchor = e.shiftKey ? (props.selection?.anchor ?? at) : at
   emit('selectText', textAnchor, at)
 }
 

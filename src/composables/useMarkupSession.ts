@@ -14,6 +14,7 @@ import {
   plainEditSurface,
   textWriter,
 } from '@/composables/useTextEditSurface'
+import { spanOf, type TextSelection } from '@/lib/textSelection'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -26,11 +27,6 @@ import { useProjectStore } from '@/stores/projectStore'
  */
 export type MarkupAction = { kind: 'wrap'; attrs: string } | { kind: 'clear' }
 
-export interface TextRange {
-  start: number
-  end: number
-}
-
 export interface MarkupSession {
   /** Which block is being typed into, or nothing when no visit is open. */
   editing: ComputedRef<{ pageId: string; labelId: string } | null>
@@ -39,8 +35,8 @@ export interface MarkupSession {
   /** The words that string sets, which is what the canvas is showing. */
   plain: ComputedRef<string | null>
   markup: ComputedRef<Markup | null>
-  codeRange: ComputedRef<TextRange>
-  plainRange: ComputedRef<TextRange>
+  codeRange: ComputedRef<TextSelection>
+  plainRange: ComputedRef<TextSelection>
   writeCode(next: string): void
   writePlain(next: string): void
   selectPlain(anchor: number, focus: number): void
@@ -92,18 +88,19 @@ function createMarkupSession(): MarkupSession {
    * sides can be asked about: the field that is writing answers for itself,
    * and the other one is projected onto it.
    */
-  const codeRange = computed<TextRange>(() => {
+  const codeRange = computed<TextSelection>(() => {
     const m = markup.value
     if (textWriter.value === 'code' || m === null) return codeEditSurface.range.value
     const at = plainEditSurface.range.value
-    return codeSelection(m, at.start, at.end)
+    const code = codeSelection(m, at.anchor, at.focus)
+    return { anchor: code.start, focus: code.end }
   })
 
-  const plainRange = computed<TextRange>(() => {
+  const plainRange = computed<TextSelection>(() => {
     const m = markup.value
     if (textWriter.value === 'plain' || m === null) return plainEditSurface.range.value
     const at = codeEditSurface.range.value
-    return { start: plainCaret(m, at.start), end: plainCaret(m, at.end) }
+    return { anchor: plainCaret(m, at.anchor), focus: plainCaret(m, at.focus) }
   })
 
   /**
@@ -121,7 +118,7 @@ function createMarkupSession(): MarkupSession {
       if (editing.value === null) return
       const to = textWriter.value === 'code' ? plainRange.value : codeRange.value
       const surface = textWriter.value === 'code' ? plainEditSurface : codeEditSurface
-      surface.setRange(to.start, to.end)
+      surface.setRange(to.anchor, to.focus)
     },
     { flush: 'post' },
   )
@@ -151,14 +148,15 @@ function createMarkupSession(): MarkupSession {
     plainEditSurface.field.value?.focus({ preventScroll: true })
   }
 
-  function nextCode(from: string, m: Markup, at: TextRange, action: MarkupAction) {
+  function nextCode(from: string, m: Markup, at: TextSelection, action: MarkupAction) {
+    const span = spanOf(at)
     if (action.kind === 'wrap') {
-      return at.start === at.end ? null : wrapCode(from, at.start, at.end, action.attrs)
+      return span.from === span.to ? null : wrapCode(from, span.from, span.to, action.attrs)
     }
     // Clearing is asked in plain offsets, since what it takes off is every tag
     // whose words lie inside the selection rather than every tag the code
     // happens to hold between two code offsets.
-    const words = { start: plainCaret(m, at.start), end: plainCaret(m, at.end) }
+    const words = { start: plainCaret(m, span.from), end: plainCaret(m, span.to) }
     const cleared = unwrapPlainRange(from, words.start, words.end)
     const after = parseMarkup(cleared)
     return { code: cleared, ...codeSelection(after, words.start, words.end) }

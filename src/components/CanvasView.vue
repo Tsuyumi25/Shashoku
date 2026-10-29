@@ -334,6 +334,7 @@ import TranslationCards from '@/components/TranslationCards.vue'
 import { useBrushHud } from '@/composables/useBrushHud'
 import { useCanvasTextEdit } from '@/composables/useCanvasTextEdit'
 import { useMarkupSession } from '@/composables/useMarkupSession'
+import { spanOf } from '@/lib/textSelection'
 import { plainEditSurface } from '@/composables/useTextEditSurface'
 import { useCutText } from '@/composables/useCutText'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
@@ -700,8 +701,8 @@ const { cutSelection } = useCutText()
 function cutEditedText(labelId: string) {
   const pageId = editor.currentPageId
   if (pageId === null) return
-  const { start, end } = markup.plainRange.value
-  cutSelection(pageId, labelId, start, end)
+  const { from, to } = spanOf(markup.plainRange.value)
+  cutSelection(pageId, labelId, from, to)
 }
 
 /**
