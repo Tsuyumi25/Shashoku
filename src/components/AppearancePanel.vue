@@ -5,13 +5,13 @@
         <span class="min-w-0 truncate text-xs text-muted-foreground">{{ scopeLine }}</span>
       </div>
 
-      <p v-if="scope.offPage" class="mb-1.5 px-0.5 text-[10px] text-amber-500">
+      <p v-if="scope.offPage" class="mb-1.5 px-0.5 text-[11px] text-amber-500">
         其中有不在目前頁面的物件
       </p>
 
       <CommonAppearance :targets="targets" />
 
-      <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[10px] text-muted-foreground/60">
+      <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[11px] text-muted-foreground/60">
         選取的種類不同,只有共通的能一起調
       </div>
 

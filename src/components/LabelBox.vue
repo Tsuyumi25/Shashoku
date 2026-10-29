@@ -58,7 +58,7 @@
 
       <div
         v-if="tags.length > 0 && (hovered || inSelection || captioned)"
-        class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[10px] leading-tight whitespace-nowrap text-white select-none"
+        class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[11px] leading-tight whitespace-nowrap text-white select-none"
         :style="captionStyle(counterTurn)"
       >
         <span v-for="tag in tags" :key="tag.name" class="flex items-center gap-1">

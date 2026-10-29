@@ -60,13 +60,13 @@
         :key="stage.repo"
         class="flex items-baseline gap-2 rounded border border-border px-2.5 py-1.5"
       >
-        <span class="w-4 shrink-0 text-[10px] text-muted-foreground">{{ index + 1 }}</span>
+        <span class="w-4 shrink-0 text-[11px] text-muted-foreground">{{ index + 1 }}</span>
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2">
             <span class="text-xs">{{ stage.name }}</span>
-            <span class="truncate text-[10px] text-muted-foreground">{{ stage.job }}</span>
+            <span class="truncate text-[11px] text-muted-foreground">{{ stage.job }}</span>
           </div>
-          <code class="block truncate text-[10px] text-muted-foreground">{{ stage.repo }}</code>
+          <code class="block truncate text-[11px] text-muted-foreground">{{ stage.repo }}</code>
         </div>
       </li>
     </ol>
@@ -117,7 +117,7 @@ const STAGES: { name: string; repo: string; job: string }[] = [
 <style scoped>
 .device-btn {
   padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
 }
 .device-btn + .device-btn {

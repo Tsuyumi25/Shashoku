@@ -108,7 +108,7 @@ const active = ref<TabKey>('fonts')
 }
 .settings-nav-title {
   padding: 0.25rem 0.5rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: var(--muted-foreground);
 }
@@ -118,7 +118,7 @@ const active = ref<TabKey>('fonts')
   gap: 0.4375rem;
   padding: 0.3125rem 0.5rem;
   border-radius: 0.25rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   text-align: left;
   color: var(--muted-foreground);
 }

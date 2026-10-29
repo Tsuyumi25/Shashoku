@@ -261,7 +261,7 @@ function pick(ids: readonly string[], e: MouseEvent) {
   margin-bottom: 0.3rem;
   border-radius: 4px;
   padding: 0.1rem 0.2rem;
-  font-size: 12px;
+  font-size: 13px;
 }
 .group-head:hover {
   background: color-mix(in oklch, var(--secondary) 50%, transparent);
@@ -295,7 +295,7 @@ function pick(ids: readonly string[], e: MouseEvent) {
   border-radius: 3px;
   gap: 0.4rem;
   margin-bottom: 0.3rem;
-  font-size: 11px;
+  font-size: 12px;
   color: #1f1f1f;
 }
 .cluster-label:hover {

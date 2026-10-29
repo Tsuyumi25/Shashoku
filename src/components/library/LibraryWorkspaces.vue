@@ -149,7 +149,7 @@ onMounted(() => {
   height: 1.75rem;
   padding: 0 0.375rem;
   border-radius: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
   white-space: nowrap;
 }
@@ -168,7 +168,7 @@ onMounted(() => {
   height: 1.75rem;
   padding: 0 0.375rem;
   border-radius: 0.25rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   text-align: left;
   cursor: default;
   user-select: none;
@@ -186,7 +186,7 @@ onMounted(() => {
 }
 .lib-count {
   flex-shrink: 0;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
 }

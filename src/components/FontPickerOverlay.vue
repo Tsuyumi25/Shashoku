@@ -132,18 +132,18 @@
           >
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
-                <span class="truncate text-[11px] text-muted-foreground">{{
+                <span class="truncate text-[12px] text-muted-foreground">{{
                   faces[0]!.displayName
                 }}</span>
                 <span
                   v-if="faces[0]!.family === currentFamily"
-                  class="shrink-0 rounded-sm bg-primary/20 px-1 text-[10px] text-primary"
+                  class="shrink-0 rounded-sm bg-primary/20 px-1 text-[11px] text-primary"
                 >
                   目前
                 </span>
                 <span
                   v-if="usedCounts.has(faces[0]!.family)"
-                  class="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                  class="shrink-0 text-[11px] tabular-nums text-muted-foreground"
                   :title="`這一話有 ${usedCounts.get(faces[0]!.family)} 句用這個字型`"
                 >
                   {{ usedCounts.get(faces[0]!.family) }}
@@ -872,7 +872,7 @@ function revealCurrentFamily() {
   border: 1px solid var(--border);
   background: var(--background);
   padding: 0.125rem 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--foreground);
 }
 .weight-step:hover {
@@ -885,7 +885,7 @@ function revealCurrentFamily() {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .action-row {
@@ -900,7 +900,7 @@ function revealCurrentFamily() {
   border: 1px solid var(--border);
   background: var(--background);
   padding: 0.375rem 0.5rem;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--foreground);
 }
@@ -954,7 +954,7 @@ function revealCurrentFamily() {
   border-radius: 0.375rem;
   background: var(--popover);
   color: var(--popover-foreground);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 </style>

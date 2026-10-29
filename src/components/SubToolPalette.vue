@@ -33,7 +33,7 @@
         :class="editor.paintStrokeUpdatesStyle && 'bg-current'"
       />
       <span class="min-w-0 truncate text-left font-medium">更新樣式</span>
-      <kbd class="ml-auto shrink-0 rounded border border-border px-1 text-[10px] font-normal">
+      <kbd class="ml-auto shrink-0 rounded border border-border px-1 text-[11px] font-normal">
         ctrl
       </kbd>
     </button>
@@ -84,7 +84,7 @@
       it.
     -->
     <template v-if="unregistered.length > 0">
-      <div class="mt-2 border-t border-border pt-1.5 pl-1 text-[10px] text-muted-foreground">
+      <div class="mt-2 border-t border-border pt-1.5 pl-1 text-[11px] text-muted-foreground">
         未註冊（無顏色、無補全）
       </div>
       <div class="flex flex-col gap-0.5">
@@ -135,7 +135,7 @@
         @click="onApplyToSelection"
       >
         <span class="block truncate">套用於選取的 {{ scope.objects }} 個</span>
-        <span v-if="scope.meanings > 1" class="mt-0.5 block truncate text-[10px] text-amber-500">
+        <span v-if="scope.meanings > 1" class="mt-0.5 block truncate text-[11px] text-amber-500">
           {{ scope.meanings }} 種組合會被壓成一種
         </span>
       </button>

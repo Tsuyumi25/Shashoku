@@ -173,7 +173,7 @@ const onStart = (e: Event) =>
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
 }
 .field > span:first-child {

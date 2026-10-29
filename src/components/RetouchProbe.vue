@@ -8,7 +8,7 @@
   <div class="shrink-0 border-b border-border">
     <div class="probe-head">
       <span class="text-xs font-medium">動作</span>
-      <span class="ml-auto pr-1 text-[11px] text-muted-foreground">{{ standing }}</span>
+      <span class="ml-auto pr-1 text-[12px] text-muted-foreground">{{ standing }}</span>
     </div>
 
     <div class="flex flex-wrap items-center gap-1 px-2 pt-2">
@@ -178,7 +178,7 @@ function growBy5(): void {
   border-radius: 0.25rem;
   border: 1px solid var(--border);
   padding: 0.125rem 0.375rem;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .route-btn:hover:not(:disabled) {
@@ -207,7 +207,7 @@ function growBy5(): void {
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0.5rem 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .station-bad {

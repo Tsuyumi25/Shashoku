@@ -211,7 +211,7 @@
                 -->
                 <span
                   v-if="(element as Row).kind === 'label'"
-                  class="text-[10px] leading-snug whitespace-pre-wrap text-muted-foreground"
+                  class="text-[11px] leading-snug whitespace-pre-wrap text-muted-foreground"
                   :class="!asideText(element as LabelRow) && 'opacity-50'"
                 >{{ asideText(element as LabelRow) || '—' }}</span>
 
@@ -272,7 +272,7 @@
 
                 <div
                   v-if="(element as Row).kind === 'label' && (element as LabelRow).unit.tags.length > 0"
-                  class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
+                  class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
                 >
                   <span
                     v-for="tag in orderedTags((element as LabelRow).unit.tags)"

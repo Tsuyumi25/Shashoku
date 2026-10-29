@@ -80,7 +80,7 @@ watch([() => props.sample, cw, ch], paint, { flush: 'post' })
   border-radius: 9999px;
   background: oklch(0.6 0.2 25);
   padding: 0 4px;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 14px;
   color: white;
 }

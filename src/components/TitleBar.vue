@@ -195,7 +195,7 @@ async function onSave() {
   height: 1.75rem;
   padding: 0 0.5rem;
   border-radius: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   white-space: nowrap;
   color: var(--muted-foreground);
   outline: none;
@@ -213,7 +213,7 @@ async function onSave() {
   padding: 0 0.625rem;
   border: 1px solid var(--border);
   border-radius: 0.375rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   white-space: nowrap;
   color: var(--muted-foreground);
   outline: none;
@@ -237,7 +237,7 @@ async function onSave() {
 }
 .tb-face {
   padding: 0 0.625rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
 }
 .tb-face + .tb-face {

@@ -207,7 +207,7 @@ async function reveal() {
   height: 1.75rem;
   padding: 0 0.5rem;
   border-radius: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
 }
 .info-btn:hover {

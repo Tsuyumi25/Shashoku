@@ -871,7 +871,7 @@ onMounted(() => {
 .jump-item {
   padding: 0.125rem 0.5rem;
   border-radius: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
   text-decoration: none;
   white-space: nowrap;
@@ -885,7 +885,7 @@ onMounted(() => {
   color: var(--foreground);
 }
 .jump-count {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
 }
@@ -935,12 +935,12 @@ onMounted(() => {
   margin-bottom: 0.375rem;
   padding: 0.0625rem 0.25rem;
   border-radius: 0.1875rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted-foreground);
 }
 .band-count {
   margin-left: 0.25rem;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -957,7 +957,7 @@ onMounted(() => {
   border: 1px dashed color-mix(in oklch, var(--primary) 35%, transparent);
   border-radius: 0.375rem;
   text-align: center;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.6;
   color: var(--muted-foreground);
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;

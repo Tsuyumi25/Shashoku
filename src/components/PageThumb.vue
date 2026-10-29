@@ -17,7 +17,7 @@
 
       <span
         v-if="badgeText"
-        class="absolute inset-x-0 bottom-0 bg-destructive/90 px-1 py-0.5 text-center text-[10px] text-destructive-foreground"
+        class="absolute inset-x-0 bottom-0 bg-destructive/90 px-1 py-0.5 text-center text-[11px] text-destructive-foreground"
       >
         {{ badgeText }}
       </span>

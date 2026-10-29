@@ -141,7 +141,7 @@ onBeforeUnmount(() => listen(false))
   border-radius: 0.25rem;
   padding: 0.3rem 0.5rem;
   text-align: start;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: var(--foreground);
 }
 .menu-item:hover {

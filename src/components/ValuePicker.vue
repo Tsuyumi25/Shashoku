@@ -51,14 +51,14 @@
             <span class="truncate">{{ v.label }}</span>
             <span
               v-if="v.key === currentKey"
-              class="shrink-0 rounded-sm bg-primary/20 px-1 text-[10px] text-primary"
+              class="shrink-0 rounded-sm bg-primary/20 px-1 text-[11px] text-primary"
             >
               目前
             </span>
           </span>
           <span class="flex items-center gap-1.5">
             <span class="rung-bar" :style="{ width: `${barWidth(v.count)}px` }" />
-            <span class="text-[10px] tabular-nums text-muted-foreground">{{ v.count }}</span>
+            <span class="text-[11px] tabular-nums text-muted-foreground">{{ v.count }}</span>
           </span>
         </button>
       </div>
@@ -310,7 +310,7 @@ const barWidth = (count: number) => Math.max(3, 40 * Math.sqrt(count / mostUsed.
   border-radius: 0.25rem;
   padding: 0.25rem 0.5rem;
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
 }
 .rung-sample {
   display: flex;

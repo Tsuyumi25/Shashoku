@@ -265,7 +265,7 @@ function rgbOf(hex: string): string {
   border-radius: 3px;
   background: var(--background);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 .color-input:focus-visible {
@@ -290,7 +290,7 @@ function rgbOf(hex: string): string {
   padding: 4px 8px;
   border-radius: 3px;
   background: var(--secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 .color-clear:hover {
   background: var(--accent);

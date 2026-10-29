@@ -128,7 +128,7 @@ const TAGS = [
   border-radius: 6px;
   background: var(--popover);
   color: var(--popover-foreground);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
   white-space: nowrap;
   pointer-events: auto;
