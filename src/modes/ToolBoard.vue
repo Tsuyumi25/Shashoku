@@ -9,7 +9,7 @@
     was that problem's own confession. With the lists standing on the canvas,
     what is left has a height of its own again.
   -->
-  <div class="flex min-h-0 flex-1 flex-col">
+  <div class="flex min-h-0 flex-col">
     <RetouchProbe />
   </div>
 </template>

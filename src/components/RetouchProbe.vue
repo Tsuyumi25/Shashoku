@@ -7,7 +7,7 @@
   -->
   <div class="shrink-0 border-b border-border">
     <div class="probe-head">
-      <span class="text-xs font-medium">修圖(試作)</span>
+      <span class="text-xs font-medium">動作</span>
       <span class="ml-auto pr-1 text-[11px] text-muted-foreground">{{ standing }}</span>
     </div>
 

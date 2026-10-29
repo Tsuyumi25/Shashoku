@@ -16,30 +16,18 @@
             a trip to the other side.
           -->
           <!--
-            Values to give the selection above, verbs to run below. Which
-            property's values is asked for by name from the appearance panel;
-            the font stays mounted so the picker keeps its catalogue and scroll.
+            The values to give the selection, the whole column. Which property's
+            values is asked for by name from the appearance panel; the font
+            stays mounted so the picker keeps its catalogue and scroll.
           -->
-          <SplitterGroup
-            v-show="ui.view === 'editor'"
-            direction="vertical"
-            class="min-h-0 flex-1"
-            auto-save-id="translate:left:v1"
-            :storage="preferences.panelStorage"
-          >
-            <SplitterPanel :order="1" :default-size="65" :min-size="20" class="flex min-h-0">
-              <div v-show="valuePicker.shown.value === 'font'" class="flex min-w-0 flex-1 flex-col">
-                <FontPickerOverlay />
-              </div>
-              <div v-if="valuePicker.shown.value !== 'font'" class="flex min-w-0 flex-1 flex-col">
-                <ValuePicker :kind="valuePicker.shown.value" />
-              </div>
-            </SplitterPanel>
-            <ResizeHandle vertical />
-            <SplitterPanel :order="2" :default-size="35" :min-size="10" class="flex min-h-0 flex-col">
-              <ToolBoard />
-            </SplitterPanel>
-          </SplitterGroup>
+          <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1">
+            <div v-show="valuePicker.shown.value === 'font'" class="flex min-w-0 flex-1 flex-col">
+              <FontPickerOverlay />
+            </div>
+            <div v-if="valuePicker.shown.value !== 'font'" class="flex min-w-0 flex-1 flex-col">
+              <ValuePicker :kind="valuePicker.shown.value" />
+            </div>
+          </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -105,7 +93,6 @@ import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import { useWallPublisher } from '@/composables/useWallPublisher'
-import ToolBoard from '@/modes/ToolBoard.vue'
 import ValuePicker from '@/components/ValuePicker.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
