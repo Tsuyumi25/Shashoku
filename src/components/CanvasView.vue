@@ -15,10 +15,7 @@
   >
     <template v-if="currentFile && pageReady">
       <div :style="stageStyle">
-        <div
-          class="page-checker"
-          :style="{ width: `${editor.viewContentSize.w}px`, height: `${editor.viewContentSize.h}px` }"
-        />
+        <div class="page-checker" :style="checkerStyle" />
       </div>
 
       <!--
@@ -323,7 +320,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import { useEventListener, useResizeObserver } from '@vueuse/core'
+import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
@@ -830,6 +827,26 @@ const containerRef = useTemplateRef('containerRef')
  * keep a mark screen-sized.
  */
 const stageStyle = computed(() => stageStyleFor(view))
+
+const { pixelRatio } = useDevicePixelRatio()
+
+/**
+ * One screen pixel short of the page on every side. The checker and the page
+ * are drawn separately, so a page edge that falls inside a screen pixel leaves
+ * both partly covering it — and the checker shows through an opaque page as a
+ * grey seam. Inset, nothing of it is left under the edge; what is lost is a
+ * pixel's width of checker under a page that is transparent at its very rim.
+ */
+const checkerStyle = computed(() => {
+  const inset = 1 / (pixelRatio.value * view.scale)
+  return {
+    position: 'relative' as const,
+    left: `${inset}px`,
+    top: `${inset}px`,
+    width: `${Math.max(0, editor.viewContentSize.w - 2 * inset)}px`,
+    height: `${Math.max(0, editor.viewContentSize.h - 2 * inset)}px`,
+  }
+})
 
 /**
  * ⚠️ The viewport's corner, not the stage's — the stage travels with the view,

@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
+import { useDevicePixelRatio } from '@vueuse/core'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownCodeOf } from '@shared/page/units'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -70,7 +71,9 @@ const props = defineProps<{
   overlay?: StrokeOverlay
 }>()
 
-const dpr = window.devicePixelRatio || 1
+// Live, not read once: the interface's zoom changes it under a mounted run, and
+// a canvas still sized for the old ratio is stretched to fit, every edge softened.
+const { pixelRatio } = useDevicePixelRatio()
 
 const raster = useRasterStore()
 /**
@@ -213,6 +216,7 @@ function paint() {
     cancelAnimationFrame(frame)
     frame = null
   }
+  const dpr = pixelRatio.value
   const w = Math.max(1, Math.round(props.container.w * dpr))
   const h = Math.max(1, Math.round(props.container.h * dpr))
   if (cv.width !== w || cv.height !== h) {
@@ -327,7 +331,11 @@ watch(() => raster.revision, schedulePaint, { flush: 'sync' })
 /** The stroke on this run's layer, which moves for the same reason and as often. */
 watch(() => stroke.revision, schedulePaint)
 
-watch(() => [props.view, props.container, props.place] as const, schedulePaint, { deep: true })
+watch(
+  () => [props.view, props.container, props.place, pixelRatio.value] as const,
+  schedulePaint,
+  { deep: true },
+)
 
 /**
  * Nothing above draws a run that has just appeared: every watch here fires on a
