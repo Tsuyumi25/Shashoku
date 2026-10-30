@@ -5,7 +5,7 @@ import type {
   TextLayerEntry,
   TranslationUnit,
 } from '@shared/page/types'
-import { unitOfBlock } from '@shared/page/units'
+import { placeOfBlock, unitOfBlock } from '@shared/page/units'
 import { generateId } from '@shared/page/schema'
 import { cloneEffects } from '@shared/effects/clone'
 import { pageStack } from '@shared/page/stack'
@@ -28,7 +28,12 @@ import {
 import { effectedFrame } from '@/lib/layerEffects'
 import { EMPTY_RECT, clampToPage, isEmptyRect, unionRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
-import { useProjectStore, type RemovedEntry, type RemovedTranslation } from '@/stores/projectStore'
+import {
+  useProjectStore,
+  type RemovedEntry,
+  type RemovedTranslation,
+  type SideWords,
+} from '@/stores/projectStore'
 
 /**
  * Merging layers, and duplicating one.
@@ -304,12 +309,17 @@ export function useMergeLayers() {
   }
 
   /**
+   * ⭐ A text block's copy is another block of the same translation, read right
+   * after the one it copies and saying the same words — Ctrl+J and Alt with a
+   * drag both copy what was pressed and nothing else. `wholeUnit` is the other
+   * question, a second translation copied whole, asked from the object's menu.
+   *
    * `id` names what to copy when it is not the cursor; `keepSelection` leaves
    * the selection where it is rather than moving it onto the copy — Alt and a
    * drag goes on holding what the hand pressed.
    */
   async function duplicateLayer(
-    opts: { id?: string; keepSelection?: boolean } = {},
+    opts: { id?: string; keepSelection?: boolean; wholeUnit?: boolean } = {},
   ): Promise<void> {
     const open = openPage()
     const id = opts.id ?? editor.cursorId
@@ -321,7 +331,9 @@ export function useMergeLayers() {
     const clone: Clone = { entry: source, files: [], texts: [] }
     const copy = cloneEntry(source, clone)
     if (copy.kind !== 'group') copy.locked = false
-    const { units, extra } = copyUnits(open.page, clone)
+    const { units, extra } = opts.wholeUnit
+      ? copyUnits(open.page, clone)
+      : { units: [], extra: [] as TextLayerEntry[] }
 
     if (clone.files.length > 0) {
       await project.flush()
@@ -335,6 +347,25 @@ export function useMergeLayers() {
     const at = [...path.slice(0, -1), path[path.length - 1] + 1]
     const originals = new Map(clone.texts.map(([was, now]) => [now, was]))
 
+    // Each copied block joins its original's translation: the words as they
+    // stood, kept for undo, and as they stand once it is in.
+    const joined: Array<{ was: string; before: SideWords; after: SideWords }> = []
+    const joinTranslations = () => {
+      if (opts.wholeUnit) return
+      for (const [was, now] of clone.texts) {
+        const before = project.sideWordsOf(open.page, was)
+        if (before === undefined || !project.addMemberAfter(open.page, was, now)) continue
+        const after = project.sideWordsOf(open.page, was)!
+        const page = project.pageById(open.page)?.page
+        const place = page === undefined ? undefined : placeOfBlock(page, was)
+        if (after.pieces && place !== undefined) {
+          after.pieces.splice(place.at + 1, 0, [...(after.pieces[place.at] ?? [])])
+        }
+        project.setSideWords(open.page, was, after)
+        joined.push({ was, before, after })
+      }
+    }
+
     let removed: RemovedEntry | null = null
     let leftovers: RemovedTranslation[] = []
     editor.pushCommand({
@@ -342,6 +373,7 @@ export function useMergeLayers() {
       do: () => {
         if (removed === null) {
           project.addLayer(open.page, copy, at)
+          joinTranslations()
           // The other side's twins, each above the block it copies.
           for (const block of extra) {
             const live = project.pageById(open.page)?.page.layers ?? []
@@ -370,10 +402,12 @@ export function useMergeLayers() {
             )
           }
           project.restoreEntry(removed)
+          for (const { was, after } of joined) project.setSideWords(open.page, was, after)
         }
       },
       undo: () => {
         removed = project.removeEntry(copy.id)
+        for (const { was, before } of [...joined].reverse()) project.setSideWords(open.page, was, before)
         // A twin unit with blocks outside the copied entry is still standing.
         leftovers = units.flatMap(({ unit }) => project.deleteLabel(open.page, unit.id) ?? [])
       },

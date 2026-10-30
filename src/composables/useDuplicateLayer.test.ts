@@ -62,20 +62,77 @@ const lettering = (project: Project) => unit(project).translation.members
 /** The translation the copy made: the one that is not `u`. */
 const twin = (project: Project) => page(project).translationUnits.find((u) => u.id !== 'u')!
 
-/** The block the copy of `t` is. */
-const copyOfT = (project: Project) => twin(project).translation.members[0]
+/** The block the menu's copy of `t` is, in the second translation. */
+const twinOfT = (project: Project) => twin(project).translation.members[0]
+
+/** The block Ctrl+J made of `t`: the one after it in its own translation. */
+const copyOfT = (project: Project) => lettering(project).find((id) => id !== 't')!
 
 beforeEach(() => setActivePinia(createPinia()))
 
 /**
- * ⭐ A copy is a second translation, whole: both sides, its own proposals, read
- * right after the one it came from.
+ * ⭐ Ctrl+J and Alt with a drag copy the block pressed and nothing else: another
+ * block of the same translation, read right after it, saying the same words.
  */
 describe('copying a block of lettering', () => {
-  it('makes a second translation, read right after the original', async () => {
+  it('joins its own translation, right after the block it copies', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
+
+    expect(page(project).translationUnits).toHaveLength(1)
+    expect(lettering(project)).toEqual(['t', copyOfT(project)])
+    expect(unit(project).translation.separators).toEqual([''])
+    expect(page(project).readingOrder).toEqual(['u'])
+  })
+
+  it('says the same words, its own lines when nothing is chosen', async () => {
+    const { project, merge } = open(['轟隆'])
+
+    await merge.duplicateLayer()
+
+    expect(shownLinesOf(page(project), project.blockById(PAGE, copyOfT(project))!)).toEqual(['轟隆'])
+  })
+
+  it('says the same words when they come from a chosen proposal, which stays chosen', async () => {
+    const { project, merge } = open([])
+    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
+    unit(project).chosen = 'c'
+
+    await merge.duplicateLayer()
+
+    expect(unit(project).chosen).toBe('c')
+    expect(shownLinesOf(page(project), project.blockById(PAGE, copyOfT(project))!)).toEqual(['好痛！'])
+    expect(shownLinesOf(page(project), project.blockById(PAGE, 't')!)).toEqual(['好痛！'])
+  })
+
+  it('takes the block and its piece back out when undone, and puts them back on redo', async () => {
+    const { project, editor, merge } = open([])
+    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
+    unit(project).chosen = 'c'
+
+    await merge.duplicateLayer()
+    const made = JSON.parse(JSON.stringify(unit(project)))
+    editor.undo()
+
+    expect(lettering(project)).toEqual(['t'])
+    expect(unit(project).candidates[0]!.pieces).toEqual([['好痛！']])
+    expect(unit(project).translation.separators).toEqual([])
+
+    editor.redo()
+    expect(unit(project)).toEqual(made)
+  })
+})
+
+/**
+ * ⭐ The object menu's copy is a second translation, whole: both sides, its own
+ * proposals, read right after the one it came from.
+ */
+describe('copying a whole translation', () => {
+  it('makes a second translation, read right after the original', async () => {
+    const { project, merge } = open(['轟隆'])
+
+    await merge.duplicateLayer({ wholeUnit: true })
 
     expect(page(project).translationUnits).toHaveLength(2)
     expect(page(project).readingOrder).toEqual(['u', twin(project).id])
@@ -86,7 +143,7 @@ describe('copying a block of lettering', () => {
   it('copies the artwork side along with it', async () => {
     const { project, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
 
     const [source] = twin(project).source.members
     expect(source).not.toBe('s')
@@ -96,7 +153,7 @@ describe('copying a block of lettering', () => {
   it('leaves no block the page cannot say anything about', async () => {
     const { project, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
 
     const claimed = new Set(
       page(project).translationUnits.flatMap((u) => [...u.source.members, ...u.translation.members]),
@@ -116,9 +173,9 @@ describe('copying a block of lettering', () => {
     unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
     unit(project).chosen = 'c'
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
 
-    const copy = project.blockById(PAGE, copyOfT(project))!
+    const copy = project.blockById(PAGE, twinOfT(project))!
     expect(shownLinesOf(page(project), copy)).toEqual(['好痛！'])
     expect(twin(project).chosen).not.toBe('c')
   })
@@ -128,8 +185,8 @@ describe('copying a block of lettering', () => {
     unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
     unit(project).chosen = 'c'
 
-    await merge.duplicateLayer()
-    project.updateLabelText(PAGE, copyOfT(project), '不痛')
+    await merge.duplicateLayer({ wholeUnit: true })
+    project.updateLabelText(PAGE, twinOfT(project), '不痛')
 
     expect(shownLinesOf(page(project), project.blockById(PAGE, 't')!)).toEqual(['好痛！'])
   })
@@ -137,7 +194,7 @@ describe('copying a block of lettering', () => {
   it('takes the whole second translation back out when it is undone', async () => {
     const { project, editor, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
     editor.undo()
 
     expect(page(project).translationUnits.map((u) => u.id)).toEqual(['u'])
@@ -148,7 +205,7 @@ describe('copying a block of lettering', () => {
   it('puts it back the same on redo', async () => {
     const { project, editor, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
     const made = JSON.parse(JSON.stringify(twin(project)))
     editor.undo()
     editor.redo()
@@ -164,18 +221,18 @@ describe('copying a block of lettering', () => {
   it('gives the copy a body of its own, so moving it leaves the original where it was', async () => {
     const { project, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
-    project.moveLabel(PAGE, copyOfT(project), 900, 40)
+    await merge.duplicateLayer({ wholeUnit: true })
+    project.moveLabel(PAGE, twinOfT(project), 900, 40)
 
-    expect(project.blockById(PAGE, copyOfT(project))!.body).toMatchObject({ x: 900, y: 40 })
+    expect(project.blockById(PAGE, twinOfT(project))!.body).toMatchObject({ x: 900, y: 40 })
     expect(project.blockById(PAGE, 't')!.body).toMatchObject({ x: 0, y: 0 })
   })
 
   it('gives it a style of its own, so restyling one leaves the other alone', async () => {
     const { project, merge } = open(['轟隆'])
 
-    await merge.duplicateLayer()
-    const copy = copyOfT(project)
+    await merge.duplicateLayer({ wholeUnit: true })
+    const copy = twinOfT(project)
     project.setLabelStyle(PAGE, copy, { ...project.blockById(PAGE, copy)!.body.style, fontSizePx: 96 })
 
     expect(project.blockById(PAGE, 't')!.body.style.fontSizePx).not.toBe(96)
@@ -186,7 +243,7 @@ describe('copying a block of lettering', () => {
     const { project, editor, merge } = open(['轟隆'])
     editor.selectOnly('s')
 
-    await merge.duplicateLayer()
+    await merge.duplicateLayer({ wholeUnit: true })
 
     expect(unit(project).source.members).toEqual(['s'])
     expect(twin(project).translation.members).toHaveLength(1)

@@ -318,6 +318,8 @@
       Outside the page's branch: a refusal is worth saying whether or not there
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
+    <CanvasMenu :at="objectMenu?.at ?? null" :items="OBJECT_MENU" @pick="onObjectMenu" @close="objectMenu = null" />
+
     <PropertyWheel
       v-if="wheelAt !== null"
       :at="wheelAt"
@@ -335,6 +337,7 @@ import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch }
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import PropertyWheel from '@/components/PropertyWheel.vue'
+import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import { logActivity } from '@/lib/activityLog'
 import { useValuePicker, type ValueKind } from '@/composables/useValuePicker'
 import { useMergeLayers } from '@/composables/useMergeLayers'
@@ -683,18 +686,44 @@ const wheelAt = ref<{ x: number; y: number } | null>(null)
 const wheelOrigin = ref({ left: 0, top: 0 })
 
 /**
- * The ring acts on the selection, so pressing it over an object that is not
- * part of the selection makes that object the selection first — the object
- * under the hand is the one a reader means.
+ * The right button means two things by where it lands. Over a text object it is
+ * that object's menu — the things done to a translation as a whole; anywhere
+ * else it is the ring of properties for whatever is selected. The ring never
+ * opens over a text object, so which of the two comes up is never in doubt.
+ *
+ * Raster layers are not asked: the base map covers the whole page, and taking
+ * it as the object under the hand would leave the ring nowhere to open.
  */
-function openWheel(e: PointerEvent) {
-  const pointed = pointedObjectId.value
-  if (pointed !== null && !editor.isSelected(pointed)) editor.selectOnly(pointed)
-  if (editor.selectedIds.size === 0) return
+function onRightPress(e: PointerEvent) {
   const rect = containerRef.value?.getBoundingClientRect()
   if (!rect) return
+  const pointed = pointedObjectId.value
+  if (pointed !== null) {
+    if (!editor.isSelected(pointed)) editor.selectOnly(pointed)
+    objectMenu.value = { id: pointed, at: { x: e.clientX, y: e.clientY } }
+    return
+  }
+  if (editor.selectedIds.size === 0) return
   wheelOrigin.value = { left: rect.left, top: rect.top }
   wheelAt.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+/** An object's own menu, and which object it is for. */
+const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null)
+
+/**
+ * A copy of the whole translation, both sides, read right after the original —
+ * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
+ */
+const OBJECT_MENU: MenuItem[] = [{ id: 'duplicate-unit', label: '製作副本（整句）' }]
+
+function onObjectMenu(pick: string) {
+  const at = objectMenu.value
+  objectMenu.value = null
+  if (at === null || pick !== 'duplicate-unit') return
+  void merge.duplicateLayer({ id: at.id, wholeUnit: true }).catch((err: unknown) =>
+    console.error('duplicate failed', err),
+  )
 }
 
 function chooseFromWheel(kind: ValueKind) {
@@ -1681,7 +1710,7 @@ function onPointerDown(e: PointerEvent) {
     return
   }
   if (e.button === 2 && !e.altKey) {
-    openWheel(e)
+    onRightPress(e)
     return
   }
   if (e.button !== 0) {
@@ -1771,23 +1800,10 @@ function onPointerDown(e: PointerEvent) {
  * made where the object stands and the drag goes on moving the object pressed,
  * so the picture is the same either way and nothing has to wait for a copy's
  * pixels before the hand can move. Pressed on part of a selection, every member
- * is copied.
- *
- * ⚠️ Once per translation. Copying a block copies the whole translation it
- * belongs to, every block of it, so a selection holding two blocks of one
- * translation asked for it twice and left two copies stacked where it stood.
+ * is copied — each one block, joining its own translation.
  */
 function leaveCopiesOf(pressed: readonly string[]): void {
-  const asked = pressed.length === 1 && editor.isSelected(pressed[0]) ? [...editor.selectedIds] : pressed
-  const page = editor.currentPageId === null ? undefined : project.pageById(editor.currentPageId)?.page
-  const seen = new Set<string>()
-  const ids = asked.filter((id) => {
-    const unit = page === undefined ? undefined : placeOfBlock(page, id)?.unit.id
-    if (unit === undefined) return true
-    if (seen.has(unit)) return false
-    seen.add(unit)
-    return true
-  })
+  const ids = pressed.length === 1 && editor.isSelected(pressed[0]) ? [...editor.selectedIds] : pressed
   for (const id of ids) {
     void merge.duplicateLayer({ id, keepSelection: true }).catch((err: unknown) =>
       console.error('duplicate failed', err),
