@@ -277,7 +277,7 @@ useEventListener(window, 'keydown', (e) => {
     if (e.repeat) return
     const lift = pixels.liftsSelection.value
       ? pixels.liftSelection()
-      : merge.duplicateLayer()
+      : merge.duplicateLayer({})
     void lift.catch((err: unknown) => console.error('duplicate failed', err))
   }
 })

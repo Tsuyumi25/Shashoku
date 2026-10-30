@@ -303,9 +303,16 @@ export function useMergeLayers() {
     return { units, extra }
   }
 
-  async function duplicateLayer(): Promise<void> {
+  /**
+   * `id` names what to copy when it is not the cursor; `keepSelection` leaves
+   * the selection where it is rather than moving it onto the copy — Alt and a
+   * drag goes on holding what the hand pressed.
+   */
+  async function duplicateLayer(
+    opts: { id?: string; keepSelection?: boolean } = {},
+  ): Promise<void> {
     const open = openPage()
-    const id = editor.cursorId
+    const id = opts.id ?? editor.cursorId
     if (open === null || id === null) return
     const path = pathOf(open.layers, id)
     const source = project.entryById(id)
@@ -371,7 +378,7 @@ export function useMergeLayers() {
         leftovers = units.flatMap(({ unit }) => project.deleteLabel(open.page, unit.id) ?? [])
       },
     })
-    editor.selectOnly(copy.id)
+    if (!opts.keepSelection) editor.selectOnly(copy.id)
   }
 
   return {

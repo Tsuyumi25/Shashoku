@@ -6,6 +6,7 @@
     :class="[canvasCursor]"
     @wheel.prevent="onWheel"
     @pointerdown="onPointerDown"
+    @pointerdown.capture="onAltPress"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
@@ -158,6 +159,7 @@
           <LabelBox
             v-for="object in objects"
             :key="object.id"
+            :data-object-id="object.id"
             :pointer="framesTakePointer ? 'box' : 'none'"
             :framed="connecting || painting"
             :handles="!connecting && !painting && groupFrame === null"
@@ -335,6 +337,7 @@ import Notice from '@/components/Notice.vue'
 import PropertyWheel from '@/components/PropertyWheel.vue'
 import { logActivity } from '@/lib/activityLog'
 import { useValuePicker, type ValueKind } from '@/composables/useValuePicker'
+import { useMergeLayers } from '@/composables/useMergeLayers'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
@@ -673,6 +676,7 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
  * label list's job.
  */
 const valuePicker = useValuePicker()
+const merge = useMergeLayers()
 
 /** Where the right button's ring of properties stands, or null when it is down. */
 const wheelAt = ref<{ x: number; y: number } | null>(null)
@@ -1751,6 +1755,7 @@ function onPointerDown(e: PointerEvent) {
     return
   }
   onSelectObject(hit, e.shiftKey)
+  if (e.altKey && editor.tool === 'select') leaveCopiesOf([hit])
   el.setPointerCapture(e.pointerId)
   layerDrag.value = {
     id: hit,
@@ -1759,6 +1764,48 @@ function onPointerDown(e: PointerEvent) {
     grab: at,
     engaged: false,
   }
+}
+
+/**
+ * Alt and a drag leaves a copy behind, as Photoshop's move does. The copy is
+ * made where the object stands and the drag goes on moving the object pressed,
+ * so the picture is the same either way and nothing has to wait for a copy's
+ * pixels before the hand can move. Pressed on part of a selection, every member
+ * is copied.
+ *
+ * ⚠️ Once per translation. Copying a block copies the whole translation it
+ * belongs to, every block of it, so a selection holding two blocks of one
+ * translation asked for it twice and left two copies stacked where it stood.
+ */
+function leaveCopiesOf(pressed: readonly string[]): void {
+  const asked = pressed.length === 1 && editor.isSelected(pressed[0]) ? [...editor.selectedIds] : pressed
+  const page = editor.currentPageId === null ? undefined : project.pageById(editor.currentPageId)?.page
+  const seen = new Set<string>()
+  const ids = asked.filter((id) => {
+    const unit = page === undefined ? undefined : placeOfBlock(page, id)?.unit.id
+    if (unit === undefined) return true
+    if (seen.has(unit)) return false
+    seen.add(unit)
+    return true
+  })
+  for (const id of ids) {
+    void merge.duplicateLayer({ id, keepSelection: true }).catch((err: unknown) =>
+      console.error('duplicate failed', err),
+    )
+  }
+}
+
+/**
+ * Text objects are pressed on their own frames, which stop the press before it
+ * reaches the canvas's handler; this hears it on the way down.
+ */
+function onAltPress(e: PointerEvent): void {
+  if (!e.altKey || e.button !== 0 || editor.tool !== 'select') return
+  if (!(e.target instanceof Element)) return
+  const id = e.target.closest<HTMLElement>('[data-object-id]')?.dataset.objectId
+  if (id === undefined || editor.isLayerLocked(id)) return
+  if (!editor.isSelected(id)) editor.selectOnly(id)
+  leaveCopiesOf([id])
 }
 
 /**

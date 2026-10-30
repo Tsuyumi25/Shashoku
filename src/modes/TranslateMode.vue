@@ -222,7 +222,7 @@ function onMerge() {
 // The same fork the key takes, so the button and Ctrl+J cannot come to mean
 // two different things.
 function onDuplicate() {
-  const copy = pixels.liftsSelection.value ? pixels.liftSelection() : duplicateLayer()
+  const copy = pixels.liftsSelection.value ? pixels.liftSelection() : duplicateLayer({})
   void copy.catch((err: unknown) => console.error('duplicate failed', err))
 }
 

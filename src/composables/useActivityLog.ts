@@ -87,7 +87,13 @@ export function useActivityLog(): void {
     'pointerdown',
     (e: PointerEvent) => {
       if (panning || e.button === 1) return
-      logActivity('press', { button: e.button, shift: e.shiftKey || undefined, ...describe(e.target) })
+      logActivity('press', {
+        button: e.button,
+        shift: e.shiftKey || undefined,
+        alt: e.altKey || undefined,
+        ctrl: e.ctrlKey || undefined,
+        ...describe(e.target),
+      })
     },
     { capture: true },
   )
