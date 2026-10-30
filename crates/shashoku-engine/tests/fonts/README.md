@@ -27,6 +27,19 @@ Both versions are written down because the command alone does not settle what
 comes out: a different release of either would produce different bytes, and the
 tests measure bytes.
 
+## A face whose line stops short of its descenders
+
+`Mplus1-Regular.shallow.subset.otf` is that same subset with one bit flipped —
+the edit is one bit, the file is not, since fonttools 4.61.1 writes every table
+back out on save:
+USE_TYPO_METRICS (bit 7 of `OS/2.fsSelection`), so the line takes the typo
+descender of 120 units while the `g` reaches 220. That is how Taipei Sans TC
+Beta is built, and what the frame has to hold anyway.
+
+    f = TTFont("Mplus1-Regular.subset.otf")
+    f["OS/2"].fsSelection |= 1 << 7
+    f.save("Mplus1-Regular.shallow.subset.otf")
+
 ## Two faces without a vertical form
 
 The column fallback tests need faces that leave characters out of `vert`, which

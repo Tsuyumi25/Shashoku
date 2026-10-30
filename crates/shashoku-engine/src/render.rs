@@ -692,7 +692,6 @@ fn build_horizontal_path(
         .map(|line| line.baseline - line.ascent + line.height)
         .fold(0.0, f32::max);
     let w = (max_width.ceil() as u32).max(1) + padding * 2;
-    let h = (content_h.ceil() as u32).max(1) + padding * 2;
 
     let outlines = sk_font.outline_glyphs();
     let mut groups = GlyphGroups::default();
@@ -734,6 +733,15 @@ fn build_horizontal_path(
 
     let baseline = origin_y + lines[0].baseline;
     let (path, groups) = groups.finish();
+    // Down to the lowest ink as well as the line box: some faces' metrics stop
+    // above their own descenders — Taipei Sans TC Beta's line descends 123
+    // units and its `g` 249. Only downward, since a horizontal run hangs from
+    // its top edge and growing there would move every glyph.
+    let ink_h = path
+        .as_ref()
+        .and_then(|p| p.compute_tight_bounds())
+        .map_or(0.0, |b| b.bottom() - origin_y);
+    let h = (content_h.max(ink_h).ceil() as u32).max(1) + padding * 2;
     Ok(BuiltRun {
         path,
         groups,
@@ -3662,6 +3670,52 @@ mod column_fallback_tests {
         assert!(
             h > w * 8.0,
             "{w}×{h}: the line does not run down the column"
+        );
+    }
+}
+
+/// ⭐ A frame holds every stroke drawn in it, however little of the descent the
+/// face's line metrics admit to.
+#[cfg(test)]
+mod ink_overflow_tests {
+    use super::*;
+
+    const SIZE: f32 = 40.0;
+    const PADDING: u32 = 4;
+
+    /// M PLUS 1's eight-character cut with USE_TYPO_METRICS switched on, so its
+    /// line descends 120 units while its `g` reaches 220 — the shape of Taipei
+    /// Sans TC Beta, whose line descends 123 and whose `g` reaches 249.
+    const SHALLOW: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fonts/Mplus1-Regular.shallow.subset.otf"
+    ));
+
+    #[test]
+    fn a_descender_below_the_line_s_metrics_is_not_cut_off() {
+        let run = build_horizontal_path(
+            SHALLOW,
+            "g",
+            SIZE,
+            PADDING,
+            0,
+            Phase::default(),
+            Align::default(),
+            &[],
+            Scale::ONE,
+            DEFAULT_LEADING,
+        )
+        .unwrap();
+        let bottom = run
+            .path
+            .expect("drew nothing")
+            .compute_tight_bounds()
+            .expect("no ink")
+            .bottom();
+        assert!(
+            bottom + PADDING as f32 <= run.height as f32,
+            "ink reaches {bottom}, the frame stops at {} with {PADDING} of padding",
+            run.height
         );
     }
 }
