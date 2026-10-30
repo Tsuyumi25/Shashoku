@@ -26,6 +26,7 @@
         :key="`turn-${zone.key}`"
         class="absolute"
         :style="turnZoneStyle(zone)"
+        data-frame-handle
         @pointerdown="ownPress($event) && onRotateDown($event)"
         @dblclick.stop
         @pointermove="onRotateMove"
@@ -39,6 +40,7 @@
         class="absolute border border-primary bg-background"
         :class="corner.cursor"
         :style="cornerStyle(corner)"
+        data-frame-handle
         @pointerdown="ownPress($event) && onScaleDown($event, corner)"
         @pointermove="onScaleMove"
         @pointerup="onScaleUp"
@@ -52,6 +54,7 @@
           class="absolute border border-primary bg-background"
           :class="edge.cursor"
           :style="cornerStyle(edge)"
+          data-frame-handle
           @pointerdown="ownPress($event) && onScaleDown($event, edge)"
           @pointermove="onScaleMove"
           @pointerup="onScaleUp"
@@ -62,6 +65,7 @@
       <div
         class="absolute flex cursor-move items-center justify-center"
         :style="referenceStyle"
+        data-frame-handle
         @pointerdown="ownPress($event) && onReferenceDown($event)"
         @pointermove="onReferenceMove"
         @pointerup="onReferenceUp"

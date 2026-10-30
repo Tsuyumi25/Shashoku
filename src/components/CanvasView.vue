@@ -1843,11 +1843,13 @@ useEventListener(window, 'pointercancel', (e: PointerEvent) => void settleAltRun
 
 /**
  * Text objects are pressed on their own frames, which stop the press before it
- * reaches the canvas's handler; this hears it on the way down.
+ * reaches the canvas's handler; this hears it on the way down. Only a press on
+ * the body copies: Alt on a handle is that handle's own variant — scaling
+ * about the reference point — and leaves nothing behind.
  */
 function onAltPress(e: PointerEvent): void {
   if (!e.altKey || e.button !== 0 || editor.tool !== 'select') return
-  if (!(e.target instanceof Element)) return
+  if (!(e.target instanceof Element) || e.target.closest('[data-frame-handle], [data-markup-toolbar]')) return
   const id = e.target.closest<HTMLElement>('[data-object-id]')?.dataset.objectId
   if (id === undefined || editor.isLayerLocked(id)) return
   if (!editor.isSelected(id)) editor.selectOnly(id)
