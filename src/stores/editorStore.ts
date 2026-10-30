@@ -1171,6 +1171,54 @@ export const useEditorStore = defineStore('editor', () => {
     settleBook(cmd, book)
   }
 
+  /** How many steps the current book's history holds, for `foldSince`. */
+  function historyDepth(): number {
+    return historyOf(currentBook.value).undo.length
+  }
+
+  /**
+   * Everything taken onto the current book's history since it stood at
+   * `depth`, made one step — a gesture whose parts land as separate commands
+   * but are one act to the hand, so one undo takes it back. `keepIf` says
+   * whether the run is worth keeping at all; one that is not is taken back
+   * now, and leaves nothing to redo.
+   */
+  function foldSince(
+    depth: number,
+    label: string,
+    keepIf: (steps: readonly Command[]) => boolean = () => true,
+  ) {
+    const book = currentBook.value
+    const history = historyOf(book)
+    if (history.undo.length < depth) return
+    const steps = history.undo.slice(depth)
+    if (steps.length === 0) return
+    if (!keepIf(steps)) {
+      for (const cmd of [...steps].reverse()) {
+        cmd.undo()
+        cmd.forget?.()
+      }
+      setHistory(book, { undo: history.undo.slice(0, depth), redo: history.redo })
+      historyStep.value++
+      return
+    }
+    if (steps.length === 1) return
+    const one: Command = {
+      label,
+      journals: steps.flatMap((cmd) => cmd.journals ?? []),
+      do: () => {
+        for (const cmd of steps) if (cmd.do() === false) return false
+      },
+      undo: () => {
+        for (const cmd of [...steps].reverse()) if (cmd.undo() === false) return false
+      },
+      forget: () => {
+        for (const cmd of steps) cmd.forget?.()
+      },
+    }
+    setHistory(book, { undo: [...history.undo.slice(0, depth), one], redo: history.redo })
+  }
+
   /** Wipes the current book's stack — nothing else's. */
   function clearHistory() {
     const book = currentBook.value
@@ -2947,6 +2995,8 @@ export const useEditorStore = defineStore('editor', () => {
     editBy,
     pushCommand,
     historyStep,
+    historyDepth,
+    foldSince,
     forgetJournals,
     undo,
     redo,

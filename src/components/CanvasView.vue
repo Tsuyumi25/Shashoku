@@ -333,7 +333,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import PropertyWheel from '@/components/PropertyWheel.vue'
@@ -637,7 +637,8 @@ function layerHitAt(p: Anchor): string | null {
 const pointedLayerId = ref<string | null>(null)
 
 function onLayerCommit(entry: RasterLayerEntry) {
-  void placement.commit(entry).catch((err: unknown) => console.error('place layer failed', err))
+  const landed = placement.commit(entry).catch((err: unknown) => console.error('place layer failed', err))
+  altRun?.waits.push(landed)
 }
 
 // The picker enumerates on its first opening, which is too late for text that
@@ -1804,12 +1805,40 @@ function onPointerDown(e: PointerEvent) {
  */
 function leaveCopiesOf(pressed: readonly string[]): void {
   const ids = pressed.length === 1 && editor.isSelected(pressed[0]) ? [...editor.selectedIds] : pressed
+  altRun ??= { depth: editor.historyDepth(), waits: [] }
   for (const id of ids) {
-    void merge.duplicateLayer({ id, keepSelection: true }).catch((err: unknown) =>
-      console.error('duplicate failed', err),
+    altRun.waits.push(
+      merge
+        .duplicateLayer({ id, keepSelection: true })
+        .catch((err: unknown) => console.error('duplicate failed', err)),
     )
   }
 }
+
+/**
+ * ⭐ The copies and the move are one act, so they are one step: undone, the
+ * copy goes and the object is back where it was. A raster copy's pixels and a
+ * raster move's write both land after the release, so the fold waits for them.
+ * Let go without moving and there was nothing to copy for — Photoshop makes no
+ * copy for a click — so the copies are taken back.
+ */
+let altRun: { depth: number; waits: Promise<unknown>[] } | null = null
+
+async function settleAltRun(): Promise<void> {
+  const run = altRun
+  altRun = null
+  if (run === null) return
+  await Promise.all(run.waits)
+  await nextTick()
+  editor.foldSince(run.depth, 'alt-copy', (steps) =>
+    steps.some((cmd) => !cmd.label.startsWith('duplicate-layer')),
+  )
+}
+
+// On the window and bubbling, so it is heard after the frame or the canvas has
+// committed the move the release ends.
+useEventListener(window, 'pointerup', () => void settleAltRun())
+useEventListener(window, 'pointercancel', () => void settleAltRun())
 
 /**
  * Text objects are pressed on their own frames, which stop the press before it
