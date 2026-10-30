@@ -480,7 +480,10 @@ fn shape_column(
             !(vertical::presentation_form(c).is_some_and(drawn) || vert_handles(c))
         }
     };
-    let ways: Vec<(usize, bool)> = text.char_indices().map(|(at, c)| (at, sideways(c))).collect();
+    let ways: Vec<(usize, bool)> = text
+        .char_indices()
+        .map(|(at, c)| (at, sideways(c)))
+        .collect();
 
     let mut out: Vec<ShapedGlyph> = Vec::new();
     let mut i = 0;
@@ -3656,6 +3659,9 @@ mod column_fallback_tests {
             .count();
         assert_eq!(pieces, 1, "the two dashes were drawn apart");
         let (w, h) = (path.bounds().width(), path.bounds().height());
-        assert!(h > w * 8.0, "{w}×{h}: the line does not run down the column");
+        assert!(
+            h > w * 8.0,
+            "{w}×{h}: the line does not run down the column"
+        );
     }
 }
