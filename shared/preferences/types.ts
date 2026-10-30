@@ -74,9 +74,19 @@ export interface OcrPreference {
   onomatopoeia: boolean;
 }
 
+/** A list of font families the user put together by hand, in the font library. */
+export interface FontGroup {
+  id: string;
+  name: string;
+  /** Families in the order they were added. A family may sit in any number of groups. */
+  families: string[];
+}
+
 export interface Preferences {
   /** Font families the user starred, in the order they were added. */
   fontFavorites: string[];
+  /** Groups in the order the library's sidebar lists them. */
+  fontGroups: FontGroup[];
   /**
    * Folders scanned on top of the platform's own font directories. Files are
    * read where they lie and never copied, so a folder that moves takes its
@@ -178,6 +188,7 @@ export interface Preferences {
 export function defaultPreferences(): Preferences {
   return {
     fontFavorites: [],
+    fontGroups: [],
     fontFolders: [],
     defaultFontFamily: "",
     fontPickerBoxPx: 120,

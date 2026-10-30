@@ -160,3 +160,51 @@ describe("how big the font picker's boxes are", () => {
     expect(parsePreferences(older).fontPickerBoxPx).toBe(defaultPreferences().fontPickerBoxPx);
   });
 });
+
+describe("font groups", () => {
+  it("come back with what was written, in order", () => {
+    const prefs = defaultPreferences();
+    prefs.fontGroups = [
+      { id: "a", name: "對白", families: ["Noto Sans CJK JP", "源樣黑體"] },
+      { id: "b", name: "音效", families: [] },
+    ];
+    expect(parsePreferences(serializePreferences(prefs)).fontGroups).toEqual(prefs.fontGroups);
+  });
+
+  it("drop a group that is malformed or reuses an id", () => {
+    const raw = JSON.stringify({
+      fontGroups: [
+        { id: "a", name: "對白", families: [] },
+        { id: "a", name: "重複", families: [] },
+        { id: "", name: "沒有 id", families: [] },
+        { id: "c", families: [] },
+        { id: "d", name: "沒有清單" },
+        "not a group",
+      ],
+    });
+    expect(parsePreferences(raw).fontGroups).toEqual([{ id: "a", name: "對白", families: [] }]);
+  });
+
+  it("never read two alike: a repeated name opens numbered", () => {
+    const raw = JSON.stringify({
+      fontGroups: [
+        { id: "a", name: "對白", families: [] },
+        { id: "b", name: "對白", families: [] },
+        { id: "c", name: "對白 2", families: [] },
+      ],
+    });
+    expect(parsePreferences(raw).fontGroups.map((g) => g.name)).toEqual(["對白", "對白 2", "對白 2 2"]);
+  });
+
+  it("give a group with a blank name one to be picked by", () => {
+    const raw = JSON.stringify({ fontGroups: [{ id: "a", name: "  ", families: ["X"] }] });
+    expect(parsePreferences(raw).fontGroups).toEqual([{ id: "a", name: "未命名群組", families: ["X"] }]);
+  });
+
+  it("keep a family once however often the file lists it", () => {
+    const raw = JSON.stringify({
+      fontGroups: [{ id: "a", name: "對白", families: ["X", "Y", "X", 3, ""] }],
+    });
+    expect(parsePreferences(raw).fontGroups[0]!.families).toEqual(["X", "Y"]);
+  });
+});

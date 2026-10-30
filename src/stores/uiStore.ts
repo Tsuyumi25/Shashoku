@@ -7,7 +7,7 @@ import { defineStore } from "pinia";
  * where the first double-click happens, not because the library is above the
  * others.
  */
-export type AppView = "library" | "editor" | "export";
+export type AppView = "library" | "fonts" | "editor" | "export";
 
 export const useUiStore = defineStore("ui", () => {
   const view = ref<AppView>("library");

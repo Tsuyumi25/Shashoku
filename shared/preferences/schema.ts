@@ -1,3 +1,4 @@
+import { freeGroupName } from "./fontGroups";
 import {
   MAX_FONT_PICKER_BOX_PX,
   MAX_UI_ZOOM_LEVEL,
@@ -51,6 +52,7 @@ export function parsePreferences(raw: string): Preferences {
 
   const {
     fontFavorites,
+    fontGroups,
     fontFolders,
     defaultFontFamily,
     fontPickerBoxPx,
@@ -74,6 +76,23 @@ export function parsePreferences(raw: string): Preferences {
     prefs.fontFavorites = fontFavorites.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
     );
+  }
+  if (Array.isArray(fontGroups)) {
+    const ids = new Set<string>();
+    for (const group of fontGroups) {
+      if (!isRecord(group)) continue;
+      const { id, name, families } = group;
+      if (typeof id !== "string" || id.length === 0 || ids.has(id)) continue;
+      if (typeof name !== "string" || !Array.isArray(families)) continue;
+      ids.add(id);
+      prefs.fontGroups.push({
+        id,
+        name: freeGroupName(name.trim() || "未命名群組", prefs.fontGroups.map((g) => g.name)),
+        families: [
+          ...new Set(families.filter((f): f is string => typeof f === "string" && f.length > 0)),
+        ],
+      });
+    }
   }
   if (Array.isArray(fontFolders)) {
     prefs.fontFolders = fontFolders.filter(
@@ -164,6 +183,7 @@ export function serializePreferences(prefs: Preferences): string {
   return JSON.stringify(
     {
       fontFavorites: prefs.fontFavorites,
+      fontGroups: prefs.fontGroups,
       fontFolders: prefs.fontFolders,
       defaultFontFamily: prefs.defaultFontFamily,
       fontPickerBoxPx: prefs.fontPickerBoxPx,

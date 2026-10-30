@@ -55,11 +55,11 @@
     <div class="tb-center">
       <div class="tb-center-side justify-end">
         <!--
-          A lone capsule in the pill's own dress: the faces are three surfaces
-          of the open project, the library leaves it to pick another — a
-          different object, so it stands apart, but a peer view, so it wears
-          the same weight and lights the same way. Ghost styling here read as
-          an auxiliary control, and disabling it while open left the starting
+          Capsules in the pill's own dress: the faces are surfaces of the open
+          project, while the book and font libraries look past it — different
+          objects, so they stand apart, but peer views, so they wear the same
+          weight and light the same way. Ghost styling here read as an
+          auxiliary control, and disabling one while open left the starting
           view as the only one without a you-are-here signal.
         -->
         <button
@@ -70,6 +70,15 @@
         >
           <LibraryBig :size="14" />
           <span>書庫</span>
+        </button>
+        <button
+          class="tb-lib no-drag ml-1"
+          :class="ui.view === 'fonts' && 'tb-lib-on'"
+          title="切換到字體庫"
+          @click="ui.setView('fonts')"
+        >
+          <Type :size="14" />
+          <span>字體庫</span>
         </button>
       </div>
 
@@ -113,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { LayoutGrid, LibraryBig, Menu, Save, Settings } from '@lucide/vue'
+import { LayoutGrid, LibraryBig, Menu, Save, Settings, Type } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,

@@ -25,45 +25,7 @@
           <ToggleGroupItem value="horizontal" class="seg-item">橫排</ToggleGroupItem>
           <ToggleGroupItem value="vertical" class="seg-item">直排</ToggleGroupItem>
         </ToggleGroupRoot>
-        <PopoverRoot>
-          <PopoverTrigger
-            class="shrink-0 rounded p-1 hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground"
-            title="顯示選項"
-          >
-            <SlidersHorizontal :size="14" />
-          </PopoverTrigger>
-          <PopoverPortal>
-            <PopoverContent class="picker-options" side="bottom" align="end" :side-offset="6">
-              <label class="flex items-center gap-1.5" title="畫不出當前樣本文字的字體，不列在清單裡">
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 accent-primary"
-                  :checked="hidingUndrawable"
-                  @change="onHideUndrawable($event)"
-                />
-                隱藏缺字的字體
-              </label>
-              <label
-                class="flex items-center gap-1.5"
-                :class="hidingUndrawable ? 'cursor-not-allowed opacity-40' : ''"
-                :title="
-                  hidingUndrawable
-                    ? '清單裡沒有缺字的字體了，沒有東西可以標記'
-                    : '把畫不出來的那幾個字框起來'
-                "
-              >
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 accent-primary"
-                  :checked="preferences.prefs.markMissingGlyphs"
-                  :disabled="hidingUndrawable"
-                  @change="onMarkMissing($event)"
-                />
-                標記缺字
-              </label>
-            </PopoverContent>
-          </PopoverPortal>
-        </PopoverRoot>
+        <FontSampleOptions />
       </div>
 
       <div class="flex items-center gap-1">
@@ -188,7 +150,7 @@
                 :caret-key="aimedAt === faces[0]!.family ? sampleCaretKey : 0"
                 @select-text="(a, b) => onCellSelect(faces[0]!.family, a, b)"
                 @select-word="onCellWord(faces[0]!.family, $event)"
-                @caret-at="surface.showCaretAt($event)"
+                @caret-at="showCaretAt($event)"
               />
             </div>
 
@@ -257,22 +219,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { SlidersHorizontal, Star } from '@lucide/vue'
-import {
-  PopoverContent,
-  PopoverPortal,
-  PopoverRoot,
-  PopoverTrigger,
-  ToggleGroupItem,
-  ToggleGroupRoot,
-} from 'reka-ui'
+import { Star } from '@lucide/vue'
+import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
 import type { TextLayerEntry } from '@shared/page/types'
-import { blocksOnSide, shownLinesOf } from '@shared/page/units'
+import { shownLinesOf } from '@shared/page/units'
 import { selectionWords } from '@/lib/selectionWords'
 import type { TextStyle } from '@shared/text-style/types'
 import { sharedValue } from '@shared/batch/value'
@@ -281,9 +236,11 @@ import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
+import FontSampleOptions from '@/components/FontSampleOptions.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
-import { createTextEditSurface } from '@/composables/useTextEditSurface'
+import { useChapterFontCounts } from '@/composables/useChapterFontCounts'
+import { DEFAULT_SAMPLE_TEXT, useSampleTyping } from '@/composables/useSampleTyping'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor } from '@/lib/fontSampleCache'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -325,35 +282,16 @@ const objectText = computed(() =>
 
 type Group = 'all' | 'fav' | 'used'
 
-/**
- * How many translations in the open chapter each family sets — the faces this
- * work already reaches for, most used first, each drawn with the selection's
- * own words. Only families this machine has can be drawn, so one the chapter
- * names but the catalogue lacks is not in the list.
- */
-const usedCounts = computed(() => {
-  const out = new Map<string, number>()
-  for (const file of project.files) {
-    if (file.badge !== 'ok') continue
-    for (const block of blocksOnSide(file.page.layers, 'translation')) {
-      const family = block.body.style.fontFamily
-      if (family) out.set(family, (out.get(family) ?? 0) + 1)
-    }
-  }
-  return out
-})
+const usedCounts = useChapterFontCounts()
 const group = ref<Group>('all')
 
-
-/** What the cells say before anything is selected or typed. */
-const FALLBACK_SAMPLE = '等一下……你是說真的嗎！？\n等一下……你是说真的吗！？'
 
 /**
  * The sample every cell draws. Line breaks are real, because the box holding
  * them is a `textarea` sitting on the sample itself — the `\n` they used to be
  * spelled as was a single-line field's limitation, and it is gone with it.
  */
-const savedSample = () => preferences.prefs.fontSampleText || FALLBACK_SAMPLE
+const savedSample = () => preferences.prefs.fontSampleText || DEFAULT_SAMPLE_TEXT
 const sampleText = ref(objectText.value.trim() ? objectText.value : savedSample())
 // An object's own words stand in while it is selected and are not what was saved.
 watch(sampleText, (text) => {
@@ -363,107 +301,27 @@ watch(sampleText, (text) => {
 watch(objectText, (text) => {
   sampleText.value = text.trim() ? text : savedSample()
 })
+// The font library types into the same saved sample while this stays mounted.
+watch(
+  () => preferences.prefs.fontSampleText,
+  () => {
+    if (!objectText.value.trim()) sampleText.value = savedSample()
+  },
+)
 
-/**
- * The control the sample is typed into. It is never seen: the letters the user
- * is looking at are the engine's, drawn in the cell, and this only holds the
- * keyboard and gives the IME somewhere to open its candidates (ADR 0001,
- * decision 4).
- */
-const surface = createTextEditSurface()
-const { range: sampleRange, moved: sampleCaretKey } = surface
-const sampleEl = ref<HTMLTextAreaElement | null>(null)
-
-watch(sampleEl, (el) => surface.register(el), { immediate: true })
-
-/**
- * Which cell is being typed into, or null.
- *
- * One at a time, because there is one sample string. Held as the family rather
- * than the row, so a scroll that recycles the virtual rows leaves the caret on
- * the cell it belongs to.
- */
-const aimedAt = ref<string | null>(null)
-
-function aim(family: string): void {
-  if (aimedAt.value !== family) {
-    aimedAt.value = family
-    surface.pin(true)
-  }
-  // Guarded, because a drag asks for this on every frame and taking focus that
-  // is already held is work for nothing.
-  const el = sampleEl.value
-  if (el && document.activeElement !== el) el.focus({ preventScroll: true })
-}
-
-/** A press on the cell but outside the sample: take the cell, leave the caret. */
-function aimCell(family: string, e: MouseEvent) {
-  // A cell cannot hold focus itself, so letting the press run its course would
-  // clear the focus the control is being given within the same click.
-  e.preventDefault()
-  aim(family)
-}
-
-function onCellSelect(family: string, anchor: number, focus: number) {
-  aim(family)
-  surface.setRange(anchor, focus)
-}
-
-const words = new Intl.Segmenter(undefined, { granularity: 'word' })
-
-function onCellWord(family: string, at: number) {
-  aim(family)
-  for (const piece of words.segment(sampleText.value)) {
-    const end = piece.index + piece.segment.length
-    if (at >= piece.index && at < end) {
-      surface.setRange(piece.index, end)
-      return
-    }
-  }
-}
-
-function onSampleInput(e: Event) {
-  sampleText.value = (e.target as HTMLTextAreaElement).value
-}
-
-/**
- * A new selection replaces the text under the caret without an `input` event to say
- * so, so the control's own selection is what the projection has to be told
- * about — the browser has already clamped it by the time this runs.
- */
-watch(sampleText, () => surface.read(), { flush: 'post' })
-
-function onSampleBlur() {
-  aimedAt.value = null
-  surface.pin(false)
-  surface.showCaretAt(null)
-}
-
-/**
- * Parked when no cell is aimed. It is never focused then, so it cannot pull the
- * window's scroll — which is the one thing an off-screen focused element does.
- */
-const PARKED = {
-  position: 'fixed' as const,
-  left: '0px',
-  top: '0px',
-  width: '1px',
-  height: '1px',
-}
-
-const sampleStyle = computed(() => {
-  const box = surface.pinnedBox.value
-  if (box === null) return PARKED
-  return {
-    position: 'fixed' as const,
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${box.width}px`,
-    height: `${box.height}px`,
-    writingMode: box.vertical ? ('vertical-rl' as const) : ('horizontal-tb' as const),
-  }
-})
-
+const sampleEl = useTemplateRef<HTMLTextAreaElement>('sampleEl')
+const {
+  aimedAt,
+  sampleRange,
+  sampleCaretKey,
+  sampleStyle,
+  aimCell,
+  onCellSelect,
+  onCellWord,
+  onSampleInput,
+  onSampleBlur,
+  showCaretAt,
+} = useSampleTyping(sampleText, sampleEl)
 
 /**
  * Direction follows the selected object; toggling it here lasts until the
@@ -558,14 +416,6 @@ function onBoxSize(e: Event) {
 }
 
 const hidingUndrawable = computed(() => preferences.prefs.missingGlyphMode === 'hide')
-
-function onHideUndrawable(e: Event) {
-  preferences.setMissingGlyphMode((e.target as HTMLInputElement).checked ? 'hide' : 'tofu')
-}
-
-function onMarkMissing(e: Event) {
-  preferences.setMarkMissingGlyphs((e.target as HTMLInputElement).checked)
-}
 
 // The preference keeps its value while the control is disabled, so unhiding puts
 // the marks back the way they were rather than at a default.
@@ -941,20 +791,3 @@ function revealCurrentFamily() {
 }
 </style>
 
-<style>
-/* Portalled out of the component, so the scoped block does not reach it. */
-.picker-options {
-  z-index: 50;
-  display: flex;
-  width: 15rem;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  font-size: 0.8125rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-}
-</style>

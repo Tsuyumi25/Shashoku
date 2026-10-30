@@ -29,6 +29,7 @@
             </div>
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
+          <FontLibrarySidebar v-if="ui.view === 'fonts'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
 
@@ -57,6 +58,9 @@
                 </SplitterPanel>
               </SplitterGroup>
             </div>
+            <div v-if="ui.view === 'fonts'" class="absolute inset-0">
+              <FontLibraryList />
+            </div>
             <div v-if="ui.view === 'export'" class="absolute inset-0">
               <ProjectManagerMode />
             </div>
@@ -75,6 +79,8 @@ import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
+import FontLibraryList from '@/components/fontLibrary/FontLibraryList.vue'
+import FontLibrarySidebar from '@/components/fontLibrary/FontLibrarySidebar.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
 import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'

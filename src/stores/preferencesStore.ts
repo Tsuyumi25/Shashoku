@@ -13,6 +13,7 @@ import {
   type MissingGlyphMode,
   type SidePanel,
 } from '@shared/preferences/types'
+import { freeGroupName } from '@shared/preferences/fontGroups'
 import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
@@ -100,6 +101,34 @@ export const usePreferencesStore = defineStore('preferences', () => {
     const at = prefs.fontFavorites.indexOf(family)
     if (at === -1) prefs.fontFavorites.push(family)
     else prefs.fontFavorites.splice(at, 1)
+  }
+
+  function createFontGroup(name: string): string {
+    const id = crypto.randomUUID()
+    prefs.fontGroups.push({ id, name: freeGroupName(name, prefs.fontGroups.map((g) => g.name)), families: [] })
+    return id
+  }
+
+  /** False when another group already goes by the name; nothing changes then. */
+  function renameFontGroup(id: string, name: string): boolean {
+    if (prefs.fontGroups.some((g) => g.id !== id && g.name === name)) return false
+    const group = prefs.fontGroups.find((g) => g.id === id)
+    if (!group) return false
+    group.name = name
+    return true
+  }
+
+  function deleteFontGroup(id: string) {
+    const at = prefs.fontGroups.findIndex((g) => g.id === id)
+    if (at !== -1) prefs.fontGroups.splice(at, 1)
+  }
+
+  function toggleFamilyInGroup(id: string, family: string) {
+    const group = prefs.fontGroups.find((g) => g.id === id)
+    if (!group) return
+    const at = group.families.indexOf(family)
+    if (at === -1) group.families.push(family)
+    else group.families.splice(at, 1)
   }
 
   function setFontPickerBoxPx(px: number) {
@@ -200,6 +229,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     favorites,
     isFavorite,
     toggleFavorite,
+    createFontGroup,
+    renameFontGroup,
+    deleteFontGroup,
+    toggleFamilyInGroup,
     setFontPickerBoxPx,
     setFontSampleText,
     setFontSampleVertical,
