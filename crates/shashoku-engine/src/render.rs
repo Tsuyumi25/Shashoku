@@ -7,6 +7,7 @@ use skrifa::{
 use tiny_skia::{FillRule, LineJoin, Mask, Path, PathBuilder, PathSegment, Stroke, Transform};
 
 use crate::stroke::{coverage_at, signed_distance_field};
+use crate::vertical;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -392,6 +393,9 @@ struct ShapedGlyph {
     y_advance: f32,
     x_offset: f32,
     y_offset: f32,
+    /// Set in a column on its side, a quarter turn clockwise: shaped across,
+    /// and taking its horizontal advance going down.
+    sideways: bool,
 }
 
 fn shape_line(
@@ -438,8 +442,100 @@ fn shape_line(
             y_advance: (pos.y_advance as f32) * scale,
             x_offset: (pos.x_offset as f32) * scale,
             y_offset: (pos.y_offset as f32) * scale,
+            sideways: false,
         })
         .collect()
+}
+
+/// One stretch of a column, shaped the way the face can set it.
+///
+/// ⭐ The face's own vertical form wins whenever `vert` gives one. Where it
+/// does not, a character takes the Unicode vertical presentation form if the
+/// face draws it, and otherwise lies on its side if UTR #50 says it should —
+/// see the vertical module. A stretch with nothing that could need either is
+/// shaped whole, exactly as before.
+fn shape_column(
+    hr_font: &harfrust::FontRef,
+    sk_font: &FontRef,
+    text: &str,
+    size_px: f32,
+    scale: f32,
+) -> Vec<ShapedGlyph> {
+    if !vertical::may_need_help(text) {
+        return shape_line(hr_font, text, size_px, scale, true);
+    }
+    let charmap = sk_font.charmap();
+    let drawn = |c: char| charmap.map(c).is_some_and(|gid| gid.to_u32() != 0);
+    // Whether `vert` changes the character's glyph: shaped alone, it comes back
+    // as something other than the glyph the cmap names for it.
+    let vert_handles = |c: char| {
+        let Some(nominal) = charmap.map(c) else {
+            return false;
+        };
+        let mut one = [0u8; 4];
+        shape_line(hr_font, c.encode_utf8(&mut one), size_px, scale, true)
+            .first()
+            .is_some_and(|g| g.gid != nominal.to_u32())
+    };
+
+    enum Way {
+        Upright(char),
+        Sideways,
+    }
+    let ways: Vec<(usize, char, Way)> = text
+        .char_indices()
+        .map(|(at, c)| {
+            // Nothing to fall back to, or the face's own vertical form: as is.
+            let as_is = !vertical::turns(c) && vertical::presentation_form(c).is_none();
+            let way = if as_is || vert_handles(c) {
+                Way::Upright(c)
+            } else if let Some(form) = vertical::presentation_form(c).filter(|&f| drawn(f)) {
+                Way::Upright(form)
+            } else if vertical::turns(c) {
+                Way::Sideways
+            } else {
+                Way::Upright(c)
+            };
+            (at, c, way)
+        })
+        .collect();
+
+    let mut out: Vec<ShapedGlyph> = Vec::new();
+    let mut i = 0;
+    while i < ways.len() {
+        let sideways = matches!(ways[i].2, Way::Sideways);
+        let start = ways[i].0;
+        let mut j = i;
+        while j < ways.len() && matches!(ways[j].2, Way::Sideways) == sideways {
+            j += 1;
+        }
+        let end = ways.get(j).map_or(text.len(), |w| w.0);
+        if sideways {
+            for mut g in shape_line(hr_font, &text[start..end], size_px, scale, false) {
+                g.cluster += start as u32;
+                g.sideways = true;
+                out.push(g);
+            }
+        } else {
+            // Presentation forms change the stretch's bytes, so each character's
+            // place in the run is mapped back to where it stood in the text.
+            let mut run = String::new();
+            let mut back: Vec<(u32, u32)> = Vec::new();
+            for (at, _, way) in &ways[i..j] {
+                if let Way::Upright(c) = way {
+                    back.push((run.len() as u32, *at as u32));
+                    run.push(*c);
+                }
+            }
+            for mut g in shape_line(hr_font, &run, size_px, scale, true) {
+                let k = back.partition_point(|&(from, _)| from <= g.cluster);
+                g.cluster = back[k.saturating_sub(1)].1;
+                out.push(g);
+            }
+        }
+        i = j;
+    }
+    out
 }
 
 /// One run of one line, set in one style.
@@ -651,6 +747,7 @@ fn build_horizontal_path(
                         baseline_y: baseline_y - g.y_offset * scale.y,
                         scale_x: scale.x,
                         scale_y: scale.y,
+                        turned: false,
                     };
                     glyph
                         .draw(DrawSettings::unhinted(size, loc), &mut pen)
@@ -716,17 +813,31 @@ fn build_vertical_path(
         let mut laid: Vec<LaidSegment> = Vec::new();
         for seg in segments_of(line, offset, size_px, spans) {
             width = width.max(seg.size_px * leading * scale.x);
-            let glyphs = shape_line(
-                &hr_font,
-                seg.text,
-                seg.size_px,
-                seg.size_px / upem,
-                !seg.upright,
-            );
+            let glyphs = if seg.upright {
+                shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false)
+            } else {
+                shape_column(
+                    &hr_font,
+                    &sk_font,
+                    seg.text,
+                    seg.size_px,
+                    seg.size_px / upem,
+                )
+            };
             height += if seg.upright {
                 seg.size_px * scale.y
             } else {
-                glyphs.iter().map(|g| -g.y_advance).sum::<f32>() * scale.y
+                glyphs
+                    .iter()
+                    .map(|g| {
+                        if g.sideways {
+                            g.x_advance
+                        } else {
+                            -g.y_advance
+                        }
+                    })
+                    .sum::<f32>()
+                    * scale.y
             };
             laid.push(LaidSegment { seg, glyphs });
         }
@@ -776,6 +887,7 @@ fn build_vertical_path(
                             baseline_y: baseline_y - g.y_offset * scale.y,
                             scale_x: squeeze * scale.x,
                             scale_y: scale.y,
+                            turned: false,
                         };
                         glyph
                             .draw(DrawSettings::unhinted(size, loc), &mut pen)
@@ -800,7 +912,36 @@ fn build_vertical_path(
                 pen_y += em * scale.y;
                 continue;
             }
+            // A character on its side has its em box centred across the column:
+            // the face's up is the column's right.
+            let (ascent, descent, _) = size_metrics(&sk_font, seg.size_px);
             for g in glyphs {
+                if g.sideways {
+                    let gid = GlyphId::new(g.gid);
+                    if let Some(glyph) = outlines.get(gid) {
+                        let mut pen = BaselinePen {
+                            builder: groups.builder(seg.color, seg.weight),
+                            pen_x: col_center_x - (ascent - descent) * 0.5 * scale.x
+                                + g.y_offset * scale.x,
+                            baseline_y: col_origin_y + pen_y + g.x_offset * scale.y,
+                            scale_x: scale.x,
+                            scale_y: scale.y,
+                            turned: true,
+                        };
+                        glyph
+                            .draw(DrawSettings::unhinted(size, loc), &mut pen)
+                            .map_err(|e| format!("draw gid {gid:?}: {e:?}"))?;
+                    }
+                    clusters.push(ClusterRect {
+                        cluster: seg.offset + g.cluster,
+                        x: col_center_x - column_width * 0.5,
+                        y: col_origin_y + pen_y,
+                        width: *column_width,
+                        height: g.x_advance * scale.y,
+                    });
+                    pen_y += g.x_advance * scale.y;
+                    continue;
+                }
                 let baseline_x = col_center_x + pen_x + g.x_offset * scale.x;
                 let baseline_y = col_origin_y + pen_y - g.y_offset * scale.y;
 
@@ -812,6 +953,7 @@ fn build_vertical_path(
                         baseline_y,
                         scale_x: scale.x,
                         scale_y: scale.y,
+                        turned: false,
                     };
                     glyph
                         .draw(DrawSettings::unhinted(size, loc), &mut pen)
@@ -1604,10 +1746,19 @@ struct BaselinePen<'a> {
     /// cell presses two or three characters into one em of column with.
     scale_x: f32,
     scale_y: f32,
+    /// A quarter turn clockwise about the origin: the glyph's up points right
+    /// and its advance points down, for a character lying in a column.
+    turned: bool,
 }
 
 impl<'a> BaselinePen<'a> {
     fn map(&self, x: f32, y: f32) -> (f32, f32) {
+        if self.turned {
+            return (
+                self.pen_x + y * self.scale_x,
+                self.baseline_y + x * self.scale_y,
+            );
+        }
         (
             self.pen_x + x * self.scale_x,
             self.baseline_y - y * self.scale_y,
@@ -3433,5 +3584,93 @@ mod leading_tests {
         let grew = loose.width as f32 - tight.width as f32;
         assert!((grew - 2.0 * 0.8 * SIZE).abs() <= 1.0, "grew by {grew}");
         assert_eq!(loose.height, tight.height);
+    }
+}
+
+/// ⭐ What a column does with a character its face has no vertical form for:
+/// the face's own presentation form if it draws one, otherwise on its side.
+#[cfg(test)]
+mod column_fallback_tests {
+    use super::*;
+
+    const SIZE: f32 = 64.0;
+
+    /// M PLUS 1 cut to `…ー` with its layout tables dropped: no `vert`, and no
+    /// presentation forms either.
+    const NO_VERT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fonts/Mplus1-Regular.novert.subset.otf"
+    ));
+
+    /// Noto Sans CJK cut to `…︙「`, its `vert` keeping `「` and losing `…` —
+    /// the shape of a face whose vertical table forgot the ellipsis while it
+    /// draws the vertical one. A face with no `vert` at all is shaped onto the
+    /// presentation forms by the shaper itself; one with a partial `vert` is
+    /// not, which is the case this is for.
+    const FORMS: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fonts/NotoSansCJK.forms.subset.otf"
+    ));
+
+    fn column(font: &[u8], text: &str) -> BuiltRun {
+        build_vertical_path(
+            font,
+            text,
+            SIZE,
+            4,
+            0,
+            Phase::default(),
+            Align::default(),
+            &[],
+            Scale::ONE,
+            DEFAULT_LEADING,
+        )
+        .unwrap_or_else(|err| panic!("{text:?} will not lay out: {err}"))
+    }
+
+    fn ink(run: &BuiltRun) -> (f32, f32) {
+        let bounds = run.path.as_ref().expect("drew nothing").bounds();
+        (bounds.width(), bounds.height())
+    }
+
+    #[test]
+    fn an_ellipsis_with_no_vertical_form_lies_on_its_side() {
+        let (w, h) = ink(&column(NO_VERT, "…"));
+        assert!(h > w * 2.0, "{w}×{h}: the dots still run across the column");
+    }
+
+    #[test]
+    fn a_prolonged_sound_mark_with_no_vertical_form_runs_down_the_column() {
+        let (w, h) = ink(&column(NO_VERT, "ー"));
+        assert!(h > w * 2.0, "{w}×{h}");
+    }
+
+    #[test]
+    fn a_character_on_its_side_still_takes_its_own_length_of_column() {
+        let one = column(NO_VERT, "…");
+        let two = column(NO_VERT, "……");
+        assert!(
+            two.height > one.height + (SIZE * 0.5) as u32,
+            "{} then {}",
+            one.height,
+            two.height
+        );
+    }
+
+    #[test]
+    fn the_face_s_own_vertical_ellipsis_is_used_when_it_draws_one() {
+        let fallback = column(FORMS, "…");
+        let form = column(FORMS, "︙");
+        assert_eq!(
+            fallback.path.map(|p| p.bounds()),
+            form.path.map(|p| p.bounds())
+        );
+    }
+
+    #[test]
+    fn a_presentation_form_answers_to_the_characters_it_stands_for() {
+        let run = column(FORMS, "……");
+        let clusters: Vec<u32> = run.clusters.iter().map(|c| c.cluster).collect();
+        assert_eq!(clusters, vec![0, 3]);
     }
 }

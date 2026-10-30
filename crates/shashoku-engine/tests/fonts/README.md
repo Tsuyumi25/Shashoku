@@ -27,6 +27,28 @@ Both versions are written down because the command alone does not settle what
 comes out: a different release of either would produce different bytes, and the
 tests measure bytes.
 
+## Two faces without a vertical form
+
+The column fallback tests need faces that leave characters out of `vert`, which
+neither of the fonts they are cut from does — so the layout tables are edited
+down to that, on purpose:
+
+- `Mplus1-Regular.novert.subset.otf`: the same M PLUS 1 Regular, cut to `…ー`
+  with GSUB dropped. No `vert` and no presentation forms, so a column has
+  nothing to fall back to but laying the character on its side.
+
+      pyftsubset Mplus1-Regular.otf --text="…ー" --drop-tables+=GSUB \
+        --output-file=Mplus1-Regular.novert.subset.otf
+
+- `NotoSansCJK.forms.subset.otf`: Noto Sans CJK JP from nixpkgs
+  `noto-fonts-cjk-sans` 2.004 (`NotoSansCJK-VF.otf.ttc`, face 0), instanced at
+  `wght=400`, cut to `…︙「` keeping only `vert`, and with the ellipsis's entry
+  then deleted from the single substitutions — a `vert` that still turns `「`
+  but forgot `…`, in a face that draws `︙`. That is the shape of the faces
+  this exists for; a face with no `vert` at all the shaper already sends to the
+  presentation forms itself. Done with fonttools 4.61.1's `varLib.instancer`
+  and `subset` from Python, deleting the mapping by hand.
+
 Licensed under the SIL Open Font License 1.1, whose text is beside it. The
 license travels with the subset: a derivative of an OFL font stays under the
 OFL, and the copyright notice has to go with it.

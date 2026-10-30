@@ -16,6 +16,7 @@ mod raster;
 mod render;
 mod stroke;
 pub mod tile;
+mod vertical;
 
 use render::{Align, BLACK, Phase, Scale, SpanStyle, StrokePosition, StrokeSpec, parse_hex_rgba};
 
