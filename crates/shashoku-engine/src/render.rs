@@ -450,10 +450,10 @@ fn shape_line(
 /// One stretch of a column, shaped the way the face can set it.
 ///
 /// ⭐ The face's own vertical form wins whenever `vert` gives one. Where it
-/// does not, a character takes the Unicode vertical presentation form if the
-/// face draws it, and otherwise lies on its side if UTR #50 says it should —
-/// see the vertical module. A stretch with nothing that could need either is
-/// shaped whole, exactly as before.
+/// does not, a character UTR #50 lays on its side takes the Unicode vertical
+/// presentation form if the face draws it, and otherwise is turned — see the
+/// vertical module. A stretch with nothing that could need either is shaped
+/// whole, exactly as before.
 fn shape_column(
     hr_font: &harfrust::FontRef,
     sk_font: &FontRef,
@@ -485,16 +485,12 @@ fn shape_column(
     let ways: Vec<(usize, char, Way)> = text
         .char_indices()
         .map(|(at, c)| {
-            // Nothing to fall back to, or the face's own vertical form: as is.
-            let as_is = !vertical::turns(c) && vertical::presentation_form(c).is_none();
-            let way = if as_is || vert_handles(c) {
+            let way = if !vertical::turns(c) || vert_handles(c) {
                 Way::Upright(c)
             } else if let Some(form) = vertical::presentation_form(c).filter(|&f| drawn(f)) {
                 Way::Upright(form)
-            } else if vertical::turns(c) {
-                Way::Sideways
             } else {
-                Way::Upright(c)
+                Way::Sideways
             };
             (at, c, way)
         })
@@ -3602,11 +3598,13 @@ mod column_fallback_tests {
         "/tests/fonts/Mplus1-Regular.novert.subset.otf"
     ));
 
-    /// Noto Sans CJK cut to `…︙「`, its `vert` keeping `「` and losing `…` —
-    /// the shape of a face whose vertical table forgot the ellipsis while it
-    /// draws the vertical one. A face with no `vert` at all is shaped onto the
-    /// presentation forms by the shaper itself; one with a partial `vert` is
-    /// not, which is the case this is for.
+    /// Noto Sans CJK cut to `…︙「！︕`, its `vert` keeping `「` and losing `…`
+    /// and `！` — the shape of a face whose vertical table forgot the ellipsis
+    /// while it draws the vertical one, and that keeps `！` upright on purpose
+    /// while it draws a `︕` off to one side, as GenYoGothic JP does. A face
+    /// with no `vert` at all is shaped onto the presentation forms by the
+    /// shaper itself; one with a partial `vert` is not, which is the case this
+    /// is for.
     const FORMS: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fonts/NotoSansCJK.forms.subset.otf"
@@ -3672,5 +3670,16 @@ mod column_fallback_tests {
         let run = column(FORMS, "……");
         let clusters: Vec<u32> = run.clusters.iter().map(|c| c.cluster).collect();
         assert_eq!(clusters, vec![0, 3]);
+    }
+
+    #[test]
+    fn an_exclamation_the_face_keeps_upright_is_left_upright() {
+        let bang = column(FORMS, "！");
+        let form = column(FORMS, "︕");
+        assert_ne!(
+            bang.path.map(|p| p.bounds()),
+            form.path.map(|p| p.bounds()),
+            "！ was swapped for ︕"
+        );
     }
 }

@@ -42,12 +42,14 @@ down to that, on purpose:
 
 - `NotoSansCJK.forms.subset.otf`: Noto Sans CJK JP from nixpkgs
   `noto-fonts-cjk-sans` 2.004 (`NotoSansCJK-VF.otf.ttc`, face 0), instanced at
-  `wght=400`, cut to `…︙「` keeping only `vert`, and with the ellipsis's entry
-  then deleted from the single substitutions — a `vert` that still turns `「`
-  but forgot `…`, in a face that draws `︙`. That is the shape of the faces
-  this exists for; a face with no `vert` at all the shaper already sends to the
-  presentation forms itself. Done with fonttools 4.61.1's `varLib.instancer`
-  and `subset` from Python, deleting the mapping by hand.
+  `wght=400`, cut to `…︙「！︕` keeping only `vert`, and with the entries for
+  `…` and `！` then deleted from the single substitutions — a `vert` that still
+  turns `「` but forgot `…`, in a face that draws `︙`, and that keeps `！`
+  upright the way GenYoGothic JP does while drawing a `︕` off to one side.
+  That is the shape of the faces this exists for; a face with no `vert` at all
+  the shaper already sends to the presentation forms itself. Done with
+  fonttools 4.61.1's `varLib.instancer` and `subset` from Python, deleting the
+  mappings by hand.
 
 Licensed under the SIL Open Font License 1.1, whose text is beside it. The
 license travels with the subset: a derivative of an OFL font stays under the
