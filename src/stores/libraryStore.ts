@@ -76,7 +76,8 @@ export const useLibraryStore = defineStore('library', () => {
 
   const standingAt = ref<string | null>(null)
   /** At the root, whether the shelf shows the recently opened projects instead of the workspaces. */
-  const recent = ref(false)
+  /** The app opens on 最近: what was worked on last is what is most often picked up again. */
+  const recent = ref(true)
   const inside = ref<FolderContents>(empty())
   const insideLoading = ref(false)
 
@@ -427,6 +428,8 @@ export const useLibraryStore = defineStore('library', () => {
     const one = chosenItems.value
     return one.length === 1 && one[0].kind === 'page' ? one[0].page : null
   })
+
+  void loadRecent()
 
   return {
     roots,
