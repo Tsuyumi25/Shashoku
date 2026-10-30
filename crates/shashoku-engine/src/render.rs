@@ -447,13 +447,9 @@ fn shape_line(
         .collect()
 }
 
-/// One stretch of a column, shaped the way the face can set it.
-///
-/// ⭐ The face's own vertical form wins whenever `vert` gives one. Where it
-/// does not, a character UTR #50 lays on its side takes the Unicode vertical
-/// presentation form if the face draws it, and otherwise is turned — see the
-/// vertical module. A stretch with nothing that could need either is shaped
-/// whole, exactly as before.
+/// One stretch of a column, each character upright or turned the way the
+/// vertical module's table says. A stretch with nothing but plain upright
+/// characters is shaped whole.
 fn shape_column(
     hr_font: &harfrust::FontRef,
     sk_font: &FontRef,
@@ -466,8 +462,8 @@ fn shape_column(
     }
     let charmap = sk_font.charmap();
     let drawn = |c: char| charmap.map(c).is_some_and(|gid| gid.to_u32() != 0);
-    // Whether `vert` changes the character's glyph: shaped alone, it comes back
-    // as something other than the glyph the cmap names for it.
+    // Whether `vert` replaces the character: shaped alone, it comes back as
+    // something other than the glyph the cmap names for it.
     let vert_handles = |c: char| {
         let Some(nominal) = charmap.map(c) else {
             return false;
@@ -477,57 +473,29 @@ fn shape_column(
             .first()
             .is_some_and(|g| g.gid != nominal.to_u32())
     };
-
-    enum Way {
-        Upright(char),
-        Sideways,
-    }
-    let ways: Vec<(usize, char, Way)> = text
-        .char_indices()
-        .map(|(at, c)| {
-            let way = if !vertical::turns(c) || vert_handles(c) {
-                Way::Upright(c)
-            } else if let Some(form) = vertical::presentation_form(c).filter(|&f| drawn(f)) {
-                Way::Upright(form)
-            } else {
-                Way::Sideways
-            };
-            (at, c, way)
-        })
-        .collect();
+    let sideways = |c: char| match vertical::orientation(c) {
+        None => false,
+        Some(vertical::Orientation::Rotated) => true,
+        Some(vertical::Orientation::Transformed) => {
+            !(vertical::presentation_form(c).is_some_and(drawn) || vert_handles(c))
+        }
+    };
+    let ways: Vec<(usize, bool)> = text.char_indices().map(|(at, c)| (at, sideways(c))).collect();
 
     let mut out: Vec<ShapedGlyph> = Vec::new();
     let mut i = 0;
     while i < ways.len() {
-        let sideways = matches!(ways[i].2, Way::Sideways);
+        let turned = ways[i].1;
         let start = ways[i].0;
         let mut j = i;
-        while j < ways.len() && matches!(ways[j].2, Way::Sideways) == sideways {
+        while j < ways.len() && ways[j].1 == turned {
             j += 1;
         }
         let end = ways.get(j).map_or(text.len(), |w| w.0);
-        if sideways {
-            for mut g in shape_line(hr_font, &text[start..end], size_px, scale, false) {
-                g.cluster += start as u32;
-                g.sideways = true;
-                out.push(g);
-            }
-        } else {
-            // Presentation forms change the stretch's bytes, so each character's
-            // place in the run is mapped back to where it stood in the text.
-            let mut run = String::new();
-            let mut back: Vec<(u32, u32)> = Vec::new();
-            for (at, _, way) in &ways[i..j] {
-                if let Way::Upright(c) = way {
-                    back.push((run.len() as u32, *at as u32));
-                    run.push(*c);
-                }
-            }
-            for mut g in shape_line(hr_font, &run, size_px, scale, true) {
-                let k = back.partition_point(|&(from, _)| from <= g.cluster);
-                g.cluster = back[k.saturating_sub(1)].1;
-                out.push(g);
-            }
+        for mut g in shape_line(hr_font, &text[start..end], size_px, scale, !turned) {
+            g.cluster += start as u32;
+            g.sideways = turned;
+            out.push(g);
         }
         i = j;
     }
@@ -3583,8 +3551,9 @@ mod leading_tests {
     }
 }
 
-/// ⭐ What a column does with a character its face has no vertical form for:
-/// the face's own presentation form if it draws one, otherwise on its side.
+/// ⭐ How a column stands each character, by UTR #50 as `text-orientation: mixed` reads it: R
+/// turned whatever the face says, Tr upright only where the face can stand it
+/// up, Tu upright as the face draws it.
 #[cfg(test)]
 mod column_fallback_tests {
     use super::*;
@@ -3598,13 +3567,11 @@ mod column_fallback_tests {
         "/tests/fonts/Mplus1-Regular.novert.subset.otf"
     ));
 
-    /// Noto Sans CJK cut to `…︙「！︕`, its `vert` keeping `「` and losing `…`
-    /// and `！` — the shape of a face whose vertical table forgot the ellipsis
-    /// while it draws the vertical one, and that keeps `！` upright on purpose
-    /// while it draws a `︕` off to one side, as GenYoGothic JP does. A face
-    /// with no `vert` at all is shaped onto the presentation forms by the
-    /// shaper itself; one with a partial `vert` is not, which is the case this
-    /// is for.
+    /// Noto Sans CJK cut to `…︙「！︕—`, its `vert` keeping `「` and losing `…`
+    /// and `！` — a face whose vertical table forgot the ellipsis while it draws
+    /// `︙`, and keeps `！` upright on purpose while it draws a `︕` off to one
+    /// side, as GenYoGothic JP does. Its `ccmp` joins `——` into one two-em
+    /// dash, as GenYoGothic's does.
     const FORMS: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fonts/NotoSansCJK.forms.subset.otf"
@@ -3656,17 +3623,13 @@ mod column_fallback_tests {
     }
 
     #[test]
-    fn the_face_s_own_vertical_ellipsis_is_used_when_it_draws_one() {
-        let fallback = column(FORMS, "…");
-        let form = column(FORMS, "︙");
-        assert_eq!(
-            fallback.path.map(|p| p.bounds()),
-            form.path.map(|p| p.bounds())
-        );
+    fn an_ellipsis_turns_even_where_the_face_draws_a_vertical_one() {
+        let (w, h) = ink(&column(FORMS, "…"));
+        assert!(h > w * 2.0, "{w}×{h}");
     }
 
     #[test]
-    fn a_presentation_form_answers_to_the_characters_it_stands_for() {
+    fn each_turned_character_answers_for_its_own_place() {
         let run = column(FORMS, "……");
         let clusters: Vec<u32> = run.clusters.iter().map(|c| c.cluster).collect();
         assert_eq!(clusters, vec![0, 3]);
@@ -3681,5 +3644,18 @@ mod column_fallback_tests {
             form.path.map(|p| p.bounds()),
             "！ was swapped for ︕"
         );
+    }
+
+    #[test]
+    fn a_pair_of_dashes_the_face_joins_stays_one_line() {
+        let run = column(FORMS, "——");
+        let path = run.path.expect("drew nothing");
+        let pieces = path
+            .segments()
+            .filter(|s| matches!(s, tiny_skia::PathSegment::MoveTo(_)))
+            .count();
+        assert_eq!(pieces, 1, "the two dashes were drawn apart");
+        let (w, h) = (path.bounds().width(), path.bounds().height());
+        assert!(h > w * 8.0, "{w}×{h}: the line does not run down the column");
     }
 }

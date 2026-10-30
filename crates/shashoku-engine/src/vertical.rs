@@ -1,33 +1,39 @@
-//! What a character does in a column when the face has no vertical form for it.
+//! How a character stands in a column: CSS Writing Modes 3's
+//! `text-orientation: mixed`, read off each character's UTR #50
+//! Vertical_Orientation property:
 //!
-//! A face says how its characters stand in vertical text through its `vert`
-//! feature, and many leave characters out — four in ten of a working library
-//! of CJK faces have no vertical `…`. Two ways on remain, both what Firefox
-//! does (gfxTextRun.cpp, gfxHarfBuzzShaper.cpp): the Unicode vertical
-//! presentation form, when the face draws one, and otherwise turning the
-//! character a quarter clockwise, which is what UTR #50 says a character
-//! marked R or Tr is for.
+//! - U and Tu stand upright and are shaped with the face's `vert`.
+//! - R is always set as in a row and turned a quarter clockwise — whatever the
+//!   face's `vert` says. Shaped as a row, a face's joins still happen:
+//!   GenYoGothic's `ccmp` makes `——` one two-em dash, and turned, one line.
+//! - Tr stands upright when the face draws its vertical presentation form or
+//!   its `vert` replaces it, and is turned otherwise.
 //!
-//! ⚠️ Only for characters that would otherwise lie wrong — R and Tr. A Tu
-//! character (`、。，！？`) set upright as it is still reads correctly, and a
-//! face with a `vert` that leaves one out usually meant it: GenYoGothic JP
-//! keeps `！？` upright, and its `︕︖` stand a fifth of an em right of the
-//! column's centre. Firefox reaches the presentation forms only for a face
-//! with no `vert` at all, which the shaper already handles by itself.
+//! A face with no `vert` at all is put onto the presentation forms by the
+//! shaper itself; they are never swapped in here. Doing more than this table —
+//! swapping a form into a face whose `vert` left a character out on purpose —
+//! is what set GenYoGothic's `！` off centre and broke its `——` in two.
 
-/// UTR #50 R and Tr, from VerticalOrientation-18.0.0.txt, for the punctuation
-/// and symbols lettering meets: general punctuation, CJK symbols, katakana's
-/// prolonged sound mark, the low and over lines among the CJK compatibility
-/// forms, and the fullwidth forms. Letters and digits are left
-/// out on purpose — whether a Latin word in a balloon lies on its side is a
-/// typesetter's decision, not a fallback — and so are arrows and the halfwidth
-/// katakana, which would turn in a way nobody setting a column expects.
-const TURNS: &[(u32, u32)] = &[
+/// How a character in a column is taken in hand when it is not plain upright.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Orientation {
+    /// UTR #50 R: always turned.
+    Rotated,
+    /// UTR #50 Tr: upright if the face can stand it up, turned if not.
+    Transformed,
+}
+
+/// From VerticalOrientation-18.0.0.txt, for the punctuation and symbols
+/// lettering meets: general punctuation, CJK symbols, katakana's prolonged
+/// sound mark, the low and over lines among the CJK compatibility forms, and
+/// the fullwidth forms. Letters and digits are left out on purpose — whether a
+/// Latin word in a balloon lies on its side is a typesetter's decision, not a
+/// fallback — and so are arrows and the halfwidth katakana, which would turn in
+/// a way nobody setting a column expects.
+const ROTATED: &[(u32, u32)] = &[
     (0x2010, 0x2015),
     (0x2017, 0x2017),
-    (0x2018, 0x2019),
     (0x201A, 0x201B),
-    (0x201C, 0x201D),
     (0x201E, 0x201F),
     (0x2022, 0x2027),
     (0x2032, 0x203A),
@@ -35,15 +41,21 @@ const TURNS: &[(u32, u32)] = &[
     (0x2043, 0x2046),
     (0x204A, 0x2050),
     (0x2052, 0x205E),
+    (0xFE49, 0xFE4F),
+    (0xFF0D, 0xFF0D),
+    (0xFF1C, 0xFF1E),
+];
+
+const TRANSFORMED: &[(u32, u32)] = &[
+    (0x2018, 0x2019),
+    (0x201C, 0x201D),
     (0x3008, 0x3011),
     (0x3014, 0x301F),
     (0x3030, 0x3030),
     (0x30A0, 0x30A0),
     (0x30FC, 0x30FC),
-    (0xFE49, 0xFE4F),
     (0xFF08, 0xFF09),
-    (0xFF0D, 0xFF0D),
-    (0xFF1A, 0xFF1E),
+    (0xFF1A, 0xFF1B),
     (0xFF3B, 0xFF3B),
     (0xFF3D, 0xFF3D),
     (0xFF3F, 0xFF3F),
@@ -51,20 +63,26 @@ const TURNS: &[(u32, u32)] = &[
     (0xFFE3, 0xFFE3),
 ];
 
-/// Whether `c` lies on its side in a column the face has no form for.
-pub fn turns(c: char) -> bool {
+fn within(table: &[(u32, u32)], c: char) -> bool {
     let c = c as u32;
-    TURNS.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
+    table.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
 }
 
-/// The vertical presentation form of a character that turns, as Firefox's
-/// table pairs them.
+pub fn orientation(c: char) -> Option<Orientation> {
+    if within(ROTATED, c) {
+        Some(Orientation::Rotated)
+    } else if within(TRANSFORMED, c) {
+        Some(Orientation::Transformed)
+    } else {
+        None
+    }
+}
+
+/// The vertical presentation form of a Tr character, by Unicode's `<vertical>`
+/// decompositions with the fullwidth forms standing for their narrow sources.
+/// Only asked whether the face draws it, never drawn in its place.
 pub fn presentation_form(c: char) -> Option<char> {
     let form = match c {
-        '\u{2013}' => '\u{FE32}',
-        '\u{2014}' => '\u{FE31}',
-        '\u{2025}' => '\u{FE30}',
-        '\u{2026}' => '\u{FE19}',
         '\u{3008}' => '\u{FE3F}',
         '\u{3009}' => '\u{FE40}',
         '\u{300A}' => '\u{FE3D}',
@@ -79,7 +97,6 @@ pub fn presentation_form(c: char) -> Option<char> {
         '\u{3015}' => '\u{FE3A}',
         '\u{3016}' => '\u{FE17}',
         '\u{3017}' => '\u{FE18}',
-        '\u{FE4F}' => '\u{FE34}',
         '\u{FF08}' => '\u{FE35}',
         '\u{FF09}' => '\u{FE36}',
         '\u{FF1A}' => '\u{FE13}',
@@ -94,8 +111,8 @@ pub fn presentation_form(c: char) -> Option<char> {
     Some(form)
 }
 
-/// Whether anything in `text` could need either way on — the common case is
-/// a column with none, which is shaped whole as it always was.
+/// Whether anything in `text` is more than plain upright — the common case is
+/// a column with none, which is shaped whole.
 pub fn may_need_help(text: &str) -> bool {
-    text.chars().any(turns)
+    text.chars().any(|c| orientation(c).is_some())
 }
