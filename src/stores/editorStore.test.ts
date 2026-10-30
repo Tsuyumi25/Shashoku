@@ -458,6 +458,37 @@ describe('deleteSelectedLabel', () => {
   })
 })
 
+describe('folding a gesture into one step', () => {
+  it('folds what landed since the mark, even when the stack was full and trimmed', () => {
+    const editor = useEditorStore()
+    for (let i = 0; i < UNDO_LIMIT; i += 1) {
+      editor.pushCommand({ label: `old ${i}`, do: () => {}, undo: () => {} })
+    }
+    const undone: string[] = []
+    const mark = editor.historyMark()
+    editor.pushCommand({ label: 'copy', do: () => {}, undo: () => { undone.push('copy') } })
+    editor.pushCommand({ label: 'move', do: () => {}, undo: () => { undone.push('move') } })
+
+    editor.foldSince(mark, 'alt-copy')
+    editor.undo()
+
+    expect(undone).toEqual(['move', 'copy'])
+  })
+
+  it('takes back a run it is told not to keep, leaving nothing to redo', () => {
+    const editor = useEditorStore()
+    let copies = 0
+    const mark = editor.historyMark()
+    editor.pushCommand({ label: 'copy', do: () => { copies += 1 }, undo: () => { copies -= 1 } })
+
+    editor.foldSince(mark, 'alt-copy', () => false)
+
+    expect(copies).toBe(0)
+    expect(editor.canUndo).toBe(false)
+    expect(editor.canRedo).toBe(false)
+  })
+})
+
 describe('the undo stack is bounded', () => {
   it('reaches back a fixed number of steps rather than growing for ever', () => {
     const editor = useEditorStore()

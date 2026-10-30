@@ -1785,7 +1785,7 @@ function onPointerDown(e: PointerEvent) {
     return
   }
   onSelectObject(hit, e.shiftKey)
-  if (e.altKey && editor.tool === 'select') leaveCopiesOf([hit])
+  if (e.altKey && editor.tool === 'select') leaveCopiesOf([hit], e.pointerId)
   el.setPointerCapture(e.pointerId)
   layerDrag.value = {
     id: hit,
@@ -1803,9 +1803,9 @@ function onPointerDown(e: PointerEvent) {
  * pixels before the hand can move. Pressed on part of a selection, every member
  * is copied — each one block, joining its own translation.
  */
-function leaveCopiesOf(pressed: readonly string[]): void {
+function leaveCopiesOf(pressed: readonly string[], pointerId: number): void {
   const ids = pressed.length === 1 && editor.isSelected(pressed[0]) ? [...editor.selectedIds] : pressed
-  altRun ??= { depth: editor.historyDepth(), waits: [] }
+  altRun ??= { mark: editor.historyMark(), pointerId, waits: [] }
   for (const id of ids) {
     altRun.waits.push(
       merge
@@ -1822,23 +1822,24 @@ function leaveCopiesOf(pressed: readonly string[]): void {
  * Let go without moving and there was nothing to copy for — Photoshop makes no
  * copy for a click — so the copies are taken back.
  */
-let altRun: { depth: number; waits: Promise<unknown>[] } | null = null
+let altRun: { mark: number; pointerId: number; waits: Promise<unknown>[] } | null = null
 
-async function settleAltRun(): Promise<void> {
+async function settleAltRun(e: PointerEvent): Promise<void> {
   const run = altRun
+  // Only the release of the press that made the copies ends the gesture.
+  if (run === null || e.pointerId !== run.pointerId) return
   altRun = null
-  if (run === null) return
   await Promise.all(run.waits)
   await nextTick()
-  editor.foldSince(run.depth, 'alt-copy', (steps) =>
+  editor.foldSince(run.mark, 'alt-copy', (steps) =>
     steps.some((cmd) => !cmd.label.startsWith('duplicate-layer')),
   )
 }
 
 // On the window and bubbling, so it is heard after the frame or the canvas has
 // committed the move the release ends.
-useEventListener(window, 'pointerup', () => void settleAltRun())
-useEventListener(window, 'pointercancel', () => void settleAltRun())
+useEventListener(window, 'pointerup', (e: PointerEvent) => void settleAltRun(e))
+useEventListener(window, 'pointercancel', (e: PointerEvent) => void settleAltRun(e))
 
 /**
  * Text objects are pressed on their own frames, which stop the press before it
@@ -1850,7 +1851,7 @@ function onAltPress(e: PointerEvent): void {
   const id = e.target.closest<HTMLElement>('[data-object-id]')?.dataset.objectId
   if (id === undefined || editor.isLayerLocked(id)) return
   if (!editor.isSelected(id)) editor.selectOnly(id)
-  leaveCopiesOf([id])
+  leaveCopiesOf([id], e.pointerId)
 }
 
 /**

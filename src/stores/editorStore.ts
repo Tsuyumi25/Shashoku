@@ -1023,6 +1023,7 @@ export const useEditorStore = defineStore('editor', () => {
       kept = next.slice(over)
     }
     for (const gone of history.redo) gone.forget?.()
+    pushedAt.set(cmd, ++pushes)
     setHistory(book, { undo: kept, redo: [] })
     historyStep.value++
     logActivity('step', { label: cmd.label, ...cmd.detail })
@@ -1171,26 +1172,36 @@ export const useEditorStore = defineStore('editor', () => {
     settleBook(cmd, book)
   }
 
-  /** How many steps the current book's history holds, for `foldSince`. */
-  function historyDepth(): number {
-    return historyOf(currentBook.value).undo.length
+  /**
+   * Every pushed step's place in the order steps were taken, for `foldSince`.
+   * A count rather than the stack's length: a step pushed onto a full stack
+   * trims the oldest, so a length read before a gesture names the wrong place
+   * once the gesture has landed.
+   */
+  const pushedAt = new WeakMap<Command, number>()
+  let pushes = 0
+
+  /** Where the history stands now, to fold back to. */
+  function historyMark(): number {
+    return pushes
   }
 
   /**
    * Everything taken onto the current book's history since it stood at
-   * `depth`, made one step — a gesture whose parts land as separate commands
+   * `mark`, made one step — a gesture whose parts land as separate commands
    * but are one act to the hand, so one undo takes it back. `keepIf` says
    * whether the run is worth keeping at all; one that is not is taken back
    * now, and leaves nothing to redo.
    */
   function foldSince(
-    depth: number,
+    mark: number,
     label: string,
     keepIf: (steps: readonly Command[]) => boolean = () => true,
   ) {
     const book = currentBook.value
     const history = historyOf(book)
-    if (history.undo.length < depth) return
+    let depth = history.undo.length
+    while (depth > 0 && (pushedAt.get(history.undo[depth - 1]!) ?? 0) > mark) depth--
     const steps = history.undo.slice(depth)
     if (steps.length === 0) return
     if (!keepIf(steps)) {
@@ -2995,7 +3006,7 @@ export const useEditorStore = defineStore('editor', () => {
     editBy,
     pushCommand,
     historyStep,
-    historyDepth,
+    historyMark,
     foldSince,
     forgetJournals,
     undo,
