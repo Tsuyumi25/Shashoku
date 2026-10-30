@@ -88,7 +88,7 @@
             v-for="faces in rows[vrow.index]"
             :key="faces[0]!.family"
             class="font-cell group/cell"
-            :style="{ height: `${rowHeight}px` }"
+            :style="{ height: `${heightOf(vrow.index)}px` }"
             @mouseenter="hovered = faces"
             @mouseleave="hovered = null"
           >
@@ -140,6 +140,9 @@
                 :size-px="samplePx"
                 :fit-width="box.w"
                 :fit-height="box.h"
+                :overflows="fit.floored"
+                :offset="sampleOffset"
+                @scroll="sampleOffset = $event"
                 :fill-color="fillColor"
                 :stroke="sampleStroke"
                 :vertical="vertical"
@@ -155,8 +158,8 @@
             </div>
 
             <div class="cell-actions">
-              <!-- Held when there is nothing to cycle, so every cell is the same height. -->
-              <div class="weight-row" :class="faces.length > 1 ? '' : 'invisible'">
+              <!-- Held open on every cell of a row that has one, so a row's buttons line up. -->
+              <div v-if="rowHasWeights(vrow.index)" class="weight-row" :class="faces.length > 1 ? '' : 'invisible'">
                 <button
                   type="button"
                   class="weight-step"
@@ -188,12 +191,32 @@
                 >
                   選擇
                 </button>
+                <button
+                  type="button"
+                  class="cell-zoom"
+                  title="放大看完整的樣張"
+                  @click="zoomed = shownFace(faces)"
+                >
+                  <Maximize2 :size="14" />
+                </button>
               </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <FontSampleZoom
+      :face="zoomed"
+      :text="sampleText"
+      :vertical="vertical"
+      :fill-color="fillColor"
+      :stroke="stroke"
+      :weight-px="weightPx"
+      :given-at-px="objectPx || samplePx"
+      :mark="markMissing"
+      @close="zoomed = null"
+    />
 
     <!--
       Where the sample is actually typed. A real control, holding the real text
@@ -222,7 +245,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Star } from '@lucide/vue'
+import { Maximize2, Star } from '@lucide/vue'
 import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import { MAX_FONT_PICKER_BOX_PX, MIN_FONT_PICKER_BOX_PX } from '@shared/preferences/types'
 import type { FontEntry } from '@shared/fonts/types'
@@ -237,12 +260,14 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import FontSampleOptions from '@/components/FontSampleOptions.vue'
+import FontSampleZoom from '@/components/FontSampleZoom.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useChapterFontCounts } from '@/composables/useChapterFontCounts'
 import { DEFAULT_SAMPLE_TEXT, useSampleTyping } from '@/composables/useSampleTyping'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor } from '@/lib/fontSampleCache'
+import { sampleFit } from '@/lib/sampleFit'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const picker = useFontPicker()
@@ -341,32 +366,8 @@ function onDirection(v: unknown) {
   }
 }
 
-const sampleLines = computed(() => sampleText.value.split('\n'))
-const longestLine = computed(() =>
-  sampleLines.value.reduce((most, line) => Math.max(most, line.length), 1),
-)
-
-/** Matches the column advance the engine uses for vertical runs. */
-const VERTICAL_COLUMN_EM = 1.2
-/**
- * Widest a character that is not full-width comes out across this font library.
- * Only horizontal needs guessing: a vertical column advances by a constant the
- * engine sets, the same for every face.
- */
-const NARROW_ADVANCE_EM = 0.62
 /** Left and right padding of a cell. */
 const CELL_SIDE_PADDING_PX = 24
-
-function advanceEm(line: string): number {
-  let em = 0
-  for (const ch of line) {
-    // Everything from Hangul Jamo upward is either full-width or ambiguous
-    // punctuation that a CJK face draws full-width; guessing wide only costs
-    // space, guessing narrow costs the end of the line.
-    em += (ch.codePointAt(0) ?? 0) >= 0x1100 ? 1 : NARROW_ADVANCE_EM
-  }
-  return em
-}
 
 /**
  * The box every sample is shown in, in CSS pixels: wide for rows, tall for
@@ -378,38 +379,35 @@ const box = computed(() => {
   return vertical.value ? { w: d, h: d * 2 } : { w: d * 2, h: d }
 })
 
-/** Room a sample keeps from its box's edge, in CSS pixels. */
-const BOX_MARGIN_PX = 8
-/** Smallest a sample is set at however long the text, in CSS pixels. */
-const MIN_SAMPLE_PX = 6
+const fit = computed(() => sampleFit(sampleText.value, box.value, vertical.value))
 
 /**
- * The size that fills the box with this sample, worked out from the text alone
- * so it is the same for every face. A long line sets small; a short one large.
+ * How far every clipped cell is scrolled, one value for the grid so a
+ * selection dragged along one sample shows the same place in all of them.
+ * Back to the start whenever what is being compared changes shape.
  */
-const samplePx = computed(() => {
-  const { w, h } = box.value
-  const lines = sampleLines.value
-  const fit = vertical.value
-    ? Math.min(
-        (w - BOX_MARGIN_PX) / (VERTICAL_COLUMN_EM * lines.length),
-        (h - BOX_MARGIN_PX) / (longestLine.value * 1.05),
-      )
-    : Math.min(
-        (w - BOX_MARGIN_PX) / lines.reduce((most, line) => Math.max(most, advanceEm(line)), 1),
-        (h - BOX_MARGIN_PX) / (LINE_HEIGHT_RATIO * lines.length),
-      )
-  return Math.max(MIN_SAMPLE_PX, Math.floor(fit))
-})
+const sampleOffset = ref({ x: 0, y: 0 })
+watch([box, objectText], () => (sampleOffset.value = { x: 0, y: 0 }))
+const samplePx = computed(() => fit.value.sizePx)
 
 const minCellWidth = computed(() => box.value.w + CELL_SIDE_PADDING_PX)
 
-/** Label, padding, gaps and the two action rows around the sample. */
-const CELL_CHROME_PX = 118
-/** A line box runs a little taller than the em; measured across this library. */
-const LINE_HEIGHT_RATIO = 1.35
+/** Label, padding, gaps and the action row around the sample. */
+const CELL_CHROME_PX = 90
+/** The row that walks a family's weights, and the gap above it. */
+const WEIGHT_ROW_PX = 28
 
-const rowHeight = computed(() => box.value.h + CELL_CHROME_PX)
+/**
+ * Two heights, not one per cell: a row grows by the weight row only when one
+ * of its families has more than one face, so most rows give that room to the
+ * sample instead.
+ */
+function rowHasWeights(index: number): boolean {
+  return (rows.value[index] ?? []).some((faces) => faces.length > 1)
+}
+function heightOf(index: number): number {
+  return box.value.h + CELL_CHROME_PX + (rowHasWeights(index) ? WEIGHT_ROW_PX : 0)
+}
 
 function onBoxSize(e: Event) {
   preferences.setFontPickerBoxPx((e.target as HTMLInputElement).valueAsNumber)
@@ -449,15 +447,17 @@ const currentFamily = computed(() =>
   lead.value && agreed('fontFamily') ? lead.value.body.style.fontFamily : '',
 )
 const fillColor = computed(() => lead.value?.body.style.color ?? '#000000')
+/** The face whose whole sample is open, or null. */
+const zoomed = ref<FontEntry | null>(null)
 const stroke = computed(() => (lead.value ? engineStrokeFor(lead.value.effects) : undefined))
 
 /**
  * The object's stroke and weight are pixels at its own size; the sample is set
  * at another, so both are scaled to keep the proportion the object will have.
  */
+const objectPx = computed(() => (lead.value && agreed('fontSizePx') ? lead.value.body.style.fontSizePx : 0))
 const sizeRatio = computed(() => {
-  const objectPx = lead.value && agreed('fontSizePx') ? lead.value.body.style.fontSizePx : 0
-  return objectPx > 0 ? samplePx.value / objectPx : 1
+  return objectPx.value > 0 ? samplePx.value / objectPx.value : 1
 })
 const sampleStroke = computed(() =>
   stroke.value ? { ...stroke.value, width: stroke.value.width * sizeRatio.value } : undefined,
@@ -617,14 +617,14 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: rows.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => rowHeight.value,
+    estimateSize: (index: number) => heightOf(index),
     overscan: 2,
   })),
 )
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-watch([rowHeight, columns, displayed], () => virtualizer.value.measure())
+watch([box, columns, displayed], () => virtualizer.value.measure())
 
 // Enumerating on open rather than at startup. The platform's own list does not
 // change while the app runs, so this only repeats when a folder is added.
@@ -701,7 +701,7 @@ function revealCurrentFamily() {
   overflow: hidden;
 }
 
-/* The three rows sit at the bottom whatever the sample above them measured,
+/* The actions sit at the bottom whatever the sample above them measured,
  * so a row of cells keeps its controls on one line. */
 .cell-actions {
   margin-top: auto;
@@ -764,6 +764,21 @@ function revealCurrentFamily() {
 }
 .cell-action.primary:hover {
   background: color-mix(in srgb, var(--primary) 90%, transparent);
+}
+.cell-zoom {
+  display: flex;
+  flex-shrink: 0;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.cell-zoom:hover {
+  background: var(--secondary);
+  color: var(--foreground);
 }
 /*
  * One or two pixels of a colour nothing is drawn in, which is invisible in

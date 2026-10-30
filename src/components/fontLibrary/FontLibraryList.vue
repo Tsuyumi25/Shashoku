@@ -9,8 +9,8 @@
         class="w-56 rounded border border-border bg-background px-2 py-1 text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
       />
       <label class="flex items-center gap-2">
-        <span class="shrink-0">字級</span>
-        <input v-model.number="samplePx" type="range" :min="MIN_PX" :max="MAX_PX" step="1" class="w-40 accent-[var(--primary)]" />
+        <span class="shrink-0">顯示大小</span>
+        <input v-model.number="boxPx" type="range" :min="MIN_BOX_PX" :max="MAX_BOX_PX" step="1" class="w-40 accent-[var(--primary)]" />
       </label>
       <FontSampleOptions />
       <span class="ml-auto tabular-nums">{{ shown.length }} 套</span>
@@ -44,15 +44,19 @@
           </div>
           <div
             class="sample-cell"
+            :style="{ height: `${boxPx}px` }"
             title="直接在樣本上打字。所有字型共用同一段文字"
             @mousedown="aimCell(shown[vrow.index]!.family, $event)"
           >
             <FontSampleCanvas
               :entry="shown[vrow.index]!.face"
               :text="sampleText"
-              :size-px="samplePx"
+              :size-px="fit.sizePx"
               :fit-width="sampleWidth"
-              :fit-height="sampleHeight"
+              :fit-height="boxPx"
+              :overflows="fit.floored"
+              :offset="sampleOffset"
+              @scroll="sampleOffset = $event"
               :fill-color="isDark ? DARK_INK : LIGHT_INK"
               :mark="markMissing"
               :editing="aimedAt === shown[vrow.index]!.family"
@@ -95,6 +99,7 @@ import { useFontLibrary } from '@/composables/useFontLibrary'
 import { DEFAULT_SAMPLE_TEXT, useSampleTyping } from '@/composables/useSampleTyping'
 import { catalog, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
 import { coverageFor } from '@/lib/fontSampleCache'
+import { sampleFit } from '@/lib/sampleFit'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const preferences = usePreferencesStore()
@@ -107,9 +112,10 @@ const LIGHT_INK = '#2d2d2b'
 const DARK_INK = '#e8e6df'
 const isDark = useDark({ initialValue: 'light' })
 
-const MIN_PX = 16
-const MAX_PX = 120
-const samplePx = ref(40)
+const MIN_BOX_PX = 32
+const MAX_BOX_PX = 240
+/** How tall each row's sample box is; the size is whatever fills it. */
+const boxPx = ref(64)
 
 const sampleText = computed({
   get: () => preferences.prefs.fontSampleText || DEFAULT_SAMPLE_TEXT,
@@ -204,18 +210,17 @@ onMounted(async () => {
 const NAME_COLUMN_PX = 256
 const ROW_GAP_PX = 24
 const ROW_SIDE_PX = 16
-/** A line box runs a little taller than the em; measured across this library. */
-const LINE_HEIGHT_RATIO = 1.35
 const ROW_PADDING_PX = 20
 const MIN_ROW_PX = 84
 
 const scrollEl = ref<HTMLElement | null>(null)
 const { width: listWidth } = useElementSize(scrollEl)
 const sampleWidth = computed(() => Math.max(120, listWidth.value - NAME_COLUMN_PX - ROW_GAP_PX - 2 * ROW_SIDE_PX))
-const sampleHeight = computed(
-  () => Math.ceil(samplePx.value * LINE_HEIGHT_RATIO * sampleText.value.split('\n').length) + 8,
-)
-const rowHeight = computed(() => Math.max(MIN_ROW_PX, sampleHeight.value + ROW_PADDING_PX))
+/** How far every clipped row is scrolled; one value, so all rows move together. */
+const sampleOffset = ref({ x: 0, y: 0 })
+watch([boxPx, sampleWidth], () => (sampleOffset.value = { x: 0, y: 0 }))
+const fit = computed(() => sampleFit(sampleText.value, { w: sampleWidth.value, h: boxPx.value }, false))
+const rowHeight = computed(() => Math.max(MIN_ROW_PX, boxPx.value + ROW_PADDING_PX))
 
 const virtualizer = useVirtualizer(
   computed(() => ({
