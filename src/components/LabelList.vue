@@ -44,10 +44,15 @@
         @mousedown="editor.showPage(group.page.pageId)"
       >
         <PageRowThumb v-if="fileOf(group.page.pageId)" :file="fileOf(group.page.pageId)!" />
-        <span class="min-w-0 truncate text-xs font-medium">{{ group.page.name }}</span>
-        <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-          {{ group.page.count }}
-        </span>
+        <div class="flex min-w-0 flex-1 flex-col gap-1 self-stretch overflow-hidden">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="min-w-0 truncate text-xs font-medium">{{ group.page.name }}</span>
+            <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+              {{ group.page.count }}
+            </span>
+          </div>
+          <PagePinnedLayers :page-id="group.page.pageId" />
+        </div>
       </div>
 
       <!--
@@ -305,6 +310,7 @@ import Draggable from 'vuedraggable'
 import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
 import { generateId } from '@shared/page/schema'
+import PagePinnedLayers from '@/components/PagePinnedLayers.vue'
 import PageRowThumb from '@/components/PageRowThumb.vue'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {

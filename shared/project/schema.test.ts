@@ -93,3 +93,19 @@ describe('a project from before pages had directories', () => {
     expect(() => parseProjectJson(newer)).toThrow(/請更新軟體/)
   })
 })
+
+describe('pinned layer names', () => {
+  it('come back with what was written, in order', () => {
+    const project = { ...defaultProjectJson(), pinnedLayerNames: ['修圖', '底圖'] }
+    expect(parseProjectJson(serializeProjectJson(project)).pinnedLayerNames).toEqual(['修圖', '底圖'])
+  })
+
+  it('stay absent in a file that never had them, so the first open can seed them', () => {
+    expect(parseProjectJson(serializeProjectJson(defaultProjectJson())).pinnedLayerNames).toBeUndefined()
+  })
+
+  it('drop blanks, non-strings and repeats', () => {
+    const raw = JSON.stringify({ ...defaultProjectJson(), pinnedLayerNames: ['底圖', '', 3, '底圖', '修圖'] })
+    expect(parseProjectJson(raw).pinnedLayerNames).toEqual(['底圖', '修圖'])
+  })
+})

@@ -145,6 +145,17 @@
         </span>
 
         <button
+          v-if="row.entry.kind !== 'text'"
+          type="button"
+          class="h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
+          :class="isPinned(row.entry) ? 'flex text-primary' : 'hidden text-muted-foreground group-hover/row:flex'"
+          :title="isPinned(row.entry) ? `「${row.entry.name}」不再顯示在標籤清單的頁列` : `把叫「${row.entry.name}」的圖層顯示在標籤清單的頁列（這本書的每一頁）`"
+          @click.stop="project.togglePinnedLayerName(row.entry.name)"
+        >
+          <Pin :size="12" :class="isPinned(row.entry) && 'fill-current'" />
+        </button>
+
+        <button
           v-if="row.entry.kind === 'group' && !isRowLocked(row)"
           type="button"
           class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
@@ -171,6 +182,7 @@ import {
   Image,
   Lock,
   LockOpen,
+  Pin,
   SquareX,
   Type,
   Ungroup,
@@ -247,6 +259,10 @@ function onPick(row: LayerTreeRow, e: MouseEvent) {
   if (e.shiftKey) editor.extendSelectionTo(row.entry.id, sequence.value)
   else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.entry.id)
   else editor.selectOnly(row.entry.id)
+}
+
+function isPinned(entry: LayerEntry): boolean {
+  return entry.kind !== 'text' && project.pinnedLayerNames.includes(entry.name)
 }
 
 function onToggleVisible(entry: LayerEntry) {

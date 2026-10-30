@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
+import { usePreferencesStore } from './preferencesStore'
 import { defaultManifest, defaultOcr, serializeManifest } from '@shared/page/schema'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
@@ -433,5 +434,44 @@ describe('what is owed to the layers folder before anyone reads it', () => {
     await project.flush()
 
     expect(order).toEqual(['pixels'])
+  })
+})
+
+describe('which layers a page row shows', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function openRaw(project: ReturnType<typeof useProjectStore>, meta: object) {
+    vi.stubGlobal('window', {
+      api: {
+        writePage: async () => {},
+        writeProjectMeta: async () => {},
+        writePreferences: async () => {},
+        openProject: async () => ({ projectMetaRaw: JSON.stringify(meta), pages: [] }),
+        readPage: async () => ({ manifestRaw: serializeManifest(defaultManifest('p', 100, 100)) }),
+        scanRoot: async () => ({ rootImages: [], hasShashokuDir: true, hasSentinel: true }),
+      },
+    })
+    return project.openByPath(ROOT)
+  }
+
+  it('takes the machine seed the first time a project is opened, and keeps it to write', async () => {
+    usePreferencesStore().prefs.pinnedLayerSeed = ['修圖']
+    const project = useProjectStore()
+    await openRaw(project, { ...defaultProjectJson() })
+    expect(project.pinnedLayerNames).toEqual(['修圖'])
+    expect(project.dirty).toBe(true)
+  })
+
+  it('keeps its own list once it has one, whatever the machine seeds now', async () => {
+    usePreferencesStore().prefs.pinnedLayerSeed = ['修圖']
+    const project = useProjectStore()
+    await openRaw(project, { ...defaultProjectJson(), pinnedLayerNames: ['線稿', '底圖'] })
+    expect(project.pinnedLayerNames).toEqual(['線稿', '底圖'])
   })
 })

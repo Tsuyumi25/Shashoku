@@ -45,6 +45,12 @@ function parseTags(v: unknown): TagDefinition[] {
   return tags
 }
 
+function parsePinnedLayerNames(v: unknown): string[] | undefined {
+  if (v === undefined) return undefined
+  if (!Array.isArray(v)) fail('pinnedLayerNames 必須是陣列')
+  return [...new Set(v.filter((n): n is string => typeof n === 'string' && n.length > 0))]
+}
+
 function parseGlossary(v: unknown): Glossary | undefined {
   if (v === undefined) return undefined
   if (!isRecord(v)) fail('glossary 必須是物件(key = 原文, value = 譯文)')
@@ -138,6 +144,7 @@ export function parseProjectJson(raw: string): ProjectJson {
     seedStyle,
     comment,
     glossary: parseGlossary(data.glossary),
+    pinnedLayerNames: parsePinnedLayerNames(data.pinnedLayerNames),
     exportProfiles: parseExportProfiles(data.exportProfiles),
   }
 }
@@ -153,6 +160,7 @@ export function serializeProjectJson(project: ProjectJson): string {
   out.seedStyle = serializeTextStyle(project.seedStyle)
   out.comment = project.comment
   if (project.glossary !== undefined) out.glossary = project.glossary
+  if (project.pinnedLayerNames !== undefined) out.pinnedLayerNames = project.pinnedLayerNames
   out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`
 }

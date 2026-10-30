@@ -53,6 +53,7 @@ export function parsePreferences(raw: string): Preferences {
   const {
     fontFavorites,
     fontGroups,
+    pinnedLayerSeed,
     fontFolders,
     defaultFontFamily,
     fontPickerBoxPx,
@@ -93,6 +94,11 @@ export function parsePreferences(raw: string): Preferences {
         ],
       });
     }
+  }
+  if (Array.isArray(pinnedLayerSeed)) {
+    prefs.pinnedLayerSeed = [
+      ...new Set(pinnedLayerSeed.filter((n): n is string => typeof n === "string" && n.length > 0)),
+    ];
   }
   if (Array.isArray(fontFolders)) {
     prefs.fontFolders = fontFolders.filter(
@@ -184,6 +190,7 @@ export function serializePreferences(prefs: Preferences): string {
     {
       fontFavorites: prefs.fontFavorites,
       fontGroups: prefs.fontGroups,
+      pinnedLayerSeed: prefs.pinnedLayerSeed,
       fontFolders: prefs.fontFolders,
       defaultFontFamily: prefs.defaultFontFamily,
       fontPickerBoxPx: prefs.fontPickerBoxPx,

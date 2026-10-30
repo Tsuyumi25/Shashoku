@@ -28,6 +28,22 @@
     </section>
 
     <section class="mt-3 rounded border border-border p-3">
+      <label class="block text-xs">
+        新專案的頁列圖層
+        <input
+          type="text"
+          class="mt-1.5 w-full rounded border border-border bg-background px-2 py-1 text-xs"
+          :value="preferences.prefs.pinnedLayerSeed.join('、')"
+          @change="onSeed($event)"
+        />
+        <span class="mt-1 block text-muted-foreground">
+          用「、」或逗號分開。一本書第一次打開時抄一份過去，之後那本書用自己的；
+          要改某一本，在圖層面板按圖層旁的圖釘。
+        </span>
+      </label>
+    </section>
+
+    <section class="mt-3 rounded border border-border p-3">
       <label class="flex cursor-pointer items-start gap-2 text-xs">
         <input
           type="checkbox"
@@ -53,6 +69,11 @@ import { MAX_UI_ZOOM_LEVEL, MIN_UI_ZOOM_LEVEL } from '@shared/preferences/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 const preferences = usePreferencesStore()
+
+function onSeed(e: Event) {
+  const names = (e.target as HTMLInputElement).value.split(/[、,，]/).map((n) => n.trim()).filter(Boolean)
+  preferences.prefs.pinnedLayerSeed = [...new Set(names)]
+}
 
 const LEVELS = Array.from(
   { length: MAX_UI_ZOOM_LEVEL - MIN_UI_ZOOM_LEVEL + 1 },

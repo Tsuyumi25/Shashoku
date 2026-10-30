@@ -88,6 +88,11 @@ export interface Preferences {
   /** Groups in the order the library's sidebar lists them. */
   fontGroups: FontGroup[];
   /**
+   * The layer names a project starts out pinning to its page rows. A seed: a
+   * project copies it once and keeps its own list after that.
+   */
+  pinnedLayerSeed: string[];
+  /**
    * Folders scanned on top of the platform's own font directories. Files are
    * read where they lie and never copied, so a folder that moves takes its
    * families out of the catalogue with it.
@@ -189,6 +194,7 @@ export function defaultPreferences(): Preferences {
   return {
     fontFavorites: [],
     fontGroups: [],
+    pinnedLayerSeed: ["修圖", "底圖"],
     fontFolders: [],
     defaultFontFamily: "",
     fontPickerBoxPx: 120,

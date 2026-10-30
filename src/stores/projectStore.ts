@@ -327,6 +327,10 @@ export const useProjectStore = defineStore('project', () => {
     // that back now is what keeps a page nobody listed from being taken in
     // again at every open for the rest of the project's life.
     if (!sameOrder(meta.pages, loaded)) markMetaDirty()
+    if (meta.pinnedLayerNames === undefined) {
+      meta.pinnedLayerNames = [...usePreferencesStore().prefs.pinnedLayerSeed]
+      markMetaDirty()
+    }
     // Opening a project is also how its neighbours get found: the folder it
     // sits in becomes somewhere the library looks from now on.
     usePreferencesStore().addScanPoint(parentFolder(newRootPath))
@@ -1449,6 +1453,16 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
+  const pinnedLayerNames = computed(() => projectMeta.value.pinnedLayerNames ?? [])
+
+  function togglePinnedLayerName(name: string) {
+    const names = projectMeta.value.pinnedLayerNames ?? []
+    projectMeta.value.pinnedLayerNames = names.includes(name)
+      ? names.filter((n) => n !== name)
+      : [...names, name]
+    markMetaDirty()
+  }
+
   function updateComment(text: string) {
     if (projectMeta.value.comment === text) return
     projectMeta.value.comment = text
@@ -1494,6 +1508,8 @@ export const useProjectStore = defineStore('project', () => {
     
     rootPath,
     projectMeta,
+    pinnedLayerNames,
+    togglePinnedLayerName,
     files,
     allFiles,
     dirtyPageIds,

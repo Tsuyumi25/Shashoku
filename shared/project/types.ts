@@ -65,6 +65,14 @@ export interface ProjectJson {
   
   glossary?: Glossary
   /**
+   * Layer names the label list's page rows show as controls, in this order.
+   * Seeded from the machine's preference the first time the project is opened
+   * and the project's own from then on: the book is what knows which of its
+   * layers matter, and it has to say the same on whoever's machine it opens.
+   * Absent only in a file no open has seeded yet.
+   */
+  pinnedLayerNames?: string[]
+  /**
    * How this project gets delivered. Kept here rather than in preferences and
    * inheriting from nothing: a project handed to someone else has to arrive
    * knowing how it is meant to come out.
