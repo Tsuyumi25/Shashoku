@@ -136,6 +136,8 @@ function onRowKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   void library.refresh()
+  // The library opens on 最近, whose cards are read off the disk when shown.
+  if (library.recent) library.showRecent()
 })
 </script>
 

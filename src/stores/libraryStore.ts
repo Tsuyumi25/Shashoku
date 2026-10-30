@@ -429,8 +429,6 @@ export const useLibraryStore = defineStore('library', () => {
     return one.length === 1 && one[0].kind === 'page' ? one[0].page : null
   })
 
-  void loadRecent()
-
   return {
     roots,
     bookTotal,
