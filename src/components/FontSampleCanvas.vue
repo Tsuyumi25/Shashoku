@@ -5,10 +5,10 @@
     :class="overflows && 'sample-clipped'"
   >
     <!--
-      Scrolled only by a selection dragged past its edge, as a text field is:
-      the wheel belongs to the list the cell sits in.
+      The plain wheel belongs to the list the cell sits in; Shift and the wheel
+      scroll the sample, as does a selection dragged past its edge.
     -->
-    <div ref="scroller" class="sample-scroller">
+    <div ref="scroller" class="sample-scroller" @wheel="onWheel">
     <div
       v-if="current"
       ref="boxEl"
@@ -40,11 +40,18 @@
     >
       無法繪製
     </span>
-    <div v-else class="sample-pending" :style="{ width: `${fitWidth}px`, height: `${fitHeight}px` }" />
+    <div
+      v-else
+      class="sample-pending"
+      :style="{
+        width: Number.isFinite(fitWidth) ? `${fitWidth}px` : undefined,
+        height: Number.isFinite(fitHeight) ? `${fitHeight}px` : undefined,
+      }"
+    />
     </div>
     <!--
       Bars for whichever way the sample runs out, taken by the thumb or a press
-      on the track. Never by the wheel: that scrolls the list.
+      on the track.
     -->
     <div v-if="overflows && reach.x > 0" class="sample-bar sample-bar-x" @pointerdown="onBarDown('x', $event)">
       <div class="sample-thumb" :style="thumbStyle('x')" />
@@ -160,8 +167,8 @@ const request = computed<SampleRequest>(() => ({
 const scale = computed(() => {
   const sample = current.value
   if (!sample) return 1 / dpr
-  const natural = { w: sample.image.width / dpr, h: sample.image.height / dpr }
   if (props.overflows) return 1 / dpr
+  const natural = { w: sample.image.width / dpr, h: sample.image.height / dpr }
   return Math.min(1, props.fitWidth / natural.w, props.fitHeight / natural.h) / dpr
 })
 
@@ -373,19 +380,50 @@ const reach = computed(() => ({
   y: Math.max(0, content.value.h - viewH.value),
 }))
 
-/** Asks for an offset, kept inside how far this sample can go. */
+/** Asks for an offset, kept inside how far this sample can go; nothing when that is where it is. */
 function scrollTo(x: number, y: number) {
-  emit('scroll', {
+  const next = {
     x: Math.max(0, Math.min(reach.value.x, x)),
     y: Math.max(0, Math.min(reach.value.y, y)),
-  })
+  }
+  if (next.x === (props.offset?.x ?? 0) && next.y === (props.offset?.y ?? 0)) return
+  emit('scroll', next)
+}
+
+/**
+ * Shift and the wheel move a clipped sample along the way it runs out — across
+ * for columns, down for rows — with down always reading on. Shift is free for
+ * this: the lists these cells sit in only ever scroll one way, so there is no
+ * second axis for it to stand for.
+ */
+function onWheel(e: WheelEvent) {
+  if (!e.shiftKey || !props.overflows) return
+  // Chromium hands a shifted wheel over as a horizontal delta on some platforms.
+  const delta = e.deltaY || e.deltaX
+  if (delta === 0) return
+  // Along the way the sample reads on, or the other way when that is the only
+  // way it runs out — a single long row, a single tall column.
+  const across = props.vertical ? reach.value.x > 0 || reach.value.y === 0 : reach.value.y === 0
+  e.preventDefault()
+  e.stopPropagation()
+  const x = props.offset?.x ?? 0
+  const y = props.offset?.y ?? 0
+  if (across) scrollTo(x + delta, y)
+  else scrollTo(x, y + delta)
+}
+
+/** The share of its track a thumb covers, never so little it cannot be taken hold of. */
+const MIN_THUMB_SHARE = 0.08
+
+function thumbShare(axis: 'x' | 'y'): number {
+  const view = axis === 'x' ? viewW.value : viewH.value
+  const whole = axis === 'x' ? content.value.w : content.value.h
+  return Math.max(MIN_THUMB_SHARE, view / whole)
 }
 
 /** Where along its track a thumb sits, as a share: columns start at the right. */
 function thumbStyle(axis: 'x' | 'y') {
-  const view = axis === 'x' ? viewW.value : viewH.value
-  const whole = axis === 'x' ? content.value.w : content.value.h
-  const size = Math.max(0.08, view / whole)
+  const size = thumbShare(axis)
   const at = reach.value[axis] > 0 ? (props.offset?.[axis] ?? 0) / reach.value[axis] : 0
   const from = (axis === 'x' && props.vertical ? 1 - at : at) * (1 - size)
   return axis === 'x'
@@ -411,9 +449,9 @@ function onBarDown(axis: 'x' | 'y', e: PointerEvent) {
   const track = e.currentTarget as HTMLElement
   const rect = track.getBoundingClientRect()
   const length = axis === 'x' ? rect.width : rect.height
-  const whole = axis === 'x' ? content.value.w : content.value.h
   const sign = axis === 'x' && props.vertical ? -1 : 1
-  const perPx = (whole / length) * sign
+  // The thumb travels the track less its own length, and that travel is the whole reach.
+  const perPx = (reach.value[axis] / (length * (1 - thumbShare(axis)))) * sign
   const at = axis === 'x' ? e.clientX : e.clientY
   let offset = props.offset?.[axis] ?? 0
   if (!(e.target as HTMLElement).classList.contains('sample-thumb')) {
@@ -433,6 +471,8 @@ function onBarDown(axis: 'x' | 'y', e: PointerEvent) {
   track.onpointerup = track.onpointercancel = () => {
     barDrag = null
     track.onpointermove = null
+    track.onpointerup = null
+    track.onpointercancel = null
   }
 }
 
@@ -632,6 +672,7 @@ watch([current, () => props.mark], paint, { flush: 'post' })
 }
 .sample-box {
   position: relative;
+  flex-shrink: 0;
   z-index: 0;
   cursor: text;
 }
