@@ -1,6 +1,6 @@
 import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { logActivity, setActivityLogging } from '@/lib/activityLog'
+import { logActivity, logSettled, setActivityLogging } from '@/lib/activityLog'
 import { isTypingSurface } from '@/lib/typingSurface'
 import { useValuePicker } from '@/composables/useValuePicker'
 import { useEditorStore } from '@/stores/editorStore'
@@ -28,7 +28,7 @@ function describe(target: EventTarget | null): Record<string, unknown> {
     control.getAttribute('title') ||
     control.getAttribute('aria-label') ||
     control.getAttribute('placeholder') ||
-    control.textContent?.trim().replace(/\s+/g, ' ') ||
+    (control.tagName === 'INPUT' ? control.closest('label')?.textContent : control.textContent)?.trim().replace(/\s+/g, ' ') ||
     ''
   return { on: control.tagName.toLowerCase(), name: name.slice(0, NAME_CHARS) }
 }
@@ -135,7 +135,7 @@ export function useActivityLog(): void {
       for (const key of Object.keys(next)) {
         if (key === 'panelLayout' || key === 'activityLog') continue
         if (JSON.stringify(next[key]) !== JSON.stringify(held[key])) {
-          logActivity('pref', { key, value: next[key] })
+          logSettled(`pref:${key}`, 'pref', { key, value: next[key] })
         }
       }
       held = next
