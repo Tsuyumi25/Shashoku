@@ -9,9 +9,11 @@ const SAMPLE_LIMIT = 240
 let renderCalls: string[] = []
 let measureCalls: string[] = []
 
+/** A text starting `big-` comes back as a 32MB bitmap, as a long sample held at its floor can. */
 function renderText(_font: EngineFontSource, text: string): EngineBitmap {
   renderCalls.push(text)
-  return { width: 8, height: 8, baseline: 0, rgba: new Uint8Array(8 * 8 * 4), clusters: [] }
+  const [w, h] = text.startsWith('big-') ? [4096, 2048] : [8, 8]
+  return { width: w, height: h, baseline: 0, rgba: new Uint8Array(w * h * 4), clusters: [] }
 }
 
 function measureText(_font: EngineFontSource, text: string): EngineMeasure {
@@ -91,6 +93,17 @@ describe('the sample cache', () => {
     expect(renderCalls.filter((t) => t === kept)).toHaveLength(1)
     ask(dropped)
     expect(renderCalls.filter((t) => t === dropped)).toHaveLength(2)
+  })
+})
+
+describe('the sample cache by size', () => {
+  it('lets go of the oldest bitmaps once their bytes pass the budget, however few there are', () => {
+    const first = `big-${uniqueText()}`
+    ask(first)
+    for (let i = 0; i < 6; i++) ask(`big-${uniqueText()}`)
+    renderCalls = []
+    ask(first)
+    expect(renderCalls).toEqual([first])
   })
 })
 

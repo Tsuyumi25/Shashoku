@@ -18,13 +18,6 @@ const BOX_MARGIN_PX = 8
  * two-line balloon by a pixel at the default display size.
  */
 const FLOOR_SHARE = 1 / 5
-/**
- * The most a floored sample may cover, in boxes. The sample cache counts
- * entries rather than bytes, and a fitted sample could never be larger than
- * its box; held up by the floor, a long enough sample would otherwise come back
- * as a raster of any size for every face in the list.
- */
-const MAX_FLOORED_BOXES = 8
 
 function advanceEm(line: string): number {
   let em = 0
@@ -42,13 +35,6 @@ export interface SampleFit {
   sizePx: number
   /** Whether the floor held it up, so part of the text runs out of the box. */
   floored: boolean
-}
-
-/** The area a sample covers at one CSS pixel per em, as its lines would lay it out. */
-function areaPerEm(lines: readonly string[], vertical: boolean): number {
-  return vertical
-    ? VERTICAL_COLUMN_EM * lines.length * lines.reduce((most, line) => Math.max(most, [...line].length), 1) * 1.05
-    : lines.reduce((most, line) => Math.max(most, advanceEm(line)), 1) * LINE_HEIGHT_RATIO * lines.length
 }
 
 /**
@@ -69,10 +55,9 @@ export function fittedSize(text: string, box: { w: number; h: number }, vertical
   return Math.max(1, Math.floor(fit))
 }
 
-/** As `fittedSize`, but never smaller than the floor, and the floor never larger than the area allows. */
+/** As `fittedSize`, but never smaller than the floor. */
 export function sampleFit(text: string, box: { w: number; h: number }, vertical: boolean): SampleFit {
+  const floor = Math.floor((vertical ? box.w : box.h) * FLOOR_SHARE)
   const sizePx = fittedSize(text, box, vertical)
-  const affordable = Math.sqrt((MAX_FLOORED_BOXES * box.w * box.h) / areaPerEm(text.split('\n'), vertical))
-  const floor = Math.floor(Math.min((vertical ? box.w : box.h) * FLOOR_SHARE, affordable))
   return sizePx < floor ? { sizePx: floor, floored: true } : { sizePx, floored: false }
 }

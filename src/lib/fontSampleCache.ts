@@ -81,6 +81,12 @@ export interface Sample {
 
 /** Roughly 17KB per bitmap at the default sample size. */
 const CACHE_LIMIT = 240
+/**
+ * And never more than this many bytes of pixels, whatever the count. A font
+ * sample held up at its floor is as large as its text makes it rather than as
+ * large as its box, so a count alone no longer bounds what the cache holds.
+ */
+const CACHE_BYTE_LIMIT = 192 * 1024 * 1024
 
 /**
  * A measure is a few numbers and a cluster table, so the frames of everything
@@ -309,8 +315,27 @@ export function sampleSource(sample: Sample): OffscreenCanvas {
   return off
 }
 
+let cachedBytes = 0
+
 export function sampleFor(req: SampleRequest): Sample {
-  return remembered(cache, keyOf(req), CACHE_LIMIT, () => rasterize(req))
+  const key = keyOf(req)
+  const hit = cache.get(key)
+  if (hit !== undefined) {
+    cache.delete(key)
+    cache.set(key, hit)
+    return hit
+  }
+  const made = rasterize(req)
+  cache.set(key, made)
+  cachedBytes += made.image.data.byteLength
+  // The newest stays even when it alone is over budget: it is what was asked for.
+  while (cache.size > 1 && (cache.size > CACHE_LIMIT || cachedBytes > CACHE_BYTE_LIMIT)) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined) break
+    cachedBytes -= cache.get(oldest)?.image.data.byteLength ?? 0
+    cache.delete(oldest)
+  }
+  return made
 }
 
 /**
