@@ -134,34 +134,80 @@ export function textProjection(input: TextProjectionInput): TextProjection {
     ;(byLine[line] as EngineClusterRect[]).push(rect)
   }
 
-  // Every line box is the same size, so one line with glyphs in it fixes the
-  // whole grid — including the empty lines, which have nothing to measure.
-  let anchorLine = 0
-  let anchorOffset = padding
-  let size = (crossExtent - padding * 2) / lineStarts.length
-  if (vertical) anchorOffset = crossExtent - padding - size
+  // Each line with glyphs stands where its glyphs are, as tall as its own
+  // glyph box: lines sit the leading apart, which is neither their height nor
+  // the same for a line whose span is set larger. Empty lines are placed by the
+  // pitch between the lines that have glyphs.
+  const own = new Map<number, { at: number; extent: number }>()
   for (let line = 0; line < byLine.length; line += 1) {
     const rect = (byLine[line] as EngineClusterRect[])[0]
-    if (!rect) continue
-    anchorLine = line
-    anchorOffset = vertical ? rect.x : rect.y
-    size = vertical ? rect.width : rect.height
-    break
+    if (rect) own.set(line, vertical ? { at: rect.x, extent: rect.width } : { at: rect.y, extent: rect.height })
+  }
+  const placed = [...own.keys()]
+  const firstLine = placed[0] ?? 0
+  const lastLine = placed[placed.length - 1] ?? firstLine
+  const size = own.get(firstLine)?.extent ?? (crossExtent - padding * 2) / lineStarts.length
+  const firstAt = own.get(firstLine)?.at ?? (vertical ? crossExtent - padding - size : padding)
+  const lastAt = own.get(lastLine)?.at ?? firstAt
+  // Vertical text runs right to left, so a later column sits further left.
+  const towardLater = vertical ? -1 : 1
+  const pitch =
+    lastLine > firstLine
+      ? ((lastAt - firstAt) / (lastLine - firstLine)) * towardLater
+      : lineStarts.length > 1
+        ? (crossExtent - padding * 2 - size) / (lineStarts.length - 1)
+        : size
+
+  /** Where line `n`'s glyph box starts across the writing direction, and how far it reaches. */
+  function boxOf(line: number): { at: number; extent: number } {
+    return own.get(line) ?? { at: firstAt + pitch * (line - firstLine) * towardLater, extent: size }
   }
 
-  /** Where line `n`'s box starts across the writing direction. */
-  function lineOffset(line: number): number {
-    const step = line - anchorLine
-    // Vertical text runs right to left, so a later column sits further left.
-    return vertical ? anchorOffset - size * step : anchorOffset + size * step
+  /**
+   * A line's box along the order the lines are read in: top to bottom for
+   * rows, right to left for columns — so `from` is always the side facing the
+   * line before.
+   */
+  function readSpan(line: number): { from: number; to: number } {
+    const { at, extent } = boxOf(line)
+    return vertical ? { from: -(at + extent), to: -at } : { from: at, to: at + extent }
   }
 
-  /** Which line a point across the writing direction falls in, unclamped. */
+  /**
+   * The stretch a line answers for when selected or pointed at: from halfway to
+   * the line before to halfway to the line after, so a selection over several
+   * lines reads as one block — neither gapped where the leading is loose nor
+   * overlapping where it is tight, whatever size each line is set at. The
+   * outer two lines reach as far out as they do toward their neighbour.
+   */
+  function bandOf(line: number): { from: number; to: number } {
+    const self = readSpan(line)
+    const half = (a: number, b: number) => (readSpan(a).to + readSpan(b).from) / 2
+    const last = lineStarts.length - 1
+    const after = line < last ? half(line, line + 1) : null
+    const before = line > 0 ? half(line - 1, line) : null
+    const outward = (pitch - (self.to - self.from)) / 2
+    return {
+      from: before ?? self.from - (after !== null ? after - self.to : outward),
+      to: after ?? self.to + (before !== null ? self.from - before : outward),
+    }
+  }
+
+  /** A band as a cross-axis offset and extent in the run's own axes, kept inside the frame. */
+  function bandRect(line: number): { at: number; extent: number } {
+    const { from, to } = bandOf(line)
+    const near = Math.max(0, vertical ? -to : from)
+    const far = Math.min(crossExtent, vertical ? -from : to)
+    return { at: near, extent: Math.max(0, far - near) }
+  }
+
+  /** Which line a point across the writing direction falls in, clamped to the run. */
   function lineAtOffset(at: number): number {
-    if (size <= 0) return anchorLine
-    return vertical
-      ? anchorLine + Math.ceil((anchorOffset + size - at) / size) - 1
-      : anchorLine + Math.floor((at - anchorOffset) / size)
+    const p = vertical ? -at : at
+    for (let line = 0; line < lineStarts.length; line += 1) {
+      if (p < bandOf(line).to) return line
+    }
+    return lineStarts.length - 1
   }
 
   /** Position along the writing direction of the caret before `index`. */
@@ -181,10 +227,10 @@ export function textProjection(input: TextProjectionInput): TextProjection {
 
   function caret(index: number): ProjectedRect {
     const main = caretMain(index)
-    const cross = lineOffset(lineOf(index))
+    const box = boxOf(lineOf(index))
     return vertical
-      ? { x: cross, y: main, width: size, height: 0 }
-      : { x: main, y: cross, width: 0, height: size }
+      ? { x: box.at, y: main, width: box.extent, height: 0 }
+      : { x: main, y: box.at, width: 0, height: box.extent }
   }
 
   function selection(from: number, to: number): ProjectedRect[] {
@@ -197,7 +243,7 @@ export function textProjection(input: TextProjectionInput): TextProjection {
       const [lineFrom, lineTo] = lineRange(line)
       const head = caretMain(Math.max(start, lineFrom))
       const tail = caretMain(Math.min(end, lineTo))
-      const cross = lineOffset(line)
+      const band = bandRect(line)
       // A selection that swallows a blank line has nothing there to draw, so it
       // gets a sliver to keep the run continuous. Whether it swallowed one is
       // that line's own position, never a span: a blank line's two carets are
@@ -212,8 +258,8 @@ export function textProjection(input: TextProjectionInput): TextProjection {
       const span = Math.max(tail - head, BLANK_LINE_SLIVER)
       boxes.push(
         vertical
-          ? { x: cross, y: head, width: size, height: span }
-          : { x: head, y: cross, width: span, height: size },
+          ? { x: band.at, y: head, width: band.extent, height: span }
+          : { x: head, y: band.at, width: span, height: band.extent },
       )
     }
     return boxes

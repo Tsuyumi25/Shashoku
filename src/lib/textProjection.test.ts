@@ -331,3 +331,83 @@ describe('a run with no glyphs at all', () => {
     expect(p.indexAt(PADDING, PADDING + CHAR_CROSS + 1)).toBe(1)
   })
 })
+
+describe('lines set further apart than they are tall', () => {
+  /** 40 tall and 48 apart, as a 40px face at 1.2 leading comes back from the engine. */
+  const HEIGHT = 40
+  const PITCH = 48
+  const row = (cluster: number, line: number): EngineClusterRect => ({
+    cluster,
+    x: PADDING,
+    y: PADDING + PITCH * line,
+    width: CHAR_MAIN,
+    height: HEIGHT,
+  })
+  // 'a', a blank line, 'c', 'd' — four lines, glyphs on three.
+  const projection = textProjection({
+    text: 'a\n\nc\nd',
+    clusters: [row(0, 0), row(3, 2), row(5, 3)],
+    vertical: false,
+    padding: PADDING,
+    crossExtent: PADDING * 2 + PITCH * 3 + HEIGHT,
+  })
+
+  it('puts the caret on a line where that line\u2019s glyphs are, however far down', () => {
+    expect(projection.caret(5).y).toBe(PADDING + PITCH * 3)
+  })
+
+  it('places a blank line by the pitch between the lines around it', () => {
+    expect(projection.caret(2).y).toBe(PADDING + PITCH)
+  })
+
+  it('selects each line as a band of its pitch, centred on its glyphs', () => {
+    const [band] = projection.selection(5, 6)
+    expect(band).toMatchObject({ y: PADDING + PITCH * 3 + (HEIGHT - PITCH) / 2, height: PITCH })
+  })
+
+  it('answers a point on a lower line with that line', () => {
+    expect(projection.indexAt(PADDING + 1, PADDING + PITCH * 3 + HEIGHT / 2)).toBe(5)
+  })
+})
+
+describe('lines set at different sizes', () => {
+  // 40, 80 and 40 tall, each the leading of its own size below the one before:
+  // glyph boxes at 4, 68 and 148.
+  const projection = textProjection({
+    text: 'a\nb\nc',
+    clusters: [
+      { cluster: 0, x: PADDING, y: 4, width: CHAR_MAIN, height: 40 },
+      { cluster: 2, x: PADDING, y: 68, width: CHAR_MAIN, height: 80 },
+      { cluster: 4, x: PADDING, y: 148, width: CHAR_MAIN, height: 40 },
+    ],
+    vertical: false,
+    padding: PADDING,
+    crossExtent: 192,
+  })
+
+  it('answers a point in the middle of the large line with that line', () => {
+    expect(projection.indexAt(PADDING + 1, 108)).toBe(2)
+  })
+
+  it('draws the caret on the large line as tall as that line', () => {
+    expect(projection.caret(2)).toMatchObject({ y: 68, height: 80 })
+  })
+
+  it('selects the lines as bands that meet without overlapping and stay inside the frame', () => {
+    const bands = projection.selection(0, 5)
+    expect(bands.map((b) => [b.y, b.y + b.height])).toEqual([
+      [0, 56],
+      [56, 148],
+      [148, 188],
+    ])
+  })
+})
+
+describe('the edge between two lines', () => {
+  it('belongs to the later line, for columns as for rows', () => {
+    const rows = horizontal()
+    const columns = vertical()
+    expect(rows.lineOf(rows.indexAt(PADDING + 1, PADDING + CHAR_CROSS))).toBe(1)
+    expect(columns.lineOf(columns.indexAt(FIRST_COLUMN_X, PADDING + 1))).toBe(1)
+  })
+})
