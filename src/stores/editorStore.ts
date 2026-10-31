@@ -1623,20 +1623,31 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Saved words put down on the page as a sentence of their own, the way a
-   * reading is. They land on whichever side the canvas is showing, because that
-   * is the side being worked on; the other side starts blank, as a reading's
-   * translation does. Placed by its middle, where it was let go.
+   * A material put down on the page as a sentence of their own, the way a
+   * reading is. What it gives lands on whichever side the canvas is showing,
+   * because that is the side being worked on; the other side starts blank and
+   * in the project's own style, as a reading's translation does. Placed by its
+   * middle, where it was let go.
    */
-  function cmdAddLabelFromText(pageId: string, at: { x: number; y: number }, text: string, side: TextSide) {
+  function cmdAddLabelFromMaterial(
+    pageId: string,
+    at: { x: number; y: number },
+    gives: { text: string | null; patch: Partial<TextStyle>; effects: readonly LayerEffect[] | null },
+    side: TextSide,
+  ) {
     const project = useProjectStore()
-    const style = project.header.seedStyle
-    const parts = blankTranslation(style, generateLabelId)
-    const anchor = anchorFor(style, at)
+    const seed = project.header.seedStyle
+    const style = { ...seed, ...gives.patch }
+    const parts = blankTranslation(seed, generateLabelId)
     for (const block of parts.blocks) {
+      const own = block.side === side
+      const anchor = anchorFor(own ? style : seed, at)
       block.body.x = anchor.x
       block.body.y = anchor.y
-      if (block.side === side) block.body.lines = linesOf(escapeText(text))
+      if (!own) continue
+      block.body.style = { ...style }
+      if (gives.text !== null) block.body.lines = linesOf(escapeText(gives.text))
+      if (gives.effects !== null) block.effects = cloneEffects(gives.effects)
     }
     return cmdAddLabel(pageId, parts)
   }
@@ -2696,12 +2707,13 @@ export const useEditorStore = defineStore('editor', () => {
    * A saved look given in one act. Its style and its effects land together and
    * leave together: an undo that took back the font and kept the stroke would
    * leave a look nobody saved. Whatever was being tried is put back first, so
-   * the before is what the objects held and not the trial.
+   * the before is what the objects held and not the trial. A null stroke leaves
+   * each object's own.
    */
   function cmdApplyLook(
     targets: readonly AppearanceTarget<TextLayerEntry>[],
     patch: Partial<TextStyle>,
-    effects: readonly LayerEffect[],
+    effects: readonly LayerEffect[] | null,
   ) {
     endStylePreview()
     endEffectsPreview()
@@ -2709,7 +2721,10 @@ export const useEditorStore = defineStore('editor', () => {
     const stylesBefore = stylesOf(targets)
     const stylesAfter = stylesBefore.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
     const effectsBefore = effectsOf(targets)
-    const effectsAfter = effectsBefore.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
+    const effectsAfter = effectsBefore.map((entry) => ({
+      ...entry,
+      effects: cloneEffects(effects ?? entry.effects),
+    }))
     if (
       JSON.stringify(stylesBefore) === JSON.stringify(stylesAfter) &&
       JSON.stringify(effectsBefore) === JSON.stringify(effectsAfter)
@@ -3079,7 +3094,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyVerdict,
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
-    cmdAddLabelFromText,
+    cmdAddLabelFromMaterial,
     cmdReplaceLabelSource,
     cmdMoveCard,
     cmdDuplicateLabel,

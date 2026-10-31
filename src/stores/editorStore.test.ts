@@ -1903,6 +1903,15 @@ describe('layer tree edits', () => {
       expect(entryOf(project, 'a')!.effects).toEqual([])
     })
 
+    it('leaves the stroke each object has when the stroke is not given', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      editor.selectOnly('a')
+      editor.cmdApplyEffects(textTargets(editor), [STROKE])
+      editor.cmdApplyLook(textTargets(editor), LOOK, null)
+      expect(entryOf(project, 'a')!.effects).toEqual([STROKE])
+      expect(entryOf(project, 'a')!.body.style).toMatchObject(LOOK)
+    })
+
     it('takes what was being tried back before writing, so undo returns to what the object held', () => {
       const { project, editor } = openTree([label('a')], ['a'])
       editor.selectOnly('a')
@@ -3646,30 +3655,40 @@ describe('a measured leading out of the range a page can be set in', () => {
   })
 })
 
-describe('saved words put down on the page', () => {
-  const sideText = (project: ReturnType<typeof useProjectStore>, side: 'source' | 'translation') =>
-    blocksOnSide(project.pageById(PAGE)!.page.layers, side).map((b) => b.body.lines.join('\n'))
+describe('a material put down on the page', () => {
+  const blocks = (project: ReturnType<typeof useProjectStore>, side: 'source' | 'translation') =>
+    blocksOnSide(project.pageById(PAGE)!.page.layers, side)
+  const STROKE = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
 
-  it('become a sentence of their own, on the side the canvas shows', () => {
+  it('becomes a sentence of its own, giving only what is ticked, on the side the canvas shows', () => {
     const { project, editor } = openOnePage()
-    editor.setTextSide('translation')
-    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, '咕啾', 'translation')
-    expect(sideText(project, 'translation')).toEqual(['咕啾'])
-    expect(sideText(project, 'source')).toEqual([''])
-    expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(1)
+    const seed = project.header.seedStyle
+    editor.cmdAddLabelFromMaterial(
+      PAGE,
+      { x: 100, y: 100 },
+      { text: '咕啾', patch: { fontFamily: 'HanyiSentyRubber' }, effects: [STROKE] },
+      'translation',
+    )
+    const [tr] = blocks(project, 'translation')
+    expect(tr!.body.lines).toEqual(['咕啾'])
+    expect(tr!.body.style).toEqual({ ...seed, fontFamily: 'HanyiSentyRubber' })
+    expect(tr!.effects).toEqual([STROKE])
+    const [src] = blocks(project, 'source')
+    expect(src!.body.lines).toEqual([''])
+    expect(src!.body.style).toEqual(seed)
   })
 
-  it('land as the source when that is the side being worked on', () => {
+  it('lands as the source when that is the side being worked on', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, 'はぁ', 'source')
-    expect(sideText(project, 'source')).toEqual(['はぁ'])
-    expect(sideText(project, 'translation')).toEqual([''])
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: 'はぁ', patch: {}, effects: null }, 'source')
+    expect(blocks(project, 'source').map((b) => b.body.lines.join('\n'))).toEqual(['はぁ'])
+    expect(blocks(project, 'translation').map((b) => b.body.lines.join('\n'))).toEqual([''])
   })
 
-  it('keep their line breaks and are taken back by one undo', () => {
+  it('without its words ticked is an empty sentence wearing the look, taken back by one undo', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, '哈\n啊', 'translation')
-    expect(sideText(project, 'translation')).toEqual(['哈\n啊'])
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: null, patch: { color: '#ffffff' }, effects: null }, 'translation')
+    expect(blocks(project, 'translation')[0]!.body).toMatchObject({ lines: [''], style: { color: '#ffffff' } })
     editor.undo()
     expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(0)
   })

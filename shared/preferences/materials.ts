@@ -1,61 +1,111 @@
 import { cloneEffects } from "../effects/clone";
-import { freeGroupName } from "./fontGroups";
 import { parseEffects } from "../effects/schema";
 import type { LayerEffect } from "../effects/types";
 import { FONT_FIELDS } from "../text-style/fields";
 import { parseTextStyle } from "../text-style/schema";
 import { DEFAULT_TEXT_STYLE, type TextStyle } from "../text-style/types";
+import { freeGroupName } from "./fontGroups";
 
 /**
- * What a saved style carries. The size, the direction and the alignment stay
- * with the object it lands on: those are fitted to the place the words are
- * put, and a look reused across a chapter is reused in places of every size.
+ * Everything a material can carry, each a switch. The font is one switch for
+ * the three strings that name one face, since a person picks a font, not a
+ * PostScript name.
  */
-export const MATERIAL_STYLE_FIELDS = [
-  ...FONT_FIELDS,
+export const MATERIAL_FIELDS = [
+  "text",
+  "font",
+  "fontSizePx",
+  "direction",
+  "align",
   "color",
   "leadingPercent",
   "weightPx",
   "scaleXPercent",
   "scaleYPercent",
-] as const satisfies readonly (keyof TextStyle)[];
+  "stroke",
+] as const;
 
-export type MaterialStyle = Pick<TextStyle, (typeof MATERIAL_STYLE_FIELDS)[number]>;
-
-/** Words kept to be set again, as they read rather than as markup. */
-export interface TextMaterial {
-  id: string;
-  text: string;
-}
-
-/** A look kept to be given again: the style it was saved from, less what fits it to a place. */
-export interface StyleMaterial {
-  id: string;
-  style: MaterialStyle;
-  effects: LayerEffect[];
-}
+export type MaterialField = (typeof MATERIAL_FIELDS)[number];
 
 /**
- * A named shelf of materials — words and looks side by side, the way one corner
- * of a reference sheet holds a book's gasps in their typeface next to the gasps
- * themselves. The groups are what the right button's ring offers.
+ * A whole text object taken as it stood — its words, its style, its stroke —
+ * and the switches saying which of that it gives. Saving never asks what to
+ * keep: everything is kept, and what is ticked is a second question that can
+ * be answered later.
  */
+export interface Material {
+  id: string;
+  /** As it reads rather than as markup. */
+  text: string;
+  style: TextStyle;
+  effects: LayerEffect[];
+  /** In `MATERIAL_FIELDS` order. */
+  picks: MaterialField[];
+}
+
+/** A named shelf of materials. The groups are what the right button's ring offers. */
 export interface MaterialGroup {
   id: string;
   name: string;
-  texts: TextMaterial[];
-  styles: StyleMaterial[];
+  materials: Material[];
 }
 
-export function materialStyleOf(style: TextStyle): MaterialStyle {
-  const out = {} as Record<(typeof MATERIAL_STYLE_FIELDS)[number], unknown>;
-  for (const field of MATERIAL_STYLE_FIELDS) out[field] = style[field];
-  return out as MaterialStyle;
+/** Which switches a material saved this way starts with ticked. */
+export interface MaterialRecipe {
+  id: string;
+  name: string;
+  picks: MaterialField[];
 }
 
-export function sameStyleMaterial(a: Omit<StyleMaterial, "id">, b: Omit<StyleMaterial, "id">): boolean {
+/**
+ * The two ways of saving everyone starts with: words, carried in a face that
+ * reads well from the moment they land; and a look, with no words at all.
+ */
+export function defaultRecipes(): MaterialRecipe[] {
+  return [
+    { id: "text", name: "文字", picks: ["text", "font"] },
+    { id: "style", name: "樣式", picks: ["font", "color", "leadingPercent", "stroke"] },
+  ];
+}
+
+/** Put in canonical order with repeats and unknowns dropped, so two lists that tick the same switches read the same. */
+export function normalPicks(picks: Iterable<unknown>): MaterialField[] {
+  const wanted = new Set(picks);
+  return MATERIAL_FIELDS.filter((f) => wanted.has(f));
+}
+
+const STYLE_KEYS: Record<Exclude<MaterialField, "text" | "stroke">, readonly (keyof TextStyle)[]> = {
+  font: FONT_FIELDS,
+  fontSizePx: ["fontSizePx"],
+  direction: ["direction"],
+  align: ["align"],
+  color: ["color"],
+  leadingPercent: ["leadingPercent"],
+  weightPx: ["weightPx"],
+  scaleXPercent: ["scaleXPercent"],
+  scaleYPercent: ["scaleYPercent"],
+};
+
+/** The part of the snapshot's style that is ticked, to lay over whatever it lands on. */
+export function stylePatchOf(m: Pick<Material, "style" | "picks">): Partial<TextStyle> {
+  const out: Record<string, unknown> = {};
+  for (const pick of m.picks) {
+    if (pick === "text" || pick === "stroke") continue;
+    for (const key of STYLE_KEYS[pick]) out[key] = m.style[key];
+  }
+  return out as Partial<TextStyle>;
+}
+
+/** The stroke to give, or null when the stroke switch is off and whatever is there stays. */
+export function effectsPatchOf(m: Pick<Material, "effects" | "picks">): LayerEffect[] | null {
+  return m.picks.includes("stroke") ? cloneEffects(m.effects) : null;
+}
+
+export function sameMaterial(a: Omit<Material, "id">, b: Omit<Material, "id">): boolean {
   return (
-    MATERIAL_STYLE_FIELDS.every((f) => a.style[f] === b.style[f]) &&
+    a.text === b.text &&
+    JSON.stringify(a.picks) === JSON.stringify(b.picks) &&
+    JSON.stringify(a.style) === JSON.stringify(b.style) &&
     JSON.stringify(a.effects) === JSON.stringify(b.effects)
   );
 }
@@ -67,6 +117,8 @@ type RawEntry = {
   text?: unknown;
   style?: unknown;
   effects?: unknown;
+  picks?: unknown;
+  materials?: unknown;
   texts?: unknown;
   styles?: unknown;
 };
@@ -79,54 +131,59 @@ const refuse = (message: string): never => {
   throw new Error(message);
 };
 
+/** A style a material keeps; fields it lacks are filled from the default rather than costing the entry. */
+function readStyle(v: unknown): TextStyle | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  try {
+    return parseTextStyle({ ...DEFAULT_TEXT_STYLE, ...v }, "style", refuse);
+  } catch {
+    return null;
+  }
+}
+
+function readEffects(v: unknown): LayerEffect[] | null {
+  try {
+    return cloneEffects(parseEffects(v, "effects", refuse));
+  } catch {
+    return null;
+  }
+}
+
+function readMaterial(raw: RawEntry): Omit<Material, "id"> | null {
+  const style = raw.style === undefined ? { ...DEFAULT_TEXT_STYLE } : readStyle(raw.style);
+  const effects = readEffects(raw.effects);
+  if (style === null || effects === null || !Array.isArray(raw.picks)) return null;
+  const text = typeof raw.text === "string" ? raw.text : "";
+  return { text, style, effects, picks: normalPicks(raw.picks) };
+}
+
+/**
+ * The two kinds materials came in before they were one: words alone, and a
+ * look with no words. A look is ticked the way a look now saves. Words never
+ * kept a face, so only the words are ticked — ticking the font of a snapshot
+ * that never had one would hand out the blank default.
+ */
+function readLegacy(raw: RawEntry): Omit<Material, "id">[] {
+  const look = defaultRecipes()[1]!;
+  const out: Omit<Material, "id">[] = [];
+  for (const t of Array.isArray(raw.texts) ? raw.texts : []) {
+    const entry = rawEntry(t);
+    if (entry && typeof entry.text === "string" && entry.text.trim())
+      out.push({ text: entry.text, style: { ...DEFAULT_TEXT_STYLE }, effects: [], picks: ["text"] });
+  }
+  for (const s of Array.isArray(raw.styles) ? raw.styles : []) {
+    const entry = rawEntry(s);
+    const style = entry && readStyle(entry.style);
+    const effects = entry && readEffects(entry.effects);
+    if (style && effects) out.push({ text: "", style, effects, picks: [...look.picks] });
+  }
+  return out;
+}
+
 /**
  * Entries that fail to read are left out one at a time, as everything else in
  * preferences is: a damaged entry costs that entry, never the rest of the list.
  */
-function parseTextMaterials(v: unknown): TextMaterial[] {
-  if (!Array.isArray(v)) return [];
-  const out: TextMaterial[] = [];
-  const ids = new Set<string>();
-  const texts = new Set<string>();
-  for (const entry of v) {
-    const raw = rawEntry(entry);
-    if (raw === null) continue;
-    const { id, text } = raw;
-    if (typeof id !== "string" || id.length === 0 || ids.has(id)) continue;
-    if (typeof text !== "string" || text.trim().length === 0 || texts.has(text)) continue;
-    ids.add(id);
-    texts.add(text);
-    out.push({ id, text });
-  }
-  return out;
-}
-
-function parseStyleMaterials(v: unknown): StyleMaterial[] {
-  if (!Array.isArray(v)) return [];
-  const out: StyleMaterial[] = [];
-  const ids = new Set<string>();
-  for (const entry of v) {
-    const raw = rawEntry(entry);
-    if (raw === null) continue;
-    const { id, style, effects } = raw;
-    if (typeof id !== "string" || id.length === 0 || ids.has(id)) continue;
-    if (typeof style !== "object" || style === null || Array.isArray(style)) continue;
-    let material: StyleMaterial;
-    try {
-      // The project's own reader checks every field it shares with a style;
-      // the ones a material leaves out are filled from the default to get past it.
-      const full = parseTextStyle({ ...DEFAULT_TEXT_STYLE, ...style }, "style", refuse);
-      material = { id, style: materialStyleOf(full), effects: cloneEffects(parseEffects(effects, "effects", refuse)) };
-    } catch {
-      continue;
-    }
-    if (out.some((m) => sameStyleMaterial(m, material))) continue;
-    ids.add(id);
-    out.push(material);
-  }
-  return out;
-}
-
 export function parseMaterialGroups(v: unknown): MaterialGroup[] {
   if (!Array.isArray(v)) return [];
   const out: MaterialGroup[] = [];
@@ -134,15 +191,42 @@ export function parseMaterialGroups(v: unknown): MaterialGroup[] {
   for (const entry of v) {
     const raw = rawEntry(entry);
     if (raw === null) continue;
-    const { id, name, texts, styles } = raw;
+    const { id, name } = raw;
     if (typeof id !== "string" || id.length === 0 || ids.has(id) || typeof name !== "string") continue;
     ids.add(id);
-    out.push({
-      id,
-      name: freeGroupName(name.trim() || "未命名群組", out.map((g) => g.name)),
-      texts: parseTextMaterials(texts),
-      styles: parseStyleMaterials(styles),
-    });
+    const materials: Material[] = [];
+    const seen = new Set<string>();
+    const add = (mid: string, m: Omit<Material, "id">) => {
+      if (seen.has(mid) || materials.some((held) => sameMaterial(held, m))) return;
+      seen.add(mid);
+      materials.push({ id: mid, ...m });
+    };
+    if (Array.isArray(raw.materials)) {
+      for (const m of raw.materials) {
+        const r = rawEntry(m);
+        if (r === null || typeof r.id !== "string" || r.id.length === 0) continue;
+        const read = readMaterial(r);
+        if (read) add(r.id, read);
+      }
+    } else {
+      readLegacy(raw).forEach((m, at) => add(`${id}-${at}`, m));
+    }
+    out.push({ id, name: freeGroupName(name.trim() || "未命名群組", out.map((g) => g.name)), materials });
+  }
+  return out;
+}
+
+/** Absent means nobody has touched them, which reads as the two everyone starts with. */
+export function parseRecipes(v: unknown): MaterialRecipe[] {
+  if (!Array.isArray(v)) return defaultRecipes();
+  const out: MaterialRecipe[] = [];
+  for (const entry of v) {
+    const raw = rawEntry(entry);
+    if (raw === null) continue;
+    const { id, name, picks } = raw;
+    if (typeof id !== "string" || id.length === 0 || out.some((r) => r.id === id)) continue;
+    if (typeof name !== "string" || !Array.isArray(picks)) continue;
+    out.push({ id, name: freeGroupName(name.trim() || "未命名", out.map((r) => r.name)), picks: normalPicks(picks) });
   }
   return out;
 }

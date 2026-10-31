@@ -16,7 +16,8 @@ import {
 import { freeGroupName } from '@shared/preferences/fontGroups'
 import { cloneEffects } from '@shared/effects/clone'
 import type { LayerEffect } from '@shared/effects/types'
-import { sameStyleMaterial, type MaterialStyle } from '@shared/preferences/materials'
+import { normalPicks, sameMaterial, type MaterialField } from '@shared/preferences/materials'
+import type { TextStyle } from '@shared/text-style/types'
 import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
@@ -111,8 +112,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.materialGroups.push({
       id,
       name: freeGroupName(name, prefs.materialGroups.map((g) => g.name)),
-      texts: [],
-      styles: [],
+      materials: [],
     })
     return id
   }
@@ -131,28 +131,61 @@ export const usePreferencesStore = defineStore('preferences', () => {
     if (at !== -1) prefs.materialGroups.splice(at, 1)
   }
 
-  /** False when the group already holds the same words; nothing changes then. */
-  function saveTextMaterial(groupId: string, text: string): boolean {
+  /** False when the group already holds the same snapshot ticked the same way; nothing changes then. */
+  function saveMaterial(
+    groupId: string,
+    snapshot: { text: string; style: TextStyle; effects: readonly LayerEffect[] },
+    picks: readonly MaterialField[],
+  ): boolean {
     const group = prefs.materialGroups.find((g) => g.id === groupId)
-    if (!group || text.trim().length === 0 || group.texts.some((m) => m.text === text)) return false
-    group.texts.push({ id: crypto.randomUUID(), text })
-    return true
-  }
-
-  /** False when the group already holds the same look; nothing changes then. */
-  function saveStyleMaterial(groupId: string, style: MaterialStyle, effects: readonly LayerEffect[]): boolean {
-    const group = prefs.materialGroups.find((g) => g.id === groupId)
-    const material = { style: { ...style }, effects: cloneEffects(effects) }
-    if (!group || group.styles.some((m) => sameStyleMaterial(m, material))) return false
-    group.styles.push({ id: crypto.randomUUID(), ...material })
+    if (!group) return false
+    const material = {
+      text: snapshot.text,
+      style: { ...snapshot.style },
+      effects: cloneEffects(snapshot.effects),
+      picks: normalPicks(picks),
+    }
+    if (group.materials.some((m) => sameMaterial(m, material))) return false
+    group.materials.push({ id: crypto.randomUUID(), ...material })
     return true
   }
 
   function deleteMaterial(groupId: string, id: string) {
     const group = prefs.materialGroups.find((g) => g.id === groupId)
-    if (!group) return
-    group.texts = group.texts.filter((m) => m.id !== id)
-    group.styles = group.styles.filter((m) => m.id !== id)
+    if (group) group.materials = group.materials.filter((m) => m.id !== id)
+  }
+
+  function toggleMaterialPick(groupId: string, id: string, field: MaterialField) {
+    const material = prefs.materialGroups.find((g) => g.id === groupId)?.materials.find((m) => m.id === id)
+    if (!material) return
+    const on = material.picks.includes(field)
+    material.picks = normalPicks(on ? material.picks.filter((p) => p !== field) : [...material.picks, field])
+  }
+
+  function createRecipe(name: string): string {
+    const id = crypto.randomUUID()
+    prefs.materialRecipes.push({ id, name: freeGroupName(name, prefs.materialRecipes.map((r) => r.name)), picks: [] })
+    return id
+  }
+
+  /** False when another recipe already goes by the name; nothing changes then. */
+  function renameRecipe(id: string, name: string): boolean {
+    if (prefs.materialRecipes.some((r) => r.id !== id && r.name === name)) return false
+    const recipe = prefs.materialRecipes.find((r) => r.id === id)
+    if (!recipe) return false
+    recipe.name = name
+    return true
+  }
+
+  function deleteRecipe(id: string) {
+    prefs.materialRecipes = prefs.materialRecipes.filter((r) => r.id !== id)
+  }
+
+  function toggleRecipePick(id: string, field: MaterialField) {
+    const recipe = prefs.materialRecipes.find((r) => r.id === id)
+    if (!recipe) return
+    const on = recipe.picks.includes(field)
+    recipe.picks = normalPicks(on ? recipe.picks.filter((p) => p !== field) : [...recipe.picks, field])
   }
 
   function createFontGroup(name: string): string {
@@ -284,9 +317,13 @@ export const usePreferencesStore = defineStore('preferences', () => {
     createMaterialGroup,
     renameMaterialGroup,
     deleteMaterialGroup,
-    saveTextMaterial,
-    saveStyleMaterial,
+    saveMaterial,
     deleteMaterial,
+    toggleMaterialPick,
+    createRecipe,
+    renameRecipe,
+    deleteRecipe,
+    toggleRecipePick,
     createFontGroup,
     renameFontGroup,
     deleteFontGroup,

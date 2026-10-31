@@ -365,7 +365,6 @@ import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, without
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { blocksOnSide, placeOfBlock, shownCodeOf, shownLinesOf, sideOf } from '@shared/page/units'
-import { materialStyleOf } from '@shared/preferences/materials'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -717,11 +716,10 @@ const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null
  * A copy of the whole translation, both sides, read right after the original —
  * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
  */
-const OBJECT_MENU: MenuItem[] = [
+const OBJECT_MENU = computed<MenuItem[]>(() => [
   { id: 'duplicate-unit', label: '製作副本（整句）' },
-  { id: 'save-look', label: '將樣式存成素材' },
-  { id: 'save-text', label: '將文字存成素材' },
-]
+  ...preferences.prefs.materialRecipes.map((r) => ({ id: `save:${r.id}`, label: `存成素材：${r.name}` })),
+])
 
 function onObjectMenu(pick: string) {
   const at = objectMenu.value
@@ -736,15 +734,20 @@ function onObjectMenu(pick: string) {
   const pageId = project.pageOfEntry(at.id)
   const entry = project.entryById(at.id)
   const page = pageId === null ? undefined : project.pageById(pageId)?.page
-  if (entry?.kind !== 'text' || !page) return
-  // Into the group the shelf has open, or the first, or a new one when there
-  // is none. Saving again what is already there still opens the shelf on it,
-  // so the press always ends with the saved thing in view.
+  const recipe = preferences.prefs.materialRecipes.find((r) => `save:${r.id}` === pick)
+  if (entry?.kind !== 'text' || !page || !recipe) return
+  // The whole object is kept and the recipe only says what starts ticked. Into
+  // the group the shelf has open, or the first, or a new one when there is
+  // none; saving again what is already there still opens the shelf on it, so
+  // the press always ends with the saved thing in view.
   const groups = preferences.prefs.materialGroups
   const groupId =
     groups.find((g) => g.id === column.openGroupId.value)?.id ?? groups[0]?.id ?? preferences.createMaterialGroup('素材')
-  if (pick === 'save-look') preferences.saveStyleMaterial(groupId, materialStyleOf(entry.body.style), entry.effects)
-  else if (pick === 'save-text') preferences.saveTextMaterial(groupId, shownLinesOf(page, entry).join('\n'))
+  preferences.saveMaterial(
+    groupId,
+    { text: shownLinesOf(page, entry).join('\n'), style: entry.body.style, effects: entry.effects },
+    recipe.picks,
+  )
   column.openGroup(groupId)
 }
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parsePreferences, serializePreferences } from "./schema";
+import { effectsPatchOf, stylePatchOf } from "./materials";
+import { DEFAULT_TEXT_STYLE } from "../text-style/types";
 import {
   MIN_UNDO_PIXEL_BYTES,
   MIN_UNDO_PIXEL_STEPS,
@@ -209,11 +211,14 @@ describe("font groups", () => {
   });
 });
 
-describe("material groups", () => {
-  const LOOK = {
+describe("materials", () => {
+  const STYLE = {
     fontFamily: "HanyiSentyRubber",
     fontFace: "HanyiSentyRubber",
     fontStyleName: "Regular",
+    fontSizePx: 60,
+    direction: "vertical" as const,
+    align: "start" as const,
     color: "#ffffff",
     leadingPercent: 120,
     weightPx: 0.5,
@@ -221,73 +226,85 @@ describe("material groups", () => {
     scaleYPercent: 90,
   };
   const STROKE = { kind: "stroke" as const, width: 4, color: "#000000", position: "outside" as const };
-  const group = (over: Record<string, unknown>) => ({ id: "g", name: "喘息", texts: [], styles: [], ...over });
+  const snap = (over: Record<string, unknown>) => ({ id: "m", text: "咕啾", style: STYLE, effects: [STROKE], picks: ["text"], ...over });
 
-  it("come back with what was written, words and looks in order", () => {
+  it("come back with what was written: snapshots, switches and recipes", () => {
     const prefs = defaultPreferences();
     prefs.materialGroups = [
       {
         id: "g",
         name: "喘息",
-        texts: [
-          { id: "a", text: "咕啾" },
-          { id: "b", text: "哈\n啊" },
+        materials: [
+          { id: "a", text: "哈\n啊", style: STYLE, effects: [STROKE], picks: ["text", "font"] },
+          { id: "b", text: "", style: STYLE, effects: [], picks: ["font", "color", "stroke"] },
         ],
-        styles: [{ id: "s", style: LOOK, effects: [STROKE] }],
       },
-      { id: "h", name: "擬音", texts: [], styles: [] },
     ];
-    expect(parsePreferences(serializePreferences(prefs)).materialGroups).toEqual(prefs.materialGroups);
+    prefs.materialRecipes = [{ id: "r", name: "大字", picks: ["text", "fontSizePx"] }];
+    const back = parsePreferences(serializePreferences(prefs));
+    expect(back.materialGroups).toEqual(prefs.materialGroups);
+    expect(back.materialRecipes).toEqual(prefs.materialRecipes);
+  });
+
+  it("start with a recipe for words and one for a look", () => {
+    expect(parsePreferences("{}").materialRecipes.map((r) => [r.name, r.picks])).toEqual([
+      ["文字", ["text", "font"]],
+      ["樣式", ["font", "color", "leadingPercent", "stroke"]],
+    ]);
+  });
+
+  it("keep the switches in one order and drop the ones nobody knows", () => {
+    const raw = JSON.stringify({
+      materialGroups: [{ id: "g", name: "x", materials: [snap({ picks: ["stroke", "glow", "text", "text"] })] }],
+    });
+    expect(parsePreferences(raw).materialGroups[0]!.materials[0]!.picks).toEqual(["text", "stroke"]);
   });
 
   it("lose only the entry that is damaged", () => {
     const raw = JSON.stringify({
       materialGroups: [
-        group({
-          texts: [{ id: "a", text: "哈" }, { id: "b", text: "  " }, { id: "c" }, { id: "a", text: "嗯" }],
-          styles: [
-            { id: "s", style: LOOK, effects: [] },
-            { id: "t", style: { ...LOOK, scaleXPercent: 0 }, effects: [] },
-            { id: "u", style: LOOK, effects: [{ kind: "glow" }] },
-            { id: "v", style: "not a style" },
+        {
+          id: "g",
+          name: "x",
+          materials: [
+            snap({ id: "a" }),
+            snap({ id: "b", style: { ...STYLE, scaleXPercent: 0 } }),
+            snap({ id: "c", effects: [{ kind: "glow" }] }),
+            snap({ id: "d", picks: "text" }),
+            snap({ id: "a", text: "嗯" }),
           ],
-        }),
+        },
         { id: "", name: "沒有 id" },
-        "not a group",
       ],
     });
-    const [only, ...rest] = parsePreferences(raw).materialGroups;
-    expect(rest).toEqual([]);
-    expect(only!.texts).toEqual([{ id: "a", text: "哈" }]);
-    expect(only!.styles.map((m) => m.id)).toEqual(["s"]);
+    const groups = parsePreferences(raw).materialGroups;
+    expect(groups.map((g) => g.materials.map((m) => m.id))).toEqual([["a"]]);
   });
 
-  it("keep one of two looks in a group that differ only by id", () => {
+  it("read words and looks saved before they were one kind, each ticked the way its kind is", () => {
     const raw = JSON.stringify({
       materialGroups: [
-        group({
-          styles: [
-            { id: "s", style: LOOK, effects: [STROKE] },
-            { id: "t", style: LOOK, effects: [STROKE] },
-            { id: "u", style: LOOK, effects: [] },
-          ],
-        }),
+        { id: "g", name: "舊", texts: [{ id: "t", text: "哈" }], styles: [{ id: "s", style: STYLE, effects: [STROKE] }] },
       ],
     });
-    expect(parsePreferences(raw).materialGroups[0]!.styles.map((m) => m.id)).toEqual(["s", "u"]);
+    const [words, look] = parsePreferences(raw).materialGroups[0]!.materials;
+    expect(words).toMatchObject({ text: "哈", picks: ["text"] });
+    expect(look).toMatchObject({ text: "", style: STYLE, effects: [STROKE], picks: ["font", "color", "leadingPercent", "stroke"] });
   });
+});
 
-  it("never carry the size, direction or alignment of the object a look was saved from", () => {
-    const raw = JSON.stringify({
-      materialGroups: [
-        group({ styles: [{ id: "s", style: { ...LOOK, fontSizePx: 88, direction: "vertical", align: "end" }, effects: [] }] }),
-      ],
+describe("what a material gives", () => {
+  const STYLE = { ...DEFAULT_TEXT_STYLE, fontFamily: "A", fontFace: "A-R", fontStyleName: "R", fontSizePx: 60, color: "#fff" };
+  it("is the ticked part of its style, the font as all three of its names", () => {
+    expect(stylePatchOf({ style: STYLE, picks: ["text", "font", "color"] })).toEqual({
+      fontFamily: "A",
+      fontFace: "A-R",
+      fontStyleName: "R",
+      color: "#fff",
     });
-    expect(parsePreferences(raw).materialGroups[0]!.styles[0]!.style).toEqual(LOOK);
   });
-
-  it("never read two groups by one name: a repeat opens numbered", () => {
-    const raw = JSON.stringify({ materialGroups: [group({ id: "a" }), group({ id: "b" })] });
-    expect(parsePreferences(raw).materialGroups.map((g) => g.name)).toEqual(["喘息", "喘息 2"]);
+  it("gives no stroke at all unless the stroke is ticked", () => {
+    expect(effectsPatchOf({ effects: [], picks: ["font"] })).toBeNull();
+    expect(effectsPatchOf({ effects: [], picks: ["stroke"] })).toEqual([]);
   });
 });
