@@ -1868,6 +1868,56 @@ describe('layer tree edits', () => {
     })
   })
 
+  describe('a saved look', () => {
+    const STROKE = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
+    const LOOK = { fontFamily: 'HanyiSentyRubber', color: '#ffffff', weightPx: 0.5 }
+    const entryOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
+      const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
+      return entry?.kind === 'text' ? entry : undefined
+    }
+    const textTargets = (editor: ReturnType<typeof useEditorStore>) =>
+      editor.selectedNodes().filter((t): t is AppearanceTarget<TextLayerEntry> => t.entry.kind === 'text')
+
+    it('lands style and stroke together and leaves the size where it was', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      editor.selectOnly('a')
+      const size = entryOf(project, 'a')!.body.style.fontSizePx
+
+      editor.cmdApplyLook(textTargets(editor), LOOK, [STROKE])
+
+      const after = entryOf(project, 'a')!
+      expect(after.body.style).toMatchObject({ ...LOOK, fontSizePx: size })
+      expect(after.effects).toEqual([STROKE])
+    })
+
+    /** An undo that took back the font and kept the stroke would leave a look nobody saved. */
+    it('goes back in one step, both halves at once', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      editor.selectOnly('a')
+      const before = structuredClone({ ...entryOf(project, 'a')!.body.style })
+
+      editor.cmdApplyLook(textTargets(editor), LOOK, [STROKE])
+      editor.undo()
+
+      expect(entryOf(project, 'a')!.body.style).toEqual(before)
+      expect(entryOf(project, 'a')!.effects).toEqual([])
+    })
+
+    it('takes what was being tried back before writing, so undo returns to what the object held', () => {
+      const { project, editor } = openTree([label('a')], ['a'])
+      editor.selectOnly('a')
+      const color = entryOf(project, 'a')!.body.style.color
+
+      editor.previewStyle(textTargets(editor), { color: '#ff0000' })
+      editor.previewEffects(textTargets(editor), [{ ...STROKE, color: '#ff0000' }])
+      editor.cmdApplyLook(textTargets(editor), LOOK, [STROKE])
+      editor.undo()
+
+      expect(entryOf(project, 'a')!.body.style.color).toBe(color)
+      expect(entryOf(project, 'a')!.effects).toEqual([])
+    })
+  })
+
   describe('style on the batch', () => {
     const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
       (findEntry(project.pageById(PAGE)?.page.layers ?? [], id) as TextLayerEntry).body.style
@@ -3593,5 +3643,34 @@ describe('a measured leading out of the range a page can be set in', () => {
     const { project, editor } = openOnePage()
     editor.cmdAddLabelFromReading(PAGE, { x: 100, y: 100 }, reading, { leadingPercent: 900 })
     expect(labelsOf(project)[0].body.style.leadingPercent).toBe(250)
+  })
+})
+
+describe('saved words put down on the page', () => {
+  const sideText = (project: ReturnType<typeof useProjectStore>, side: 'source' | 'translation') =>
+    blocksOnSide(project.pageById(PAGE)!.page.layers, side).map((b) => b.body.lines.join('\n'))
+
+  it('become a sentence of their own, on the side the canvas shows', () => {
+    const { project, editor } = openOnePage()
+    editor.setTextSide('translation')
+    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, '咕啾', 'translation')
+    expect(sideText(project, 'translation')).toEqual(['咕啾'])
+    expect(sideText(project, 'source')).toEqual([''])
+    expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(1)
+  })
+
+  it('land as the source when that is the side being worked on', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, 'はぁ', 'source')
+    expect(sideText(project, 'source')).toEqual(['はぁ'])
+    expect(sideText(project, 'translation')).toEqual([''])
+  })
+
+  it('keep their line breaks and are taken back by one undo', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromText(PAGE, { x: 100, y: 100 }, '哈\n啊', 'translation')
+    expect(sideText(project, 'translation')).toEqual(['哈\n啊'])
+    editor.undo()
+    expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(0)
   })
 })

@@ -14,6 +14,9 @@ import {
   type SidePanel,
 } from '@shared/preferences/types'
 import { freeGroupName } from '@shared/preferences/fontGroups'
+import { cloneEffects } from '@shared/effects/clone'
+import type { LayerEffect } from '@shared/effects/types'
+import { sameStyleMaterial, type MaterialStyle } from '@shared/preferences/materials'
 import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
@@ -101,6 +104,55 @@ export const usePreferencesStore = defineStore('preferences', () => {
     const at = prefs.fontFavorites.indexOf(family)
     if (at === -1) prefs.fontFavorites.push(family)
     else prefs.fontFavorites.splice(at, 1)
+  }
+
+  function createMaterialGroup(name: string): string {
+    const id = crypto.randomUUID()
+    prefs.materialGroups.push({
+      id,
+      name: freeGroupName(name, prefs.materialGroups.map((g) => g.name)),
+      texts: [],
+      styles: [],
+    })
+    return id
+  }
+
+  /** False when another group already goes by the name; nothing changes then. */
+  function renameMaterialGroup(id: string, name: string): boolean {
+    if (prefs.materialGroups.some((g) => g.id !== id && g.name === name)) return false
+    const group = prefs.materialGroups.find((g) => g.id === id)
+    if (!group) return false
+    group.name = name
+    return true
+  }
+
+  function deleteMaterialGroup(id: string) {
+    const at = prefs.materialGroups.findIndex((g) => g.id === id)
+    if (at !== -1) prefs.materialGroups.splice(at, 1)
+  }
+
+  /** False when the group already holds the same words; nothing changes then. */
+  function saveTextMaterial(groupId: string, text: string): boolean {
+    const group = prefs.materialGroups.find((g) => g.id === groupId)
+    if (!group || text.trim().length === 0 || group.texts.some((m) => m.text === text)) return false
+    group.texts.push({ id: crypto.randomUUID(), text })
+    return true
+  }
+
+  /** False when the group already holds the same look; nothing changes then. */
+  function saveStyleMaterial(groupId: string, style: MaterialStyle, effects: readonly LayerEffect[]): boolean {
+    const group = prefs.materialGroups.find((g) => g.id === groupId)
+    const material = { style: { ...style }, effects: cloneEffects(effects) }
+    if (!group || group.styles.some((m) => sameStyleMaterial(m, material))) return false
+    group.styles.push({ id: crypto.randomUUID(), ...material })
+    return true
+  }
+
+  function deleteMaterial(groupId: string, id: string) {
+    const group = prefs.materialGroups.find((g) => g.id === groupId)
+    if (!group) return
+    group.texts = group.texts.filter((m) => m.id !== id)
+    group.styles = group.styles.filter((m) => m.id !== id)
   }
 
   function createFontGroup(name: string): string {
@@ -229,6 +281,12 @@ export const usePreferencesStore = defineStore('preferences', () => {
     favorites,
     isFavorite,
     toggleFavorite,
+    createMaterialGroup,
+    renameMaterialGroup,
+    deleteMaterialGroup,
+    saveTextMaterial,
+    saveStyleMaterial,
+    deleteMaterial,
     createFontGroup,
     renameFontGroup,
     deleteFontGroup,

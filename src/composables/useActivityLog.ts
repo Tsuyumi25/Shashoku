@@ -2,7 +2,7 @@ import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { logActivity, logSettled, setActivityLogging } from '@/lib/activityLog'
 import { isTypingSurface } from '@/lib/typingSurface'
-import { useValuePicker } from '@/composables/useValuePicker'
+import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -48,7 +48,7 @@ export function useActivityLog(): void {
   const preferences = usePreferencesStore()
   const editor = useEditorStore()
   const ui = useUiStore()
-  const valuePicker = useValuePicker()
+  const column = useLeftColumn()
 
   watch(
     () => preferences.prefs.activityLog,
@@ -116,7 +116,8 @@ export function useActivityLog(): void {
       logActivity('select', { n: list.length, ids: list })
     },
   )
-  watch(valuePicker.shown, (which) => logActivity('values', { which }))
+  watch(column.shown, (which) => logActivity('column', { which }))
+  watch(column.openGroupId, (group) => logActivity('shelf', { group }))
   watch(
     () => editor.pendingTextEdit?.labelId ?? null,
     (id, was) => {

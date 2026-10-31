@@ -1623,6 +1623,25 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * Saved words put down on the page as a sentence of their own, the way a
+   * reading is. They land on whichever side the canvas is showing, because that
+   * is the side being worked on; the other side starts blank, as a reading's
+   * translation does. Placed by its middle, where it was let go.
+   */
+  function cmdAddLabelFromText(pageId: string, at: { x: number; y: number }, text: string, side: TextSide) {
+    const project = useProjectStore()
+    const style = project.header.seedStyle
+    const parts = blankTranslation(style, generateLabelId)
+    const anchor = anchorFor(style, at)
+    for (const block of parts.blocks) {
+      block.body.x = anchor.x
+      block.body.y = anchor.y
+      if (block.side === side) block.body.lines = linesOf(escapeText(text))
+    }
+    return cmdAddLabel(pageId, parts)
+  }
+
+  /**
    * Where the panel's add button drops a label. The view centre is a container
    * coordinate, which is what `screenToPagePx` wants once the container's own
    * offset is taken out — and it can be off the page after a pan, hence the
@@ -2674,6 +2693,43 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * A saved look given in one act. Its style and its effects land together and
+   * leave together: an undo that took back the font and kept the stroke would
+   * leave a look nobody saved. Whatever was being tried is put back first, so
+   * the before is what the objects held and not the trial.
+   */
+  function cmdApplyLook(
+    targets: readonly AppearanceTarget<TextLayerEntry>[],
+    patch: Partial<TextStyle>,
+    effects: readonly LayerEffect[],
+  ) {
+    endStylePreview()
+    endEffectsPreview()
+    if (targets.length === 0) return
+    const stylesBefore = stylesOf(targets)
+    const stylesAfter = stylesBefore.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
+    const effectsBefore = effectsOf(targets)
+    const effectsAfter = effectsBefore.map((entry) => ({ ...entry, effects: cloneEffects(effects) }))
+    if (
+      JSON.stringify(stylesBefore) === JSON.stringify(stylesAfter) &&
+      JSON.stringify(effectsBefore) === JSON.stringify(effectsAfter)
+    )
+      return
+    pushCommand({
+      label: `apply-look ${targets.length}`,
+      detail: { ids: targets.map((t) => t.entry.id), patch },
+      do: () => {
+        writeStyles(stylesAfter)
+        writeEffects(effectsAfter)
+      },
+      undo: () => {
+        writeStyles(stylesBefore)
+        writeEffects(effectsBefore)
+      },
+    })
+  }
+
+  /**
    * Every text object in the chapter, which is what the statistics count.
    *
    * The translation whatever tool is open: what this feeds is the style a newly
@@ -3023,6 +3079,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyVerdict,
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
+    cmdAddLabelFromText,
     cmdReplaceLabelSource,
     cmdMoveCard,
     cmdDuplicateLabel,
@@ -3056,6 +3113,7 @@ export const useEditorStore = defineStore('editor', () => {
     previewStyle,
     endStylePreview,
     cmdApplyEffects,
+    cmdApplyLook,
     previewEffects,
     endEffectsPreview,
     cmdReorderMembers,

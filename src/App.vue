@@ -16,17 +16,16 @@
             a trip to the other side.
           -->
           <!--
-            The values to give the selection, the whole column. Which property's
-            values is asked for by name from the appearance panel; the font
-            stays mounted so the picker keeps its catalogue and scroll.
+            What to give the selection, the whole column: a shelf of saved
+            materials, or the fonts. The font stays mounted so the picker keeps
+            its catalogue and scroll.
           -->
-          <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1">
-            <div v-show="valuePicker.shown.value === 'font'" class="flex min-w-0 flex-1 flex-col">
+          <div v-show="ui.view === 'editor'" class="flex min-h-0 flex-1 flex-col">
+            <LibraryTabs />
+            <div v-show="column.shown.value === 'font'" class="flex min-h-0 min-w-0 flex-1 flex-col">
               <FontPickerOverlay />
             </div>
-            <div v-if="valuePicker.shown.value !== 'font'" class="flex min-w-0 flex-1 flex-col">
-              <ValuePicker :kind="valuePicker.shown.value" />
-            </div>
+            <MaterialShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <FontLibrarySidebar v-if="ui.view === 'fonts'" />
@@ -78,6 +77,8 @@ import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
+import LibraryTabs from '@/components/materials/LibraryTabs.vue'
+import MaterialShelf from '@/components/materials/MaterialShelf.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import FontLibraryList from '@/components/fontLibrary/FontLibraryList.vue'
 import FontLibrarySidebar from '@/components/fontLibrary/FontLibrarySidebar.vue'
@@ -91,7 +92,7 @@ import { useActivityLog } from '@/composables/useActivityLog'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
-import { useValuePicker } from '@/composables/useValuePicker'
+import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
@@ -100,7 +101,6 @@ import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import { useWallPublisher } from '@/composables/useWallPublisher'
-import ValuePicker from '@/components/ValuePicker.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -119,12 +119,12 @@ const exportSelection = useExportStore()
 const ui = useUiStore()
 useWallPublisher()
 const fontPicker = useFontPicker()
-const valuePicker = useValuePicker()
+const column = useLeftColumn()
 // The font picker's own "open" follows the column, and "choose a font" from
 // anywhere brings the column back to fonts.
-watch(valuePicker.shown, (kind) => (fontPicker.isOpen.value = kind === 'font'), { immediate: true })
+watch(column.shown, (view) => (fontPicker.isOpen.value = view === 'font'), { immediate: true })
 watch(fontPicker.isOpen, (open) => {
-  if (open) valuePicker.show('font')
+  if (open) column.show('font')
 })
 const fill = useFillSelection()
 const merge = useMergeLayers()

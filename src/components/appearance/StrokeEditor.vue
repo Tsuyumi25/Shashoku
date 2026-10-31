@@ -1,12 +1,5 @@
 <template>
-  <button
-    type="button"
-    class="value-key"
-    title="在左欄列出這一話用過的描邊"
-    @click="valuePicker.show('stroke')"
-  >
-    描邊
-  </button>
+  <label class="text-muted-foreground">描邊</label>
   <div class="flex min-w-0 items-center gap-1.5">
     <ColorField
       :model-value="shown.color"
@@ -49,7 +42,6 @@ import type { LayerEffect, StrokeEffect, StrokePosition } from '@shared/effects/
 import { DEFAULT_STROKE } from '@shared/effects/types'
 import { strokeOf, withStroke } from '@shared/effects/stroke'
 import { MIXED_TEXT } from '@/lib/appearanceText'
-import { useValuePicker } from '@/composables/useValuePicker'
 
 /**
  * The stroke controls, over whatever node carries them.
@@ -83,7 +75,6 @@ const emit = defineEmits<{
   patch: [effects: LayerEffect[]]
 }>()
 
-const valuePicker = useValuePicker()
 
 const stroke = computed<StrokeEffect | null>(() => strokeOf(props.effects))
 /** What the controls stand on: the stroke itself, or what one would start as. */

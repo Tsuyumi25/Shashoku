@@ -12,57 +12,51 @@
   >
     <div class="wheel-hub" :style="{ left: `${at.x}px`, top: `${at.y}px` }" />
     <div
-      v-for="(item, i) in ITEMS"
-      :key="item.kind"
+      v-for="(item, i) in items"
+      :key="item.id"
       class="wheel-item"
       :class="aimed === i && 'wheel-item-on'"
       :style="placeOf(i)"
     >
-      {{ item.label }}
+      {{ item.name }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import type { ValueKind } from '@/composables/useValuePicker'
 
 /**
- * The right button's ring of properties: which one's values the left column
- * should lay out. A way into the value picker from where the eye already is,
- * standing in for the trip across to the appearance panel's names.
+ * The right button's ring: the fonts, and every material group — which of them
+ * the left column should open. A way there from where the eye already is,
+ * standing in for the trip across to the column's own tabs.
  *
  * Press, drag toward one and let go; or click and the ring stays until a
  * second click picks or dismisses it. Let go at the hub and nothing happens.
  *
- * ⭐ Every property keeps its direction. A ring is fast because the hand
- * learns "size is up and right"; ordering it by use would unteach that the
- * first time the order changed.
+ * ⭐ Every entry keeps its direction while the list does, and the fonts are
+ * always at the top. A ring is fast because the hand learns "the gasps are up
+ * and right"; ordering it by use would unteach that the first time the order
+ * changed.
  */
 const props = defineProps<{
   /** Where the press was, in the canvas's own pixels. */
   at: { x: number; y: number }
   /** The client point the canvas's corner stands at, to place pointer events. */
   origin: { left: number; top: number }
+  /** Clockwise after the fonts, in the order the shelf lists them. */
+  groups: readonly { id: string; name: string }[]
 }>()
 
 const emit = defineEmits<{
-  choose: [kind: ValueKind]
+  /** The fonts, or the id of the group to open. */
+  choose: [pick: { font: true } | { groupId: string }]
   close: []
 }>()
 
-/** Clockwise from the top. */
-const ITEMS: { kind: ValueKind; label: string }[] = [
-  { kind: 'font', label: '字型' },
-  { kind: 'fontSizePx', label: '字級' },
-  { kind: 'weightPx', label: '字粗' },
-  { kind: 'leadingPercent', label: '行距' },
-  { kind: 'stroke', label: '描邊' },
-  { kind: 'color', label: '文字色' },
-  { kind: 'scaleXPercent', label: '水平' },
-  { kind: 'scaleYPercent', label: '垂直' },
-]
+const FONT_ID = 'font'
+const items = computed(() => [{ id: FONT_ID, name: '字型' }, ...props.groups])
 
 const RADIUS_PX = 76
 /** Inside this the pointer is at the hub, and letting go there is a cancel. */
@@ -77,7 +71,7 @@ let held = true
 const opened = performance.now()
 
 function placeOf(i: number) {
-  const angle = (i / ITEMS.length) * Math.PI * 2 - Math.PI / 2
+  const angle = (i / items.value.length) * Math.PI * 2 - Math.PI / 2
   return {
     left: `${props.at.x + Math.cos(angle) * RADIUS_PX}px`,
     top: `${props.at.y + Math.sin(angle) * RADIUS_PX}px`,
@@ -94,14 +88,15 @@ function aim(e: PointerEvent): number {
   }
   // Each item owns the slice of directions nearest it.
   const turn = (Math.atan2(dy, dx) + Math.PI / 2 + Math.PI * 2) % (Math.PI * 2)
-  aimed.value = Math.round((turn / (Math.PI * 2)) * ITEMS.length) % ITEMS.length
+  aimed.value = Math.round((turn / (Math.PI * 2)) * items.value.length) % items.value.length
   return distance
 }
 
 function finish() {
   const at = aimed.value
   if (at === null) emit('close')
-  else emit('choose', ITEMS[at].kind)
+  else if (at === 0) emit('choose', { font: true })
+  else emit('choose', { groupId: items.value[at]!.id })
 }
 
 // Read off the window: the press that opened the ring began on the canvas,

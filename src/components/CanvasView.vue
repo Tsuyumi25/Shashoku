@@ -320,10 +320,11 @@
     -->
     <CanvasMenu :at="objectMenu?.at ?? null" :items="OBJECT_MENU" @pick="onObjectMenu" @close="objectMenu = null" />
 
-    <PropertyWheel
+    <GroupWheel
       v-if="wheelAt !== null"
       :at="wheelAt"
       :origin="wheelOrigin"
+      :groups="preferences.prefs.materialGroups"
       @choose="chooseFromWheel"
       @close="wheelAt = null"
     />
@@ -336,10 +337,10 @@
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
-import PropertyWheel from '@/components/PropertyWheel.vue'
+import GroupWheel from '@/components/GroupWheel.vue'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import { logActivity } from '@/lib/activityLog'
-import { useValuePicker, type ValueKind } from '@/composables/useValuePicker'
+import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
@@ -363,7 +364,8 @@ import type { TextStyle } from '@shared/text-style/types'
 import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { blocksOnSide, placeOfBlock, shownCodeOf, sideOf } from '@shared/page/units'
+import { blocksOnSide, placeOfBlock, shownCodeOf, shownLinesOf, sideOf } from '@shared/page/units'
+import { materialStyleOf } from '@shared/preferences/materials'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -679,17 +681,17 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
  * order to reach a range over, so building one out of scattered objects is the
  * label list's job.
  */
-const valuePicker = useValuePicker()
+const column = useLeftColumn()
 const merge = useMergeLayers()
 
-/** Where the right button's ring of properties stands, or null when it is down. */
+/** Where the right button's ring stands, or null when it is down. */
 const wheelAt = ref<{ x: number; y: number } | null>(null)
 const wheelOrigin = ref({ left: 0, top: 0 })
 
 /**
  * The right button means two things by where it lands. Over a text object it is
  * that object's menu — the things done to a translation as a whole; anywhere
- * else it is the ring of properties for whatever is selected. The ring never
+ * else it is the ring of the fonts and the material groups. The ring never
  * opens over a text object, so which of the two comes up is never in doubt.
  *
  * Raster layers are not asked: the base map covers the whole page, and taking
@@ -704,7 +706,6 @@ function onRightPress(e: PointerEvent) {
     objectMenu.value = { id: pointed, at: { x: e.clientX, y: e.clientY } }
     return
   }
-  if (editor.selectedIds.size === 0) return
   wheelOrigin.value = { left: rect.left, top: rect.top }
   wheelAt.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
@@ -716,21 +717,46 @@ const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null
  * A copy of the whole translation, both sides, read right after the original —
  * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
  */
-const OBJECT_MENU: MenuItem[] = [{ id: 'duplicate-unit', label: '製作副本（整句）' }]
+const OBJECT_MENU: MenuItem[] = [
+  { id: 'duplicate-unit', label: '製作副本（整句）' },
+  { id: 'save-look', label: '將樣式存成素材' },
+  { id: 'save-text', label: '將文字存成素材' },
+]
 
 function onObjectMenu(pick: string) {
   const at = objectMenu.value
   objectMenu.value = null
-  if (at === null || pick !== 'duplicate-unit') return
-  void merge.duplicateLayer({ id: at.id, wholeUnit: true }).catch((err: unknown) =>
-    console.error('duplicate failed', err),
-  )
+  if (at === null) return
+  if (pick === 'duplicate-unit') {
+    void merge.duplicateLayer({ id: at.id, wholeUnit: true }).catch((err: unknown) =>
+      console.error('duplicate failed', err),
+    )
+    return
+  }
+  const pageId = project.pageOfEntry(at.id)
+  const entry = project.entryById(at.id)
+  const page = pageId === null ? undefined : project.pageById(pageId)?.page
+  if (entry?.kind !== 'text' || !page) return
+  // Into the group the shelf has open, or the first, or a new one when there
+  // is none. Saving again what is already there still opens the shelf on it,
+  // so the press always ends with the saved thing in view.
+  const groups = preferences.prefs.materialGroups
+  const groupId =
+    groups.find((g) => g.id === column.openGroupId.value)?.id ?? groups[0]?.id ?? preferences.createMaterialGroup('素材')
+  if (pick === 'save-look') preferences.saveStyleMaterial(groupId, materialStyleOf(entry.body.style), entry.effects)
+  else if (pick === 'save-text') preferences.saveTextMaterial(groupId, shownLinesOf(page, entry).join('\n'))
+  column.openGroup(groupId)
 }
 
-function chooseFromWheel(kind: ValueKind) {
+function chooseFromWheel(pick: { font: true } | { groupId: string }) {
   wheelAt.value = null
-  logActivity('wheel', { pick: kind })
-  valuePicker.show(kind)
+  if ('font' in pick) {
+    logActivity('wheel', { pick: 'font' })
+    column.show('font')
+  } else {
+    logActivity('wheel', { group: pick.groupId })
+    column.openGroup(pick.groupId)
+  }
 }
 
 function onSelectObject(id: string, additive: boolean) {

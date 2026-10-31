@@ -1,3 +1,5 @@
+import type { MaterialGroup } from "./materials";
+
 export const MIN_FONT_PICKER_BOX_PX = 60;
 export const MAX_FONT_PICKER_BOX_PX = 240;
 /** Chromium's zoom steps: each one is a factor of 1.2, so ±5 is 40%–249%. */
@@ -83,6 +85,8 @@ export interface FontGroup {
 }
 
 export interface Preferences {
+  /** Shelves of saved words and looks, in the order the ring and the library list them. */
+  materialGroups: MaterialGroup[];
   /** Font families the user starred, in the order they were added. */
   fontFavorites: string[];
   /** Groups in the order the library's sidebar lists them. */
@@ -192,6 +196,7 @@ export interface Preferences {
  */
 export function defaultPreferences(): Preferences {
   return {
+    materialGroups: [],
     fontFavorites: [],
     fontGroups: [],
     pinnedLayerSeed: ["修圖", "底圖"],

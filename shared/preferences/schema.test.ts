@@ -208,3 +208,86 @@ describe("font groups", () => {
     expect(parsePreferences(raw).fontGroups[0]!.families).toEqual(["X", "Y"]);
   });
 });
+
+describe("material groups", () => {
+  const LOOK = {
+    fontFamily: "HanyiSentyRubber",
+    fontFace: "HanyiSentyRubber",
+    fontStyleName: "Regular",
+    color: "#ffffff",
+    leadingPercent: 120,
+    weightPx: 0.5,
+    scaleXPercent: 100,
+    scaleYPercent: 90,
+  };
+  const STROKE = { kind: "stroke" as const, width: 4, color: "#000000", position: "outside" as const };
+  const group = (over: Record<string, unknown>) => ({ id: "g", name: "喘息", texts: [], styles: [], ...over });
+
+  it("come back with what was written, words and looks in order", () => {
+    const prefs = defaultPreferences();
+    prefs.materialGroups = [
+      {
+        id: "g",
+        name: "喘息",
+        texts: [
+          { id: "a", text: "咕啾" },
+          { id: "b", text: "哈\n啊" },
+        ],
+        styles: [{ id: "s", style: LOOK, effects: [STROKE] }],
+      },
+      { id: "h", name: "擬音", texts: [], styles: [] },
+    ];
+    expect(parsePreferences(serializePreferences(prefs)).materialGroups).toEqual(prefs.materialGroups);
+  });
+
+  it("lose only the entry that is damaged", () => {
+    const raw = JSON.stringify({
+      materialGroups: [
+        group({
+          texts: [{ id: "a", text: "哈" }, { id: "b", text: "  " }, { id: "c" }, { id: "a", text: "嗯" }],
+          styles: [
+            { id: "s", style: LOOK, effects: [] },
+            { id: "t", style: { ...LOOK, scaleXPercent: 0 }, effects: [] },
+            { id: "u", style: LOOK, effects: [{ kind: "glow" }] },
+            { id: "v", style: "not a style" },
+          ],
+        }),
+        { id: "", name: "沒有 id" },
+        "not a group",
+      ],
+    });
+    const [only, ...rest] = parsePreferences(raw).materialGroups;
+    expect(rest).toEqual([]);
+    expect(only!.texts).toEqual([{ id: "a", text: "哈" }]);
+    expect(only!.styles.map((m) => m.id)).toEqual(["s"]);
+  });
+
+  it("keep one of two looks in a group that differ only by id", () => {
+    const raw = JSON.stringify({
+      materialGroups: [
+        group({
+          styles: [
+            { id: "s", style: LOOK, effects: [STROKE] },
+            { id: "t", style: LOOK, effects: [STROKE] },
+            { id: "u", style: LOOK, effects: [] },
+          ],
+        }),
+      ],
+    });
+    expect(parsePreferences(raw).materialGroups[0]!.styles.map((m) => m.id)).toEqual(["s", "u"]);
+  });
+
+  it("never carry the size, direction or alignment of the object a look was saved from", () => {
+    const raw = JSON.stringify({
+      materialGroups: [
+        group({ styles: [{ id: "s", style: { ...LOOK, fontSizePx: 88, direction: "vertical", align: "end" }, effects: [] }] }),
+      ],
+    });
+    expect(parsePreferences(raw).materialGroups[0]!.styles[0]!.style).toEqual(LOOK);
+  });
+
+  it("never read two groups by one name: a repeat opens numbered", () => {
+    const raw = JSON.stringify({ materialGroups: [group({ id: "a" }), group({ id: "b" })] });
+    expect(parsePreferences(raw).materialGroups.map((g) => g.name)).toEqual(["喘息", "喘息 2"]);
+  });
+});
