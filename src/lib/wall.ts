@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { WallAttribute } from '@/lib/wallAttributes'
+import type { TextSide } from '@shared/page/text'
 
 /** How a piece of text is shown on the wall, against the size it is set at. */
 export type WallSize = 'uniform' | 'eased' | 'proportional'
@@ -16,6 +17,13 @@ export const wallAttribute = ref<WallAttribute>('font')
 
 export type WallScope = 'page' | 'chapter'
 export const wallScope = ref<WallScope>('chapter')
+
+/**
+ * Which side the wall gathers. Its own, apart from the editor's: the wall is
+ * where the looks a side holds are compared, and that is asked of the sources
+ * too — while the editor may be on the other side doing something else.
+ */
+export const wallSide = ref<TextSide>('translation')
 
 /**
  * The size, in screen pixels, a piece set at `sizePx` is shown at.

@@ -1,6 +1,13 @@
 <template>
   <div class="flex flex-col gap-3 p-2 text-xs">
     <div class="flex flex-col gap-1">
+      <span class="text-muted-foreground">哪一面</span>
+      <ToggleGroupRoot type="single" class="seg w-full" :model-value="wallSide" @update:model-value="onSide">
+        <ToggleGroupItem value="source" class="seg-item">原文</ToggleGroupItem>
+        <ToggleGroupItem value="translation" class="seg-item">譯文</ToggleGroupItem>
+      </ToggleGroupRoot>
+    </div>
+    <div class="flex flex-col gap-1">
       <span class="text-muted-foreground">範圍</span>
       <ToggleGroupRoot type="single" class="seg w-full" :model-value="wallScope" @update:model-value="onScope">
         <ToggleGroupItem value="page" class="seg-item">本頁</ToggleGroupItem>
@@ -42,6 +49,7 @@ import { WALL_ATTRIBUTES } from '@/lib/wallAttributes'
 import {
   wallAttribute,
   wallScope,
+  wallSide,
   wallSize,
   type WallScope,
   type WallSize,
@@ -52,6 +60,10 @@ const off = 'text-muted-foreground hover:bg-secondary hover:text-foreground'
 
 function onScope(v: unknown) {
   if (v === 'page' || v === 'chapter') wallScope.value = v as WallScope
+}
+
+function onSide(v: unknown) {
+  if (v === 'source' || v === 'translation') wallSide.value = v
 }
 
 function onSize(v: unknown) {

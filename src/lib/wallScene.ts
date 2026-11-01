@@ -16,9 +16,13 @@ export function wallSceneOf(
   const entries: WallEntry[] = []
   files.forEach((file, i) => {
     if (file.badge !== 'ok') return
-    for (const block of blocksOnSide(file.page.layers, 'translation')) {
+    for (const block of [
+      ...blocksOnSide(file.page.layers, 'translation'),
+      ...blocksOnSide(file.page.layers, 'source'),
+    ]) {
       entries.push({
         id: block.id,
+        side: block.side,
         pageId: file.pageId,
         pageNumber: i + 1,
         code: shownCodeOf(file.page, block),

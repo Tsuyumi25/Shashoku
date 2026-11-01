@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-full min-h-0 flex-col bg-muted">
     <div class="flex h-7 shrink-0 items-center gap-3 border-b border-border bg-card px-2 text-xs select-none">
-      <span class="font-medium">{{ wallScope === 'page' ? '這一頁' : '這一話' }}的全部譯文</span>
+      <span class="font-medium">{{ wallScope === 'page' ? '這一頁' : '這一話' }}的全部{{ sideName }}</span>
       <span class="text-muted-foreground tabular-nums">
         {{ pieces.length }} 個物件 · {{ groups.length }} 組 · {{ bucketCount }} 堆
         <template v-if="missingCount">
@@ -11,11 +11,11 @@
     </div>
 
     <p v-if="scene.entries.length === 0" class="p-4 text-sm text-muted-foreground">
-      主視窗開啟專案後，這裡會列出它的每一句譯文
+      主視窗開啟專案後，這裡會列出它的每一塊原文或譯文
     </p>
 
     <p v-else-if="shown.length === 0" class="p-4 text-sm text-muted-foreground">
-      {{ scene.currentPageId === null ? '主視窗還沒翻到任何一頁' : '這一頁沒有譯文' }}
+      {{ scene.currentPageId === null ? '主視窗還沒翻到任何一頁' : `這一頁沒有${sideName}` }}
     </p>
 
     <div v-else ref="bodyEl" class="min-h-0 flex-1 overflow-auto p-4">
@@ -102,7 +102,7 @@ import WallPiece from '@/components/wall/WallPiece.vue'
 import { drawnLabel } from '@/lib/labelRaster'
 import type { Sample } from '@/lib/fontSampleCache'
 import { groupByAttribute } from '@/lib/wallAttributes'
-import { shownEm, wallAttribute, wallScope, wallSize } from '@/lib/wall'
+import { shownEm, wallAttribute, wallScope, wallSide, wallSize } from '@/lib/wall'
 
 /**
  * Every translation in the open chapter on one surface, each drawn as the page
@@ -139,9 +139,12 @@ interface Item {
 const shown = computed(() =>
   props.scene.entries.filter(
     (entry) =>
-      entry.code.trim() && (wallScope.value === 'chapter' || entry.pageId === props.scene.currentPageId),
+      entry.side === wallSide.value &&
+      entry.code.trim() &&
+      (wallScope.value === 'chapter' || entry.pageId === props.scene.currentPageId),
   ),
 )
+const sideName = computed(() => (wallSide.value === 'source' ? '原文' : '譯文'))
 
 /** Drawn once per entry and size mode; regrouping does not draw anything again. */
 const pieces = computed<Item[]>(() =>

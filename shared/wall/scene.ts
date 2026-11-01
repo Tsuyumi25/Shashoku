@@ -1,14 +1,17 @@
 import type { LayerEffect } from "../effects/types";
 import type { TagRegistry } from "../tags/types";
 import type { TextStyle } from "../text-style/types";
+import type { TextSide } from "../page/text";
 
 /**
- * One translation as the wall draws it: its words, its look, and where to send
- * the editor when it is pointed at. The wall window holds no project of its
- * own, so this is everything it knows.
+ * One block as the wall draws it: its words, its look, and where to send the
+ * editor when it is pointed at. The wall window holds no project of its own,
+ * so this is everything it knows.
  */
 export interface WallEntry {
   id: string;
+  /** Sources carry looks of their own, so the wall shows either side. */
+  side: TextSide;
   pageId: string;
   /** Counting from one, as the page bar does. */
   pageNumber: number;
@@ -19,7 +22,7 @@ export interface WallEntry {
   tags: string[];
 }
 
-/** The open chapter's translations, or nothing when no project is open. */
+/** The open chapter's blocks on both sides, or nothing when no project is open. */
 export interface WallScene {
   entries: WallEntry[];
   /** The project's tags, for their order and colours. */
