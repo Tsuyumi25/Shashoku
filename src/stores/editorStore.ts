@@ -21,7 +21,7 @@ import {
   type RemovedTranslation,
   type TranslationParts,
 } from '@/stores/projectStore'
-import { clamp, screenToPagePx } from '@/lib/coords'
+import { clamp } from '@/lib/coords'
 import { blankTranslation, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
 import { linesOf, type TextSide } from '@shared/page/text'
 import { blocksOf, shownCodeOf, sideOf } from '@shared/page/units'
@@ -1718,25 +1718,6 @@ export const useEditorStore = defineStore('editor', () => {
     return cmdAddLabel(pageId, parts)
   }
 
-  /**
-   * Where the panel's add button drops a label. The view centre is a container
-   * coordinate, which is what `screenToPagePx` wants once the container's own
-   * offset is taken out — and it can be off the page after a pan, hence the
-   * clamp inside it.
-   */
-  function addLabelAtViewCenter() {
-    const natural = viewContentSize.value
-    if (!natural.w || !natural.h) return
-    const p = screenToPagePx(
-      viewContainerSize.value.w / 2,
-      viewContainerSize.value.h / 2,
-      { left: 0, top: 0 },
-      view,
-      natural,
-    )
-    addLabelAt(p.x, p.y)
-  }
-
   /** The objects as a reader meets them, so a group dragged stays a group. */
   function inChapterOrder(ids: readonly string[]): string[] {
     const project = useProjectStore()
@@ -3184,7 +3165,6 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetPageOrder,
     cmdImportPages,
     addLabelAt,
-    addLabelAtViewCenter,
     deleteSelection,
     moveObjectsTo,
     cmdAddLabel,

@@ -393,41 +393,6 @@ describe('cmdApplyVerdict', () => {
   })
 })
 
-describe('addLabelAtViewCenter', () => {
-  it('lands on the middle of the page when the page is fitted', () => {
-    const { project, editor } = openOnePage()
-    editor.viewContainerSize = { w: 800, h: 600 }
-    editor.viewContentSize = { w: 400, h: 300 }
-    editor.fitToView()
-
-    editor.addLabelAtViewCenter()
-
-    const added = labelsOf(project).at(-1)
-    expect(added?.body.x).toBeCloseTo(200, 6)
-    expect(added?.body.y).toBeCloseTo(150, 6)
-  })
-
-  it('clamps onto the page when the view has been panned off it', () => {
-    const { project, editor } = openOnePage()
-    editor.viewContainerSize = { w: 800, h: 600 }
-    editor.viewContentSize = { w: 400, h: 300 }
-    editor.fitToView()
-    editor.panBy(-5000, -5000)
-
-    editor.addLabelAtViewCenter()
-
-    expect(labelsOf(project).at(-1)?.body).toMatchObject({ x: 400, y: 300 })
-  })
-
-  it('does nothing before a page has been measured', () => {
-    const { project, editor } = openOnePage()
-    editor.viewContainerSize = { w: 800, h: 600 }
-    editor.viewContentSize = { w: 0, h: 0 }
-    editor.addLabelAtViewCenter()
-    expect(labelsOf(project)).toHaveLength(0)
-  })
-})
-
 describe('deleteSelectedLabel', () => {
   it('removes the selection and lands on the label that took its place', () => {
     const { project, editor } = openOnePage([label('a'), label('b'), label('c')])

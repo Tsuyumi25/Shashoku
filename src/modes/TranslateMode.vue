@@ -128,21 +128,6 @@
             <Trash2 :size="14" />
           </button>
         </div>
-        <div
-          v-else
-          class="flex h-7 shrink-0 items-center gap-px border-b border-border px-1 select-none"
-        >
-          <span class="ml-1 text-xs text-muted-foreground">{{ labelCount }} 條</span>
-          <button
-            type="button"
-            class="panel-action ml-auto"
-            title="在畫面中心新增標籤"
-            :disabled="!editor.currentPageId"
-            @click="editor.addLabelAtViewCenter()"
-          >
-            <Plus :size="14" />
-          </button>
-        </div>
 
         <!--
           Only the one showing is mounted. The list registers a window
@@ -168,14 +153,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import {
   Combine,
   Copy,
   FilePlus,
   FolderPlus,
   PaintBucket,
-  Plus,
   Trash2,
 } from '@lucide/vue'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
@@ -225,11 +208,6 @@ function onDuplicate() {
   const copy = pixels.liftsSelection.value ? pixels.liftSelection() : duplicateLayer({})
   void copy.catch((err: unknown) => console.error('duplicate failed', err))
 }
-
-// The chapter's, not the open page's — the list below spans the chapter.
-const labelCount = computed(() =>
-  project.files.reduce((n, f) => n + f.page.readingOrder.length, 0),
-)
 
 /** The names already spoken for on the open page, among one kind of entry. */
 function takenNames(kind: 'group' | 'raster'): Set<string> {
