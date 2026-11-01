@@ -49,7 +49,7 @@
           group.page.pageId === editor.currentPageId && 'text-foreground',
           isHere(group.page) ? 'heading-here' : 'heading-away',
         ]"
-        @mousedown="editor.showPage(group.page.pageId)"
+        @mousedown="turnFromHeading(group.page.pageId)"
       >
         <PageRowThumb v-if="fileOf(group.page.pageId)" :file="fileOf(group.page.pageId)!" />
         <div class="flex min-w-0 flex-1 flex-col gap-1 self-stretch overflow-hidden">
@@ -948,9 +948,29 @@ function onInputKey(e: KeyboardEvent) {
 }
 
 /**
- * Selecting on the canvas has to bring the list to the object, or the two stop
- * being about the same thing. A row already on screen is left where it is,
- * which is what keeps clicking a row from scrolling under the pointer.
+ * Set by a press on a heading, for the turn it causes. Focus would say the
+ * list is in use only once the press is over, after the turn has been followed.
+ */
+let turnedHere = false
+
+function turnFromHeading(pageId: string): void {
+  turnedHere = pageId !== editor.currentPageId
+  editor.showPage(pageId)
+}
+
+/**
+ * Selecting on the canvas has to bring the list to the object, and turning the
+ * page has to bring it to the page, or the two stop being about the same
+ * thing. The cursor's row is the target when it is on the page now showing;
+ * otherwise the page itself — a selection reaches across pages and survives a
+ * turn, so a cursor left on page 3 says nothing about where page 7 is.
+ *
+ * A row is only brought as far as it takes to be seen. A page just turned to
+ * from elsewhere is brought to the top, its heading pinned and its rows below it:
+ * `nearest` would stop a page further down at the bottom edge, showing the
+ * heading and none of what is under it. A page turned from the list itself is
+ * left where it is, so pressing a heading does not pull it out from under the
+ * pointer.
  *
  * It runs on arrival as well as on every move, because the list shares its
  * column with the tree now and is built afresh each time it is switched back
@@ -959,25 +979,24 @@ function onInputKey(e: KeyboardEvent) {
  */
 watch(
   () => [editor.currentPageId, editor.cursorId] as const,
-  async ([pageId, labelId]) => {
+  async ([pageId, labelId], previous) => {
     if (pageId === null) return
-    const index =
-      labelId === null
-        ? rows.value.findIndex((r) => r.kind === 'page' && r.pageId === pageId)
-        : rows.value.findIndex(
-            (r) =>
-              r.kind === 'block'
-                ? r.pageId === pageId && r.block.id === labelId
-                : r.kind === 'label' &&
-                  r.pageId === pageId &&
-                  r.blocks.length === 1 &&
-                  r.blocks[0].id === labelId,
-          )
-    if (index === -1) return
-    const selector =
-      labelId === null
-        ? `[data-page-id="${CSS.escape(pageId)}"]`
-        : `[data-row-id="${CSS.escape(labelId)}"]`
+    const turned = previous?.[0] !== pageId && !turnedHere
+    turnedHere = false
+    const onPage =
+      labelId !== null &&
+      rows.value.some((r) =>
+        r.kind === 'block'
+          ? r.pageId === pageId && r.block.id === labelId
+          : r.kind === 'label' &&
+            r.pageId === pageId &&
+            r.blocks.length === 1 &&
+            r.blocks[0].id === labelId,
+      )
+    if (!onPage && !rows.value.some((r) => r.kind === 'page' && r.pageId === pageId)) return
+    const selector = onPage
+      ? `[data-row-id="${CSS.escape(labelId)}"]`
+      : `[data-page-id="${CSS.escape(pageId)}"]`
 
     // Focus goes where the cursor went, but only while the list is the thing
     // being used: keys are dispatched by what they act on, so moving the cursor
@@ -987,7 +1006,10 @@ watch(
 
     await nextTick()
     const target = scrollEl.value?.querySelector<HTMLElement>(selector)
-    if (target) reveal(target)
+    if (target) {
+      if (onPage || !turned) reveal(target)
+      else bringPageToTop(target)
+    }
     if (held && editor.pendingTextEdit === null) {
       await nextTick()
       focusIn(selector)
@@ -995,6 +1017,14 @@ watch(
   },
   { immediate: true },
 )
+
+/** The page under `heading` scrolled to the top of the list, its first rows right under the pinned heading. */
+function bringPageToTop(heading: HTMLElement): void {
+  const list = scrollEl.value
+  const group = heading.closest('[data-page-group]')
+  if (!list || !group) return
+  list.scrollTop += group.getBoundingClientRect().top - list.getBoundingClientRect().top
+}
 
 /**
  * `scrollIntoView` with the pinned heading taken into account. `nearest` stops
