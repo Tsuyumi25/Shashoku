@@ -77,11 +77,17 @@ export interface OcrPreference {
 }
 
 export function defaultRetouchOpacityPreference(): RetouchOpacityPreference {
-  return { wholeBook: false, undoable: true };
+  return { low: 0.4, high: 1, mode: "toggle", wholeBook: false, undoable: false };
 }
 
-/** How the 修圖 opacity buttons write: how far they reach, and whether undo sees them. */
+/** Whether the 修圖 button flips the opacity and leaves it, or holds it only while pressed. */
+export type RetouchPress = "toggle" | "hold";
+
+/** How the 修圖 button writes: the two opacities it swaps between, how it is pressed, how far it reaches, and whether undo sees it. */
 export interface RetouchOpacityPreference {
+  low: number;
+  high: number;
+  mode: RetouchPress;
   wholeBook: boolean;
   undoable: boolean;
 }

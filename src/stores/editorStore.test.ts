@@ -1722,13 +1722,17 @@ describe('layer tree edits', () => {
         expect(editor.canUndo).toBe(false)
       })
 
-      it('leaves history alone when asked to', () => {
-        const { project, editor } = openTree([retouch('r', { locked: true })], [])
+      it('leaves history alone when asked to, and answers what each layer held so a hold can put it back', () => {
+        const { project, editor } = openTree([retouch('r', { locked: true }), retouch('r2', { opacity: 0.7 })], [])
 
-        editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: false })
+        const was = editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: false })
 
-        expect(opacityOf(project, 'r')).toBe(0.4)
+        expect([opacityOf(project, 'r'), opacityOf(project, 'r2')]).toEqual([0.4, 0.4])
         expect(editor.canUndo).toBe(false)
+        expect(was).toEqual([
+          { pageId: PAGE, id: 'r', opacity: 1 },
+          { pageId: PAGE, id: 'r2', opacity: 0.7 },
+        ])
       })
 
       it('follows the names the project lists, and only the pages it is handed', () => {

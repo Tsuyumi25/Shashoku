@@ -2308,8 +2308,15 @@ export const useEditorStore = defineStore('editor', () => {
    * Left out of history when the caller says so, since it is flipped back and
    * forth while lettering and each flip would otherwise stand between the
    * hand and the last real edit.
+   *
+   * Answers what each layer it changed held before, so a hold can put exactly
+   * that back.
    */
-  function cmdSetRetouchOpacity(pageIds: readonly string[], opacity: number, opts: { undoable: boolean }) {
+  function cmdSetRetouchOpacity(
+    pageIds: readonly string[],
+    opacity: number,
+    opts: { undoable: boolean },
+  ): { pageId: string; id: string; opacity: number }[] {
     const project = useProjectStore()
     const names = new Set(project.retouchLayerNames)
     const moved: { pageId: string; id: string; opacity: number }[] = []
@@ -2321,9 +2328,9 @@ export const useEditorStore = defineStore('editor', () => {
         moved.push({ pageId, id: entry.id, opacity: entry.opacity })
       }
     }
-    if (moved.length === 0) return
+    if (moved.length === 0) return moved
     for (const { pageId, id } of moved) project.setLayerOpacity(pageId, id, opacity)
-    if (!opts.undoable) return
+    if (!opts.undoable) return moved
     pushCommand(
       {
         label: `set-retouch-opacity ${moved.length}`,
@@ -2336,6 +2343,7 @@ export const useEditorStore = defineStore('editor', () => {
       },
       { alreadyApplied: true },
     )
+    return moved
   }
 
   /**

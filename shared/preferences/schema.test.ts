@@ -133,6 +133,17 @@ describe("how this machine reads a page", () => {
   });
 });
 
+describe("how the 修圖 toggle writes", () => {
+  it("round trips, keeping opacities inside 0 to 1 and defaulting what is missing", () => {
+    const prefs = defaultPreferences();
+    prefs.retouchOpacity = { low: 0.25, high: 0.9, mode: "hold", wholeBook: true, undoable: true };
+    expect(parsePreferences(serializePreferences(prefs)).retouchOpacity).toEqual(prefs.retouchOpacity);
+
+    const off = JSON.stringify({ retouchOpacity: { low: -1, high: 7, mode: "tap", undoable: true } });
+    expect(parsePreferences(off).retouchOpacity).toEqual({ low: 0, high: 1, mode: "toggle", wholeBook: false, undoable: true });
+  });
+});
+
 describe("the projects opened lately", () => {
   it("comes back in the order it was written, most recent first", () => {
     const prefs = defaultPreferences();

@@ -111,45 +111,115 @@
       >
         {{ editor.showingOriginal ? '回到作業' : '看原圖' }}
       </button>
-      <button
-        v-for="opacity in RETOUCH_OPACITIES"
-        :key="opacity"
-        type="button"
-        class="route-btn"
-        :class="retouchAt === opacity && 'route-btn-on'"
-        :disabled="!currentFile"
-        :title="`把叫「${project.retouchLayerNames.join('」「')}」的圖層不透明度設成 ${Math.round(opacity * 100)}%，鎖住的也照改。會跟著匯出；圖層面板的 ☀ 決定是哪幾層`"
-        @click="setRetouchOpacity(opacity)"
-      >
-        修圖{{ Math.round(opacity * 100) }}%
-      </button>
-    </div>
-    <div class="flex flex-wrap items-center gap-3 px-2 pb-2 text-[12px] text-muted-foreground">
-      <label class="flex items-center gap-1.5" title="勾起來時修圖按鈕改整本每一頁，沒勾只改目前這頁">
-        <input
-          type="checkbox"
-          class="h-3.5 w-3.5 accent-primary"
-          :checked="preferences.prefs.retouchOpacity.wholeBook"
-          @change="preferences.setRetouchOpacity({ wholeBook: ($event.target as HTMLInputElement).checked })"
-        />
-        整本
-      </label>
-      <label class="flex items-center gap-1.5" title="勾起來時修圖按鈕的每一次切換都可以復原，沒勾就不進復原歷史">
-        <input
-          type="checkbox"
-          class="h-3.5 w-3.5 accent-primary"
-          :checked="preferences.prefs.retouchOpacity.undoable"
-          @change="preferences.setRetouchOpacity({ undoable: ($event.target as HTMLInputElement).checked })"
-        />
-        可復原
-      </label>
+      <PopoverRoot v-model:open="retouchSettingsOpen">
+        <PopoverAnchor as-child>
+          <button
+            type="button"
+            class="route-btn"
+            :aria-pressed="retouchDimmed"
+            :class="retouchDimmed && 'route-btn-on'"
+            :disabled="!currentFile"
+            :title="retouch.mode === 'hold'
+              ? `按住時把叫「${project.retouchLayerNames.join('」「')}」的圖層換到另一個不透明度（${percent(retouch.low)}% / ${percent(retouch.high)}%），放開就回來，鎖住的也照改。右鍵打開設定`
+              : `在 ${percent(retouch.low)}% 和 ${percent(retouch.high)}% 之間切換叫「${project.retouchLayerNames.join('」「')}」的圖層不透明度，鎖住的也照改，會跟著匯出。右鍵打開設定`"
+            @click="retouch.mode === 'toggle' && toggleRetouch()"
+            @pointerdown="onRetouchPress"
+            @pointerup="endRetouchHold"
+            @pointercancel="endRetouchHold"
+            @lostpointercapture="endRetouchHold"
+            @contextmenu.prevent="retouchSettingsOpen = true"
+          >
+            修圖 {{ percent(retouchDimmed ? retouch.low : retouch.high) }}%
+          </button>
+        </PopoverAnchor>
+        <PopoverPortal>
+          <PopoverContent class="retouch-options" side="bottom" align="end" :side-offset="6">
+            <label class="retouch-row">
+              <span>調淡時</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                class="retouch-percent"
+                :value="percent(retouch.low)"
+                @change="onRetouchPercent('low', $event)"
+              />
+              %
+            </label>
+            <label class="retouch-row">
+              <span>蓋住時</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                class="retouch-percent"
+                :value="percent(retouch.high)"
+                @change="onRetouchPercent('high', $event)"
+              />
+              %
+            </label>
+            <div class="retouch-row">
+              <span>按法</span>
+              <label class="retouch-row" title="按一下換過去，再按一下換回來">
+                <input
+                  type="radio"
+                  name="retouch-mode"
+                  class="accent-primary"
+                  :checked="retouch.mode === 'toggle'"
+                  @change="preferences.setRetouchOpacity({ mode: 'toggle' })"
+                />
+                切換
+              </label>
+              <label class="retouch-row" title="按住的時候換過去，放開就換回來">
+                <input
+                  type="radio"
+                  name="retouch-mode"
+                  class="accent-primary"
+                  :checked="retouch.mode === 'hold'"
+                  @change="preferences.setRetouchOpacity({ mode: 'hold' })"
+                />
+                按住
+              </label>
+            </div>
+            <label class="retouch-row" title="勾起來時切換整本每一頁，沒勾只改目前這頁">
+              <input
+                type="checkbox"
+                class="h-3.5 w-3.5 accent-primary"
+                :checked="retouch.wholeBook"
+                @change="preferences.setRetouchOpacity({ wholeBook: ($event.target as HTMLInputElement).checked })"
+              />
+              整本
+            </label>
+            <label
+              class="retouch-row"
+              :class="retouch.mode === 'hold' && 'cursor-not-allowed opacity-40'"
+              :title="retouch.mode === 'hold' ? '按住放開就回到原本的值，沒有東西要記進 undo 歷史' : '勾起來時每一次切換都會記進 undo 歷史，可以用 Ctrl+Z 退回；沒勾就不記'"
+            >
+              <input
+                type="checkbox"
+                class="h-3.5 w-3.5 accent-primary"
+                :checked="retouch.undoable"
+                :disabled="retouch.mode === 'hold'"
+                @change="preferences.setRetouchOpacity({ undoable: ($event.target as HTMLInputElement).checked })"
+              />
+              錄入 undo 歷史
+            </label>
+            <p class="retouch-note">
+              改的圖層：{{ project.retouchLayerNames.length ? `「${project.retouchLayerNames.join('」「')}」` : '沒有' }}，在圖層面板用 ☀ 指定
+            </p>
+          </PopoverContent>
+        </PopoverPortal>
+      </PopoverRoot>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
+import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import { useInpaintSelection } from '@/composables/useInpaintSelection'
 import { isEmptyRect } from '@/lib/selection/rect'
 import { allEntries } from '@shared/page/tree'
@@ -161,7 +231,6 @@ import { useSelectionStore } from '@/stores/selectionStore'
 
 /** Five is the amount the notes settled on; one is for the edge that is nearly there. */
 const GROW_STEPS = [1, 5] as const
-const RETOUCH_OPACITIES = [0.4, 1] as const
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
@@ -200,6 +269,9 @@ function grow(px: number): void {
   selection.grow(target, px)
 }
 
+const retouch = computed(() => preferences.prefs.retouchOpacity)
+const retouchSettingsOpen = ref(false)
+
 /** The opacity the current page's 修圖 layers all share, or null when they differ or there are none. */
 const retouchAt = computed(() => {
   const file = currentFile.value
@@ -213,10 +285,40 @@ const retouchAt = computed(() => {
   return values.size === 1 ? [...values][0] : null
 })
 
-function setRetouchOpacity(opacity: number): void {
-  const { wholeBook, undoable } = preferences.prefs.retouchOpacity
+const retouchDimmed = computed(() => retouchAt.value === retouch.value.low)
+
+function percent(opacity: number): number {
+  return Math.round(opacity * 100)
+}
+
+function toggleRetouch(): void {
+  const { low, high, wholeBook, undoable } = retouch.value
   const pages = wholeBook ? project.files.map((f) => f.pageId) : pageId.value ? [pageId.value] : []
-  editor.cmdSetRetouchOpacity(pages, opacity, { undoable })
+  editor.cmdSetRetouchOpacity(pages, retouchDimmed.value ? high : low, { undoable })
+}
+
+let held: { pageId: string; id: string; opacity: number }[] | null = null
+
+function onRetouchPress(e: PointerEvent): void {
+  if (retouch.value.mode !== 'hold' || e.button !== 0 || held !== null) return
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  const { low, high, wholeBook } = retouch.value
+  const pages = wholeBook ? project.files.map((f) => f.pageId) : pageId.value ? [pageId.value] : []
+  held = editor.cmdSetRetouchOpacity(pages, retouchDimmed.value ? high : low, { undoable: false })
+}
+
+function endRetouchHold(): void {
+  if (held === null) return
+  for (const { pageId: page, id, opacity } of held) project.setLayerOpacity(page, id, opacity)
+  held = null
+}
+
+function onRetouchPercent(which: 'low' | 'high', e: Event): void {
+  const input = e.target as HTMLInputElement
+  if (!Number.isNaN(input.valueAsNumber)) {
+    preferences.setRetouchOpacity({ [which]: Math.round(input.valueAsNumber) / 100 })
+  }
+  input.value = String(percent(retouch.value[which]))
 }
 </script>
 
@@ -275,5 +377,43 @@ function setRetouchOpacity(opacity: number): void {
   border-color: var(--primary);
   background: color-mix(in oklch, var(--primary) 14%, transparent);
   color: var(--foreground);
+}
+</style>
+
+<style>
+/* Portalled out of the component, so a scoped block would not reach it. */
+.retouch-options {
+  z-index: 50;
+  display: flex;
+  width: 14rem;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 0.8125rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.retouch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.retouch-row > span {
+  flex: 1;
+}
+.retouch-percent {
+  width: 4rem;
+  border: 1px solid var(--input);
+  border-radius: 0.25rem;
+  background: var(--background);
+  padding: 1px 4px;
+  text-align: right;
+}
+.retouch-note {
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
 </style>

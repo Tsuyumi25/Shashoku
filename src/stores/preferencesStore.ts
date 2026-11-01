@@ -2,6 +2,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { SplitterGroupProps } from 'reka-ui'
 import {
+  clampOpacity,
   clampUiZoomLevel,
   parsePreferences,
   serializePreferences,
@@ -306,7 +307,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   function setRetouchOpacity(patch: Partial<RetouchOpacityPreference>) {
-    prefs.retouchOpacity = { ...prefs.retouchOpacity, ...patch }
+    const next = { ...prefs.retouchOpacity, ...patch }
+    prefs.retouchOpacity = { ...next, low: clampOpacity(next.low), high: clampOpacity(next.high) }
   }
 
   return {

@@ -188,11 +188,22 @@ export function parsePreferences(raw: string): Preferences {
   }
   if (isRecord(retouchOpacity)) {
     const kept: Partial<RetouchOpacityPreference> = {};
+    if (typeof retouchOpacity.low === "number" && Number.isFinite(retouchOpacity.low)) {
+      kept.low = clampOpacity(retouchOpacity.low);
+    }
+    if (typeof retouchOpacity.high === "number" && Number.isFinite(retouchOpacity.high)) {
+      kept.high = clampOpacity(retouchOpacity.high);
+    }
+    if (retouchOpacity.mode === "toggle" || retouchOpacity.mode === "hold") kept.mode = retouchOpacity.mode;
     if (typeof retouchOpacity.wholeBook === "boolean") kept.wholeBook = retouchOpacity.wholeBook;
     if (typeof retouchOpacity.undoable === "boolean") kept.undoable = retouchOpacity.undoable;
     prefs.retouchOpacity = { ...defaultRetouchOpacityPreference(), ...kept };
   }
   return prefs;
+}
+
+export function clampOpacity(opacity: number): number {
+  return Math.min(1, Math.max(0, opacity));
 }
 
 export function clampUiZoomLevel(level: number): number {
