@@ -568,7 +568,7 @@ const objects = computed(() => {
     const body = label.body
     const tags = placeOfBlock(file.page, label.id)?.unit.tags ?? []
     const look = reference
-      ? sourceLook(body.style)
+      ? sourceLook(previewedStyle(body.style, editor.isSelected(label.id)))
       : { style: previewedStyle(body.style, editor.isSelected(label.id)), effects: label.effects }
     return {
     id: label.id,
