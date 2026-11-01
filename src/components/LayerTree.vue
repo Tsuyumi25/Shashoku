@@ -156,6 +156,17 @@
         </button>
 
         <button
+          v-if="row.entry.kind === 'raster'"
+          type="button"
+          class="h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
+          :class="isRetouchLayer(row.entry) ? 'flex text-primary' : 'hidden text-muted-foreground group-hover/row:flex'"
+          :title="isRetouchLayer(row.entry) ? `修圖按鈕不再改叫「${row.entry.name}」的圖層` : `修圖按鈕也改叫「${row.entry.name}」的圖層的不透明度（這本書的每一頁）`"
+          @click.stop="project.toggleRetouchLayerName(row.entry.name)"
+        >
+          <Sun :size="12" :class="isRetouchLayer(row.entry) && 'fill-current'" />
+        </button>
+
+        <button
           v-if="row.entry.kind === 'group' && !isRowLocked(row)"
           type="button"
           class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
@@ -184,6 +195,7 @@ import {
   LockOpen,
   Pin,
   SquareX,
+  Sun,
   Type,
   Ungroup,
 } from '@lucide/vue'
@@ -263,6 +275,10 @@ function onPick(row: LayerTreeRow, e: MouseEvent) {
 
 function isPinned(entry: LayerEntry): boolean {
   return entry.kind !== 'text' && project.pinnedLayerNames.includes(entry.name)
+}
+
+function isRetouchLayer(entry: LayerEntry): boolean {
+  return entry.kind === 'raster' && project.retouchLayerNames.includes(entry.name)
 }
 
 function onToggleVisible(entry: LayerEntry) {

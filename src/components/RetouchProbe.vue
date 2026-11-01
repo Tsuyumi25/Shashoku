@@ -111,6 +111,38 @@
       >
         {{ editor.showingOriginal ? '回到作業' : '看原圖' }}
       </button>
+      <button
+        v-for="opacity in RETOUCH_OPACITIES"
+        :key="opacity"
+        type="button"
+        class="route-btn"
+        :class="retouchAt === opacity && 'route-btn-on'"
+        :disabled="!currentFile"
+        :title="`把叫「${project.retouchLayerNames.join('」「')}」的圖層不透明度設成 ${Math.round(opacity * 100)}%，鎖住的也照改。會跟著匯出；圖層面板的 ☀ 決定是哪幾層`"
+        @click="setRetouchOpacity(opacity)"
+      >
+        修圖{{ Math.round(opacity * 100) }}%
+      </button>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 px-2 pb-2 text-[12px] text-muted-foreground">
+      <label class="flex items-center gap-1.5" title="勾起來時修圖按鈕改整本每一頁，沒勾只改目前這頁">
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-primary"
+          :checked="preferences.prefs.retouchOpacity.wholeBook"
+          @change="preferences.setRetouchOpacity({ wholeBook: ($event.target as HTMLInputElement).checked })"
+        />
+        整本
+      </label>
+      <label class="flex items-center gap-1.5" title="勾起來時修圖按鈕的每一次切換都可以復原，沒勾就不進復原歷史">
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-primary"
+          :checked="preferences.prefs.retouchOpacity.undoable"
+          @change="preferences.setRetouchOpacity({ undoable: ($event.target as HTMLInputElement).checked })"
+        />
+        可復原
+      </label>
     </div>
   </div>
 </template>
@@ -120,19 +152,23 @@ import { computed } from 'vue'
 import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
 import { useInpaintSelection } from '@/composables/useInpaintSelection'
 import { isEmptyRect } from '@/lib/selection/rect'
+import { allEntries } from '@shared/page/tree'
 import { useEditorStore } from '@/stores/editorStore'
 import { useOcrStore } from '@/stores/ocrStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
 /** Five is the amount the notes settled on; one is for the edge that is nearly there. */
 const GROW_STEPS = [1, 5] as const
+const RETOUCH_OPACITIES = [0.4, 1] as const
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
 const inpaint = useInpaintSelection()
 const project = useProjectStore()
 const ocr = useOcrStore()
+const preferences = usePreferencesStore()
 
 const pageId = computed(() => editor.currentPageId)
 const pool = computed(() => (pageId.value ? project.readingsOfPage(pageId.value) : []))
@@ -162,6 +198,25 @@ function grow(px: number): void {
   const target = editor.maskTarget
   if (target === null) return
   selection.grow(target, px)
+}
+
+/** The opacity the current page's 修圖 layers all share, or null when they differ or there are none. */
+const retouchAt = computed(() => {
+  const file = currentFile.value
+  if (!file) return null
+  const names = new Set(project.retouchLayerNames)
+  const values = new Set(
+    allEntries(file.page.layers)
+      .filter((e) => e.kind === 'raster' && names.has(e.name))
+      .map((e) => e.opacity),
+  )
+  return values.size === 1 ? [...values][0] : null
+})
+
+function setRetouchOpacity(opacity: number): void {
+  const { wholeBook, undoable } = preferences.prefs.retouchOpacity
+  const pages = wholeBook ? project.files.map((f) => f.pageId) : pageId.value ? [pageId.value] : []
+  editor.cmdSetRetouchOpacity(pages, opacity, { undoable })
 }
 </script>
 

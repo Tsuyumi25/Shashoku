@@ -45,9 +45,9 @@ function parseTags(v: unknown): TagDefinition[] {
   return tags
 }
 
-function parsePinnedLayerNames(v: unknown): string[] | undefined {
+function parseLayerNames(v: unknown, field: string): string[] | undefined {
   if (v === undefined) return undefined
-  if (!Array.isArray(v)) fail('pinnedLayerNames 必須是陣列')
+  if (!Array.isArray(v)) fail(`${field} 必須是陣列`)
   return [...new Set(v.filter((n): n is string => typeof n === 'string' && n.length > 0))]
 }
 
@@ -144,7 +144,8 @@ export function parseProjectJson(raw: string): ProjectJson {
     seedStyle,
     comment,
     glossary: parseGlossary(data.glossary),
-    pinnedLayerNames: parsePinnedLayerNames(data.pinnedLayerNames),
+    pinnedLayerNames: parseLayerNames(data.pinnedLayerNames, 'pinnedLayerNames'),
+    retouchLayerNames: parseLayerNames(data.retouchLayerNames, 'retouchLayerNames'),
     exportProfiles: parseExportProfiles(data.exportProfiles),
   }
 }
@@ -161,6 +162,7 @@ export function serializeProjectJson(project: ProjectJson): string {
   out.comment = project.comment
   if (project.glossary !== undefined) out.glossary = project.glossary
   if (project.pinnedLayerNames !== undefined) out.pinnedLayerNames = project.pinnedLayerNames
+  if (project.retouchLayerNames !== undefined) out.retouchLayerNames = project.retouchLayerNames
   out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`
 }

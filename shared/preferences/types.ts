@@ -76,6 +76,16 @@ export interface OcrPreference {
   onomatopoeia: boolean;
 }
 
+export function defaultRetouchOpacityPreference(): RetouchOpacityPreference {
+  return { wholeBook: false, undoable: true };
+}
+
+/** How the 修圖 opacity buttons write: how far they reach, and whether undo sees them. */
+export interface RetouchOpacityPreference {
+  wholeBook: boolean;
+  undoable: boolean;
+}
+
 /** A list of font families the user put together by hand, in the font library. */
 export interface FontGroup {
   id: string;
@@ -190,6 +200,7 @@ export interface Preferences {
    */
   undoPixelBytes: number;
   ocr: OcrPreference;
+  retouchOpacity: RetouchOpacityPreference;
 }
 
 /**
@@ -225,5 +236,6 @@ export function defaultPreferences(): Preferences {
     undoPixelSteps: 10,
     undoPixelBytes: 512 * 1024 * 1024,
     ocr: defaultOcrPreference(),
+    retouchOpacity: defaultRetouchOpacityPreference(),
   };
 }

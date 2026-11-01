@@ -109,3 +109,11 @@ describe('pinned layer names', () => {
     expect(parseProjectJson(raw).pinnedLayerNames).toEqual(['底圖', '修圖'])
   })
 })
+
+describe('retouch layer names', () => {
+  it('keep an emptied list empty, apart from a file that never set one', () => {
+    const emptied = { ...defaultProjectJson(), retouchLayerNames: [] }
+    expect(parseProjectJson(serializeProjectJson(emptied)).retouchLayerNames).toEqual([])
+    expect(parseProjectJson(serializeProjectJson(defaultProjectJson())).retouchLayerNames).toBeUndefined()
+  })
+})

@@ -9,8 +9,10 @@ import {
   MIN_UNDO_PIXEL_STEPS,
   defaultOcrPreference,
   defaultPreferences,
+  defaultRetouchOpacityPreference,
   type OcrPreference,
   type Preferences,
+  type RetouchOpacityPreference,
 } from "./types";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -74,6 +76,7 @@ export function parsePreferences(raw: string): Preferences {
     undoPixelSteps,
     undoPixelBytes,
     ocr,
+    retouchOpacity,
   } = parsed;
 
   prefs.materialGroups = parseMaterialGroups(materialGroups);
@@ -183,6 +186,12 @@ export function parsePreferences(raw: string): Preferences {
     if (typeof ocr.onomatopoeia === "boolean") kept.onomatopoeia = ocr.onomatopoeia;
     prefs.ocr = { ...defaultOcrPreference(), ...kept };
   }
+  if (isRecord(retouchOpacity)) {
+    const kept: Partial<RetouchOpacityPreference> = {};
+    if (typeof retouchOpacity.wholeBook === "boolean") kept.wholeBook = retouchOpacity.wholeBook;
+    if (typeof retouchOpacity.undoable === "boolean") kept.undoable = retouchOpacity.undoable;
+    prefs.retouchOpacity = { ...defaultRetouchOpacityPreference(), ...kept };
+  }
   return prefs;
 }
 
@@ -215,6 +224,7 @@ export function serializePreferences(prefs: Preferences): string {
       undoPixelSteps: prefs.undoPixelSteps,
       undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,
+      retouchOpacity: prefs.retouchOpacity,
     },
     null,
     2,

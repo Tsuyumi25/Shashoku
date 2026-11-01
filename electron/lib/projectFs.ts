@@ -40,6 +40,7 @@ import {
 } from "@shared/project/schema";
 import { pageDirName, reconcilePages } from "@shared/project/pages";
 import {
+  RETOUCH_LAYER_NAME,
   baseMapLayer,
   defaultManifest,
   generateId,
@@ -419,7 +420,7 @@ async function makePage(
     const manifest = defaultManifest(sourceName, width, height);
     manifest.layers = [
       baseMapLayer(file, width, height),
-      { ...baseMapLayer(retouchFile, width, height), name: "修圖", locked: false },
+      { ...baseMapLayer(retouchFile, width, height), name: RETOUCH_LAYER_NAME, locked: false },
     ];
     await writeFileAtomic(join(pageDir, PAGE_MANIFEST_FILENAME), serializeManifest(manifest));
   } catch (err) {

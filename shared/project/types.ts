@@ -73,6 +73,11 @@ export interface ProjectJson {
    */
   pinnedLayerNames?: string[]
   /**
+   * Layer names the 修圖 opacity buttons write to. Absent until someone changes
+   * it, and read as the name a new page gives its working copy.
+   */
+  retouchLayerNames?: string[]
+  /**
    * How this project gets delivered. Kept here rather than in preferences and
    * inheriting from nothing: a project handed to someone else has to arrive
    * knowing how it is meant to come out.

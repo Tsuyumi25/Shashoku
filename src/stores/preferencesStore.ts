@@ -11,6 +11,7 @@ import {
   MIN_FONT_PICKER_BOX_PX,
   defaultPreferences,
   type MissingGlyphMode,
+  type RetouchOpacityPreference,
   type SidePanel,
 } from '@shared/preferences/types'
 import { freeGroupName } from '@shared/preferences/fontGroups'
@@ -304,6 +305,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.sidePanel = panel
   }
 
+  function setRetouchOpacity(patch: Partial<RetouchOpacityPreference>) {
+    prefs.retouchOpacity = { ...prefs.retouchOpacity, ...patch }
+  }
+
   return {
     prefs,
     hydrate,
@@ -342,5 +347,6 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMissingGlyphMode,
     setMarkMissingGlyphs,
     setSidePanel,
+    setRetouchOpacity,
   }
 })

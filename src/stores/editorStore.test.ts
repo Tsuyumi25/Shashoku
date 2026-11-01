@@ -1703,6 +1703,46 @@ describe('layer tree edits', () => {
       editor.undo()
       expect([opacityOf(project, 'a'), away()]).toEqual([1, 1])
     })
+
+    describe('the 修圖 buttons', () => {
+      const retouch = (id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerEntry => ({
+        ...raster(id),
+        name: '修圖',
+        ...extra,
+      })
+
+      it('writes the named layers through a lock, in one step of history', () => {
+        const { project, editor } = openTree([raster('base'), retouch('r', { locked: true }), retouch('r2')], [])
+
+        editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: true })
+
+        expect([opacityOf(project, 'r'), opacityOf(project, 'r2'), opacityOf(project, 'base')]).toEqual([0.4, 0.4, 1])
+        editor.undo()
+        expect([opacityOf(project, 'r'), opacityOf(project, 'r2')]).toEqual([1, 1])
+        expect(editor.canUndo).toBe(false)
+      })
+
+      it('leaves history alone when asked to', () => {
+        const { project, editor } = openTree([retouch('r', { locked: true })], [])
+
+        editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: false })
+
+        expect(opacityOf(project, 'r')).toBe(0.4)
+        expect(editor.canUndo).toBe(false)
+      })
+
+      it('follows the names the project lists, and only the pages it is handed', () => {
+        const { project, editor } = openTree([retouch('r'), raster('patch')], [])
+        project.allFiles.push({ ...project.allFiles[0], pageId: 'p002.png', page: { ...project.allFiles[0].page, layers: [retouch('far')] } })
+        project.toggleRetouchLayerName('修圖')
+        project.toggleRetouchLayerName('patch')
+
+        editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: true })
+
+        const far = findEntry(project.pageById('p002.png')?.page.layers ?? [], 'far')?.opacity
+        expect([opacityOf(project, 'r'), opacityOf(project, 'patch'), far]).toEqual([1, 0.4, 1])
+      })
+    })
   })
 
   /**

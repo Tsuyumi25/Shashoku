@@ -32,6 +32,7 @@ import {
   serializeManifest,
   serializeOcr,
   unreadablePage,
+  RETOUCH_LAYER_NAME,
 } from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import {
@@ -1485,6 +1486,16 @@ export const useProjectStore = defineStore('project', () => {
     markMetaDirty()
   }
 
+  const retouchLayerNames = computed(() => projectMeta.value.retouchLayerNames ?? [RETOUCH_LAYER_NAME])
+
+  function toggleRetouchLayerName(name: string) {
+    const names = retouchLayerNames.value
+    projectMeta.value.retouchLayerNames = names.includes(name)
+      ? names.filter((n) => n !== name)
+      : [...names, name]
+    markMetaDirty()
+  }
+
   function updateComment(text: string) {
     if (projectMeta.value.comment === text) return
     projectMeta.value.comment = text
@@ -1532,6 +1543,8 @@ export const useProjectStore = defineStore('project', () => {
     projectMeta,
     pinnedLayerNames,
     togglePinnedLayerName,
+    retouchLayerNames,
+    toggleRetouchLayerName,
     files,
     allFiles,
     dirtyPageIds,

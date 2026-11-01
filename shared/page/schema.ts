@@ -409,6 +409,9 @@ export function unreadablePage(name: string): ManifestJson {
   return defaultManifest(name, 1, 1)
 }
 
+/** What the working copy a new page puts over its base map is called. */
+export const RETOUCH_LAYER_NAME = '修圖'
+
 /**
  * The layer a page made from a source image starts with.
  *

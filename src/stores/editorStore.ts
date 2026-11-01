@@ -27,7 +27,7 @@ import { linesOf, type TextSide } from '@shared/page/text'
 import { blocksOf, shownCodeOf, sideOf } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
 import type { ManifestJson } from '@shared/page/types'
-import { findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { allEntries, findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
@@ -2303,6 +2303,42 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * The working copy set to one opacity across these pages, lock or no lock:
+   * a lock is put on against a stray drag, and this is asked for by name.
+   * Left out of history when the caller says so, since it is flipped back and
+   * forth while lettering and each flip would otherwise stand between the
+   * hand and the last real edit.
+   */
+  function cmdSetRetouchOpacity(pageIds: readonly string[], opacity: number, opts: { undoable: boolean }) {
+    const project = useProjectStore()
+    const names = new Set(project.retouchLayerNames)
+    const moved: { pageId: string; id: string; opacity: number }[] = []
+    for (const pageId of pageIds) {
+      const file = project.pageById(pageId)
+      if (!file) continue
+      for (const entry of allEntries(file.page.layers)) {
+        if (entry.kind !== 'raster' || !names.has(entry.name) || entry.opacity === opacity) continue
+        moved.push({ pageId, id: entry.id, opacity: entry.opacity })
+      }
+    }
+    if (moved.length === 0) return
+    for (const { pageId, id } of moved) project.setLayerOpacity(pageId, id, opacity)
+    if (!opts.undoable) return
+    pushCommand(
+      {
+        label: `set-retouch-opacity ${moved.length}`,
+        do: () => {
+          for (const { pageId, id } of moved) project.setLayerOpacity(pageId, id, opacity)
+        },
+        undo: () => {
+          for (const { pageId, id, opacity: was } of moved) project.setLayerOpacity(pageId, id, was)
+        },
+      },
+      { alreadyApplied: true },
+    )
+  }
+
+  /**
    * A blend mode lands in one go rather than through a drag, so this applies it
    * as it goes and records only what the tree actually took: a selection can
    * hold both folders and layers, and pass-through is refused on everything but
@@ -3196,6 +3232,7 @@ export const useEditorStore = defineStore('editor', () => {
     isUnitLocked,
     cmdRenameLayer,
     cmdSetOpacity,
+    cmdSetRetouchOpacity,
     cmdSetBlendMode,
     cmdUpdateLabelText,
     cmdPickTranslation,
