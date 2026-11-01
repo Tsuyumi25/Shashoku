@@ -333,7 +333,10 @@ function preview(m: Material) {
   heldBase.value ??= { style: { ...lead.body.style }, effects: cloneEffects(lead.effects) }
   const { patch, effects } = gives(m)
   editor.previewStyle(targets.value, patch)
+  // A material with its stroke unticked shows the objects' own stroke, not
+  // whatever the material hovered before it left behind.
   if (effects !== null) editor.previewEffects(targets.value, effects)
+  else editor.endEffectsPreview()
 }
 
 function endPreview() {

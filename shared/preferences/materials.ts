@@ -158,13 +158,28 @@ function readMaterial(raw: RawEntry): Omit<Material, "id"> | null {
 }
 
 /**
+ * What a look gave before materials were one kind: everything but the size, the
+ * direction and the alignment. Narrower than a look saved today, and kept so —
+ * ticking only today's look would quietly stop an old one giving its weight and
+ * its stretch.
+ */
+const LEGACY_LOOK_PICKS: MaterialField[] = [
+  "font",
+  "color",
+  "leadingPercent",
+  "weightPx",
+  "scaleXPercent",
+  "scaleYPercent",
+  "stroke",
+];
+
+/**
  * The two kinds materials came in before they were one: words alone, and a
- * look with no words. A look is ticked the way a look now saves. Words never
- * kept a face, so only the words are ticked — ticking the font of a snapshot
- * that never had one would hand out the blank default.
+ * look with no words. Words never kept a face, so only the words are ticked —
+ * ticking the font of a snapshot that never had one would hand out the blank
+ * default.
  */
 function readLegacy(raw: RawEntry): Omit<Material, "id">[] {
-  const look = defaultRecipes()[1]!;
   const out: Omit<Material, "id">[] = [];
   for (const t of Array.isArray(raw.texts) ? raw.texts : []) {
     const entry = rawEntry(t);
@@ -175,7 +190,7 @@ function readLegacy(raw: RawEntry): Omit<Material, "id">[] {
     const entry = rawEntry(s);
     const style = entry && readStyle(entry.style);
     const effects = entry && readEffects(entry.effects);
-    if (style && effects) out.push({ text: "", style, effects, picks: [...look.picks] });
+    if (style && effects) out.push({ text: "", style, effects, picks: [...LEGACY_LOOK_PICKS] });
   }
   return out;
 }

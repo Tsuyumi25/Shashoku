@@ -281,7 +281,7 @@ describe("materials", () => {
     expect(groups.map((g) => g.materials.map((m) => m.id))).toEqual([["a"]]);
   });
 
-  it("read words and looks saved before they were one kind, each ticked the way its kind is", () => {
+  it("read words and looks saved before they were one kind, each ticked for what it used to give", () => {
     const raw = JSON.stringify({
       materialGroups: [
         { id: "g", name: "舊", texts: [{ id: "t", text: "哈" }], styles: [{ id: "s", style: STYLE, effects: [STROKE] }] },
@@ -289,7 +289,7 @@ describe("materials", () => {
     });
     const [words, look] = parsePreferences(raw).materialGroups[0]!.materials;
     expect(words).toMatchObject({ text: "哈", picks: ["text"] });
-    expect(look).toMatchObject({ text: "", style: STYLE, effects: [STROKE], picks: ["font", "color", "leadingPercent", "stroke"] });
+    expect(look).toMatchObject({ text: "", style: STYLE, effects: [STROKE], picks: ["font", "color", "leadingPercent", "weightPx", "scaleXPercent", "scaleYPercent", "stroke"] });
   });
 });
 

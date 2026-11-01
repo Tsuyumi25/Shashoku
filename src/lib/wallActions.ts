@@ -14,8 +14,11 @@ import { useUiStore } from '@/stores/uiStore'
  */
 export function revealPiece(pageId: string, id: string): void {
   const editor = useEditorStore()
-  editor.showPage(pageId)
+  // The wall may be a beat behind, as in `selectPieces`: a piece gone since is
+  // not selected, or what acts on the selection would act on nothing.
   const entry = useProjectStore().entryById(id)
+  if (entry === undefined) return
+  editor.showPage(pageId)
   if (entry?.kind === 'text' && entry.side !== editor.textSide) editor.setTextSide(entry.side)
   editor.selectOnly(id)
   useUiStore().setView('editor')
