@@ -2588,10 +2588,41 @@ export const useEditorStore = defineStore('editor', () => {
    * drift: the day the panel offers less than the whole selection, the write
    * would silently still take all of it.
    */
+  /**
+   * The selection as the side on screen reaches it. A text block selected on
+   * the other side stands for its sentence's blocks on this one: the selection
+   * outlives Shift+S so Ctrl+L can pair across the two sides, and a person who
+   * picked translations on the wall and turned to the sources means to change
+   * those sources, not the translations they can no longer see.
+   *
+   * ⚠️ Ctrl+L and every move read the selection itself, never this.
+   */
+  const reachedIds = computed<ReadonlySet<string>>(() => {
+    const project = useProjectStore()
+    const side = textSide.value
+    const out = new Set<string>()
+    for (const id of selectedIds.value) {
+      const entry = project.entryById(id)
+      const pageId = project.pageOfEntry(id)
+      if (entry?.kind !== 'text' || entry.side === side || pageId === null) {
+        out.add(id)
+        continue
+      }
+      const unit = project.placeOf(pageId, id)?.unit
+      for (const member of (side === 'source' ? unit?.source : unit?.translation)?.members ?? []) out.add(member)
+    }
+    return out
+  })
+
+  /** Whether a change to the selection's appearance reaches this node. */
+  function isReached(id: string): boolean {
+    return reachedIds.value.has(id)
+  }
+
   function selectedNodes(): AppearanceTarget<LayerEntry>[] {
     const project = useProjectStore()
     const out: AppearanceTarget<LayerEntry>[] = []
-    for (const id of unlockedSelection()) {
+    for (const id of [...reachedIds.value].filter((id) => !isLayerLocked(id))) {
       const pageId = project.pageOfEntry(id)
       if (pageId === null) continue
       const entry = project.entryById(id)
@@ -3162,6 +3193,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdAddLabelFromReading,
     cmdAddLabelFromMaterial,
     cmdLinkSelection,
+    isReached,
     cmdDetachSelection,
     linkPlan,
     cmdReplaceLabelSource,

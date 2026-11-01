@@ -3729,3 +3729,26 @@ describe('Ctrl+L on the selection', () => {
     expect(units(project)).toBe(2)
   })
 })
+
+describe('the selection seen from the other side', () => {
+  it('reaches the same sentences on the side shown, for anything that changes how they look', () => {
+    const { project, editor } = openOnePage()
+    editor.setTextSide('translation')
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    const translation = [...editor.selectedIds][0]!
+    const source = project.pageById(PAGE)!.page.translationUnits[0]!.source.members[0]!
+
+    editor.setTextSide('source')
+    expect(editor.selectedNodes().map((t) => t.entry.id)).toEqual([source])
+    // The selection itself is untouched, so Ctrl+L can still pair across sides.
+    expect([...editor.selectedIds]).toEqual([translation])
+
+    editor.cmdApplyStyle(editor.selectedNodes() as AppearanceTarget<TextLayerEntry>[], { color: '#123456' })
+    const color = (id: string) => {
+      const e = project.entryById(id)
+      return e?.kind === 'text' ? e.body.style.color : null
+    }
+    expect(color(source)).toBe('#123456')
+    expect(color(translation)).not.toBe('#123456')
+  })
+})

@@ -568,8 +568,8 @@ const objects = computed(() => {
     const body = label.body
     const tags = placeOfBlock(file.page, label.id)?.unit.tags ?? []
     const look = reference
-      ? sourceLook(previewedStyle(body.style, editor.isSelected(label.id)))
-      : { style: previewedStyle(body.style, editor.isSelected(label.id)), effects: label.effects }
+      ? sourceLook(previewedStyle(body.style, editor.isReached(label.id)))
+      : { style: previewedStyle(body.style, editor.isReached(label.id)), effects: label.effects }
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),

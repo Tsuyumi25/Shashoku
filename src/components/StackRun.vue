@@ -185,8 +185,8 @@ const drawnTexts = computed(() => {
     const entry = node.entry
     const body = entry.body
     const look = reference
-      ? sourceLook(previewedStyle(body.style, editor.isSelected(entry.id)))
-      : { style: previewedStyle(body.style, editor.isSelected(entry.id)), effects: entry.effects }
+      ? sourceLook(previewedStyle(body.style, editor.isReached(entry.id)))
+      : { style: previewedStyle(body.style, editor.isReached(entry.id)), effects: entry.effects }
     out.set(
       entry.id,
       drawnLabel(
