@@ -192,7 +192,7 @@
             :key="object.id"
             :data-object-id="object.id"
             :pointer="framesTakePointer ? 'box' : 'none'"
-            :framed="connecting || painting || object.kin !== undefined"
+            :framed="connecting || painting"
             :handles="!connecting && !painting && groupFrame === null"
             :captioned="painting"
             :code="object.code"
@@ -201,7 +201,8 @@
             :x="object.x"
             :y="object.y"
             :rotation="object.rotation"
-            :accent="object.kin ?? object.accent"
+            :accent="object.accent"
+            :member="object.member"
             :tags="object.tags"
             :natural="editor.viewContentSize"
             :view="view"
@@ -414,7 +415,7 @@ import {
   type Anchor,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
-import { sourceLook } from '@/lib/sourceLook'
+import { SOURCE_COLOR, sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
@@ -578,7 +579,7 @@ const objects = computed(() => {
     y: body.y,
     rotation: body.rotation,
     accent: accentOf(tags),
-    kin: kinOf(file.page, label.id),
+    member: isMember(file.page, label.id) ? memberColor.value : undefined,
     style: look.style,
     effects: look.effects,
     tags: tagsInRegistryOrder(tags, project.header.tags).map((name) => ({
@@ -964,18 +965,15 @@ const selectedUnits = computed(() => {
   return out
 })
 
-/**
- * A block not selected itself, in a sentence the selection is in: framed in
- * that sentence's own colour, so two sentences about to be joined read as two
- * colours before Ctrl+L and one after.
- */
-function kinOf(page: ManifestJson, id: string): string | undefined {
-  if (editor.isSelected(id)) return undefined
+/** A block not selected itself, in a sentence the selection is in. */
+function isMember(page: ManifestJson, id: string): boolean {
+  if (editor.isSelected(id)) return false
   const unit = placeOfBlock(page, id)?.unit
-  if (!unit || !selectedUnits.value.has(unit.id)) return undefined
-  const at = Math.max(0, page.readingOrder.indexOf(unit.id))
-  return `hsl(${Math.round((at * 137.5) % 360)} 75% 45%)`
+  return unit !== undefined && selectedUnits.value.has(unit.id)
 }
+
+/** The other side's colour: the sources' blue over translations, and `primary` over sources. */
+const memberColor = computed(() => (editor.textSide === 'source' ? 'var(--primary)' : SOURCE_COLOR))
 
 /**
  * Ctrl held long enough to mean it. A chord like Ctrl+Z goes past in less, and

@@ -166,6 +166,12 @@ const props = defineProps<{
    */
   standing?: boolean
   /**
+   * Set when not selected but in a sentence the selection is in: the colour of
+   * a dashed outline worn whatever its tags say, since what it tells is only
+   * that Ctrl+L would take it along, and that reads the same for every sentence.
+   */
+  member?: string
+  /**
    * What this frame takes the pointer for.
    *
    * `box` is the whole of it: a press anywhere inside is a press on the object,
@@ -269,7 +275,7 @@ const handlePointer = computed<'none' | 'auto'>(() =>
  * object means, which is the whole reason it was free to take.
  */
 const outlineWidth = computed(() => {
-  if (props.selected || props.inSelection) return 2
+  if (props.selected || props.inSelection || props.member) return 2
   if (hovered.value || dragging.value || props.standing) return 1
   return 0
 })
@@ -300,13 +306,13 @@ const boxStyle = computed(() => ({
   width: `${props.box.width}px`,
   height: `${props.box.height}px`,
   transform: `translate(-50%, -50%) rotate(${props.rotation}rad)`,
-  // Always solid; a width of zero is what makes it absent, so there is one
-  // number deciding whether the outline is there and how heavy it is.
-  outlineStyle: 'solid' as const,
+  // A width of zero is what makes it absent, so there is one number deciding
+  // whether the outline is there and how heavy it is.
+  outlineStyle: props.member ? ('dashed' as const) : ('solid' as const),
   outlineWidth: `calc(${outlineWidth.value}px * var(--px))`,
   // An object no registered tag speaks for draws in the ordinary colour, which
   // is what "nobody has said what this is" looks like.
-  outlineColor: props.accent ?? 'var(--primary)',
+  outlineColor: props.member ?? props.accent ?? 'var(--primary)',
   pointerEvents: props.pointer === 'box' ? ('auto' as const) : ('none' as const),
   // The object in hand answers before its neighbours, handles and box alike:
   // objects set close together overlap, and a press meant for the one being

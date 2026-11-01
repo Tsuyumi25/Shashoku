@@ -9,6 +9,7 @@
     :locked="locked"
     :handles="!editing && (handles ?? true)"
     :accent="accent"
+    :member="member"
     :standing="framed || untyped"
     :pointer="pointer"
     :title="substitution"
@@ -148,6 +149,8 @@ const props = defineProps<{
    * pointer can only be found by hunting for it.
    */
   framed?: boolean
+  /** The dashed outline's colour, when it is in a sentence the selection is in without being selected. */
+  member?: string
   /**
    * Whether to offer the corner and rotation handles. Off under a tool that
    * takes no pointer on the objects, since a handle drawn but carrying nothing
