@@ -42,7 +42,7 @@ import {
   type Point,
   type Rect,
 } from '@/lib/selection/rect'
-import { traceMaskOutlines } from '@/lib/selection/trace'
+import { offsetSegments, traceMaskSegments } from '@/lib/selection/trace'
 import { linePressure, rememberStrokeEnd, settleStrokeEnd } from '@/lib/selection/strokeEnd'
 
 export type { MaskTarget }
@@ -774,7 +774,7 @@ export const useSelectionStore = defineStore('selection', () => {
 
   let display: SelectionDisplay | null = null
   let displayAt = -1
-  let outlineCache: Point[][] = []
+  let outlineCache: Int32Array = new Int32Array(0)
   let outlinesAt = -1
 
   /** The selection as it stands, with no gesture over it. */
@@ -818,24 +818,28 @@ export const useSelectionStore = defineStore('selection', () => {
     return display !== null && display.page === page ? display : null
   }
 
-  /** The marching ants, as closed outlines in page coordinates. */
-  function outlinesFor(page: string): Point[][] {
+  /** The marching ants, as boundary segments in page coordinates. See `traceMaskSegments`. */
+  function outlinesFor(page: string): Int32Array {
     const shown = displayFor(page)
-    if (shown === null || shown.bounds === null) return []
+    if (shown === null || shown.bounds === null) return new Int32Array(0)
     if (outlinesAt !== revision.value) {
       outlinesAt = revision.value
       const at = shown.region
-      outlineCache = traceMaskOutlines(shown.bytes, at.w, at.h, {
-        x: shown.bounds.x - at.x,
-        y: shown.bounds.y - at.y,
-        w: shown.bounds.w,
-        h: shown.bounds.h,
-      }).map((loop) => loop.map((p) => ({ x: p.x + at.x, y: p.y + at.y })))
+      outlineCache = offsetSegments(
+        traceMaskSegments(shown.bytes, at.w, at.h, {
+          x: shown.bounds.x - at.x,
+          y: shown.bounds.y - at.y,
+          w: shown.bounds.w,
+          h: shown.bounds.h,
+        }),
+        at.x,
+        at.y,
+      )
     }
     return outlineCache
   }
 
-  let shapeOutlineCache: Point[][] = []
+  let shapeOutlineCache: Int32Array = new Int32Array(0)
   let shapeOutlinesAt = -1
 
   /**
@@ -847,20 +851,19 @@ export const useSelectionStore = defineStore('selection', () => {
    * — a wash has no crisp edge to read, so without it a drag in that mode shows
    * its effect and never its boundary.
    */
-  function shapeOutlinesFor(page: string): Point[][] {
+  function shapeOutlinesFor(page: string): Int32Array {
     const g = gesture.value
-    if (g === null || g.page !== page) return []
+    if (g === null || g.page !== page) return new Int32Array(0)
     const shape = currentShape()
-    if (shape === null || isEmptyRect(shape.bounds)) return []
+    if (shape === null || isEmptyRect(shape.bounds)) return new Int32Array(0)
     if (shapeOutlinesAt !== revision.value) {
       shapeOutlinesAt = revision.value
       const at = shape.bounds
-      shapeOutlineCache = traceMaskOutlines(shape.coverage, at.w, at.h, {
-        x: 0,
-        y: 0,
-        w: at.w,
-        h: at.h,
-      }).map((loop) => loop.map((p) => ({ x: p.x + at.x, y: p.y + at.y })))
+      shapeOutlineCache = offsetSegments(
+        traceMaskSegments(shape.coverage, at.w, at.h, { x: 0, y: 0, w: at.w, h: at.h }),
+        at.x,
+        at.y,
+      )
     }
     return shapeOutlineCache
   }

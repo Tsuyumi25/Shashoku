@@ -46,6 +46,15 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
+/** Boundary segments as sorted strings, so a test says which edges exist and not in what order. */
+function segmentsOf(segments: Int32Array): string[] {
+  const out: string[] = []
+  for (let i = 0; i < segments.length; i += 4) {
+    out.push(`${segments[i]},${segments[i + 1]}-${segments[i + 2]},${segments[i + 3]}`)
+  }
+  return out.sort()
+}
+
 describe('holding one selection', () => {
   it('starts with nothing', () => {
     const sel = useSelectionStore()
@@ -394,10 +403,8 @@ describe('showing the gesture itself', () => {
     sel.beginGesture('marquee-rect', 'subtract', PAGE_A, { x: 8, y: 8 })
     sel.trackPointer({ x: 24, y: 24 }, mods)
 
-    const shape = sel.shapeOutlinesFor(PAGE_A.page)
-    expect(shape.length).toBe(1)
-    expect(new Set(shape[0].map((p) => `${p.x},${p.y}`))).toEqual(
-      new Set(['8,8', '24,8', '24,24', '8,24']),
+    expect(segmentsOf(sel.shapeOutlinesFor(PAGE_A.page))).toEqual(
+      ['8,8-24,8', '8,24-24,24', '8,8-8,24', '24,8-24,24'].sort(),
     )
     // The result is a different shape: the corner taken out of the selection.
     expect(sel.displayFor(PAGE_A.page)?.bounds).toEqual({ x: 0, y: 0, w: 16, h: 16 })
@@ -406,10 +413,10 @@ describe('showing the gesture itself', () => {
   it('has nothing to outline with no gesture, or on another page', () => {
     const sel = useSelectionStore()
     select(sel, PAGE_A, { x: 4, y: 4, w: 4, h: 4 })
-    expect(sel.shapeOutlinesFor(PAGE_A.page)).toEqual([])
+    expect(sel.shapeOutlinesFor(PAGE_A.page)).toHaveLength(0)
     sel.beginGesture('marquee-rect', 'new', PAGE_A, { x: 4, y: 4 })
     sel.trackPointer({ x: 12, y: 12 }, mods)
-    expect(sel.shapeOutlinesFor(PAGE_B.page)).toEqual([])
+    expect(sel.shapeOutlinesFor(PAGE_B.page)).toHaveLength(0)
   })
 
   it('gives a polygon a line to show before it encloses anything', () => {
@@ -420,7 +427,7 @@ describe('showing the gesture itself', () => {
     // One vertex placed and the pointer standing in as the second: no region
     // yet, so the line is the only thing there is to draw.
     sel.trackPointer({ x: 20, y: 4 }, mods)
-    expect(sel.shapeOutlinesFor(PAGE_A.page)).toEqual([])
+    expect(sel.shapeOutlinesFor(PAGE_A.page)).toHaveLength(0)
     expect(sel.buildingPathFor(PAGE_A.page)).toEqual([
       { x: 4, y: 4 },
       { x: 20, y: 4 },
@@ -437,7 +444,7 @@ describe('showing the gesture itself', () => {
     sel.trackPointer({ x: 20, y: 20 }, mods)
 
     expect(sel.buildingPathFor(PAGE_A.page)).toEqual([])
-    expect(sel.shapeOutlinesFor(PAGE_A.page).length).toBe(1)
+    expect(sel.shapeOutlinesFor(PAGE_A.page).length).toBeGreaterThan(0)
   })
 
   it('never draws a building line for a marquee or a freehand lasso', () => {
@@ -729,17 +736,13 @@ describe('outlines', () => {
   it('traces the selection on the page asked for and nothing on the others', () => {
     const sel = useSelectionStore()
     select(sel, PAGE_A, { x: 4, y: 4, w: 8, h: 8 })
-    const loops = sel.outlinesFor(PAGE_A.page)
-    expect(loops.length).toBe(1)
-    expect(new Set(loops[0].map((p) => `${p.x},${p.y}`))).toEqual(
-      new Set(['4,4', '12,4', '12,12', '4,12']),
-    )
-    expect(sel.outlinesFor(PAGE_B.page)).toEqual([])
+    expect(segmentsOf(sel.outlinesFor(PAGE_A.page))).toEqual(['4,4-12,4', '4,12-12,12', '4,4-4,12', '12,4-12,12'].sort())
+    expect(sel.outlinesFor(PAGE_B.page)).toHaveLength(0)
   })
 
   it('has no outlines with nothing selected', () => {
     const sel = useSelectionStore()
-    expect(sel.outlinesFor(PAGE_A.page)).toEqual([])
+    expect(sel.outlinesFor(PAGE_A.page)).toHaveLength(0)
   })
 })
 

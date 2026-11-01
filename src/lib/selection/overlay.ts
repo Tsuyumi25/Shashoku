@@ -2,11 +2,8 @@ import { contentToScreenPx, type ViewTransform } from '@/lib/coords'
 import type { MaskWindow } from '@/lib/selection/mask'
 import type { Point, Rect } from '@/lib/selection/rect'
 
-/** Dash length in device pixels, so the crawl looks the same on any display. */
-export const ANTS_DASH = 6
-
 /**
- * Outlines in page coordinates as a path in device pixels.
+ * Points in page coordinates as a path in device pixels.
  *
  * Built in device pixels under an identity transform rather than drawn under the
  * view transform, because a 1px stroke has to stay 1px at every zoom — scaling
@@ -17,60 +14,78 @@ export const ANTS_DASH = 6
  * Rotation comes through `contentToScreenPx` rather than being open-coded here:
  * a hand-rolled `tx + x * scale` is right until the first time the view turns.
  */
-function appendRun(
-  path: Path2D,
-  points: readonly Point[],
-  view: ViewTransform,
-  dpr: number,
-  close: boolean,
-): void {
-  for (let i = 0; i < points.length; i++) {
-    const p = contentToScreenPx(points[i].x, points[i].y, view)
-    const sx = Math.round(p.x * dpr) + 0.5
-    const sy = Math.round(p.y * dpr) + 0.5
-    if (i === 0) path.moveTo(sx, sy)
-    else path.lineTo(sx, sy)
-  }
-  if (close) path.closePath()
-}
-
-export function antsPath(
-  outlines: readonly (readonly Point[])[],
-  view: ViewTransform,
-  dpr: number,
-): Path2D {
-  const path = new Path2D()
-  for (const loop of outlines) appendRun(path, loop, view, dpr, true)
-  return path
+function onDevicePixel(x: number, y: number, view: ViewTransform, dpr: number): Point {
+  const p = contentToScreenPx(x, y, view)
+  return { x: Math.round(p.x * dpr) + 0.5, y: Math.round(p.y * dpr) + 0.5 }
 }
 
 /** An unfinished run of points, left open because it encloses nothing yet. */
 export function openPath(points: readonly Point[], view: ViewTransform, dpr: number): Path2D {
   const path = new Path2D()
-  appendRun(path, points, view, dpr, false)
+  points.forEach((point, i) => {
+    const p = onDevicePixel(point.x, point.y, view, dpr)
+    if (i === 0) path.moveTo(p.x, p.y)
+    else path.lineTo(p.x, p.y)
+  })
   return path
 }
 
 /**
- * Black under white, so the ants are visible on a white balloon and on the dark
- * gutter around the page alike. Only the dash offset moves between frames, so
- * the crawl costs one number and a stroke.
+ * Boundary segments stroked one device pixel wide into a mask, which the ants
+ * pattern then fills. Drawn once whenever the selection or the view moves, and
+ * never again while the ants crawl.
+ *
+ * ⚠️ One open path for all of them and no `closePath`. Chromium's closePath
+ * walks the whole path built so far, so closing each of the thousands of loops
+ * in a screentone selection cost most of a second; a segment has nothing to
+ * close.
  */
-export function strokeAnts(
-  ctx: CanvasRenderingContext2D,
-  path: Path2D,
-  phase: number,
+export function strokeSegments(
+  ctx: OffscreenCanvasRenderingContext2D,
+  segments: Int32Array,
+  view: ViewTransform,
+  dpr: number,
 ): void {
+  // A plain copy, because the view is reactive and a page of screentone reads
+  // it a few hundred thousand times: through the proxy that was most of a zoom step.
+  const at: ViewTransform = { ...view }
+  ctx.beginPath()
+  for (let i = 0; i < segments.length; i += 4) {
+    const a = onDevicePixel(segments[i]!, segments[i + 1]!, at, dpr)
+    const b = onDevicePixel(segments[i + 2]!, segments[i + 3]!, at, dpr)
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+  }
   ctx.lineWidth = 1
-  ctx.strokeStyle = '#000'
-  ctx.setLineDash([])
-  ctx.stroke(path)
   ctx.strokeStyle = '#fff'
-  ctx.setLineDash([ANTS_DASH, ANTS_DASH])
-  ctx.lineDashOffset = -phase
-  ctx.stroke(path)
-  ctx.setLineDash([])
-  ctx.lineDashOffset = 0
+  ctx.stroke()
+}
+
+/** How many steps one stripe takes to come round, and the stripe's period in device pixels. */
+export const ANTS_PHASES = 8
+
+/**
+ * The ants as screen-fixed diagonal stripes, black and white, moving down and
+ * to the right as the phase grows — what Photoshop, GIMP and Aseprite draw. A
+ * pixel is white when `(x + y - phase) mod 8` is past half, which is GIMP's rule
+ * with the phase turned round so the stripes travel the way Photoshop's do.
+ * Black under white means the ants show on a white balloon and on the dark
+ * gutter around the page alike.
+ */
+export function antsTile(phase: number): OffscreenCanvas {
+  const tile = new OffscreenCanvas(ANTS_PHASES, ANTS_PHASES)
+  const ctx = tile.getContext('2d')!
+  const image = ctx.createImageData(ANTS_PHASES, ANTS_PHASES)
+  for (let y = 0; y < ANTS_PHASES; y++) {
+    for (let x = 0; x < ANTS_PHASES; x++) {
+      const white = (((x + y - phase) % ANTS_PHASES) + ANTS_PHASES) % ANTS_PHASES >= ANTS_PHASES / 2
+      const at = (y * ANTS_PHASES + x) * 4
+      image.data[at] = image.data[at + 1] = image.data[at + 2] = white ? 255 : 0
+      image.data[at + 3] = 255
+    }
+  }
+  ctx.putImageData(image, 0, 0)
+  return tile
 }
 
 /**

@@ -1,12 +1,12 @@
 import { onBeforeUnmount, watch, type Ref } from 'vue'
 import { applyViewTransform } from '@/lib/coords'
 import {
-  ANTS_DASH,
-  antsPath,
+  ANTS_PHASES,
+  antsTile,
   openPath,
   paintMaskRegion,
-  strokeAnts,
   strokeBuildingPath,
+  strokeSegments,
 } from '@/lib/selection/overlay'
 import { intersectRect, sameRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
@@ -16,30 +16,23 @@ import { useSelectionStore } from '@/stores/selectionStore'
 const ANTS_FRAME_MS = 80
 
 /**
- * Past this many vertices the ants are drawn still. A selection painted by hand
- * can have tens of thousands of separate specks, and animating that spends the
- * whole frame budget on a shimmer nobody can follow anyway.
- */
-const ANTS_ANIMATION_LIMIT = 50_000
-
-/**
  * What one frame of the overlay is made of, worked out when the selection or the
  * view moves and then drawn as often as the crawl asks for.
  *
- * The crawl only changes a dash offset, so it must not be the thing that decides
- * what is on the layer — everything here is redrawn together, or animating the
- * ants would rub out whatever else the frame had in it.
+ * The crawl only changes which stripes show through the ants mask, so it must
+ * not be the thing that decides what is on the layer — everything here is
+ * redrawn together, or animating the ants would rub out whatever else the frame
+ * had in it.
  */
 interface OverlayFrame {
   /** Page-sized and in page coordinates, so it lands at the page origin. */
   wash: OffscreenCanvas | null
-  ants: Path2D | null
-  shape: Path2D | null
+  /** Whether the ants mask has anything in it this frame. */
+  ants: boolean
   building: Path2D | null
-  vertices: number
 }
 
-const EMPTY_FRAME: OverlayFrame = { wash: null, ants: null, shape: null, building: null, vertices: 0 }
+const EMPTY_FRAME: OverlayFrame = { wash: null, ants: false, building: null }
 
 /**
  * The layer over the page that says what is selected.
@@ -79,6 +72,22 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
   let washRegion: Rect | null = null
   let washAt = -1
 
+  /**
+   * The ants are a mask and a pattern. Every boundary segment — of the selection
+   * and of the shape being dragged — is stroked once into `antsMask`, at screen
+   * size and in device pixels; each crawl step fills `antsLayer` with the
+   * stripes for its phase and keeps only what the mask covers. A frame's cost is
+   * the size of the screen, however many specks a screentone selection has.
+   */
+  let antsMask: OffscreenCanvas | null = null
+  let antsLayer: OffscreenCanvas | null = null
+  let tiles: OffscreenCanvas[] | null = null
+
+  function screenCanvas(at: OffscreenCanvas | null, w: number, h: number): OffscreenCanvas {
+    if (at !== null && at.width === w && at.height === h) return at
+    return new OffscreenCanvas(w, h)
+  }
+
   function stopCrawl(): void {
     if (crawlRaf) cancelAnimationFrame(crawlRaf)
     crawlRaf = 0
@@ -91,8 +100,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
 
     const shown = selection.displayFor(page)
     let wash: OverlayFrame['wash'] = null
-    let ants: Path2D | null = null
-    let vertices = 0
+    const segments: Int32Array[] = []
 
     if (shown !== null && shown.bounds !== null) {
       if (selection.quickMask) {
@@ -120,25 +128,45 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
         }
         if (washCtx !== null) wash = washImage
       } else {
-        const loops = selection.outlinesFor(page)
-        if (loops.length > 0) {
-          ants = antsPath(loops, view, dpr)
-          for (const loop of loops) vertices += loop.length
-        }
+        segments.push(selection.outlinesFor(page))
       }
     }
+    segments.push(selection.shapeOutlinesFor(page))
 
-    const shapeLoops = selection.shapeOutlinesFor(page)
-    let shape: Path2D | null = null
-    if (shapeLoops.length > 0) {
-      shape = antsPath(shapeLoops, view, dpr)
-      for (const loop of shapeLoops) vertices += loop.length
+    const ants = segments.some((s) => s.length > 0)
+    if (ants) {
+      const w = Math.max(1, Math.round(editor.viewContainerSize.w * dpr))
+      const h = Math.max(1, Math.round(editor.viewContainerSize.h * dpr))
+      antsMask = screenCanvas(antsMask, w, h)
+      antsLayer = screenCanvas(antsLayer, w, h)
+      const mask = antsMask.getContext('2d')
+      if (mask !== null) {
+        mask.clearRect(0, 0, w, h)
+        for (const s of segments) if (s.length > 0) strokeSegments(mask, s, view, dpr)
+      }
     }
 
     const placed = selection.buildingPathFor(page)
     const building = placed.length > 1 ? openPath(placed, view, dpr) : null
 
-    return { wash, ants, shape, building, vertices }
+    return { wash, ants, building }
+  }
+
+  /** The stripes for this phase, kept to where the mask has a boundary. */
+  function drawAnts(ctx: CanvasRenderingContext2D): void {
+    if (antsMask === null || antsLayer === null) return
+    const layer = antsLayer.getContext('2d')
+    if (layer === null) return
+    tiles ??= Array.from({ length: ANTS_PHASES }, (_, i) => antsTile(i))
+    const pattern = layer.createPattern(tiles[phase], 'repeat')
+    if (pattern === null) return
+    layer.globalCompositeOperation = 'copy'
+    layer.fillStyle = pattern
+    layer.fillRect(0, 0, antsLayer.width, antsLayer.height)
+    layer.globalCompositeOperation = 'destination-in'
+    layer.drawImage(antsMask, 0, 0)
+    layer.globalCompositeOperation = 'source-over'
+    ctx.drawImage(antsLayer, 0, 0)
   }
 
   function render(): void {
@@ -162,8 +190,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
       ctx.drawImage(frame.wash, 0, 0)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
     }
-    if (frame.ants !== null) strokeAnts(ctx, frame.ants, phase)
-    if (frame.shape !== null) strokeAnts(ctx, frame.shape, phase)
+    if (frame.ants) drawAnts(ctx)
     if (frame.building !== null) strokeBuildingPath(ctx, frame.building)
   }
 
@@ -171,7 +198,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
     crawlRaf = requestAnimationFrame(crawl)
     if (now - lastCrawlAt < ANTS_FRAME_MS) return
     lastCrawlAt = now
-    phase = (phase + 1) % (ANTS_DASH * 2)
+    phase = (phase + 1) % ANTS_PHASES
     render()
   }
 
@@ -179,8 +206,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
     stopCrawl()
     frame = build()
     render()
-    const dashed = frame.ants !== null || frame.shape !== null
-    if (dashed && frame.vertices <= ANTS_ANIMATION_LIMIT) crawlRaf = requestAnimationFrame(crawl)
+    if (frame.ants) crawlRaf = requestAnimationFrame(crawl)
   }
 
   function schedulePaint(): void {

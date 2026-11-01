@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { traceMaskOutlines } from '@/lib/selection/trace'
-import type { Point } from '@/lib/selection/rect'
+import { offsetSegments, traceMaskSegments } from '@/lib/selection/trace'
 
 function mask(w: number, rows: string[], value = 255): Uint8ClampedArray {
   const m = new Uint8ClampedArray(w * rows.length)
@@ -10,66 +9,63 @@ function mask(w: number, rows: string[], value = 255): Uint8ClampedArray {
   return m
 }
 
-function corners(loop: Point[]): Set<string> {
-  return new Set(loop.map((p) => `${p.x},${p.y}`))
+/** Segments as sorted strings, so a test says which edges exist and not in what order they came. */
+function edges(segments: Int32Array): string[] {
+  const out: string[] = []
+  for (let i = 0; i < segments.length; i += 4) {
+    out.push(`${segments[i]},${segments[i + 1]}-${segments[i + 2]},${segments[i + 3]}`)
+  }
+  return out.sort()
 }
 
-describe('traceMaskOutlines', () => {
-  it('has no loops for an empty mask', () => {
-    expect(traceMaskOutlines(mask(3, ['000', '000', '000']), 3, 3, { x: 0, y: 0, w: 3, h: 3 })).toEqual(
-      [],
+const all = (w: number, h: number) => ({ x: 0, y: 0, w, h })
+
+describe('traceMaskSegments', () => {
+  it('has nothing for an empty mask', () => {
+    expect(edges(traceMaskSegments(mask(3, ['000', '000', '000']), 3, 3, all(3, 3)))).toEqual([])
+  })
+
+  it('gives one pixel its four sides', () => {
+    expect(edges(traceMaskSegments(mask(3, ['000', '010', '000']), 3, 3, all(3, 3)))).toEqual(
+      ['1,1-2,1', '1,1-1,2', '1,2-2,2', '2,1-2,2'].sort(),
     )
   })
 
-  it('walks one pixel as a four-corner loop', () => {
-    const loops = traceMaskOutlines(mask(3, ['000', '010', '000']), 3, 3, { x: 0, y: 0, w: 3, h: 3 })
-    expect(loops.length).toBe(1)
-    expect(corners(loops[0])).toEqual(new Set(['1,1', '2,1', '2,2', '1,2']))
-  })
-
-  it('keeps only the corners of a solid block', () => {
-    const loops = traceMaskOutlines(
-      mask(4, ['0000', '0110', '0110', '0000']),
-      4,
-      4,
-      { x: 0, y: 0, w: 4, h: 4 },
+  it('draws a solid block as four long sides, not one per pixel', () => {
+    expect(edges(traceMaskSegments(mask(4, ['0000', '0110', '0110', '0000']), 4, 4, all(4, 4)))).toEqual(
+      ['1,1-3,1', '1,3-3,3', '1,1-1,3', '3,1-3,3'].sort(),
     )
-    expect(loops.length).toBe(1)
-    expect(corners(loops[0])).toEqual(new Set(['1,1', '3,1', '3,3', '1,3']))
   })
 
-  it('gives a hole its own loop', () => {
-    const loops = traceMaskOutlines(
-      mask(5, ['00000', '01110', '01010', '01110', '00000']),
-      5,
-      5,
-      { x: 0, y: 0, w: 5, h: 5 },
+  it('outlines a hole as well as the shape around it', () => {
+    const segs = traceMaskSegments(mask(5, ['00000', '01110', '01010', '01110', '00000']), 5, 5, all(5, 5))
+    expect(edges(segs)).toEqual(
+      ['1,1-4,1', '1,4-4,4', '1,1-1,4', '4,1-4,4', '2,2-3,2', '2,3-3,3', '2,2-2,3', '3,2-3,3'].sort(),
     )
-    expect(loops.map((l) => l.length).sort()).toEqual([4, 4])
   })
 
-  /** Diagonal neighbours are not connected, as in Photoshop and Clip Studio. */
-  it('separates a saddle into two loops instead of a bowtie', () => {
-    const loops = traceMaskOutlines(mask(2, ['10', '01']), 2, 2, { x: 0, y: 0, w: 2, h: 2 })
-    expect(loops.length).toBe(2)
-    expect(loops[0].length).toBe(4)
-    expect(loops[1].length).toBe(4)
+  /**
+   * Diagonal neighbours do not touch, as in Photoshop and Clip Studio: each of
+   * two pixels meeting at a corner keeps all four sides. Where their sides
+   * line up through the corner they are drawn as one straight run, which strokes
+   * the same pixels.
+   */
+  it('keeps every side of two pixels meeting at a corner', () => {
+    expect(edges(traceMaskSegments(mask(2, ['10', '01']), 2, 2, all(2, 2)))).toEqual(
+      ['0,0-1,0', '0,0-0,1', '1,2-2,2', '2,1-2,2', '0,1-2,1', '1,0-1,2'].sort(),
+    )
   })
 
   it('reads the page edge as outside', () => {
-    const loops = traceMaskOutlines(mask(3, ['100', '000', '000']), 3, 3, { x: 0, y: 0, w: 3, h: 3 })
-    expect(corners(loops[0])).toEqual(new Set(['0,0', '1,0', '1,1', '0,1']))
+    expect(edges(traceMaskSegments(mask(3, ['100', '000', '000']), 3, 3, all(3, 3)))).toEqual(
+      ['0,0-1,0', '0,1-1,1', '0,0-0,1', '1,0-1,1'].sort(),
+    )
   })
 
-  it('only walks the region it is given', () => {
-    const loops = traceMaskOutlines(
-      mask(4, ['1000', '0000', '0000', '0001']),
-      4,
-      4,
-      { x: 0, y: 0, w: 2, h: 2 },
+  it('only scans the region it is given, reading what lies past it as unselected', () => {
+    expect(edges(traceMaskSegments(mask(4, ['1000', '0000', '0000', '0001']), 4, 4, { x: 0, y: 0, w: 2, h: 2 }))).toEqual(
+      ['0,0-1,0', '0,1-1,1', '0,0-0,1', '1,0-1,1'].sort(),
     )
-    expect(loops.length).toBe(1)
-    expect(corners(loops[0])).toEqual(new Set(['0,0', '1,0', '1,1', '0,1']))
   })
 
   /**
@@ -77,8 +73,12 @@ describe('traceMaskOutlines', () => {
    * the ants where it is more than half selected and outside where it is less.
    */
   it('runs along the halfway line of a soft edge', () => {
-    const region = { x: 0, y: 0, w: 3, h: 3 }
-    expect(traceMaskOutlines(mask(3, ['000', '010', '000'], 127), 3, 3, region)).toEqual([])
-    expect(traceMaskOutlines(mask(3, ['000', '010', '000'], 128), 3, 3, region).length).toBe(1)
+    expect(edges(traceMaskSegments(mask(3, ['000', '010', '000'], 127), 3, 3, all(3, 3)))).toEqual([])
+    expect(edges(traceMaskSegments(mask(3, ['000', '010', '000'], 128), 3, 3, all(3, 3)))).toHaveLength(4)
+  })
+
+  it('moves to page coordinates without changing shape', () => {
+    const segs = traceMaskSegments(mask(3, ['000', '010', '000']), 3, 3, all(3, 3))
+    expect(edges(offsetSegments(segs, 10, 20))).toEqual(['11,21-12,21', '11,21-11,22', '11,22-12,22', '12,21-12,22'].sort())
   })
 })
