@@ -27,8 +27,10 @@ export function textsOfUnit(page: ManifestJson, unit: TranslationUnit): Translat
   }
 }
 
-export function collectTexts(files: readonly ProjectFile[]): PageTexts[] {
-  return files.map((file) => {
+/** Every page, or only those named, in the project's order either way. */
+export function collectTexts(files: readonly ProjectFile[], pageIds?: readonly string[]): PageTexts[] {
+  const wanted = pageIds === undefined ? null : new Set(pageIds)
+  return files.filter((file) => wanted === null || wanted.has(file.pageId)).map((file) => {
     if (file.badge !== 'ok') return { pageId: file.pageId, badge: file.badge, objects: [] }
     return {
       pageId: file.pageId,

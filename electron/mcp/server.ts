@@ -9,14 +9,18 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { askRenderer } from "./bridge";
 import {
+  noteSeen,
   renderChooseResult,
   renderProposeResult,
   renderTexts,
   renderWithdrawResult,
+  sinceSeen,
+  type SeenTexts,
 } from "@shared/mcp/render";
 import type {
   ChooseOutcome,
   ChooseParams,
+  GetTextsParams,
   PageTexts,
   ProposeOutcome,
   ProposeParams,
@@ -69,22 +73,44 @@ function authenticates(header: string | string[] | undefined): boolean {
  */
 function buildServer(getSource: () => string | undefined): McpServer {
   const server = new McpServer({ name: "shashoku", version: "0.0.0" });
+  // Per session, as the server is: "changed since the last read" means since
+  // this caller's last read, and a reconnect starts with nothing seen.
+  const seen: SeenTexts = new Map();
 
   server.registerTool(
     "get_texts",
     {
-      title: "Read every text object's source and translation",
+      title: "Read text objects' source and translation",
       description:
-        "Read-only. Lists every text object in the open Shashoku project, page by page " +
-        "in reading order: the object's id, its source text (原文) and what it currently " +
-        "reads as (譯文). An empty 譯文 means the object is untranslated. Both are markup: " +
+        "Read-only. Lists the text objects in the open Shashoku project, page by page in " +
+        "reading order: the object's id, its source text (原文) and what it currently reads " +
+        "as (譯文). An empty 譯文 means the object is untranslated. Both are markup: " +
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a literal " +
-        "`<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given.",
+        "`<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. Candidates are " +
+        "marked （human） for a person's, （你） for yours and （AI） for another client's. " +
+        "page_ids reads only those pages. changed_only answers only the objects that read " +
+        "differently since this session last saw them — through get_texts or any write's " +
+        "reply — plus the ids that are gone; the first read of a session is all of it.",
+      inputSchema: {
+        page_ids: z.array(z.string()).min(1).optional(),
+        changed_only: z.boolean().optional(),
+      },
     },
-    async () => {
+    async ({ page_ids, changed_only }) => {
       try {
-        const pages = await askRenderer<PageTexts[]>("get_texts");
-        return { content: [{ type: "text", text: renderTexts(pages) }] };
+        const pages = await askRenderer<PageTexts[]>("get_texts", {
+          pageIds: page_ids,
+        } satisfies GetTextsParams);
+        const caller = getSource();
+        const missing = page_ids?.filter((id) => !pages.some((p) => p.pageId === id)) ?? [];
+        const since = changed_only ? sinceSeen(seen, pages, caller) : null;
+        noteSeen(seen, pages, caller, true);
+        const text = renderTexts(since?.pages ?? pages, {
+          caller,
+          missing,
+          changedOnly: since?.gone,
+        });
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return toolError(err);
       }
@@ -96,28 +122,47 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Propose translation candidates",
       description:
-        "Append translation candidates to text objects on one page. Never overwrites: every " +
-        "item lands in the object's candidate drawer. Where the object currently reads as " +
-        "nothing at all, the new candidate also takes effect immediately; anywhere else the " +
-        "person keeps what they chose and picks from the drawer. items[].lines is one array " +
-        "entry per rendered line — no embedded newlines. Lines are markup, the same syntax " +
-        "get_texts shows: wrap a stretch in `<size=×1.3 color=#ff0000 weight=+1 upright>…</>` " +
-        "to set it apart, and write a literal `<` or `&` as `&lt;` or `&amp;`.",
+        "Append translation candidates to text objects, on any number of pages in one batch. " +
+        "Never deletes: every item lands in the object's candidate drawer. Where the object " +
+        "currently reads as nothing at all, the new candidate also takes effect immediately; " +
+        "anywhere else it stays in the drawer unless the item sets choose, which makes it " +
+        "take effect whatever the object read as (the earlier choice stays in the drawer). " +
+        "Give each item lines or pieces, not both. lines is one array entry per rendered " +
+        "line — no embedded newlines — and means one block. pieces is one array of lines " +
+        "per block, for an object get_texts says is set in several blocks: a candidate " +
+        "takes effect only with as many pieces as the object has blocks. Lines are markup, " +
+        "the same syntax get_texts shows: wrap a stretch in " +
+        "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` to set it apart, and write a " +
+        "literal `<` or `&` as `&lt;` or `&amp;`.",
       inputSchema: {
-        page_id: z.string(),
         items: z
-          .array(z.object({ object_id: z.string(), lines: z.array(z.string()) }))
+          .array(
+            z.object({
+              page_id: z.string(),
+              object_id: z.string(),
+              lines: z.array(z.string()).optional(),
+              pieces: z.array(z.array(z.string())).optional(),
+              choose: z.boolean().optional(),
+            }),
+          )
           .min(1),
       },
     },
-    async ({ page_id, items }) => {
+    async ({ items }) => {
       try {
+        const caller = getSource();
         const result = await askRenderer<WriteResult<ProposeOutcome>>("propose_translations", {
-          pageId: page_id,
-          items: items.map((i) => ({ unitId: i.object_id, lines: i.lines })),
-          source: getSource(),
+          items: items.map((i) => ({
+            pageId: i.page_id,
+            unitId: i.object_id,
+            lines: i.lines,
+            pieces: i.pieces,
+            choose: i.choose,
+          })),
+          source: caller,
         } satisfies ProposeParams);
-        return { content: [{ type: "text", text: renderProposeResult(result) }] };
+        noteSeen(seen, result.pages, caller, false);
+        return { content: [{ type: "text", text: renderProposeResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -129,26 +174,34 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Withdraw candidates this client proposed",
       description:
-        "Remove translation candidates from objects' drawers, in one batch. Only " +
-        "candidates this client itself proposed can be withdrawn: human-written " +
-        "candidates and other clients' proposals are refused per item. Withdrawing a " +
-        "current choice falls that object back to its own typed lines. Replies with " +
-        "each object's full state afterwards.",
+        "Remove translation candidates from objects' drawers, on any number of pages in one " +
+        "batch. Only candidates this client itself proposed (marked （你）) can be withdrawn: " +
+        "human-written candidates and other clients' proposals are refused per item. " +
+        "Withdrawing a current choice falls that object back to its own typed lines. Every " +
+        "candidate is a row on the person's screen beside the page, so withdraw your own " +
+        "once a newer one replaces it or it is plainly not wanted. Replies with each " +
+        "object's full state afterwards.",
       inputSchema: {
-        page_id: z.string(),
         items: z
-          .array(z.object({ object_id: z.string(), translation_id: z.string() }))
+          .array(
+            z.object({ page_id: z.string(), object_id: z.string(), translation_id: z.string() }),
+          )
           .min(1),
       },
     },
-    async ({ page_id, items }) => {
+    async ({ items }) => {
       try {
+        const caller = getSource();
         const result = await askRenderer<WriteResult<WithdrawOutcome>>("withdraw_translation", {
-          pageId: page_id,
-          items: items.map((i) => ({ unitId: i.object_id, translationId: i.translation_id })),
-          source: getSource(),
+          items: items.map((i) => ({
+            pageId: i.page_id,
+            unitId: i.object_id,
+            translationId: i.translation_id,
+          })),
+          source: caller,
         } satisfies WithdrawParams);
-        return { content: [{ type: "text", text: renderWithdrawResult(result) }] };
+        noteSeen(seen, result.pages, caller, false);
+        return { content: [{ type: "text", text: renderWithdrawResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -161,23 +214,29 @@ function buildServer(getSource: () => string | undefined): McpServer {
       title: "Point objects at candidates in their drawers",
       description:
         "Move text objects' translation slots to candidates already in their drawers " +
-        "(candidate ids are listed by get_texts), in one batch. Nothing is deleted: the " +
-        "previous choices stay in the drawers. Replies with each object's full state " +
-        "afterwards.",
+        "(candidate ids are listed by get_texts), on any number of pages in one batch. " +
+        "Nothing is deleted: the previous choices stay in the drawers. Replies with each " +
+        "object's full state afterwards.",
       inputSchema: {
-        page_id: z.string(),
         items: z
-          .array(z.object({ object_id: z.string(), translation_id: z.string() }))
+          .array(
+            z.object({ page_id: z.string(), object_id: z.string(), translation_id: z.string() }),
+          )
           .min(1),
       },
     },
-    async ({ page_id, items }) => {
+    async ({ items }) => {
       try {
+        const caller = getSource();
         const result = await askRenderer<WriteResult<ChooseOutcome>>("choose_translation", {
-          pageId: page_id,
-          items: items.map((i) => ({ unitId: i.object_id, translationId: i.translation_id })),
+          items: items.map((i) => ({
+            pageId: i.page_id,
+            unitId: i.object_id,
+            translationId: i.translation_id,
+          })),
         } satisfies ChooseParams);
-        return { content: [{ type: "text", text: renderChooseResult(result) }] };
+        noteSeen(seen, result.pages, caller, false);
+        return { content: [{ type: "text", text: renderChooseResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }

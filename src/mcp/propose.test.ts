@@ -124,4 +124,21 @@ describe('planProposal', () => {
       }),
     ).toEqual({ action: 'append', pieces: [['轟'], ['隆']], fillSlot: true })
   })
+
+  it('fills over typed words and a settled choice when asked to choose', () => {
+    const settled = said({ candidates: [{ id: 't1', pieces: [['舊']] }], chosen: 't1' }, [['書いた']])
+    expect(planProposal(settled.page, settled.unit, { unitId: settled.unit.id, lines: ['新'], choose: true })).toEqual({
+      action: 'append',
+      pieces: [['新']],
+      fillSlot: true,
+    })
+  })
+
+  /** Asked to take effect and unable to: refused, so nothing lands that the caller did not mean. */
+  it('refuses a choose whose pieces do not match the blocks', () => {
+    const two = said({}, [[], []])
+    expect(planProposal(two.page, two.unit, { unitId: two.unit.id, lines: ['訳'], choose: true })).toMatchObject({
+      action: 'refuse',
+    })
+  })
 })

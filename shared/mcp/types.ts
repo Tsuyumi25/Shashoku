@@ -57,63 +57,63 @@ export interface PageTexts {
   objects: TranslationTexts[];
 }
 
+export interface GetTextsParams {
+  /** Only these pages, in the project's order. Every page when absent. */
+  pageIds?: string[];
+}
+
 export interface ProposeItem {
+  pageId: string;
   unitId: string;
   /** The whole translation, one line per array entry. */
   lines?: string[];
   /**
-   * The translation already cut into blocks, one array of lines each.
-   *
-   * ⚠️ Where lettering goes on the artwork is a decision about the drawing, not
-   * about the language, so this is here to keep the surface from being unable to
-   * say it rather than because anything should reach for it. `lines` is the
-   * ordinary way in and means one block.
+   * The translation already cut into blocks, one array of lines each — what a
+   * translation set in several blocks needs to be choosable.
    */
   pieces?: string[][];
+  /** Point the object at the new candidate whatever it reads as now. */
+  choose?: boolean;
 }
 
 export interface ProposeParams {
-  pageId: string;
   items: ProposeItem[];
   /** The proposing client, from the session's clientInfo — not model-supplied. */
   source?: string;
 }
 
 export type ProposeOutcome =
-  | { unitId: string; ok: true; translationId: string; filledSlot: boolean }
-  | { unitId: string; ok: false; reason: string };
+  | { pageId: string; unitId: string; ok: true; translationId: string; filledSlot: boolean }
+  | { pageId: string; unitId: string; ok: false; reason: string };
 
 export interface ChooseItem {
+  pageId: string;
   unitId: string;
   translationId: string;
 }
 
 export interface ChooseParams {
-  pageId: string;
   items: ChooseItem[];
 }
 
-export type ChooseOutcome =
-  | { unitId: string; translationId: string; ok: true }
-  | { unitId: string; translationId: string; ok: false; reason: string };
+export type ChooseOutcome = (ChooseItem & { ok: true }) | (ChooseItem & { ok: false; reason: string });
 
 export interface WithdrawParams {
-  pageId: string;
   items: ChooseItem[];
   /** The withdrawing client's clientInfo — must match each candidate's stamp. */
   source?: string;
 }
 
 export type WithdrawOutcome =
-  | { unitId: string; translationId: string; ok: true; clearedSlot: boolean }
-  | { unitId: string; translationId: string; ok: false; reason: string };
+  | (ChooseItem & { ok: true; clearedSlot: boolean })
+  | (ChooseItem & { ok: false; reason: string });
 
 /**
- * Every write answers with the touched objects' full current state, so a
- * caller audits what actually happened in the same breath rather than by a
- * second read.
+ * Every write answers with the touched objects' full current state, page by
+ * page, so a caller audits what actually happened in the same breath rather
+ * than by a second read.
  */
 export interface WriteResult<Outcome> {
   outcomes: Outcome[];
-  objects: TranslationTexts[];
+  pages: PageTexts[];
 }

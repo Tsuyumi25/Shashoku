@@ -13,7 +13,7 @@ import type { ProjectFile } from '@/types/project'
 import { collectTexts } from './collect'
 import { planProposal } from './propose'
 import { planWithdraw } from './withdraw'
-import { renderProposeResult, renderTexts, renderWithdrawResult } from '@shared/mcp/render'
+import { noteSeen, renderProposeResult, renderTexts, renderWithdrawResult, sinceSeen, type SeenTexts } from '@shared/mcp/render'
 import { blankBlock } from '@shared/page/schema'
 
 /** One ordinary translation: one block a side, and the unit that holds them. */
@@ -143,11 +143,17 @@ describe('collectTexts', () => {
     expect(pages[0].objects.map((o) => o.id)).toEqual(['u-b', 'u-a'])
     expect(pages[1]).toEqual({ pageId: '002', badge: 'damaged', objects: [] })
   })
+
+  it("reads only the pages asked for, in the project's order whatever order they were asked in", () => {
+    const files = [file('001', [said('a')], ['u-a']), file('002', [said('b')], ['u-b']), file('003', [said('c')], ['u-c'])]
+    expect(collectTexts(files, ['003', '001', 'nope']).map((p) => p.pageId)).toEqual(['001', '003'])
+  })
 })
 
 describe('renderTexts', () => {
   it('renders a script a model can read, marking the empty answers', () => {
-    const rendered = renderTexts([
+    const rendered = renderTexts(
+      [
       {
         pageId: '001',
         badge: 'ok',
@@ -172,17 +178,50 @@ describe('renderTexts', () => {
           { id: 'b', source: null, translation: '', blocks: 1, candidates: [] },
         ],
       },
-      { pageId: '002', badge: 'damaged', objects: [] },
-    ])
+        { pageId: '002', badge: 'damaged', objects: [] },
+      ],
+      { caller: 'claude-code 2.1.219', missing: ['009'] },
+    )
     expect(rendered).toContain('2 頁 · 2 筆翻譯')
     expect(rendered).toContain('原文: 何言ってんの')
     expect(rendered).toContain('譯文: 你在說什麼啊')
     expect(rendered).toContain(
-      '候選: ✓t1「你在說什麼啊」 ／ t2「少騙人了」（human） ／ t3「才不是那樣呢」（claude-code 2.1.219）',
+      '候選: ✓t1「你在說什麼啊」（AI） ／ t2「少騙人了」（human） ／ t3「才不是那樣呢」（你）',
     )
+    expect(rendered).toContain('沒有這些頁：009')
     expect(rendered).toContain('原文: （無）')
     expect(rendered).toContain('譯文: （未翻）')
     expect(rendered).toContain('頁 002 ·（damaged，內容不可讀）')
+  })
+})
+
+describe('reading only what changed', () => {
+  const object = (id: string, translation: string) => ({ id, source: null, translation, blocks: 1, candidates: [] })
+  const page = (pageId: string, objects: ReturnType<typeof object>[]) => ({ pageId, badge: 'ok' as const, objects })
+
+  it('answers everything the first time, then only what reads differently and what is gone', () => {
+    const seen: SeenTexts = new Map()
+    const before = [page('001', [object('a', '甲'), object('b', '乙'), object('c', '丙')]), page('002', [object('d', '丁')])]
+    expect(sinceSeen(seen, before, undefined).pages).toEqual(before)
+    noteSeen(seen, before, undefined, true)
+
+    const after = [page('001', [object('a', '甲'), object('b', '乙改')]), page('002', [object('d', '丁')])]
+    const since = sinceSeen(seen, after, undefined)
+    expect(since.pages).toEqual([page('001', [object('b', '乙改')])])
+    expect(since.gone).toEqual(new Map([['001', ['c']]]))
+
+    noteSeen(seen, after, undefined, true)
+    expect(sinceSeen(seen, after, undefined).pages).toEqual([])
+  })
+
+  it("takes a write's reply as seen without forgetting the rest of the page", () => {
+    const seen: SeenTexts = new Map()
+    noteSeen(seen, [page('001', [object('a', '甲'), object('b', '乙')])], undefined, true)
+    noteSeen(seen, [page('001', [object('a', '甲改')])], undefined, false)
+
+    const since = sinceSeen(seen, [page('001', [object('a', '甲改'), object('b', '乙')])], undefined)
+    expect(since.pages).toEqual([])
+    expect(since.gone.size).toBe(0)
   })
 })
 
@@ -273,24 +312,30 @@ describe('renderProposeResult', () => {
   it('says what landed, what took effect, what was refused, then the state', () => {
     const rendered = renderProposeResult({
       outcomes: [
-        { unitId: 'a', ok: true, translationId: 't1', filledSlot: true },
-        { unitId: 'b', ok: true, translationId: 't2', filledSlot: false },
-        { unitId: 'c', ok: false, reason: '物件不存在' },
+        { pageId: '001', unitId: 'a', ok: true, translationId: 't1', filledSlot: true },
+        { pageId: '001', unitId: 'b', ok: true, translationId: 't2', filledSlot: false },
+        { pageId: '002', unitId: 'c', ok: false, reason: '物件不存在' },
       ],
-      objects: [
+      pages: [
         {
-          id: 'a',
-          source: null,
-          translation: '新譯',
-          blocks: 1,
-          candidates: [{ id: 't1', text: '新譯', human: false, chosen: true }],
+          pageId: '001',
+          badge: 'ok',
+          objects: [
+            {
+              id: 'a',
+              source: null,
+              translation: '新譯',
+              blocks: 1,
+              candidates: [{ id: 't1', text: '新譯', human: false, chosen: true }],
+            },
+          ],
         },
       ],
     })
     expect(rendered).toContain('收下 2 則，拒絕 1 則')
-    expect(rendered).toContain('a → 候選 t1（這一筆原本空白，已直接生效）')
-    expect(rendered).toContain('b → 候選 t2（進入抽屜，現值未動）')
-    expect(rendered).toContain('c ✗ 物件不存在')
+    expect(rendered).toContain('001 · a → 候選 t1（已生效）')
+    expect(rendered).toContain('001 · b → 候選 t2（進入抽屜，現值未動）')
+    expect(rendered).toContain('002 · c ✗ 物件不存在')
     expect(rendered).toContain('操作後的物件狀態：')
     expect(rendered).toContain('✓t1「新譯」')
   })
@@ -300,10 +345,10 @@ describe('renderWithdrawResult', () => {
   it('reports per item and shows whether a slot cleared', () => {
     const rendered = renderWithdrawResult({
       outcomes: [
-        { unitId: 'a', translationId: 't1', ok: true, clearedSlot: true },
-        { unitId: 'a', translationId: 't2', ok: false, reason: '這是人寫過的候選——不可撤' },
+        { pageId: '001', unitId: 'a', translationId: 't1', ok: true, clearedSlot: true },
+        { pageId: '001', unitId: 'a', translationId: 't2', ok: false, reason: '這是人寫過的候選——不可撤' },
       ],
-      objects: [],
+      pages: [],
     })
     expect(rendered).toContain('候選 t1 已撤回（原為現值，物件已回退為自己的字）')
     expect(rendered).toContain('候選 t2 ✗ 這是人寫過的候選——不可撤')

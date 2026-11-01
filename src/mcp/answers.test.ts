@@ -60,11 +60,11 @@ function openWith(
 const writePage = vi.fn(async () => {})
 const writeProjectMeta = vi.fn(async () => {})
 
-function propose(items: { unitId: string; lines: string[] }[]) {
+function propose(items: { unitId: string; lines: string[]; choose?: boolean }[]) {
   return answer({
     id: 'q',
     method: 'propose_translations',
-    params: { pageId: PAGE_ID, items, source: CLIENT },
+    params: { items: items.map((i) => ({ pageId: PAGE_ID, ...i })), source: CLIENT },
   }) as Promise<WriteResult<ProposeOutcome>>
 }
 
@@ -83,10 +83,13 @@ describe('answer — the orchestration the bridge drives', () => {
     ).rejects.toThrow('沒有開啟中的專案')
   })
 
-  it('refuses the whole batch before touching a damaged page', async () => {
+  it('refuses the items on a damaged page and leaves it unwritten', async () => {
     const project = useProjectStore()
     openWith(project, [label('a')], 'damaged')
-    await expect(propose([{ unitId: 'u-a', lines: ['新譯'] }])).rejects.toThrow('拒絕寫入')
+    const result = await propose([{ unitId: 'u-a', lines: ['新譯'] }])
+    expect(result.outcomes).toEqual([
+      { pageId: PAGE_ID, unitId: 'u-a', ok: false, reason: `頁 ${PAGE_ID} 是 damaged，拒絕寫入` },
+    ])
     expect(writePage).not.toHaveBeenCalled()
   })
 
@@ -95,12 +98,21 @@ describe('answer — the orchestration the bridge drives', () => {
     openWith(project, [label('a')])
     const result = await propose([{ unitId: 'u-a', lines: ['新譯'] }])
     expect(result.outcomes).toEqual([
-      { unitId: 'u-a', ok: true, translationId: expect.any(String), filledSlot: true },
+      { pageId: PAGE_ID, unitId: 'u-a', ok: true, translationId: expect.any(String), filledSlot: true },
     ])
-    expect(result.objects).toHaveLength(1)
-    expect(result.objects[0].translation).toBe('新譯')
-    expect(result.objects[0].candidates[0]).toMatchObject({ source: CLIENT, chosen: true })
+    expect(result.pages).toHaveLength(1)
+    expect(result.pages[0].objects[0].translation).toBe('新譯')
+    expect(result.pages[0].objects[0].candidates[0]).toMatchObject({ source: CLIENT, chosen: true })
     expect(writePage).toHaveBeenCalledTimes(1)
+  })
+
+  it('puts a proposal in place over a settled choice when asked to, keeping the old one', async () => {
+    const project = useProjectStore()
+    openWith(project, [label('a', { candidates: [{ id: 't1', pieces: [['舊譯']], human: true }], chosen: 't1' })])
+    const result = await propose([{ unitId: 'u-a', lines: ['新譯'], choose: true }])
+    expect(result.outcomes[0]).toMatchObject({ ok: true, filledSlot: true })
+    expect(result.pages[0].objects[0].translation).toBe('新譯')
+    expect(result.pages[0].objects[0].candidates.map((c) => c.id)).toContain('t1')
   })
 
   it('reports per item and lists each touched object once', async () => {
@@ -112,8 +124,8 @@ describe('answer — the orchestration the bridge drives', () => {
       { unitId: 'gone', lines: ['x'] },
     ])
     expect(result.outcomes.map((o) => o.ok)).toEqual([true, true, false])
-    expect(result.objects.map((o) => o.id)).toEqual(['u-a'])
-    expect(result.objects[0].candidates).toHaveLength(2)
+    expect(result.pages[0].objects.map((o) => o.id)).toEqual(['u-a'])
+    expect(result.pages[0].objects[0].candidates).toHaveLength(2)
   })
 
   it('choose refuses a candidate outside the drawer and moves the slot to one inside', async () => {
@@ -131,16 +143,17 @@ describe('answer — the orchestration the bridge drives', () => {
       id: 'q',
       method: 'choose_translation',
       params: {
-        pageId: PAGE_ID,
         items: [
-          { unitId: 'u-a', translationId: 'elsewhere' },
-          { unitId: 'u-a', translationId: 't2' },
+          { pageId: PAGE_ID, unitId: 'u-a', translationId: 'elsewhere' },
+          { pageId: PAGE_ID, unitId: 'u-a', translationId: 't2' },
+          { pageId: 'nowhere', unitId: 'u-a', translationId: 't2' },
         ],
       },
     })) as WriteResult<ChooseOutcome>
     expect(result.outcomes[0]).toMatchObject({ ok: false, reason: '候選不在這一筆的抽屜裡' })
     expect(result.outcomes[1]).toMatchObject({ ok: true, translationId: 't2' })
-    expect(result.objects[0].translation).toBe('乙')
+    expect(result.outcomes[2]).toMatchObject({ ok: false, reason: '頁 nowhere 不存在' })
+    expect(result.pages[0].objects[0].translation).toBe('乙')
   })
 
   it('withdraw clears the slot it held and says so, then flushes', async () => {
@@ -156,14 +169,13 @@ describe('answer — the orchestration the bridge drives', () => {
       id: 'q',
       method: 'withdraw_translation',
       params: {
-        pageId: PAGE_ID,
-        items: [{ unitId: 'u-a', translationId: 'mine' }],
+        items: [{ pageId: PAGE_ID, unitId: 'u-a', translationId: 'mine' }],
         source: CLIENT,
       },
     })) as WriteResult<WithdrawOutcome>
     expect(result.outcomes[0]).toMatchObject({ ok: true, clearedSlot: true })
-    expect(result.objects[0].translation).toBe('自己的字')
-    expect(result.objects[0].candidates).toHaveLength(0)
+    expect(result.pages[0].objects[0].translation).toBe('自己的字')
+    expect(result.pages[0].objects[0].candidates).toHaveLength(0)
     expect(writePage).toHaveBeenCalledTimes(1)
   })
 })

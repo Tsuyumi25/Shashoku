@@ -11,7 +11,7 @@ export type ProposalPlan =
  * ordinary proposal is; sending both is a caller that has not decided which it
  * means, and is refused rather than resolved by precedence.
  */
-function piecesOf(item: ProposeItem): string[][] | null {
+function piecesOf(item: Omit<ProposeItem, 'pageId'>): string[][] | null {
   if (item.pieces !== undefined && item.lines !== undefined) return null
   if (item.pieces !== undefined) return item.pieces
   if (item.lines !== undefined) return [item.lines]
@@ -22,20 +22,22 @@ function piecesOf(item: ProposeItem): string[][] | null {
  * The one decision the write tool makes, kept pure so it can be stated and
  * tested apart from the store that carries it out.
  *
- * A proposal only ever appends. The slot is filled as a courtesy exactly when
- * the translation reads as nothing at all — no chosen candidate and nothing
- * typed into any of its blocks — because only then is there nothing anyone
- * decided that the fill would displace. Typed-but-unchosen words count as a
- * decision.
+ * A proposal only ever appends. Unasked, the slot is filled as a courtesy
+ * exactly when the translation reads as nothing at all — no chosen candidate
+ * and nothing typed into any of its blocks — because only then is there
+ * nothing anyone decided that the fill would displace. Typed-but-unchosen
+ * words count as a decision. Asked with `choose`, the slot moves whatever it
+ * held: the earlier choice stays in the drawer.
  *
- * ⚠️ And only when the proposal has a block for every block the lettering is
- * set in. Filling a slot the blocks cannot read from would put words on the
- * page that no block is showing.
+ * ⚠️ Either way only when the proposal has a block for every block the
+ * lettering is set in. Filling a slot the blocks cannot read from would put
+ * words on the page that no block is showing, so a `choose` that cannot be
+ * honoured is refused rather than quietly appended.
  */
 export function planProposal(
   page: ManifestJson,
   unit: TranslationUnit | undefined,
-  item: ProposeItem,
+  item: Omit<ProposeItem, 'pageId'>,
 ): ProposalPlan {
   if (!unit) return { action: 'refuse', reason: '這一筆翻譯不存在' }
   const pieces = piecesOf(item)
@@ -51,6 +53,13 @@ export function planProposal(
   if (lines.every((l) => l.trim() === '')) {
     return { action: 'refuse', reason: '每一行都是空白——沒有內容可收' }
   }
+  const fits = pieces.length === unit.translation.members.length
+  if (item.choose === true && !fits) {
+    return {
+      action: 'refuse',
+      reason: `這一筆的譯文排成 ${unit.translation.members.length} 塊，候選只有 ${pieces.length} 塊——換不上去`,
+    }
+  }
   // ⚠️ Reads as nothing, which is not the same as holding no characters. A
   // translation left standing on a few empty lines is as blank as one holding
   // none, and comparing the joined text against "" calls it written-in because
@@ -59,7 +68,6 @@ export function planProposal(
   return {
     action: 'append',
     pieces,
-    fillSlot:
-      unit.chosen === null && blank && pieces.length === unit.translation.members.length,
+    fillSlot: item.choose === true || (unit.chosen === null && blank && fits),
   }
 }
