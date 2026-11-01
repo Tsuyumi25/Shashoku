@@ -32,14 +32,22 @@
       {{ emptyNote }}
     </div>
 
-    <template v-for="group in pageGroups" :key="group.page.key">
+    <!--
+      Each page is wrapped so its heading sticks only while the page is under
+      it: pinned to the top of the list while its rows scroll past, then carried
+      off by its own page's end as the next heading arrives. The pinned layers
+      ride in the heading, and this is what keeps them in reach without
+      scrolling back up to them. Opaque, since rows pass underneath.
+    -->
+    <div v-for="group in pageGroups" :key="group.page.key" data-page-group>
       <div
         tabindex="0"
         :data-page-id="group.page.pageId"
-        class="flex items-center gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
+        data-page-heading
+        class="sticky top-0 z-10 flex items-center gap-2 border-y border-border px-2 py-1 select-none focus:ring-1 focus:ring-inset focus:ring-primary focus:outline-none"
         :class="[
           group.page.pageId === editor.currentPageId && 'text-foreground',
-          isHere(group.page) ? 'bg-accent/50' : 'bg-secondary/60 hover:bg-secondary',
+          isHere(group.page) ? 'heading-here' : 'heading-away',
         ]"
         @mousedown="editor.showPage(group.page.pageId)"
       >
@@ -297,7 +305,7 @@
           </template>
         </Draggable>
       </div>
-    </template>
+    </div>
   </div>
   <CanvasMenu :at="rowMenuAt" :items="ROW_MENU" @pick="onRowMenuPick" @close="closeRowMenu" />
   </div>
@@ -759,7 +767,11 @@ const editingIsVertical = computed(
 )
 
 function focusIn(selector: string) {
-  scrollEl.value?.querySelector<HTMLElement>(selector)?.focus()
+  const el = scrollEl.value?.querySelector<HTMLElement>(selector)
+  if (!el) return
+  // Focusing scrolls on its own, and would leave the row under the pinned heading.
+  el.focus({ preventScroll: true })
+  reveal(el)
 }
 
 /**
@@ -974,9 +986,8 @@ watch(
     const held = scrollEl.value?.contains(document.activeElement) ?? false
 
     await nextTick()
-    scrollEl.value
-      ?.querySelector<HTMLElement>(selector)
-      ?.scrollIntoView({ block: 'nearest' })
+    const target = scrollEl.value?.querySelector<HTMLElement>(selector)
+    if (target) reveal(target)
     if (held && editor.pendingTextEdit === null) {
       await nextTick()
       focusIn(selector)
@@ -985,12 +996,42 @@ watch(
   { immediate: true },
 )
 
+/**
+ * `scrollIntoView` with the pinned heading taken into account. `nearest` stops
+ * a row going up at the top edge, which is where its page's heading is pinned,
+ * so the row would come to rest underneath it; it is nudged down to just below.
+ */
+function reveal(el: HTMLElement): void {
+  el.scrollIntoView({ block: 'nearest' })
+  const list = scrollEl.value
+  if (!list || el.hasAttribute('data-page-heading')) return
+  const heading = el.closest('[data-page-group]')?.querySelector<HTMLElement>('[data-page-heading]')
+  if (!heading) return
+  const covered = heading.getBoundingClientRect().bottom - el.getBoundingClientRect().top
+  if (covered > 0) list.scrollTop -= covered
+}
+
 function orderedTags(tags: readonly string[]): string[] {
   return tagsInRegistryOrder(tags, project.header.tags)
 }
 </script>
 
 <style scoped>
+/*
+ * The tints the headings always had, mixed onto the panel's card instead of
+ * laid over it: a pinned heading has rows passing underneath, and a
+ * translucent one would show them through its page name.
+ */
+.heading-here {
+  background-color: color-mix(in oklab, var(--color-accent) 50%, var(--color-card));
+}
+.heading-away {
+  background-color: color-mix(in oklab, var(--color-secondary) 60%, var(--color-card));
+}
+.heading-away:hover {
+  background-color: var(--color-secondary);
+}
+
 /*
  * The row grows with the translation instead of scrolling inside a fixed box:
  * a line the writer cannot see is a line they cannot check.
