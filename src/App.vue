@@ -274,6 +274,15 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     if (e.repeat) return
     void merge.mergeBySelection().catch((err: unknown) => console.error('merge failed', err))
+  } else if (key === 'l') {
+    // Which blocks make which sentence. Ctrl+L puts the selection in one
+    // sentence; with Shift it takes the selection out into one of its own. What
+    // the first means is read off the selection, one side or both, so the same
+    // selection does the same thing whichever side the canvas shows.
+    e.preventDefault()
+    if (e.repeat) return
+    if (e.shiftKey) editor.cmdDetachSelection()
+    else editor.cmdLinkSelection()
   } else if (key === 'j') {
     // One key for both, as Photoshop's is: a selection means lift what is
     // inside it onto a layer of its own, and no selection means copy the whole

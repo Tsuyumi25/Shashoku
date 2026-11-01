@@ -3693,3 +3693,39 @@ describe('a material put down on the page', () => {
     expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(0)
   })
 })
+
+describe('Ctrl+L on the selection', () => {
+  const units = (project: ReturnType<typeof useProjectStore>) => project.pageById(PAGE)!.page.translationUnits.length
+
+  it('joins two sentences into one and one undo splits them again', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    const a = [...editor.selectedIds][0]!
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 300, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    const b = [...editor.selectedIds][0]!
+    editor.selectOnly(a)
+    editor.toggleSelected(b)
+
+    editor.cmdLinkSelection()
+    expect(units(project)).toBe(1)
+    expect([...editor.selectedIds].sort()).toEqual([a, b].sort())
+
+    editor.undo()
+    expect(units(project)).toBe(2)
+  })
+
+  it('takes a block out into a sentence of its own with Ctrl+Shift+L', () => {
+    const { project, editor } = openOnePage()
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '撲', patch: {}, effects: null }, 'translation')
+    const a = [...editor.selectedIds][0]!
+    editor.cmdAddLabelFromMaterial(PAGE, { x: 300, y: 100 }, { text: '通', patch: {}, effects: null }, 'translation')
+    const b = [...editor.selectedIds][0]!
+    editor.selectOnly(a)
+    editor.toggleSelected(b)
+    editor.cmdLinkSelection()
+    editor.selectOnly(b)
+
+    editor.cmdDetachSelection()
+    expect(units(project)).toBe(2)
+  })
+})

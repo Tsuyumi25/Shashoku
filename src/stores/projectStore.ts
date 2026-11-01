@@ -7,6 +7,7 @@ import type { TagDefinition } from '@shared/tags/types'
 import type {
   GroupLayerEntry,
   LayerEntry,
+  ManifestJson,
   OcrCandidatePersisted,
   SourceBody,
   TextLayerEntry,
@@ -81,6 +82,10 @@ import { createAutosave } from '@/lib/autosave'
  * happens at the next open, so leaving them would make the undo look right
  * today and lose the lines tomorrow.
  */
+
+/** The part of a page that says which blocks make which sentence. */
+export type PageStructure = Pick<ManifestJson, 'translationUnits' | 'readingOrder' | 'readingEdges' | 'layers'>
+
 export interface LabelPlace {
   /** One per block, front to back, so putting them back cannot shift each other. */
   paths: number[][]
@@ -804,6 +809,23 @@ export const useProjectStore = defineStore('project', () => {
     const file = pageById(pageId)
     if (!file) return
     if (!restoreGroupAt(file.page.layers, path, folder)) return
+    markPageDirty(pageId)
+  }
+
+  /**
+   * Everything that says which blocks make which sentence, written back whole:
+   * the sentences, their order, the lines between them, and the tree the blank
+   * placeholders live in. For a step that regroups blocks, whose before and
+   * after are both whole pages of that structure.
+   */
+  function setPageStructure(pageId: string, structure: PageStructure) {
+    const file = pageById(pageId)
+    if (!file) return
+    const copy = structuredClone(structure)
+    file.page.translationUnits = copy.translationUnits
+    file.page.readingOrder = copy.readingOrder
+    file.page.readingEdges = copy.readingEdges
+    file.page.layers = copy.layers
     markPageDirty(pageId)
   }
 
@@ -1579,6 +1601,7 @@ export const useProjectStore = defineStore('project', () => {
     entryById,
     pageOfEntry,
     setReadingOrder,
+    setPageStructure,
     readingEdgesOf,
     addReadingEdges,
     removeReadingEdges,

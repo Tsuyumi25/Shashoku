@@ -68,6 +68,37 @@
         <OcrOverlay v-if="ocrPointedBox" :pointed-box="ocrPointedBox" />
 
         <!--
+          What Ctrl+L would do, while Ctrl is held: the sentence everything goes
+          into, framed, and a line from each block on this side that would move
+          into it. Nothing here takes the pointer or survives letting go.
+        -->
+        <svg
+          v-if="foretold"
+          class="pointer-events-none absolute left-0 top-0 overflow-visible"
+          width="1"
+          height="1"
+        >
+          <rect
+            v-if="foretold.frame"
+            :x="foretold.frame.x"
+            :y="foretold.frame.y"
+            :width="foretold.frame.w"
+            :height="foretold.frame.h"
+            rx="6"
+            class="foretell-frame"
+          />
+          <line
+            v-for="(l, i) in foretold.lines"
+            :key="i"
+            :x1="l.x1"
+            :y1="l.y1"
+            :x2="l.x2"
+            :y2="l.y2"
+            class="foretell-line"
+          />
+        </svg>
+
+        <!--
           The boxes of whichever routes are switched on. Under the pointed mark
           above so that the one being pointed at still reads as the one.
         -->
@@ -161,7 +192,7 @@
             :key="object.id"
             :data-object-id="object.id"
             :pointer="framesTakePointer ? 'box' : 'none'"
-            :framed="connecting || painting"
+            :framed="connecting || painting || object.kin !== undefined"
             :handles="!connecting && !painting && groupFrame === null"
             :captioned="painting"
             :code="object.code"
@@ -170,7 +201,7 @@
             :x="object.x"
             :y="object.y"
             :rotation="object.rotation"
-            :accent="object.accent"
+            :accent="object.kin ?? object.accent"
             :tags="object.tags"
             :natural="editor.viewContentSize"
             :view="view"
@@ -335,6 +366,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import type { ManifestJson } from '@shared/page/types'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import GroupWheel from '@/components/GroupWheel.vue'
@@ -546,6 +578,7 @@ const objects = computed(() => {
     y: body.y,
     rotation: body.rotation,
     accent: accentOf(tags),
+    kin: kinOf(file.page, label.id),
     style: look.style,
     effects: look.effects,
     tags: tagsInRegistryOrder(tags, project.header.tags).map((name) => ({
@@ -913,6 +946,92 @@ function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) 
   if (!editor.currentPageId) return
   editor.cmdRotateLabel(editor.currentPageId, labelId, from, to)
 }
+
+/**
+ * The sentences the selection belongs to, on either side. Selecting a block
+ * selects nothing else, but the sentence it is in is what Ctrl+L works on, and
+ * the selection survives Shift+S — so the other side shows which of its blocks
+ * the selected one goes with, with no need to draw that side at all.
+ */
+const selectedUnits = computed(() => {
+  const file = currentFile.value
+  const out = new Set<string>()
+  if (!file) return out
+  for (const id of editor.selectedIds) {
+    const unit = placeOfBlock(file.page, id)?.unit
+    if (unit) out.add(unit.id)
+  }
+  return out
+})
+
+/**
+ * A block not selected itself, in a sentence the selection is in: framed in
+ * that sentence's own colour, so two sentences about to be joined read as two
+ * colours before Ctrl+L and one after.
+ */
+function kinOf(page: ManifestJson, id: string): string | undefined {
+  if (editor.isSelected(id)) return undefined
+  const unit = placeOfBlock(page, id)?.unit
+  if (!unit || !selectedUnits.value.has(unit.id)) return undefined
+  const at = Math.max(0, page.readingOrder.indexOf(unit.id))
+  return `hsl(${Math.round((at * 137.5) % 360)} 75% 45%)`
+}
+
+/**
+ * Ctrl held long enough to mean it. A chord like Ctrl+Z goes past in less, and
+ * the foretelling would otherwise flash on every one of them.
+ */
+const FORETELL_DELAY_MS = 150
+const ctrlHeld = ref(false)
+let ctrlTimer: ReturnType<typeof setTimeout> | undefined
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+  if (e.key !== 'Control' || e.repeat) return
+  clearTimeout(ctrlTimer)
+  ctrlTimer = setTimeout(() => (ctrlHeld.value = true), FORETELL_DELAY_MS)
+})
+function letGoOfCtrl() {
+  clearTimeout(ctrlTimer)
+  ctrlHeld.value = false
+}
+useEventListener(window, 'keyup', (e: KeyboardEvent) => {
+  if (e.key === 'Control') letGoOfCtrl()
+})
+useEventListener(window, 'blur', letGoOfCtrl)
+
+const foretold = computed(() => {
+  if (!ctrlHeld.value) return null
+  const file = currentFile.value
+  const plan = editor.linkPlan()
+  if (!file || plan.kind === 'none') return null
+  const shown = new Map(objects.value.map((o) => [o.id, o]))
+  const centre = (id: string) => {
+    const o = shown.get(id)
+    if (!o) return null
+    const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
+    return { x: d.center.x, y: d.center.y, w: d.box.w, h: d.box.h }
+  }
+  const main = file.page.translationUnits.find((u) => u.id === plan.main)
+  const inMain = main
+    ? [...main.source.members, ...main.translation.members].map(centre).filter((c) => c !== null)
+    : []
+  const frame = inMain.length
+    ? (() => {
+        const x0 = Math.min(...inMain.map((c) => c.x - c.w / 2)) - 8
+        const y0 = Math.min(...inMain.map((c) => c.y - c.h / 2)) - 8
+        const x1 = Math.max(...inMain.map((c) => c.x + c.w / 2)) + 8
+        const y1 = Math.max(...inMain.map((c) => c.y + c.h / 2)) + 8
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+      })()
+    : null
+  const to = frame ? { x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 } : null
+  const lines = to
+    ? plan.moving
+        .map(centre)
+        .filter((c) => c !== null)
+        .map((c) => ({ x1: c.x, y1: c.y, x2: to.x, y2: to.y }))
+    : []
+  return { frame, lines }
+})
 
 /**
  * Whichever registered tag sits highest in the project's order decides the
@@ -2179,6 +2298,19 @@ useEventListener(window, 'blur', () => {
 </script>
 
 <style scoped>
+/* A mark on the interface over the page, so its width is held to screen pixels. */
+.foretell-frame {
+  fill: none;
+  stroke: #e8830c;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.foretell-line {
+  stroke: #e8830c;
+  stroke-width: 2.5;
+  stroke-dasharray: 7 4;
+  vector-effect: non-scaling-stroke;
+}
 .page-checker {
   background: repeating-conic-gradient(#ffffff 0 25%, #cccccc 0 50%) 0 0 /
     calc(var(--px) * 16px) calc(var(--px) * 16px);

@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, toRaw } from 'vue'
 import { defineStore } from 'pinia'
 import type {
   GroupLayerEntry,
@@ -16,6 +16,7 @@ import { useCardStore } from '@/stores/cardStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import {
   useProjectStore,
+  type PageStructure,
   type RemovedEntry,
   type RemovedTranslation,
   type TranslationParts,
@@ -25,7 +26,9 @@ import { blankTranslation, emptyBody, generateId as generateLabelId } from '@sha
 import { linesOf, type TextSide } from '@shared/page/text'
 import { blocksOf, shownCodeOf, sideOf } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
-import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import type { ManifestJson } from '@shared/page/types'
+import { findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
@@ -1622,6 +1625,69 @@ export const useEditorStore = defineStore('editor', () => {
     cmdAddLabel(pageId, parts)
   }
 
+  /** The selected text objects on the open page, locked ones refusing the whole step. */
+  function selectedBlocksOnPage(): { pageId: string; ids: string[] } | null {
+    const pageId = currentPageId.value
+    const page = pageId === null ? undefined : useProjectStore().pageById(pageId)?.page
+    if (!page || pageId === null) return null
+    const ids = [...selectedIds.value].filter((id) => findTextObject(page.layers, id))
+    if (!ids.length || ids.some(isLayerLocked)) return null
+    return { pageId, ids }
+  }
+
+  /**
+   * One regrouping as one step: the page's structure before and after, whole.
+   * The words a regrouping writes back (a chosen proposal settled into its
+   * blocks) and the blanks it adds or removes all live in that structure, so
+   * nothing it did can be left behind by an undo.
+   */
+  function cmdRegroup(label: string, change: (page: ManifestJson) => boolean) {
+    const at = selectedBlocksOnPage()
+    if (!at) return
+    commitTextEdit()
+    const project = useProjectStore()
+    const live = project.pageById(at.pageId)?.page
+    if (!live) return
+    // The page is reactive; what is cloned has to be the plain object under it.
+    const page = toRaw(live)
+    const structure = (p: ManifestJson): PageStructure => ({
+      translationUnits: p.translationUnits,
+      readingOrder: p.readingOrder,
+      readingEdges: p.readingEdges,
+      layers: p.layers,
+    })
+    const before = structuredClone(structure(page))
+    const draft = structuredClone(page)
+    if (!change(draft)) return
+    const after = structuredClone(structure(draft))
+    pushCommand({
+      label: `${label} ${at.ids.length}`,
+      detail: { page: at.pageId, ids: at.ids },
+      do: () => project.setPageStructure(at.pageId, after),
+      undo: () => project.setPageStructure(at.pageId, before),
+    })
+    selectedIds.value = new Set([...selectedIds.value].filter((id) => findTextObject(after.layers, id)))
+  }
+
+  /** Ctrl+L. See `shared/page/relink`. */
+  function cmdLinkSelection() {
+    const ids = selectedBlocksOnPage()?.ids ?? []
+    cmdRegroup('link', (page) => relink(page, ids, generateLabelId, useProjectStore().header.seedStyle))
+  }
+
+  /** Ctrl+Shift+L. */
+  function cmdDetachSelection() {
+    const ids = selectedBlocksOnPage()?.ids ?? []
+    cmdRegroup('detach', (page) => detach(page, ids, generateLabelId, useProjectStore().header.seedStyle))
+  }
+
+  /** What Ctrl+L would do with the selection right now, for showing while Ctrl is held. */
+  function linkPlan(): RelinkPlan {
+    const at = selectedBlocksOnPage()
+    const page = at ? useProjectStore().pageById(at.pageId)?.page : undefined
+    return at && page ? planRelink(page, at.ids) : { kind: 'none' }
+  }
+
   /**
    * A material put down on the page as a sentence of their own, the way a
    * reading is. What it gives lands on whichever side the canvas is showing,
@@ -3095,6 +3161,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
     cmdAddLabelFromMaterial,
+    cmdLinkSelection,
+    cmdDetachSelection,
+    linkPlan,
     cmdReplaceLabelSource,
     cmdMoveCard,
     cmdDuplicateLabel,
