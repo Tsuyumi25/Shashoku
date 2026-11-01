@@ -363,7 +363,7 @@ function isRowLocked(row: LayerTreeRow): boolean {
 }
 
 const renaming = ref<{ id: string; draft: string } | null>(null)
-const renameEl = useTemplateRef<HTMLInputElement>('renameEl')
+const renameEls = useTemplateRef<HTMLInputElement[]>('renameEl')
 
 async function beginRename(row: LayerTreeRow) {
   const entry = row.entry
@@ -372,7 +372,9 @@ async function beginRename(row: LayerTreeRow) {
   await nextTick()
   // Selected rather than merely focused: an auto-named 資料夾3 is there to be
   // replaced, not appended to.
-  renameEl.value?.select()
+  const field = renameEls.value?.[0]
+  field?.focus()
+  field?.select()
 }
 
 /**
