@@ -264,6 +264,22 @@ describe("materials", () => {
     ]);
   });
 
+  it("start with a 文字色 and a 描邊 shelf, each material giving only its one switch, until somebody clears them", () => {
+    const groups = parsePreferences("{}").materialGroups;
+    expect(groups.map((g) => g.name)).toEqual(["文字色", "描邊"]);
+    expect(groups[0]!.materials.map((m) => [m.style.color, m.picks])).toEqual([
+      ["#000000", ["color"]],
+      ["#ffffff", ["color"]],
+      ["#ff0000", ["color"]],
+    ]);
+    expect(groups[1]!.materials.map((m) => [m.effects.map((e) => e.color), m.picks])).toEqual([
+      [["#ffffff"], ["stroke"]],
+      [["#000000"], ["stroke"]],
+      [[], ["stroke"]],
+    ]);
+    expect(parsePreferences(JSON.stringify({ materialGroups: [] })).materialGroups).toEqual([]);
+  });
+
   it("keep the switches in one order and drop the ones nobody knows", () => {
     const raw = JSON.stringify({
       materialGroups: [{ id: "g", name: "x", materials: [snap({ picks: ["stroke", "glow", "text", "text"] })] }],

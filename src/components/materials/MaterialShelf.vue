@@ -26,6 +26,14 @@
       <button type="button" class="shelf-tab" title="新群組" aria-label="新群組" @click="addGroup">
         <Plus :size="12" />
       </button>
+      <button
+        type="button"
+        class="shelf-tab"
+        title="加入內建的「文字色」和「描邊」群組，放在現有群組旁邊，不會動到它們"
+        @click="addDefaults"
+      >
+        內建
+      </button>
       <span class="ml-auto flex items-center gap-1">
         <button
           type="button"
@@ -90,7 +98,7 @@
     </div>
 
     <div v-if="!group" class="p-3 text-xs leading-relaxed text-muted-foreground">
-      還沒有群組。按 ＋ 建一個，或在畫布上對一顆字按右鍵「存成素材：…」，會自動建好。
+      還沒有群組。按 ＋ 建一個、按「內建」拿現成的文字色和描邊，或在畫布上對一顆字按右鍵「存成素材：…」，會自動建好。
     </div>
 
     <div v-else class="min-h-0 flex-1 overflow-y-auto p-2" @mouseleave="endPreview">
@@ -244,6 +252,11 @@ function addGroup() {
   void startRename('group', id, preferences.prefs.materialGroups.find((g) => g.id === id)?.name ?? '')
 }
 
+function addDefaults() {
+  const id = preferences.addDefaultMaterialGroups()
+  if (id !== null) column.openGroup(id)
+}
+
 function addRecipe() {
   const id = preferences.createRecipe('新存法')
   void startRename('recipe', id, preferences.prefs.materialRecipes.find((r) => r.id === id)?.name ?? '')
@@ -296,9 +309,14 @@ function describe(m: Material): string {
   const parts: string[] = []
   if (carriesWords(m)) parts.push(`「${m.text.replace(/\n/g, ' ')}」`)
   if (m.picks.includes('font')) parts.push(m.style.fontFamily || '預設字型')
-  const stroke = m.picks.includes('stroke') ? visibleStrokeOf(m.effects) : null
-  if (stroke) parts.push(`描邊 ${stroke.width}px`)
-  const rest = m.picks.filter((f) => f !== 'text' && f !== 'font' && f !== 'stroke').map((f) => FIELD_NAMES[f])
+  if (m.picks.includes('color')) parts.push(`文字色 ${m.style.color}`)
+  if (m.picks.includes('stroke')) {
+    const stroke = visibleStrokeOf(m.effects)
+    parts.push(stroke ? `描邊 ${stroke.color} ${stroke.width}px` : '無描邊')
+  }
+  const rest = m.picks
+    .filter((f) => f !== 'text' && f !== 'font' && f !== 'color' && f !== 'stroke')
+    .map((f) => FIELD_NAMES[f])
   if (rest.length) parts.push(rest.join('、'))
   return parts.join(' · ') || '沒有打勾'
 }

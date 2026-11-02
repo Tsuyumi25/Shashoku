@@ -1,4 +1,4 @@
-import { defaultRecipes, type MaterialGroup, type MaterialRecipe } from "./materials";
+import { defaultMaterialGroups, defaultRecipes, type MaterialGroup, type MaterialRecipe } from "./materials";
 
 export const MIN_FONT_PICKER_BOX_PX = 60;
 export const MAX_FONT_PICKER_BOX_PX = 240;
@@ -215,7 +215,7 @@ export interface Preferences {
  */
 export function defaultPreferences(): Preferences {
   return {
-    materialGroups: [],
+    materialGroups: defaultMaterialGroups(() => crypto.randomUUID()),
     materialRecipes: defaultRecipes(),
     fontFavorites: [],
     fontGroups: [],

@@ -18,7 +18,7 @@ import {
 import { freeGroupName } from '@shared/preferences/fontGroups'
 import { cloneEffects } from '@shared/effects/clone'
 import type { LayerEffect } from '@shared/effects/types'
-import { normalPicks, sameMaterial, type MaterialField } from '@shared/preferences/materials'
+import { defaultMaterialGroups, normalPicks, sameMaterial, type MaterialField } from '@shared/preferences/materials'
 import type { TextStyle } from '@shared/text-style/types'
 import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
@@ -117,6 +117,16 @@ export const usePreferencesStore = defineStore('preferences', () => {
       materials: [],
     })
     return id
+  }
+
+  /** The factory shelves added again beside whatever is there, each under a name nobody holds. */
+  function addDefaultMaterialGroups(): string | null {
+    const added = defaultMaterialGroups(() => crypto.randomUUID())
+    for (const group of added) {
+      group.name = freeGroupName(group.name, prefs.materialGroups.map((g) => g.name))
+      prefs.materialGroups.push(group)
+    }
+    return added[0]?.id ?? null
   }
 
   /** False when another group already goes by the name; nothing changes then. */
@@ -322,6 +332,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     isFavorite,
     toggleFavorite,
     createMaterialGroup,
+    addDefaultMaterialGroups,
     renameMaterialGroup,
     deleteMaterialGroup,
     saveMaterial,

@@ -68,6 +68,45 @@ export function defaultRecipes(): MaterialRecipe[] {
   ];
 }
 
+/** The words a factory material is drawn on; never given, since none of them ticks the text. */
+const PRESET_SAMPLE = "文字";
+
+function preset(color: string, effects: LayerEffect[], picks: MaterialField[], id: string): Material {
+  return { id, text: PRESET_SAMPLE, style: { ...DEFAULT_TEXT_STYLE, color }, effects, picks };
+}
+
+/**
+ * The shelves everyone starts with, so the colours and strokes nearly every
+ * page uses are there before anybody has saved one. Each gives one switch: a
+ * colour leaves the stroke alone and a stroke leaves the colour alone.
+ *
+ * The stroke is drawn at the width the canvas already uses to hold a source
+ * off busy line art.
+ */
+export function defaultMaterialGroups(newId: () => string): MaterialGroup[] {
+  const stroke = (color: string): LayerEffect[] => [{ kind: "stroke", width: 5, color, position: "outside" }];
+  return [
+    {
+      id: newId(),
+      name: "文字色",
+      materials: [
+        preset("#000000", [], ["color"], newId()),
+        preset("#ffffff", [], ["color"], newId()),
+        preset("#ff0000", [], ["color"], newId()),
+      ],
+    },
+    {
+      id: newId(),
+      name: "描邊",
+      materials: [
+        preset("#000000", stroke("#ffffff"), ["stroke"], newId()),
+        preset("#ffffff", stroke("#000000"), ["stroke"], newId()),
+        preset("#000000", [], ["stroke"], newId()),
+      ],
+    },
+  ];
+}
+
 /** Put in canonical order with repeats and unknowns dropped, so two lists that tick the same switches read the same. */
 export function normalPicks(picks: Iterable<unknown>): MaterialField[] {
   const wanted = new Set(picks);
@@ -198,9 +237,11 @@ function readLegacy(raw: RawEntry): Omit<Material, "id">[] {
 /**
  * Entries that fail to read are left out one at a time, as everything else in
  * preferences is: a damaged entry costs that entry, never the rest of the list.
+ * Absent means nobody has touched them, which reads as the shelves everyone
+ * starts with; an empty list is somebody having cleared them.
  */
 export function parseMaterialGroups(v: unknown): MaterialGroup[] {
-  if (!Array.isArray(v)) return [];
+  if (!Array.isArray(v)) return defaultMaterialGroups(() => crypto.randomUUID());
   const out: MaterialGroup[] = [];
   const ids = new Set<string>();
   for (const entry of v) {
