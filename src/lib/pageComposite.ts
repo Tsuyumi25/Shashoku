@@ -20,6 +20,8 @@ export class CompositeError extends Error {}
 
 export interface CompositeInput {
   page: ManifestJson
+  /** Which face's lettering goes on the page. */
+  face: string
   /**
    * One raster layer's PNG, by the file name the manifest holds. A loader
    * rather than a bag of bytes so that the caller only has to say where layers
@@ -114,14 +116,10 @@ export async function decodeLayerBitmaps(
   return decoded
 }
 
-/**
- * Bound to the page rather than free, because what a block reads as is the
- * unit's answer and not the block's: a chosen candidate lives one level up.
- */
-function drawTextWith(page: ManifestJson): StackPaint['drawText'] {
+function drawTextWith(): StackPaint['drawText'] {
   return (ctx, node) => {
     const label = node.entry
-    const code = shownCodeOf(page, label)
+    const code = shownCodeOf(label)
     if (code.length === 0) return
     const body = label.body
     const drawn = drawnLabel(code, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
@@ -224,7 +222,7 @@ export function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
-  return await compositeWith(input, drawTextWith(input.page))
+  return await compositeWith(input, drawTextWith())
 }
 
 /**
@@ -330,7 +328,7 @@ async function compositeWith(
   drawText: StackPaint['drawText'],
 ): Promise<OffscreenCanvas> {
   const size = { w: input.page.width, h: input.page.height }
-  const stack = pageStack(input.page.layers, 'translation')
+  const stack = pageStack(input.page.layers, 'translation', input.face)
   const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)

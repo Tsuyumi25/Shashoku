@@ -24,7 +24,7 @@ export function useWallPublisher(): void {
   })
 
   const scene = computed<WallScene | null>(() =>
-    open.value ? wallSceneOf(project.files, project.header.tags, editor.currentPageId) : null,
+    open.value ? wallSceneOf(project.files, project.header.tags, editor.currentPageId, project.activeFace) : null,
   )
 
   const send = () => {

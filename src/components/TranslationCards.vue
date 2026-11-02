@@ -101,10 +101,9 @@
 import { computed, ref, watchEffect, watchPostEffect } from 'vue'
 import type { Box } from '@shared/ocr/places'
 import type { TextLayerEntry } from '@shared/page/types'
-import { findTextObject } from '@shared/page/tree'
 import { pageStack, stackedTextNodes } from '@shared/page/stack'
 import { generateId } from '@shared/page/schema'
-import { shownCodeOf } from '@shared/page/units'
+import { blocksOnSide, shownCodeOf } from '@shared/page/units'
 import { drawnLabel } from '@/lib/labelRaster'
 import { screenToContentPx } from '@/lib/coords'
 import { vAutoGrow } from '@/lib/autoGrow'
@@ -170,7 +169,7 @@ function pinKey(objectId: string): string {
 /** Which objects are drawn at all, so a card never stands for a hidden one. */
 const shown = computed(() => {
   const out = new Set<string>()
-  for (const { entry } of stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'translation'))) {
+  for (const { entry } of stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'translation', project.activeFace))) {
     out.add(entry.id)
   }
   return out
@@ -195,7 +194,7 @@ function frameOf(entry: TextLayerEntry): Box {
   const body = entry.body
   const page = file.value?.page
   const drawn = drawnLabel(
-    page === undefined ? body.lines.join('\n') : shownCodeOf(page, entry),
+    page === undefined ? body.lines.join('\n') : shownCodeOf(entry),
     body.style,
     entry.effects,
     { x: body.x, y: body.y },
@@ -216,21 +215,17 @@ interface Listed {
   entry: TextLayerEntry
 }
 
-/** Every object with a choice to offer, and no frame measured for any of them. */
+/** Every block of lettering with a choice to offer, and no frame measured for any of them. */
 const listed = computed<Listed[]>(() => {
   const out: Listed[] = []
   const page = file.value?.page
   if (page === undefined) return out
-  // ⚠️ One card per translation, hung off its first block. The pool belongs to
-  // the unit, so a card per block would offer the same choice twice and let two
-  // of them disagree about which row is picked.
-  for (const unit of page.translationUnits) {
-    const first = unit.translation.members[0]
-    const entry = first === undefined ? undefined : findTextObject(page.layers, first)
-    if (entry === undefined || !shown.value.has(entry.id)) continue
-    const rows = rowsOf(page.layers, unit)
+  // One card per block: every block keeps a pool of its own.
+  for (const entry of blocksOnSide(page.layers, 'translation', project.activeFace)) {
+    if (entry.side !== 'translation' || !shown.value.has(entry.id)) continue
+    const rows = rowsOf(entry)
     if (!offersAChoice(rows)) continue
-    out.push({ objectId: entry.id, rows, chosen: unit.chosen ?? OWN, entry })
+    out.push({ objectId: entry.id, rows, chosen: entry.body.chosen ?? OWN, entry })
   }
   return out
 })

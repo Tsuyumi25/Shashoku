@@ -34,12 +34,12 @@ export function useSelectionSample(): SelectionSample {
       ? { pageId: lead.pageId, entry: lead.entry }
       : project.files
           .filter((f) => f.badge === 'ok')
-          .flatMap((f) => blocksOnSide(f.page.layers, 'translation').map((entry) => ({ pageId: f.pageId, entry })))
+          .flatMap((f) => blocksOnSide(f.page.layers, 'translation', project.activeFace).map((entry) => ({ pageId: f.pageId, entry })))
           .find((p) => p.entry.body.style.fontFamily)
     if (!pick) return null
     const page = project.pageById(pick.pageId)?.page
     if (!page) return null
-    const lines = shownLinesOf(page, pick.entry)
+    const lines = shownLinesOf(pick.entry)
       .slice(0, 2)
       .map((line) => line.slice(0, 4))
       .filter(Boolean)

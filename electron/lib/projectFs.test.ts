@@ -118,7 +118,7 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
   });
 
   async function manifestOf(pageDir: string) {
-    return parseManifest(await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8"));
+    return parseManifest(await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8"), "f");
   }
 
   /**

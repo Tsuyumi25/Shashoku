@@ -3,7 +3,7 @@ import type { TagDefinition } from '@shared/tags/types'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import type { ManifestJson } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 import type { TextSide } from '@shared/page/text'
 import { bucketObjectsOf, groupByValue, type BucketObject } from './valueBuckets'
 
@@ -117,20 +117,15 @@ describe('groupByValue', () => {
 })
 
 describe('which body the statistics count', () => {
+  const FACE = 'f'
+
   function twoBodied(id: string, sourcePx: number, translationPx: number) {
-    const lettering = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+    const lettering = blankTranslationBlock(id, FACE, DEFAULT_TEXT_STYLE)
     lettering.body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: translationPx }
-    const artwork = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+    const artwork = blankSourceBlock(`${id}s`, DEFAULT_TEXT_STYLE)
     artwork.body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: sourcePx }
     return {
-      unit: {
-        id: `u-${id}`,
-        tags: [],
-        source: { members: [artwork.id], separators: [] },
-        translation: { members: [lettering.id], separators: [] },
-        candidates: [],
-        chosen: null,
-      },
+      unit: { id: `u-${id}`, members: [artwork.id, lettering.id] },
       blocks: [lettering, artwork],
     }
   }
@@ -142,16 +137,20 @@ describe('which body the statistics count', () => {
     name: 'p',
     width: 1200,
     height: 1700,
-    translationUnits: said.map((s) => s.unit),
-    readingOrder: said.map((s) => s.unit.id),
-    readingEdges: [],
+    ledgers: {
+      [FACE]: {
+        units: said.map((s) => s.unit),
+        readingOrder: said.map((s) => s.unit.id),
+        readingEdges: [],
+      },
+    },
     layers: said.flatMap((s) => s.blocks),
   }
 
   it('reads the side it was asked about and not the other one', () => {
-    expect(bucketObjectsOf('001.png', page, 'translation').map((o) => o.style.fontSizePx)).toEqual([
-      20, 20,
-    ])
+    expect(
+      bucketObjectsOf('001.png', page, 'translation', FACE).map((o) => o.style.fontSizePx),
+    ).toEqual([20, 20])
   })
 
   /**
@@ -160,13 +159,18 @@ describe('which body the statistics count', () => {
    * would invite somebody to overwrite a measurement with a fashion.
    */
   it('has no pool for the source at all', () => {
-    expect(bucketObjectsOf('001.png', page, 'source')).toEqual([])
+    expect(bucketObjectsOf('001.png', page, 'source', FACE)).toEqual([])
   })
 
   /** Which is what makes one page two different statistics, asked one side at a time. */
   it('gives the two sides two different answers about the same objects', () => {
-    const asked = (side: TextSide) => bucketObjectsOf('001.png', page, side).length
+    const asked = (side: TextSide) => bucketObjectsOf('001.png', page, side, FACE).length
     expect(asked('translation')).toBe(2)
     expect(asked('source')).toBe(0)
+  })
+
+  /** ⚠️ Another face's lettering is not this face's pool, however it is styled. */
+  it('counts only the face it was asked about', () => {
+    expect(bucketObjectsOf('001.png', page, 'translation', 'other')).toEqual([])
   })
 })

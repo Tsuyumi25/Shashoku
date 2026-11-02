@@ -11,7 +11,7 @@ import { maskPixels } from '@/lib/selection/fill'
 import { isEmptyRect, type Rect } from '@/lib/selection/rect'
 import { rasterJournal, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
-import { useProjectStore, type RemovedEntry } from '@/stores/projectStore'
+import { useProjectStore, type PageSnapshot } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
@@ -161,7 +161,7 @@ export function useSelectionPixels() {
       alphaLocked: false,
     }
 
-    let removed: RemovedEntry | null = null
+    let removed: PageSnapshot | null = null
     editor.pushCommand({
       label: `lift-selection ${id}`,
       do: () => {

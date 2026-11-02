@@ -30,31 +30,51 @@ export interface TranslationCandidateView {
   text: string;
   /** A person wrote or corrected this one; it may never be edited, only appended after. */
   human: boolean;
-  /** Where the slot points today. */
+  /** Where this block's slot points today. */
   chosen: boolean;
   /** Which client proposed it — clientInfo stamped by the server, display only. */
   source?: string;
 }
 
-export interface TranslationTexts {
+/**
+ * One block of lettering a sentence is set in, named only where there are
+ * several: a sentence set in one block is addressed by the sentence's own id,
+ * and listing its single block again would be two names for one thing.
+ */
+export interface BlockTexts {
+  id: string;
+  /** What this block reads as today — its slot resolved, its own words otherwise. */
+  text: string;
+  candidates: TranslationCandidateView[];
+}
+
+export interface SentenceTexts {
   id: string;
   /** Resolved source text, or null where no reading names what the artwork says. */
   source: string | null;
-  /** What this reads as today — the slot resolved, the blocks' own words otherwise. */
+  /** What the whole sentence reads as today, its blocks joined as they are read. */
   translation: string;
   /**
-   * How many blocks of lettering the translation is set in. One is the ordinary
-   * case; more means a sound was split across the artwork, and a proposal has to
-   * carry that many pieces to be choosable.
+   * The blocks of lettering, only where the sentence is set in more than one.
+   * Writes then address a block rather than the sentence, since no candidate
+   * can speak for a stretch of lettering no block shows.
    */
-  blocks: number;
+  blocks?: BlockTexts[];
+  /** The one block's drawer, where the sentence is set in one block. */
   candidates: TranslationCandidateView[];
+}
+
+/** One face's reading of a page: its name as the person set it, and its sentences. */
+export interface FaceTexts {
+  faceId: string;
+  name: string;
+  sentences: SentenceTexts[];
 }
 
 export interface PageTexts {
   pageId: string;
   badge: PageBadge;
-  objects: TranslationTexts[];
+  faces: FaceTexts[];
 }
 
 export interface GetTextsParams {
@@ -62,17 +82,17 @@ export interface GetTextsParams {
   pageIds?: string[];
 }
 
+/**
+ * What a write names: a block of lettering, or a sentence standing for its one
+ * block. A sentence set in several is refused rather than resolved, since
+ * nothing says which of its blocks the words were meant for.
+ */
 export interface ProposeItem {
   pageId: string;
-  unitId: string;
-  /** The whole translation, one line per array entry. */
-  lines?: string[];
-  /**
-   * The translation already cut into blocks, one array of lines each — what a
-   * translation set in several blocks needs to be choosable.
-   */
-  pieces?: string[][];
-  /** Point the object at the new candidate whatever it reads as now. */
+  objectId: string;
+  /** The translation of that one block, one line per array entry. */
+  lines: string[];
+  /** Point the block at the new candidate whatever it reads as now. */
   choose?: boolean;
 }
 
@@ -83,12 +103,12 @@ export interface ProposeParams {
 }
 
 export type ProposeOutcome =
-  | { pageId: string; unitId: string; ok: true; translationId: string; filledSlot: boolean }
-  | { pageId: string; unitId: string; ok: false; reason: string };
+  | { pageId: string; objectId: string; ok: true; translationId: string; filledSlot: boolean }
+  | { pageId: string; objectId: string; ok: false; reason: string };
 
 export interface ChooseItem {
   pageId: string;
-  unitId: string;
+  objectId: string;
   translationId: string;
 }
 

@@ -169,8 +169,8 @@ function onApplyToSelection() {
 /** How many translations in the chapter carry each tag, registered or not. */
 const counts = computed(() => {
   const tally = new Map<string, number>()
-  for (const { unit } of project.allUnits()) {
-    for (const tag of unit.tags) tally.set(tag, (tally.get(tag) ?? 0) + 1)
+  for (const { tags } of project.allUnits()) {
+    for (const tag of tags) tally.set(tag, (tally.get(tag) ?? 0) + 1)
   }
   return tally
 })

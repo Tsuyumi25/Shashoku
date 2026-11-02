@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { outputFilename, profileFolderName } from '@shared/export/profile'
+import type { ExportProfile } from '@shared/export/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage } from '@/lib/pageComposite'
 import { encodePage } from '@/lib/pageEncode'
@@ -173,17 +174,26 @@ export const useExportStore = defineStore('export', () => {
         if (abandoned) return stop(written, '已取消')
         if (file.badge !== 'ok') return stop(written, `${file.page.name}:頁面無法讀取`)
 
-        let page: OffscreenCanvas
+        const faceOf = (profile: ExportProfile) =>
+          profile.face !== undefined && project.faceIds.includes(profile.face) ? profile.face : project.activeFace
+        const composites = new Map<string, OffscreenCanvas>()
         try {
-          page = await compositePage({
-            page: file.page,
-            loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
-          })
+          for (const face of new Set(profiles.map(faceOf))) {
+            composites.set(
+              face,
+              await compositePage({
+                page: file.page,
+                face,
+                loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
+              }),
+            )
+          }
         } catch (err) {
           return stop(written, `${file.page.name}:${messageOf(err)}`)
         }
 
         for (const profile of profiles) {
+          const page = composites.get(faceOf(profile))!
           if (abandoned) return stop(written, '已取消')
           const folder = profileFolderName(profile)
           try {

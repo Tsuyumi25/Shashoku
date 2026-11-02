@@ -1,117 +1,148 @@
 import type {
   LayerEntry,
+  Ledger,
   ManifestJson,
   SourceTextLayerEntry,
   TextLayerEntry,
+  TranslationCandidate,
   TranslationTextLayerEntry,
   TranslationUnit,
-  TranslationUnitSide,
 } from './types'
+import type { ReadingEdge } from './readingGraph'
 import type { TextSide } from './text'
 import { linesOf } from './text'
-import { escapeText, plainOf } from './markup'
+import { plainOf } from './markup'
+import { normalizeTagSet } from '../tags/set'
 import { textObjects } from './tree'
 
 /**
- * Which of a translation's two sides the interface is working on.
- *
- * Every surface that shows text, position, angle or style agrees about this, so
- * switching it switches all of them at once — and a caret can never open on one
- * side while the words under it come from the other.
- *
- * ⚠️ The compositor is not one of those surfaces. What a page exports as is
- * always the translation, whatever the interface happens to be showing.
+ * What stands between the blocks of one sentence when it is read as one
+ * stretch. A slash rather than nothing: the blocks were set apart on purpose,
+ * and reading them as one run of text would claim a sentence the page does not
+ * hold. Language-neutral, which a space or no space is not.
  */
-export function sideOf(unit: TranslationUnit, side: TextSide): TranslationUnitSide {
-  return side === 'source' ? unit.source : unit.translation
+export const BLOCK_JOINER = '/'
+
+export function emptyLedger(): Ledger {
+  return { units: [], readingOrder: [], readingEdges: [] }
 }
 
-/** The blocks on one side, in reading order, skipping any the page has lost. */
-export function blocksOf(
-  layers: readonly LayerEntry[],
-  unit: TranslationUnit,
-  side: TextSide,
-): TextLayerEntry[] {
-  const byId = new Map(textObjects(layers).map((t) => [t.id, t]))
+/**
+ * A page as one translation face reads it: the shared tree, and that face's
+ * ledger.
+ *
+ * The ledger fields read and write straight through to the manifest, so code
+ * that reassigns `page.readingOrder` is writing the face's ledger and nothing
+ * else.
+ */
+export interface FacePage {
+  readonly face: string
+  layers: LayerEntry[]
+  units: TranslationUnit[]
+  readingOrder: string[]
+  readingEdges: ReadingEdge[]
+}
+
+export function facePage(manifest: ManifestJson, face: string): FacePage {
+  const ledger = (): Ledger => (manifest.ledgers[face] ??= emptyLedger())
+  return {
+    face,
+    get layers() {
+      return manifest.layers
+    },
+    set layers(v) {
+      manifest.layers = v
+    },
+    get units() {
+      return ledger().units
+    },
+    set units(v) {
+      ledger().units = v
+    },
+    get readingOrder() {
+      return ledger().readingOrder
+    },
+    set readingOrder(v) {
+      ledger().readingOrder = v
+    },
+    get readingEdges() {
+      return ledger().readingEdges
+    },
+    set readingEdges(v) {
+      ledger().readingEdges = v
+    },
+  }
+}
+
+/** Whether a block is on the side being shown, a translation block counting only for its own face. */
+export function isOnView(block: TextLayerEntry, side: TextSide, face: string): boolean {
+  return block.side === side && (block.side === 'source' || block.face === face)
+}
+
+/** The blocks of one side of a sentence, in the order it is read, skipping any the page has lost. */
+export function blocksOf(page: FacePage, unit: TranslationUnit, side: TextSide): TextLayerEntry[] {
+  const byId = new Map(textObjects(page.layers).map((t) => [t.id, t]))
   const out: TextLayerEntry[] = []
-  for (const id of sideOf(unit, side).members) {
+  for (const id of unit.members) {
     const entry = byId.get(id)
-    if (entry?.side === side) out.push(entry)
+    if (entry !== undefined && isOnView(entry, side, page.face)) out.push(entry)
   }
   return out
 }
 
-export function sourceBlocksOf(
-  layers: readonly LayerEntry[],
-  unit: TranslationUnit,
-): SourceTextLayerEntry[] {
-  return blocksOf(layers, unit, 'source') as SourceTextLayerEntry[]
+export function sourceBlocksOf(page: FacePage, unit: TranslationUnit): SourceTextLayerEntry[] {
+  return blocksOf(page, unit, 'source') as SourceTextLayerEntry[]
 }
 
-export function translationBlocksOf(
-  layers: readonly LayerEntry[],
-  unit: TranslationUnit,
-): TranslationTextLayerEntry[] {
-  return blocksOf(layers, unit, 'translation') as TranslationTextLayerEntry[]
+export function translationBlocksOf(page: FacePage, unit: TranslationUnit): TranslationTextLayerEntry[] {
+  return blocksOf(page, unit, 'translation') as TranslationTextLayerEntry[]
 }
 
-/** Only the blocks of one side, in tree order — which is stacking order. */
-export function blocksOnSide(layers: readonly LayerEntry[], side: TextSide): TextLayerEntry[] {
-  return textObjects(layers).filter((t) => t.side === side)
+/** Only the blocks of one side, a translation side meaning one face's, in tree order — which is stacking order. */
+export function blocksOnSide(layers: readonly LayerEntry[], side: TextSide, face: string): TextLayerEntry[] {
+  return textObjects(layers).filter((t) => isOnView(t, side, face))
 }
 
 export interface UnitPlace {
   unit: TranslationUnit
   side: TextSide
-  /** Which of that side's members this is, counting from zero. */
-  at: number
 }
 
 /**
- * Which translation a block belongs to, and where in it.
+ * Which sentence of this face a block belongs to.
  *
- * A block belongs to exactly one side of exactly one unit, so the answer is
- * unambiguous when the page holds together, and absent when it does not — the
- * repair layer is what makes the first true, and nothing here guesses.
+ * A source block belongs to exactly one unit of every ledger and a translation
+ * block to exactly one of its own face's, so the answer is unambiguous when the
+ * page holds together, and absent when it does not — or when the block is
+ * another face's.
  */
-export function placeOfBlock(manifest: ManifestJson, blockId: string): UnitPlace | undefined {
-  for (const unit of manifest.translationUnits) {
-    const source = unit.source.members.indexOf(blockId)
-    if (source !== -1) return { unit, side: 'source', at: source }
-    const translation = unit.translation.members.indexOf(blockId)
-    if (translation !== -1) return { unit, side: 'translation', at: translation }
-  }
-  return undefined
+export function placeOfBlock(page: FacePage, blockId: string): UnitPlace | undefined {
+  const block = textObjects(page.layers).find((t) => t.id === blockId)
+  if (block === undefined || (block.side === 'translation' && block.face !== page.face)) return undefined
+  const unit = page.units.find((u) => u.members.includes(blockId))
+  return unit === undefined ? undefined : { unit, side: block.side }
 }
 
-export function unitOfBlock(
-  manifest: ManifestJson,
-  blockId: string,
-): TranslationUnit | undefined {
-  return placeOfBlock(manifest, blockId)?.unit
+export function unitOfBlock(page: FacePage, blockId: string): TranslationUnit | undefined {
+  return placeOfBlock(page, blockId)?.unit
 }
 
-export function findUnit(
-  manifest: ManifestJson,
-  id: string,
-): TranslationUnit | undefined {
-  return manifest.translationUnits.find((u) => u.id === id)
+export function findUnit(page: FacePage, id: string): TranslationUnit | undefined {
+  return page.units.find((u) => u.id === id)
 }
 
 /**
- * The page as a reader meets it.
+ * The page as a reader of this face meets it.
  *
- * Built from `readingOrder` alone. A unit the order does not name is absent from
- * the answer rather than recovered from where its blocks sit in the tree: a
- * fallback is how an order someone set reverts to stacking order without ever
- * saying so. Keeping the two in step is the repair layer's job, done once on the
- * way in.
+ * Built from `readingOrder` alone. A unit the order does not name is absent
+ * rather than recovered from where its blocks sit in the tree: a fallback is how
+ * an order someone set reverts to stacking order without ever saying so.
  */
-export function unitsInReadingOrder(manifest: ManifestJson): TranslationUnit[] {
-  const byId = new Map(manifest.translationUnits.map((u) => [u.id, u]))
+export function unitsInReadingOrder(page: FacePage): TranslationUnit[] {
+  const byId = new Map(page.units.map((u) => [u.id, u]))
   const out: TranslationUnit[] = []
   const seen = new Set<string>()
-  for (const id of manifest.readingOrder) {
+  for (const id of page.readingOrder) {
     if (seen.has(id)) continue
     const unit = byId.get(id)
     if (unit === undefined) continue
@@ -121,20 +152,11 @@ export function unitsInReadingOrder(manifest: ManifestJson): TranslationUnit[] {
   return out
 }
 
-/**
- * What one block of the translation side reads as.
- *
- * ⭐ The one place a chosen candidate is resolved, which is what keeps picking
- * one from overwriting anything: the words in the block stay exactly as typed,
- * and emptying the slot brings them back.
- *
- * A slot naming a candidate the pool no longer holds, or one that no longer has
- * a piece for this position, reads as the block's own words — showing nothing
- * would lose them to a dangling pointer.
- */
-export function linesAt(unit: TranslationUnit, at: number, own: readonly string[]): readonly string[] {
-  if (unit.chosen === null) return own
-  return unit.candidates.find((c) => c.id === unit.chosen)?.pieces[at] ?? own
+/** The candidate a block reads as, or null for its own lines — a slot naming one that is gone reads as its own. */
+export function chosenCandidateOf(block: TranslationTextLayerEntry): TranslationCandidate | null {
+  const { chosen, candidates } = block.body
+  if (chosen === null) return null
+  return candidates.find((c) => c.id === chosen) ?? null
 }
 
 /**
@@ -143,16 +165,10 @@ export function linesAt(unit: TranslationUnit, at: number, own: readonly string[
  * ⭐ Every surface that draws lettering goes through here — the canvas, the
  * export compositor, the thumbnail's identity — so a chosen candidate cannot be
  * showing on one of them and not another.
- *
- * A source block says its own words and nothing else, which is the last
- * asymmetry between the two sides: nobody proposes readings of the artwork.
  */
-export function shownCodeOf(manifest: ManifestJson, block: TextLayerEntry): string {
+export function shownCodeOf(block: TextLayerEntry): string {
   if (block.side === 'source') return block.body.lines.join('\n')
-  const place = placeOfBlock(manifest, block.id)
-  const lines =
-    place === undefined ? block.body.lines : linesAt(place.unit, place.at, block.body.lines)
-  return lines.join('\n')
+  return (chosenCandidateOf(block)?.lines ?? block.body.lines).join('\n')
 }
 
 /**
@@ -163,87 +179,46 @@ export function shownCodeOf(manifest: ManifestJson, block: TextLayerEntry): stri
  * again, and a block whose markup swallows a newline has fewer lines than it
  * stores.
  */
-export function shownLinesOf(
-  manifest: ManifestJson,
-  block: TextLayerEntry,
-): readonly string[] {
-  return linesOf(plainOf(shownCodeOf(manifest, block)))
+export function shownLinesOf(block: TextLayerEntry): readonly string[] {
+  return linesOf(plainOf(shownCodeOf(block)))
 }
 
 /**
- * One side read as a single stretch of text: every block in order, with what
- * the person put between them.
- *
- * ⭐ Worked out every time and never written down. Moving a block, turning it or
- * restacking it cannot change this, because none of those touch anything it
- * reads — only the words, the order of the blocks, and the separators can.
+ * One side read as a single stretch: every block in reading order, joined by
+ * `BLOCK_JOINER`. Worked out every time and never written down.
  */
-export function projectionOf(
-  layers: readonly LayerEntry[],
-  unit: TranslationUnit,
-  side: TextSide,
-): string {
-  const read = blocksOf(layers, unit, side).map((block, at) => {
-    const code = block.side === 'translation' ? linesAt(unit, at, block.body.lines) : block.body.lines
-    return linesOf(plainOf(code.join('\n')))
-  })
-  return joinPieces(read, sideOf(unit, side).separators)
+export function projectionOf(page: FacePage, unit: TranslationUnit, side: TextSide): string {
+  return blocksOf(page, unit, side)
+    .map((block) => plainOf(shownCodeOf(block)))
+    .join(BLOCK_JOINER)
+}
+
+/** The same stretch with its markup still on, which is what an agent reads. */
+export function projectionCodeOf(page: FacePage, unit: TranslationUnit, side: TextSide): string {
+  return blocksOf(page, unit, side).map(shownCodeOf).join(BLOCK_JOINER)
 }
 
 /**
- * The same stretch with its markup still on, which is what an agent reads and
- * writes. The separators belong to the page rather than to any body, so they
- * are escaped on the way in — a separator holding a `<` is text, not a tag.
+ * Whether a sentence reads as nothing at all in this face — which is not the
+ * same as having typed nothing into it: a block reading a candidate is
+ * translated.
  */
-export function projectionCodeOf(
-  layers: readonly LayerEntry[],
-  unit: TranslationUnit,
-  side: TextSide,
-): string {
-  const code = blocksOf(layers, unit, side).map((block, at) =>
-    block.side === 'translation' ? linesAt(unit, at, block.body.lines) : block.body.lines,
-  )
-  return joinPieces(code, sideOf(unit, side).separators.map(escapeText))
+export function isUntranslated(page: FacePage, unit: TranslationUnit): boolean {
+  return translationBlocksOf(page, unit).every((block) => plainOf(shownCodeOf(block)).trim() === '')
 }
 
-/**
- * Blocks of lines read as one stretch. Shared by what the page holds and by what
- * a candidate proposes, so a proposal and the thing it would replace are always
- * shown put together the same way.
- */
-export function joinPieces(
-  pieces: readonly (readonly string[])[],
-  separators: readonly string[],
-): string {
-  return pieces
-    .map((lines) => lines.join('\n'))
-    .reduce((text, piece, at) => (at === 0 ? piece : text + (separators[at - 1] ?? '') + piece), '')
+/** A sentence holding one block a side, which is what an ordinary balloon is. */
+export function isSingleton(page: FacePage, unit: TranslationUnit): boolean {
+  return blocksOf(page, unit, 'source').length === 1 && blocksOf(page, unit, 'translation').length === 1
 }
 
-/**
- * Whether a translation reads as nothing at all — which is not the same as
- * having typed nothing into it. A unit whose blocks hold no words but whose slot
- * holds a candidate with text is translated, and every display saying otherwise
- * is reading past the resolution above.
- */
-export function isUntranslated(layers: readonly LayerEntry[], unit: TranslationUnit): boolean {
-  return projectionOf(layers, unit, 'translation').length === 0
+/** What a sentence means: the tags of every block of the artwork it holds, together. */
+export function tagsOfUnit(page: FacePage, unit: TranslationUnit): string[] {
+  return normalizeTagSet(sourceBlocksOf(page, unit).flatMap((block) => block.body.tags))
 }
 
-/**
- * Whether a candidate can be pointed at as this unit's reading.
- *
- * ⚠️ One piece per block, and nothing here makes that true — a candidate
- * proposing a different number of blocks is a request to typeset the sentence
- * differently, which is a decision about the artwork that no pool entry gets to
- * make on its own.
- */
-export function candidateFits(unit: TranslationUnit, candidateId: string): boolean {
-  const candidate = unit.candidates.find((c) => c.id === candidateId)
-  return candidate !== undefined && candidate.pieces.length === unit.translation.members.length
-}
-
-/** A unit holding one block a side, which is what an ordinary balloon is. */
-export function isSingleton(unit: TranslationUnit): boolean {
-  return unit.source.members.length === 1 && unit.translation.members.length === 1
+/** What the sentence a block belongs to in this face means; nothing for a block in none. */
+export function tagsOfBlock(page: FacePage, blockId: string): string[] {
+  const unit = unitOfBlock(page, blockId)
+  return unit === undefined ? [] : tagsOfUnit(page, unit)
 }

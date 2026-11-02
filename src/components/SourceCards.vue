@@ -227,7 +227,7 @@ const file = computed(() =>
 const pool = computed<readonly OcrCandidatePersisted[]>(() => file.value?.ocr.candidates ?? [])
 
 const objects = computed(() =>
-  file.value ? (blocksOnSide(file.value.page.layers, 'source') as SourceTextLayerEntry[]) : [],
+  file.value ? (blocksOnSide(file.value.page.layers, 'source', project.activeFace) as SourceTextLayerEntry[]) : [],
 )
 
 /** How big the type on a card is, taken from the page rather than the project. */
@@ -245,7 +245,7 @@ const basePx = computed(() => (file.value ? typeSizeFor(file.value.page) : 12))
  * while the source is the side being worked on.
  */
 const objectTargets = computed(() =>
-  stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'source')).map(({ entry }) => {
+  stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'source', project.activeFace)).map(({ entry }) => {
     const body = entry.body
     // The reference treatment the canvas draws these with, halo included: the
     // frame a drop lands on has to be the frame a reader can see.

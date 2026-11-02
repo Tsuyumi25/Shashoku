@@ -82,7 +82,7 @@ function createMarkupSession(): MarkupSession {
     if (at === null) return null
     const page = project.pageById(at.pageId)?.page
     const block = project.blockById(at.pageId, at.labelId)
-    return page === undefined || block === undefined ? null : shownCodeOf(page, block)
+    return page === undefined || block === undefined ? null : shownCodeOf(block)
   })
 
   const markup = computed<Markup | null>(() =>

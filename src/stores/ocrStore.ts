@@ -239,7 +239,7 @@ export const useOcrStore = defineStore('ocr', () => {
    */
   function sourceBlocksOfPage(pageId: string): SourceTextLayerEntry[] {
     const page = useProjectStore().pageById(pageId)?.page
-    return page ? (blocksOnSide(page.layers, 'source') as SourceTextLayerEntry[]) : []
+    return page ? (blocksOnSide(page.layers, 'source', useProjectStore().activeFace) as SourceTextLayerEntry[]) : []
   }
 
   function settle(pageId: string) {

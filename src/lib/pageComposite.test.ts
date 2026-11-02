@@ -3,7 +3,7 @@ import { artworkSignature } from './pageComposite'
 import { pageStack } from '@shared/page/stack'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankTranslationBlock } from '@shared/page/schema'
 
 function raster(id: string, over: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
   return {
@@ -41,13 +41,13 @@ function folder(id: string, children: LayerEntry[], over: Partial<GroupLayerEntr
 }
 
 function text(id: string): TextLayerEntry {
-  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  const entry = blankTranslationBlock(id, 'f', DEFAULT_TEXT_STYLE)
   entry.body.lines = ['x']
   return entry
 }
 
 function sign(layers: LayerEntry[]): string {
-  return artworkSignature(pageStack(layers, 'translation'))
+  return artworkSignature(pageStack(layers, 'translation', 'f'))
 }
 
 describe('what the artwork composite would read', () => {

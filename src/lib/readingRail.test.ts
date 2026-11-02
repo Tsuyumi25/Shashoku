@@ -6,30 +6,25 @@ import { buildLabelRows, type LabelRow } from '@/lib/labelRows'
 import { laneOffset, railMarks, railWidth } from '@/lib/readingRail'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+
+const FACE = 'f'
 
 function text(id: string): TextLayerEntry {
-  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  const entry = blankTranslationBlock(id, FACE, DEFAULT_TEXT_STYLE)
   entry.body.lines = [id]
   return entry
 }
 
 function sourceText(id: string): TextLayerEntry {
-  return blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+  return blankSourceBlock(`${id}s`, DEFAULT_TEXT_STYLE)
 }
 
 /** One page, given as the ids it holds and the lines drawn across it. */
 function page(ids: string, drawn: string[] = []): LabelRow[] {
   const order = ids.split(' ')
   const layers: LayerEntry[] = order.flatMap((id) => [text(id), sourceText(id)])
-  const units = order.map((id) => ({
-    id,
-    tags: [],
-    source: { members: [`${id}s`], separators: [] },
-    translation: { members: [id], separators: [] },
-    candidates: [],
-    chosen: null,
-  }))
+  const units = order.map((id) => ({ id, members: [`${id}s`, id] }))
   const file: ProjectFile = {
     pageId: '001.png',
     pageDir: '/p/001.png',
@@ -41,16 +36,20 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
       name: 'p',
       width: 1200,
       height: 1700,
-      translationUnits: units,
-      readingOrder: order,
-      readingEdges: drawn.map((pair) => {
-        const [from, to] = pair.split('>')
-        return { from, to }
-      }),
+      ledgers: {
+        [FACE]: {
+          units,
+          readingOrder: order,
+          readingEdges: drawn.map((pair) => {
+            const [from, to] = pair.split('>')
+            return { from, to }
+          }),
+        },
+      },
       layers,
     },
   }
-  return buildLabelRows([file], 'translation').filter(
+  return buildLabelRows([file], 'translation', FACE).filter(
     (row): row is LabelRow => row.kind === 'label',
   )
 }

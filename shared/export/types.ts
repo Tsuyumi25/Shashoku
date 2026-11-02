@@ -65,6 +65,11 @@ export interface ExportProfile {
   /** Ceiling per file in bytes, or null for whatever it comes out at. */
   maxBytes: number | null;
   naming: NamingRule;
+  /**
+   * Which face's lettering this delivers. Absent, or naming a face the book no
+   * longer has, means the one being worked on when the export runs.
+   */
+  face?: string;
 }
 
 export function defaultNamingRule(): NamingRule {

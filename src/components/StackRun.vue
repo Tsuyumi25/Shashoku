@@ -171,7 +171,7 @@ const effectedRasters = computed(() => {
  */
 function codeShown(entry: TextLayerEntry): string {
   const page = project.pageById(editor.currentPageId ?? '')?.page
-  return page === undefined ? entry.body.lines.join('\n') : shownCodeOf(page, entry)
+  return page === undefined ? entry.body.lines.join('\n') : shownCodeOf(entry)
 }
 
 const drawnTexts = computed(() => {

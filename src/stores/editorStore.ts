@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, toRaw } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import type {
   GroupLayerEntry,
@@ -16,19 +16,26 @@ import { useCardStore } from '@/stores/cardStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import {
   useProjectStore,
+  type FaceState,
   type PageStructure,
-  type RemovedEntry,
-  type RemovedTranslation,
   type TranslationParts,
 } from '@/stores/projectStore'
 import { clamp } from '@/lib/coords'
-import { blankTranslation, emptyBody, generateId as generateLabelId } from '@shared/page/schema'
+import { blankTranslation, generateId as generateLabelId } from '@shared/page/schema'
 import { linesOf, type TextSide } from '@shared/page/text'
-import { blocksOf, shownCodeOf, sideOf } from '@shared/page/units'
+import {
+  blocksOf,
+  chosenCandidateOf,
+  facePage,
+  shownCodeOf,
+  sourceBlocksOf,
+  tagsOfUnit,
+  type FacePage,
+} from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
-import type { ManifestJson } from '@shared/page/types'
+import type { ManifestJson, TranslationTextLayerEntry } from '@shared/page/types'
 import { allEntries, findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
-import { detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
+import { adoptSources, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
@@ -494,7 +501,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** The label list as it is being shown, filter and all. */
   function shownRows(): ChapterRow[] {
-    return buildLabelRows(useProjectStore().files, textSide.value, labelQuery.value)
+    return buildLabelRows(useProjectStore().files, textSide.value, useProjectStore().activeFace, labelQuery.value)
   }
 
   /**
@@ -561,7 +568,8 @@ export const useEditorStore = defineStore('editor', () => {
     const units = new Map<string, readonly string[]>()
     for (const { pageId, entry } of targets) {
       const unit = project.placeOf(pageId, entry.id)?.unit
-      if (unit) units.set(unit.id, unit.tags)
+      const view = project.viewOf(pageId)
+      if (unit && view) units.set(`${pageId}\u0000${unit.id}`, tagsOfUnit(view, unit))
     }
     return {
       objects: targets.length,
@@ -825,7 +833,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!currentPageId.value) return
     const file = project.pageById(currentPageId.value)
     if (!file) return
-    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value, textSide.value)
+    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value, textSide.value, project.activeFace)
     if (rows.length === 0) return
     const index = rows.findIndex((r) => r.entry.id === cursorId.value)
     if (index === -1) {
@@ -887,7 +895,7 @@ export const useEditorStore = defineStore('editor', () => {
     const label = project.blockById(pending.pageId, pending.labelId)
     return page === undefined || label === undefined
       ? undefined
-      : shownCodeOf(page, label)
+      : shownCodeOf(label)
   }
 
   /**
@@ -974,7 +982,7 @@ export const useEditorStore = defineStore('editor', () => {
     const manifest = project.pageById(page)?.page
     const label = project.blockById(page, id)
     if (!label || !manifest) return
-    beginTextEdit(page, id, shownCodeOf(manifest, label))
+    beginTextEdit(page, id, shownCodeOf(label))
   }
 
   /**
@@ -1372,41 +1380,62 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
-  function cmdAddLabel(pageId: string, parts: TranslationParts): string | null {
+  /**
+   * A step that changes which blocks pages have or which sentences they make,
+   * recorded as each page's structure before and after. The first run does the
+   * work; a redo writes the after back, since running the work again would
+   * mint new ids for what the steps above it already name.
+   */
+  function cmdReshapePages(label: string, pageIds: readonly string[], mutate: () => boolean | void): boolean {
     const project = useProjectStore()
-    let removed: RemovedTranslation | undefined
-    pushCommand({
-      label: `add-label ${parts.unit.id}`,
-      do: () =>
-        project.addLabel(
-          pageId,
-          removed === undefined ? parts : { unit: removed.unit, blocks: removed.blocks.map((b) => b.entry) },
-          removed && {
-            paths: removed.blocks.map((b) => b.path),
-            orderIndex: removed.orderIndex,
-            edges: removed.edges,
-          },
-        ),
+    const snap = () => new Map(pageIds.flatMap((p) => {
+      const s = project.structureOf(p)
+      return s === undefined ? [] : [[p, s] as const]
+    }))
+    let before: Map<string, PageStructure> | undefined
+    let after: Map<string, PageStructure> | undefined
+    return pushCommand({
+      label,
+      do: () => {
+        if (after !== undefined) {
+          for (const [p, s] of after) project.setPageStructure(p, s)
+          return
+        }
+        before = snap()
+        if (before.size === 0 || mutate() === false) return false
+        after = snap()
+      },
       undo: () => {
-        removed = project.deleteLabel(pageId, parts.unit.id) ?? undefined
+        for (const [p, s] of before ?? []) project.setPageStructure(p, s)
       },
     })
-    const first = parts.blocks.find((b) => b.side === textSide.value) ?? parts.blocks[0]
+  }
+
+  function cmdReshape(label: string, pageId: string, mutate: () => boolean | void): boolean {
+    return cmdReshapePages(label, [pageId], mutate)
+  }
+
+  function cmdAddLabel(pageId: string, parts: TranslationParts): string | null {
+    const project = useProjectStore()
+    const unitId = parts.units[project.activeFace]?.id ?? ''
+    if (!cmdReshape(`add-label ${unitId}`, pageId, () => project.addLabel(pageId, parts))) return null
+    const first =
+      parts.blocks.find((b) => b.side === textSide.value && (b.side === 'source' || b.face === project.activeFace)) ??
+      parts.blocks[0]
     if (!first) return null
     selectOnly(first.id)
     return first.id
   }
 
   /**
-   * A new label is empty on both sides. It is placed where the pointer asked on
-   * the side being worked on, and at the same place on the other — nothing has
-   * been measured about either, so starting them apart would be inventing a
-   * difference.
+   * A new label is empty on every side and in every face. It is placed where the
+   * pointer asked, the same on all of them — nothing has been measured about
+   * any, so starting them apart would be inventing a difference.
    */
   function addLabelAt(x: number, y: number): string | null {
     const project = useProjectStore()
     if (!currentPageId.value) return null
-    const parts = blankTranslation(project.header.seedStyle, generateLabelId)
+    const parts = blankTranslation(project.header.seedStyle, project.faceIds, generateLabelId)
     for (const block of parts.blocks) {
       block.body.x = x
       block.body.y = y
@@ -1452,49 +1481,32 @@ export const useEditorStore = defineStore('editor', () => {
     const born = verdict.spawns.map((spawn) => {
       const style = measuredStyle(seed, spawn)
       const read = sourceStyle(seed, spawn, page)
-      const parts = blankTranslation(style, generateLabelId)
-      const [sourceBlock, translationBlock] = parts.blocks
-      sourceBlock.body = {
-        ...emptyBody(read),
-        by: 'auto',
-        lines: linesOf(escapeText(spawn.text)),
-        from: spawn.from,
-      }
+      const parts = blankTranslation(style, project.faceIds, generateLabelId)
       // Placed by where the reading was, which is the middle of the balloon.
       const source = anchorFor(read, spawn.centre)
       const translation = anchorFor(style, spawn.centre)
-      sourceBlock.body.x = source.x
-      sourceBlock.body.y = source.y
-      translationBlock.body.x = translation.x
-      translationBlock.body.y = translation.y
+      for (const block of parts.blocks) {
+        if (block.side === 'source') {
+          block.body = {
+            ...block.body,
+            style: read,
+            by: 'auto',
+            lines: linesOf(escapeText(spawn.text)),
+            from: spawn.from,
+            x: source.x,
+            y: source.y,
+          }
+        } else {
+          block.body.x = translation.x
+          block.body.y = translation.y
+        }
+      }
       return parts
     })
 
-    const removed = new Map<string, RemovedTranslation>()
-    pushCommand({
-      label: `recognize ${pageId}`,
-      do: () => {
-        for (const [id, source] of after) project.setLabelSource(pageId, id, source)
-        for (const parts of born) {
-          const back = removed.get(parts.unit.id)
-          project.addLabel(
-            pageId,
-            back === undefined ? parts : { unit: back.unit, blocks: back.blocks.map((b) => b.entry) },
-            back && {
-              paths: back.blocks.map((b) => b.path),
-              orderIndex: back.orderIndex,
-              edges: back.edges,
-            },
-          )
-        }
-      },
-      undo: () => {
-        for (const parts of born) {
-          const back = project.deleteLabel(pageId, parts.unit.id)
-          if (back) removed.set(parts.unit.id, back)
-        }
-        for (const [id, source] of before) project.setLabelSource(pageId, id, source)
-      },
+    cmdReshape(`recognize ${pageId}`, pageId, () => {
+      for (const [id, source] of after) project.setLabelSource(pageId, id, source)
+      for (const parts of born) project.addLabel(pageId, parts)
     })
   }
 
@@ -1607,21 +1619,26 @@ export const useEditorStore = defineStore('editor', () => {
     if (!page) return
     const style = measuredStyle(project.header.seedStyle, measured)
     const read = sourceStyle(project.header.seedStyle, measured, page)
-    const parts = blankTranslation(style, generateLabelId)
-    const [sourceBlock, translationBlock] = parts.blocks
-    sourceBlock.body = {
-      ...emptyBody(read),
-      by: 'auto',
-      lines: linesOf(escapeText(reading.text)),
-      from: reading.hash,
-    }
+    const parts = blankTranslation(style, project.faceIds, generateLabelId)
     // Placed by its middle, as a run's own blocks are.
     const source = anchorFor(read, at)
     const translation = anchorFor(style, at)
-    sourceBlock.body.x = source.x
-    sourceBlock.body.y = source.y
-    translationBlock.body.x = translation.x
-    translationBlock.body.y = translation.y
+    for (const block of parts.blocks) {
+      if (block.side === 'source') {
+        block.body = {
+          ...block.body,
+          style: read,
+          by: 'auto',
+          lines: linesOf(escapeText(reading.text)),
+          from: reading.hash,
+          x: source.x,
+          y: source.y,
+        }
+      } else {
+        block.body.x = translation.x
+        block.body.y = translation.y
+      }
+    }
     cmdAddLabel(pageId, parts)
   }
 
@@ -1637,29 +1654,23 @@ export const useEditorStore = defineStore('editor', () => {
 
   /**
    * One regrouping as one step: the page's structure before and after, whole.
-   * The words a regrouping writes back (a chosen proposal settled into its
-   * blocks) and the blanks it adds or removes all live in that structure, so
-   * nothing it did can be left behind by an undo.
+   * The blanks a regrouping adds or removes live in that structure, so nothing
+   * it did can be left behind by an undo.
    */
-  function cmdRegroup(label: string, change: (page: ManifestJson) => boolean) {
+  function cmdRegroup(label: string, change: (page: FacePage) => boolean) {
     const at = selectedBlocksOnPage()
     if (!at) return
     commitTextEdit()
     const project = useProjectStore()
     const live = project.pageById(at.pageId)?.page
     if (!live) return
-    // The page is reactive; what is cloned has to be the plain object under it.
-    const page = toRaw(live)
-    const structure = (p: ManifestJson): PageStructure => ({
-      translationUnits: p.translationUnits,
-      readingOrder: p.readingOrder,
-      readingEdges: p.readingEdges,
-      layers: p.layers,
-    })
-    const before = structuredClone(structure(page))
-    const draft = structuredClone(page)
-    if (!change(draft)) return
-    const after = structuredClone(structure(draft))
+    // A JSON round trip rather than structuredClone, which refuses the proxies
+    // a live page holds.
+    const draft = JSON.parse(JSON.stringify(live)) as ManifestJson
+    const before = project.structureOf(at.pageId)!
+    if (!change(facePage(draft, project.activeFace))) return
+    adoptSources(draft, project.faceIds, generateLabelId, project.header.seedStyle)
+    const after: PageStructure = { ledgers: draft.ledgers, layers: draft.layers }
     pushCommand({
       label: `${label} ${at.ids.length}`,
       detail: { page: at.pageId, ids: at.ids },
@@ -1669,23 +1680,33 @@ export const useEditorStore = defineStore('editor', () => {
     selectedIds.value = new Set([...selectedIds.value].filter((id) => findTextObject(after.layers, id)))
   }
 
+  /**
+   * With other faces the artwork's words are theirs too, so a regroup here
+   * never takes them off the page.
+   */
+  function sharedSources(): boolean {
+    return useProjectStore().faceIds.length > 1
+  }
+
   /** Ctrl+L. See `shared/page/relink`. */
   function cmdLinkSelection() {
     const ids = selectedBlocksOnPage()?.ids ?? []
-    cmdRegroup('link', (page) => relink(page, ids, generateLabelId, useProjectStore().header.seedStyle))
+    const seed = useProjectStore().header.seedStyle
+    cmdRegroup('link', (page) => relink(page, ids, generateLabelId, seed, sharedSources()))
   }
 
   /** Ctrl+Shift+L. */
   function cmdDetachSelection() {
     const ids = selectedBlocksOnPage()?.ids ?? []
-    cmdRegroup('detach', (page) => detach(page, ids, generateLabelId, useProjectStore().header.seedStyle))
+    const seed = useProjectStore().header.seedStyle
+    cmdRegroup('detach', (page) => detach(page, ids, generateLabelId, seed, sharedSources()))
   }
 
   /** What Ctrl+L would do with the selection right now, for showing while Ctrl is held. */
   function linkPlan(): RelinkPlan {
     const at = selectedBlocksOnPage()
-    const page = at ? useProjectStore().pageById(at.pageId)?.page : undefined
-    return at && page ? planRelink(page, at.ids) : { kind: 'none' }
+    const view = at ? useProjectStore().viewOf(at.pageId) : undefined
+    return at && view ? planRelink(view, at.ids) : { kind: 'none' }
   }
 
   /**
@@ -1704,9 +1725,9 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const seed = project.header.seedStyle
     const style = { ...seed, ...gives.patch }
-    const parts = blankTranslation(seed, generateLabelId)
+    const parts = blankTranslation(seed, project.faceIds, generateLabelId)
     for (const block of parts.blocks) {
-      const own = block.side === side
+      const own = block.side === side && (block.side === 'source' || block.face === project.activeFace)
       const anchor = anchorFor(own ? style : seed, at)
       block.body.x = anchor.x
       block.body.y = anchor.y
@@ -1724,7 +1745,7 @@ export const useEditorStore = defineStore('editor', () => {
     const wanted = new Set(ids)
     const out: string[] = []
     for (const file of project.files) {
-      for (const id of file.page.readingOrder) if (wanted.has(id)) out.push(id)
+      for (const id of project.viewOf(file.pageId)?.readingOrder ?? []) if (wanted.has(id)) out.push(id)
     }
     return out
   }
@@ -1764,7 +1785,7 @@ export const useEditorStore = defineStore('editor', () => {
 
     const before = new Map<string, string[]>()
     for (const p of touched) {
-      before.set(p, [...(project.pageById(p)?.page.readingOrder ?? [])])
+      before.set(p, [...(project.viewOf(p)?.readingOrder ?? [])])
     }
 
     const wanted = new Set(moving)
@@ -1786,47 +1807,18 @@ export const useEditorStore = defineStore('editor', () => {
       [...orders].every(([p, order]) => order.join('\u0000') === before.get(p)?.join('\u0000'))
     if (settled) return
 
-    // Whole translations travel, blocks and all: a page holding one side of a
-    // translation and not the other is not a page anybody can work on.
-    let removed: Array<{ from: string; gone: RemovedTranslation }> = []
-    pushCommand({
-      label: `move-objects ${moving.length}`,
-      do: () => {
-        removed = incoming.flatMap((id) => {
-          const from = project.pageOfUnit(id)
-          if (from === null) return []
-          const gone = project.deleteLabel(from, id)
-          return gone === null ? [] : [{ from, gone }]
-        })
-        for (const { gone } of removed) {
-          project.addLabel(page, { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) })
-        }
-        // A line whose both ends made the same journey is still saying something
-        // true, so it travels with them. One that had an end left behind is not:
-        // ids only mean anything within a page, so there is nothing for it to
-        // point at any more, and dropping it is the honest answer.
-        const landed = new Set(removed.map((r) => r.gone.unit.id))
-        project.addReadingEdges(
-          page,
-          removed.flatMap((r) => r.gone.edges).filter((e) => landed.has(e.from) && landed.has(e.to)),
-        )
-        for (const [p, order] of orders) project.setReadingOrder(p, [...order])
-      },
-      undo: () => {
-        for (const { from, gone } of [...removed].reverse()) {
-          project.deleteLabel(page, gone.unit.id)
-          project.addLabel(
-            from,
-            { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) },
-            {
-              paths: gone.blocks.map((b) => b.path),
-              orderIndex: gone.orderIndex,
-              edges: gone.edges,
-            },
-          )
-        }
-        for (const [p, order] of before) project.setReadingOrder(p, [...order])
-      },
+    cmdReshapePages(`move-objects ${moving.length}`, [...touched], () => {
+      const leaving = new Map<string, string[]>()
+      for (const id of incoming) {
+        const from = project.pageOfUnit(id)
+        if (from !== null) leaving.set(from, [...(leaving.get(from) ?? []), id])
+      }
+      for (const [from, ids] of leaving) project.moveSentences(from, page, ids)
+      for (const [p, order] of orders) {
+        const now = project.viewOf(p)?.readingOrder ?? []
+        // What the move brought along besides the dragged rows reads after them.
+        project.setReadingOrder(p, [...order.filter((id) => now.includes(id)), ...now.filter((id) => !order.includes(id))])
+      }
     })
 
     // The canvas follows the cursor, and the cursor may have just emigrated.
@@ -1880,19 +1872,9 @@ export const useEditorStore = defineStore('editor', () => {
     const page = currentPageId.value
     const landing = page === null ? 0 : landingIndex(page, ids)
 
-    let removed: RemovedEntry[] = []
-    pushCommand({
-      label: `delete-selection ${ids.length}`,
-      do: () => {
-        removed = ids
-          .map((id) => project.removeEntry(id))
-          .filter((r): r is RemovedEntry => r !== null)
-      },
-      // Backwards, so each recorded path still means what it meant when the
-      // entry was taken out from under it.
-      undo: () => {
-        for (const r of [...removed].reverse()) project.restoreEntry(r)
-      },
+    const pages = [...new Set(ids.flatMap((id) => project.pageOfEntry(id) ?? []))]
+    cmdReshapePages(`delete-selection ${ids.length}`, pages, () => {
+      for (const id of ids) project.removeEntry(id)
     })
 
     if (page === null) {
@@ -1901,47 +1883,11 @@ export const useEditorStore = defineStore('editor', () => {
     }
     const left = project.labelsOf(page)
     const landed = left[Math.min(landing, left.length - 1)]
-    const file = project.pageById(page)
+    const view = project.viewOf(page)
     // The cursor stands on a block, so the translation that took the place is
     // resolved back down to the one being shown.
-    const block =
-      landed === undefined || file === undefined
-        ? undefined
-        : blocksOf(file.page.layers, landed, textSide.value)[0]
+    const block = landed === undefined || view === undefined ? undefined : blocksOf(view, landed, textSide.value)[0]
     selectOnly(block?.id ?? null)
-  }
-
-  
-  function cmdDuplicateLabel(
-    pageId: string,
-    parts: TranslationParts,
-    opts?: { alreadyApplied?: boolean },
-  ) {
-    const project = useProjectStore()
-    let removed: RemovedTranslation | undefined
-    pushCommand(
-      {
-        label: `duplicate-label ${parts.unit.id}`,
-        do: () =>
-          project.addLabel(
-            pageId,
-            removed === undefined
-              ? parts
-              : { unit: removed.unit, blocks: removed.blocks.map((b) => b.entry) },
-            removed && {
-              paths: removed.blocks.map((b) => b.path),
-              orderIndex: removed.orderIndex,
-              edges: removed.edges,
-            },
-          ),
-        undo: () => {
-          removed = project.deleteLabel(pageId, parts.unit.id) ?? undefined
-        },
-      },
-      opts,
-    )
-    const first = parts.blocks.find((b) => b.side === textSide.value) ?? parts.blocks[0]
-    if (first) selectOnly(first.id)
   }
 
 
@@ -2145,17 +2091,7 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function cmdAddRasterLayer(pageId: string, layer: RasterLayerEntry, path?: number[]) {
     const project = useProjectStore()
-    let removed: RemovedEntry | null = null
-    pushCommand({
-      label: `add-layer ${layer.id}`,
-      do: () => {
-        if (removed === null) project.addLayer(pageId, layer, path)
-        else project.restoreEntry(removed)
-      },
-      undo: () => {
-        removed = project.removeEntry(layer.id)
-      },
-    })
+    cmdReshape(`add-layer ${layer.id}`, pageId, () => project.addLayer(pageId, layer, path))
     selectOnly(layer.id)
   }
 
@@ -2260,9 +2196,11 @@ export const useEditorStore = defineStore('editor', () => {
    * is.
    */
   function isUnitLocked(pageId: string, unitId: string): boolean {
-    const unit = useProjectStore().unitById(pageId, unitId)
-    if (unit === undefined) return false
-    return sideOf(unit, textSide.value).members.some((id) => isLayerLocked(id))
+    const project = useProjectStore()
+    const unit = project.unitById(pageId, unitId)
+    const view = project.viewOf(pageId)
+    if (unit === undefined || view === undefined) return false
+    return blocksOf(view, unit, textSide.value).some((block) => isLayerLocked(block.id))
   }
 
   /** Whatever is selected that a change is still allowed to reach. */
@@ -2482,8 +2420,7 @@ export const useEditorStore = defineStore('editor', () => {
       do: () => project.updateLabelText(pageId, labelId, newText),
       undo: () => {
         project.updateLabelText(pageId, labelId, oldText)
-        const unit = project.placeOf(pageId, labelId)?.unit
-        if (held && unit) project.setTranslationHand(pageId, unit.id, held.id, was)
+        if (held) project.setTranslationHand(pageId, labelId, held.id, was)
       },
     })
   }
@@ -2505,18 +2442,19 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  /** The proposal an object is reading, when it is reading one. */
-  /** Nothing to resolve on the artwork's side: nobody proposes readings of it. */
+  /** The proposal a block of lettering is reading, when it is reading one. */
   function chosenCandidate(pageId: string, blockId: string): TranslationCandidate | null {
-    const project = useProjectStore()
-    if (project.blockById(pageId, blockId)?.side !== 'translation') return null
-    const unit = project.placeOf(pageId, blockId)?.unit
-    if (!unit || unit.chosen === null) return null
-    return unit.candidates.find((c) => c.id === unit.chosen) ?? null
+    const block = useProjectStore().blockById(pageId, blockId)
+    return block?.side === 'translation' ? chosenCandidateOf(block) : null
+  }
+
+  function letteringOf(pageId: string, blockId: string): TranslationTextLayerEntry | undefined {
+    const block = useProjectStore().blockById(pageId, blockId)
+    return block?.side === 'translation' ? block : undefined
   }
 
   /**
-   * Which line an object reads as. `null` is the lines it was typed with.
+   * Which line a block reads as. `null` is the lines it was typed with.
    *
    * ⚠️ On the stack, unlike the panel this replaces, which wrote straight
    * through. Picking is the decision the whole list exists to make, and a Ctrl+Z
@@ -2526,14 +2464,14 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdPickTranslation(pageId: string, labelId: string, id: string | null) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const unit = project.placeOf(pageId, labelId)?.unit
-    if (!unit) return
-    const was = unit.chosen
+    const block = letteringOf(pageId, labelId)
+    if (!block) return
+    const was = block.body.chosen
     if (was === id) return
     pushCommand({
-      label: `pick-translation ${unit.id}`,
-      do: () => project.setLabelTranslation(pageId, unit.id, id),
-      undo: () => project.setLabelTranslation(pageId, unit.id, was),
+      label: `pick-translation ${labelId}`,
+      do: () => project.setLabelTranslation(pageId, labelId, id),
+      undo: () => project.setLabelTranslation(pageId, labelId, was),
     })
   }
 
@@ -2553,23 +2491,19 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdAddTranslationCandidate(pageId: string, labelId: string, id: string) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const unit = project.placeOf(pageId, labelId)?.unit
-    if (!unit) return
-    const at = unit.candidates.length
-    const was = unit.chosen
-    // One blank piece per block, so what is asked for can be read the moment it
-    // arrives — a proposal the slot cannot point at is one the request has to
-    // then go and fix.
-    const pieces = unit.translation.members.map(() => [''])
+    const block = letteringOf(pageId, labelId)
+    if (!block) return
+    const at = block.body.candidates.length
+    const was = block.body.chosen
     pushCommand({
-      label: `add-translation ${unit.id}`,
+      label: `add-translation ${labelId}`,
       do: () => {
-        project.insertTranslation(pageId, unit.id, { id, pieces, human: true }, at)
-        project.setLabelTranslation(pageId, unit.id, id)
+        project.insertTranslation(pageId, labelId, { id, lines: [''], human: true }, at)
+        project.setLabelTranslation(pageId, labelId, id)
       },
       undo: () => {
-        project.setLabelTranslation(pageId, unit.id, was)
-        project.removeTranslation(pageId, unit.id, id)
+        project.setLabelTranslation(pageId, labelId, was)
+        project.removeTranslation(pageId, labelId, id)
       },
     })
   }
@@ -2577,7 +2511,7 @@ export const useEditorStore = defineStore('editor', () => {
   /**
    * A candidate thrown away.
    *
-   * ⭐ Deleting the one being read drops the object back to its own typed lines
+   * ⭐ Deleting the one being read drops the block back to its own typed lines
    * rather than to another proposal. What those lines are is the last thing
    * anybody chose for themselves; picking the next proposal along would be the
    * program making a choice out of the deletion, which said nothing about it.
@@ -2585,20 +2519,17 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdRemoveTranslation(pageId: string, labelId: string, id: string) {
     if (isLayerLocked(labelId)) return
     const project = useProjectStore()
-    const unit = project.placeOf(pageId, labelId)?.unit
-    const at = unit?.candidates.findIndex((c) => c.id === id) ?? -1
-    if (!unit || at === -1) return
-    const was = {
-      ...unit.candidates[at],
-      pieces: unit.candidates[at].pieces.map((piece) => [...piece]),
-    }
-    const chosen = unit.chosen
+    const block = letteringOf(pageId, labelId)
+    const at = block?.body.candidates.findIndex((c) => c.id === id) ?? -1
+    if (!block || at === -1) return
+    const was = { ...block.body.candidates[at]!, lines: [...block.body.candidates[at]!.lines] }
+    const chosen = block.body.chosen
     pushCommand({
-      label: `remove-translation ${unit.id}`,
-      do: () => project.removeTranslation(pageId, unit.id, id),
+      label: `remove-translation ${labelId}`,
+      do: () => project.removeTranslation(pageId, labelId, id),
       undo: () => {
-        project.insertTranslation(pageId, unit.id, was, at)
-        project.setLabelTranslation(pageId, unit.id, chosen)
+        project.insertTranslation(pageId, labelId, was, at)
+        project.setLabelTranslation(pageId, labelId, chosen)
       },
     })
   }
@@ -2634,7 +2565,8 @@ export const useEditorStore = defineStore('editor', () => {
         continue
       }
       const unit = project.placeOf(pageId, id)?.unit
-      for (const member of (side === 'source' ? unit?.source : unit?.translation)?.members ?? []) out.add(member)
+      const view = project.viewOf(pageId)
+      if (unit && view) for (const block of blocksOf(view, unit, side)) out.add(block.id)
     }
     return out
   })
@@ -2875,7 +2807,7 @@ export const useEditorStore = defineStore('editor', () => {
   function chapterBucketObjects(): BucketObject[] {
     const project = useProjectStore()
     return project.files.flatMap((file) =>
-      bucketObjectsOf(file.pageId, file.page, 'translation'),
+      bucketObjectsOf(file.pageId, file.page, 'translation', project.activeFace),
     )
   }
 
@@ -2925,13 +2857,14 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const unit = project.unitById(pageId, unitId)
     if (!unit) return
-    const was = [...(side === 'source' ? unit.source : unit.translation).members]
+    const was = unit.members.filter((id) => project.blockById(pageId, id)?.side === side)
+    const face = project.activeFace
     if (was.length === members.length && was.every((id, at) => id === members[at])) return
     const wanted = [...members]
     pushCommand({
       label: `reorder-members ${unitId}`,
-      do: () => project.reorderMembers(pageId, unitId, side, wanted),
-      undo: () => project.reorderMembers(pageId, unitId, side, was),
+      do: () => project.reorderMembers(pageId, unitId, side, wanted, face),
+      undo: () => project.reorderMembers(pageId, unitId, side, was, face),
     })
   }
 
@@ -2942,39 +2875,42 @@ export const useEditorStore = defineStore('editor', () => {
   ) {
     const project = useProjectStore()
     const wanted = normalizeTagSet(tags)
-    // ⭐ The meaning is written one level up and the look on the block itself,
-    // so a stroke across two blocks of one sound writes that meaning once and
-    // both looks.
+    const face = project.activeFace
+    // ⭐ The meaning is written onto the artwork's words and the look on the
+    // block itself, so a stroke across two blocks of one sound writes that
+    // meaning once and both looks.
     const targets = textObjectsByIds(ids).flatMap(({ pageId, entry }) => {
       const unit = project.placeOf(pageId, entry.id)?.unit
-      return unit === undefined || sameTagSet(unit.tags, wanted) ? [] : [{ pageId, entry, unit }]
+      const view = project.viewOf(pageId)
+      return unit === undefined || view === undefined || sameTagSet(tagsOfUnit(view, unit), wanted)
+        ? []
+        : [{ pageId, entry, unit }]
     })
     if (targets.length === 0) return
 
-    const before = targets.map(({ pageId, entry, unit }) => ({
-      pageId,
-      id: entry.id,
-      unitId: unit.id,
-      tags: [...unit.tags],
-      style: { ...entry.body.style },
-    }))
-    let after = before.map((entry) => ({ ...entry, tags: wanted }))
+    const units = new Map(targets.map(({ pageId, unit }) => [`${pageId}\u0000${unit.id}`, { pageId, unitId: unit.id }]))
+    const tagsBefore = [...units.values()].flatMap(({ pageId, unitId }) => sourceTagsOf(pageId, unitId))
+    const stylesBefore = targets.map(({ pageId, entry }) => ({ pageId, id: entry.id, style: { ...entry.body.style } }))
+    let stylesAfter = stylesBefore
     if (updateStyle) {
       const sample = chapterBucketObjects()
       const { tags: registry, seedStyle } = project.header
       const style = deriveStyle(sample, wanted, registry, seedStyle)
-      after = after.map((entry) => ({ ...entry, style }))
+      stylesAfter = stylesBefore.map((entry) => ({ ...entry, style }))
     }
-    const write = (states: typeof before) => {
-      for (const state of states) {
-        project.setLabelTags(state.pageId, state.unitId, state.tags)
-        project.setLabelStyle(state.pageId, state.id, state.style)
-      }
+    const restyle = (states: typeof stylesBefore) => {
+      for (const state of states) project.setLabelStyle(state.pageId, state.id, state.style)
     }
     pushCommand({
       label: `paint-tags ${targets.length}`,
-      do: () => write(after),
-      undo: () => write(before),
+      do: () => {
+        for (const { pageId, unitId } of units.values()) project.setLabelTags(pageId, unitId, wanted, face)
+        restyle(stylesAfter)
+      },
+      undo: () => {
+        for (const b of tagsBefore) project.setSourceTags(b.pageId, b.id, b.tags)
+        restyle(stylesBefore)
+      },
     })
   }
 
@@ -2993,15 +2929,16 @@ export const useEditorStore = defineStore('editor', () => {
     // Where an object is read is one of the things a lock is put on to hold
     // still, and a line is a statement about exactly that.
     const allowed = edges.filter((e) => !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to))
-    const taken = project.addReadingEdges(pageId, allowed)
+    const face = project.activeFace
+    const taken = project.addReadingEdges(pageId, allowed, face)
     if (taken.length === 0) return
     pushCommand(
       {
         label: `draw-reading-edges ${taken.length}`,
         do: () => {
-          project.addReadingEdges(pageId, taken)
+          project.addReadingEdges(pageId, taken, face)
         },
-        undo: () => project.removeReadingEdges(pageId, taken),
+        undo: () => project.removeReadingEdges(pageId, taken, face),
       },
       { alreadyApplied: true },
     )
@@ -3009,27 +2946,107 @@ export const useEditorStore = defineStore('editor', () => {
 
   function cmdEraseReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
-    const held = project.readingEdgesOf(pageId)
+    const face = project.activeFace
+    const held = project.readingEdgesOf(pageId, face)
     const going = edges.filter(
       (e) => hasEdge(held, e) && !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to),
     )
     if (going.length === 0) return
     pushCommand({
       label: `erase-reading-edges ${going.length}`,
-      do: () => project.removeReadingEdges(pageId, going),
+      do: () => project.removeReadingEdges(pageId, going, face),
       undo: () => {
-        project.addReadingEdges(pageId, going)
+        project.addReadingEdges(pageId, going, face)
       },
     })
+  }
+
+  /**
+   * A face added or taken away, as one step: every page's structure and the
+   * face list before and after, whole. Running the work again on redo would
+   * mint new ids for what the steps above it already name.
+   */
+  function cmdFaces(label: string, change: () => boolean) {
+    const project = useProjectStore()
+    let before: FaceState | undefined
+    let after: FaceState | undefined
+    pushCommand({
+      label,
+      do: () => {
+        if (after !== undefined) return project.setFaceState(after)
+        before = project.faceState()
+        if (!change()) return false
+        after = project.faceState()
+      },
+      undo: () => {
+        if (before !== undefined) project.setFaceState(before)
+      },
+    })
+    selectedIds.value = new Set([...selectedIds.value].filter((id) => project.entryById(id) !== undefined))
+  }
+
+  /** A new face lettered like the one being worked on, which it then becomes. */
+  function cmdAddFace(name: string) {
+    const project = useProjectStore()
+    cmdFaces(`add-face ${name}`, () => {
+      project.setActiveFace(project.addFace(name))
+      return true
+    })
+  }
+
+  function cmdDeleteFace(id: string) {
+    const project = useProjectStore()
+    cmdFaces(`delete-face ${id}`, () => project.deleteFace(id))
+  }
+
+  function cmdRenameFace(id: string, name: string) {
+    const project = useProjectStore()
+    const was = project.faces.find((f) => f.id === id)?.name
+    if (was === undefined || was === name) return
+    pushCommand({
+      label: `rename-face ${id}`,
+      do: () => project.renameFace(id, name),
+      undo: () => project.renameFace(id, was),
+    })
+  }
+
+  /**
+   * Which face the canvas letters in. Not a step of history: it changes what is
+   * looked at, the way turning a page does.
+   */
+  function setActiveFace(id: string) {
+    commitTextEdit()
+    const project = useProjectStore()
+    project.setActiveFace(id)
+    // Lettering of another face is nowhere on screen now, and acting on it
+    // would act on what nobody can see.
+    const kept = [...selectedIds.value].filter((sel) => {
+      const entry = project.entryById(sel)
+      return entry?.kind !== 'text' || entry.side === 'source' || entry.face === id
+    })
+    if (kept.length !== selectedIds.value.size) selectMany(kept, false)
+  }
+
+  /** The tags each block of a sentence's artwork carries now, which is what undoing a tag write puts back. */
+  function sourceTagsOf(pageId: string, unitId: string): Array<{ pageId: string; id: string; tags: string[] }> {
+    const project = useProjectStore()
+    const unit = project.unitById(pageId, unitId)
+    const view = project.viewOf(pageId)
+    if (!unit || !view) return []
+    return sourceBlocksOf(view, unit).map((b) => ({ pageId, id: b.id, tags: [...b.body.tags] }))
   }
 
   function cmdSetLabelTags(pageId: string, labelId: string, from: string[], to: string[]) {
     if (sameTagSet(from, to) || isLayerLocked(labelId)) return
     const project = useProjectStore()
+    const was = sourceTagsOf(pageId, labelId)
+    const face = project.activeFace
     pushCommand({
       label: `set-tags ${labelId}`,
-      do: () => project.setLabelTags(pageId, labelId, to),
-      undo: () => project.setLabelTags(pageId, labelId, from),
+      do: () => project.setLabelTags(pageId, labelId, to, face),
+      undo: () => {
+        for (const b of was) project.setSourceTags(b.pageId, b.id, b.tags)
+      },
     })
   }
 
@@ -3222,7 +3239,6 @@ export const useEditorStore = defineStore('editor', () => {
     linkPlan,
     cmdReplaceLabelSource,
     cmdMoveCard,
-    cmdDuplicateLabel,
     cmdMoveLabel,
     cmdPlaceLabels,
     cmdNudge,
@@ -3268,6 +3284,11 @@ export const useEditorStore = defineStore('editor', () => {
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
     cmdSetLabelTags,
+    cmdReshape,
+    cmdAddFace,
+    cmdDeleteFace,
+    cmdRenameFace,
+    setActiveFace,
     cmdAddTag,
     cmdRemoveTag,
     cmdRenameTag,

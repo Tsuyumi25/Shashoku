@@ -21,7 +21,7 @@ export function useSelectionTags(
   return computed<TagState>(() => {
     const first = targets.value[0]
     if (!first) return { kind: 'none' }
-    const tagsOf = (id: string) => project.placeOf(editor.currentPageId ?? '', id)?.unit.tags ?? []
+    const tagsOf = (id: string) => project.tagsOf(editor.currentPageId ?? '', id)
     const head = tagsOf(first.entry.id)
     for (const { entry } of targets.value) {
       if (!sameTagSet(tagsOf(entry.id), head)) return { kind: 'many' }

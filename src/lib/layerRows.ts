@@ -1,6 +1,7 @@
 import type { LayerEntry } from '@shared/page/types'
 import type { TextSide } from '@shared/page/text'
 import type { DropTarget } from '@shared/page/tree'
+import { isOnView } from '@shared/page/units'
 import type { DropZone } from '@/lib/rowDrop'
 
 export interface LayerTreeRow {
@@ -32,15 +33,16 @@ export interface LayerTreeRow {
  * up on top. Every layer panel shows that the other way round, so the rows come
  * back reversed while their paths keep counting from the bottom.
  *
- * Only the text of the side being worked on is listed, as on the canvas: the
- * other side's objects are not what the hand is on, and listing both doubles
- * every balloon. Paths still count every entry, so an edit addresses the same
+ * Only the text of the side being worked on is listed, and of the translation
+ * only one face's, as on the canvas: the rest are not what the hand is on, and
+ * listing them doubles every balloon. Paths still count every entry, so an edit addresses the same
  * place either way.
  */
 export function flattenLayerRows(
   layers: readonly LayerEntry[],
   collapsed: ReadonlySet<string>,
   side: TextSide,
+  face: string,
 ): LayerTreeRow[] {
   const rows: LayerTreeRow[] = []
 
@@ -54,7 +56,7 @@ export function flattenLayerRows(
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i]
       const path = [...prefix, i]
-      if (entry.kind === 'text' && entry.side !== side) continue
+      if (entry.kind === 'text' && !isOnView(entry, side, face)) continue
       rows.push({
         entry,
         depth,

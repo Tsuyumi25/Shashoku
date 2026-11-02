@@ -367,7 +367,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import type { ManifestJson } from '@shared/page/types'
+import type { FacePage } from '@shared/page/units'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import GroupWheel from '@/components/GroupWheel.vue'
@@ -397,7 +397,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { blocksOnSide, placeOfBlock, shownCodeOf, shownLinesOf, sideOf } from '@shared/page/units'
+import { blocksOf, blocksOnSide, facePage, placeOfBlock, shownCodeOf, shownLinesOf, tagsOfBlock } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -470,7 +470,7 @@ const currentFile = computed(() =>
 const stack = computed(() => {
   if (!currentFile.value) return []
   if (editor.showingOriginal) return originalStack(currentFile.value.page.layers)
-  const nodes = pageStack(currentFile.value.page.layers, editor.textSide)
+  const nodes = pageStack(currentFile.value.page.layers, editor.textSide, project.activeFace)
   return editor.textsHidden ? withoutText(nodes) : nodes
 })
 
@@ -560,26 +560,27 @@ const objects = computed(() => {
   // hidden object would have nowhere to land and would go undrawn, which is the
   // one thing this tool must not do.
   const entries = connecting.value
-    ? blocksOnSide(file.page.layers, editor.textSide)
+    ? blocksOnSide(file.page.layers, editor.textSide, project.activeFace)
     : stackedTextNodes(stack.value).map((node) => node.entry)
   // Every source drawn the same way, over a halo — a reference treatment for
   // reading them against un-lettered artwork, and the canvas's alone.
   const reference = editor.textSide === 'source'
+  const view = facePage(file.page, project.activeFace)
   return entries.map((label) => {
     const body = label.body
-    const tags = placeOfBlock(file.page, label.id)?.unit.tags ?? []
+    const tags = tagsOfBlock(view, label.id)
     const look = reference
       ? sourceLook(previewedStyle(body.style, editor.isReached(label.id)))
       : { style: previewedStyle(body.style, editor.isReached(label.id)), effects: label.effects }
     return {
     id: label.id,
     locked: isLocked(file.page.layers, label.id),
-    code: shownCodeOf(file.page, label),
+    code: shownCodeOf(label),
     x: body.x,
     y: body.y,
     rotation: body.rotation,
     accent: accentOf(tags),
-    member: isMember(file.page, label.id) ? memberColor.value : undefined,
+    member: isMember(view, label.id) ? memberColor.value : undefined,
     style: look.style,
     effects: look.effects,
     tags: tagsInRegistryOrder(tags, project.header.tags).map((name) => ({
@@ -779,7 +780,7 @@ function onObjectMenu(pick: string) {
     groups.find((g) => g.id === column.openGroupId.value)?.id ?? groups[0]?.id ?? preferences.createMaterialGroup('素材')
   preferences.saveMaterial(
     groupId,
-    { text: shownLinesOf(page, entry).join('\n'), style: entry.body.style, effects: entry.effects },
+    { text: shownLinesOf(entry).join('\n'), style: entry.body.style, effects: entry.effects },
     recipe.picks,
   )
   column.openGroup(groupId)
@@ -958,15 +959,16 @@ const selectedUnits = computed(() => {
   const file = currentFile.value
   const out = new Set<string>()
   if (!file) return out
+  const view = facePage(file.page, project.activeFace)
   for (const id of editor.selectedIds) {
-    const unit = placeOfBlock(file.page, id)?.unit
+    const unit = placeOfBlock(view, id)?.unit
     if (unit) out.add(unit.id)
   }
   return out
 })
 
 /** A block not selected itself, in a sentence the selection is in. */
-function isMember(page: ManifestJson, id: string): boolean {
+function isMember(page: FacePage, id: string): boolean {
   if (editor.isSelected(id)) return false
   const unit = placeOfBlock(page, id)?.unit
   return unit !== undefined && selectedUnits.value.has(unit.id)
@@ -1008,10 +1010,8 @@ const foretold = computed(() => {
     const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
     return { x: d.center.x, y: d.center.y, w: d.box.w, h: d.box.h }
   }
-  const main = file.page.translationUnits.find((u) => u.id === plan.main)
-  const inMain = main
-    ? [...main.source.members, ...main.translation.members].map(centre).filter((c) => c !== null)
-    : []
+  const main = facePage(file.page, project.activeFace).units.find((u) => u.id === plan.main)
+  const inMain = main ? main.members.map(centre).filter((c) => c !== null) : []
   const frame = inMain.length
     ? (() => {
         const x0 = Math.min(...inMain.map((c) => c.x - c.w / 2)) - 8
@@ -1270,9 +1270,10 @@ const unitBoxes = computed(() => {
   const out = new Map<string, FrameBox>()
   const page = currentFile.value?.page
   if (page === undefined) return out
-  for (const unit of page.translationUnits) {
-    const boxes = sideOf(unit, editor.textSide)
-      .members.map((id) => objectBoxes.value.get(id))
+  const view = facePage(page, project.activeFace)
+  for (const unit of view.units) {
+    const boxes = blocksOf(view, unit, editor.textSide)
+      .map((block) => objectBoxes.value.get(block.id))
       .filter((b): b is FrameBox => b !== undefined)
     if (boxes.length === 0) continue
     if (boxes.length === 1) {
@@ -1319,7 +1320,7 @@ function objectAt(p: Anchor): string | null {
 }
 
 const heldEdges = computed<readonly ReadingEdge[]>(
-  () => currentFile.value?.page.readingEdges ?? [],
+  () => currentFile.value?.page.ledgers[project.activeFace]?.readingEdges ?? [],
 )
 
 function toScreen(p: Anchor): Anchor {
@@ -1438,7 +1439,7 @@ function unitAt(p: Anchor): string | null {
   const id = objectAt(p)
   const page = currentFile.value?.page
   if (id === null || page === undefined) return null
-  return placeOfBlock(page, id)?.unit.id ?? null
+  return placeOfBlock(facePage(page, project.activeFace), id)?.unit.id ?? null
 }
 
 function onConnectDown(p: Anchor) {
@@ -1557,7 +1558,7 @@ function liveLayer(id: string) {
 const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
-  return artworkSignature(pageStack(file.page.layers, 'translation'), (id) =>
+  return artworkSignature(pageStack(file.page.layers, 'translation', project.activeFace), (id) =>
     raster.holds(id) ? `${id}@${raster.writesTo(id)}` : null,
   )
 })
@@ -1573,6 +1574,7 @@ watch(
     try {
       const composited = await compositeArtwork({
         page: file.page,
+        face: project.activeFace,
         loadLayer: (name) => window.api.readImage(layersDirOf(pageDir), name),
         liveLayer,
       })

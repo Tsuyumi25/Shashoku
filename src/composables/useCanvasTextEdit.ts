@@ -90,7 +90,7 @@ export function useCanvasTextEdit() {
     if (page === undefined) return
     preferences.setSidePanel('labels')
     editor.revealLabel(pageId, label.id)
-    editor.beginTextEdit(pageId, label.id, shownCodeOf(page, label))
+    editor.beginTextEdit(pageId, label.id, shownCodeOf(label))
     textWriter.value = 'plain'
     const field = await fieldAppears()
     if (field === null) return

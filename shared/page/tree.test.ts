@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blankBlock } from './schema'
+import { blankTranslationBlock } from './schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } from './types'
 import { PASS_THROUGH } from './types'
@@ -20,7 +20,7 @@ import {
 } from './tree'
 
 function text(id: string, extra: Partial<TextLayerEntry> = {}): TextLayerEntry {
-  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  const entry = blankTranslationBlock(id, 'f', DEFAULT_TEXT_STYLE)
   entry.body.lines = [id]
   return Object.assign(entry, extra)
 }

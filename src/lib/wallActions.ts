@@ -7,6 +7,14 @@ import { useUiStore } from '@/stores/uiStore'
  * its own, so these run here when it says so.
  */
 
+/** The editor turned to the side, and the face, a piece of text is on. */
+function turnTo(entry: ReturnType<ReturnType<typeof useProjectStore>['entryById']>): void {
+  if (entry?.kind !== 'text') return
+  const editor = useEditorStore()
+  if (entry.side === 'translation' && entry.face !== useProjectStore().activeFace) editor.setActiveFace(entry.face)
+  if (entry.side !== editor.textSide) editor.setTextSide(entry.side)
+}
+
 /**
  * Back to the page, with the piece selected where it stands — on the side it
  * is on, since the wall may be showing sources while the editor shows
@@ -19,7 +27,7 @@ export function revealPiece(pageId: string, id: string): void {
   const entry = useProjectStore().entryById(id)
   if (entry === undefined) return
   editor.showPage(pageId)
-  if (entry?.kind === 'text' && entry.side !== editor.textSide) editor.setTextSide(entry.side)
+  turnTo(entry)
   editor.selectOnly(id)
   useUiStore().setView('editor')
 }
@@ -31,8 +39,7 @@ export function selectPieces(ids: readonly string[]): void {
   const editor = useEditorStore()
   const kept = ids.filter((id) => project.pageOfEntry(id) !== null)
   // A bucket is all one side, and the editor turns to it so what is picked shows.
-  const first = kept.length ? project.entryById(kept[0]!) : undefined
-  if (first?.kind === 'text' && first.side !== editor.textSide) editor.setTextSide(first.side)
+  turnTo(kept.length ? project.entryById(kept[0]!) : undefined)
   editor.selectMany(kept, false)
 }
 

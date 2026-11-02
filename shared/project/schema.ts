@@ -1,6 +1,6 @@
 
 
-import type { Glossary, ProjectJson } from './types'
+import type { Glossary, ProjectJson, TranslationFace } from './types'
 import { PROJECT_SCHEMA_VERSION } from './types'
 import type { TagDefinition } from '../tags/types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
@@ -49,6 +49,24 @@ function parseLayerNames(v: unknown, field: string): string[] | undefined {
   if (v === undefined) return undefined
   if (!Array.isArray(v)) fail(`${field} 必須是陣列`)
   return [...new Set(v.filter((n): n is string => typeof n === 'string' && n.length > 0))]
+}
+
+/**
+ * Refused rather than repaired when two faces share an id: every page stores
+ * that id, and which face a page's lettering belongs to must not depend on
+ * which entry is read first.
+ */
+function parseFaces(v: unknown): TranslationFace[] | undefined {
+  if (v === undefined) return undefined
+  if (!Array.isArray(v)) fail('faces 必須是陣列')
+  const faces = v.map((f, i) => {
+    if (!isRecord(f)) fail(`faces[${i}] 必須是物件`)
+    if (typeof f.id !== 'string' || f.id.length === 0) fail(`faces[${i}].id 必須是非空字串`)
+    if (typeof f.name !== 'string') fail(`faces[${i}].name 必須是字串`)
+    return { id: f.id, name: f.name }
+  })
+  if (new Set(faces.map((f) => f.id)).size !== faces.length) fail('faces 的 id 不可重複')
+  return faces.length > 0 ? faces : undefined
 }
 
 function parseGlossary(v: unknown): Glossary | undefined {
@@ -146,6 +164,8 @@ export function parseProjectJson(raw: string): ProjectJson {
     glossary: parseGlossary(data.glossary),
     pinnedLayerNames: parseLayerNames(data.pinnedLayerNames, 'pinnedLayerNames'),
     retouchLayerNames: parseLayerNames(data.retouchLayerNames, 'retouchLayerNames'),
+    faces: parseFaces(data.faces),
+    activeFace: typeof data.activeFace === 'string' && data.activeFace.length > 0 ? data.activeFace : undefined,
     exportProfiles: parseExportProfiles(data.exportProfiles),
   }
 }
@@ -163,6 +183,8 @@ export function serializeProjectJson(project: ProjectJson): string {
   if (project.glossary !== undefined) out.glossary = project.glossary
   if (project.pinnedLayerNames !== undefined) out.pinnedLayerNames = project.pinnedLayerNames
   if (project.retouchLayerNames !== undefined) out.retouchLayerNames = project.retouchLayerNames
+  if (project.faces !== undefined) out.faces = project.faces
+  if (project.activeFace !== undefined) out.activeFace = project.activeFace
   out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`
 }

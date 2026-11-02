@@ -285,11 +285,11 @@
                 >{{ rowPreview(element as Row) }}<br v-if="rowEndsOnABreak(element as Row)" /></pre>
 
                 <div
-                  v-if="(element as Row).kind === 'label' && (element as LabelRow).unit.tags.length > 0"
+                  v-if="(element as Row).kind === 'label' && unitTags(element as LabelRow).length > 0"
                   class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
                 >
                   <span
-                    v-for="tag in orderedTags((element as LabelRow).unit.tags)"
+                    v-for="tag in orderedTags(unitTags(element as LabelRow))"
                     :key="tag"
                     class="flex min-w-0 items-center gap-1"
                   >
@@ -338,7 +338,7 @@ import { codeEditSurface, plainEditSurface, textWriter } from '@/composables/use
 import { useMarkupSession } from '@/composables/useMarkupSession'
 import { textareaCaret, textareaSelection } from '@/lib/textareaMirror'
 import { isCollapsed, spanOf } from '@/lib/textSelection'
-import { shownCodeOf } from '@shared/page/units'
+import { shownCodeOf, tagsOfUnit } from '@shared/page/units'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -349,7 +349,7 @@ const markup = useMarkupSession()
  * at that scale — which is also what makes selecting across pages fall out of
  * this list rather than needing anything of its own.
  */
-const rows = computed(() => buildLabelRows(project.files, editor.textSide, editor.labelQuery))
+const rows = computed(() => buildLabelRows(project.files, editor.textSide, project.activeFace, editor.labelQuery))
 
 /**
  * Narrowing lives in the store because moving up and down walks what is on
@@ -539,7 +539,12 @@ function rowCode(row: Row): string {
   const id = row.kind === 'block' ? row.block.id : soleBlock(row)
   const page = fileOf(row.pageId)?.page
   const block = id === null ? undefined : project.blockById(row.pageId, id)
-  return page === undefined || block === undefined ? '' : shownCodeOf(page, block)
+  return page === undefined || block === undefined ? '' : shownCodeOf(block)
+}
+
+function unitTags(row: LabelRow): string[] {
+  const view = project.viewOf(row.pageId)
+  return view ? tagsOfUnit(view, row.unit) : []
 }
 
 function onRowInput(e: Event) {

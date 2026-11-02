@@ -1,22 +1,27 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { projectionOf, shownLinesOf } from '@shared/page/units'
+import type { TranslationTextLayerEntry } from '@shared/page/types'
+import { facePage, projectionOf, shownLinesOf } from '@shared/page/units'
 import { isLocked } from '@shared/page/tree'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 
 const PAGE = 'p001.png'
+const FACE = 'f'
 
-/** One ordinary balloon: a block a side, and the translation over them. */
+/** One ordinary balloon: a block a side, and the sentence over them. */
 function open(words: string[]) {
   const project = useProjectStore()
-  const lettering = blankBlock('t', 'translation', DEFAULT_TEXT_STYLE)
+  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.activeFace = FACE
+  const lettering = blankTranslationBlock('t', FACE, DEFAULT_TEXT_STYLE)
   lettering.body.lines = words
-  const artwork = blankBlock('s', 'source', DEFAULT_TEXT_STYLE)
+  const artwork = blankSourceBlock('s', DEFAULT_TEXT_STYLE)
   project.allFiles = [
     {
       pageId: PAGE,
@@ -29,18 +34,9 @@ function open(words: string[]) {
         name: 'p',
         width: 1200,
         height: 1700,
-        translationUnits: [
-          {
-            id: 'u',
-            tags: [],
-            source: { members: ['s'], separators: [] },
-            translation: { members: ['t'], separators: [] },
-            candidates: [],
-            chosen: null,
-          },
-        ],
-        readingOrder: ['u'],
-        readingEdges: [],
+        ledgers: {
+          [FACE]: { units: [{ id: 'u', members: ['s', 't'] }], readingOrder: ['u'], readingEdges: [] },
+        },
         layers: [lettering, artwork],
       },
     },
@@ -55,35 +51,51 @@ type Project = ReturnType<typeof useProjectStore>
 
 const page = (project: Project) => project.pageById(PAGE)!.page
 
-const unit = (project: Project) => page(project).translationUnits[0]
+const view = (project: Project) => facePage(page(project), FACE)
 
-const lettering = (project: Project) => unit(project).translation.members
+const unit = (project: Project) => view(project).units[0]!
 
-/** The translation the copy made: the one that is not `u`. */
-const twin = (project: Project) => page(project).translationUnits.find((u) => u.id !== 'u')!
+const blocksOfSide = (project: Project, unitId: string, side: 'source' | 'translation') =>
+  view(project)
+    .units.find((u) => u.id === unitId)!
+    .members.filter((id) => project.blockById(PAGE, id)?.side === side)
 
-/** The block the menu's copy of `t` is, in the second translation. */
-const twinOfT = (project: Project) => twin(project).translation.members[0]
+const lettering = (project: Project) => blocksOfSide(project, 'u', 'translation')
 
-/** The block Ctrl+J made of `t`: the one after it in its own translation. */
+/** The sentence the copy made: the one that is not `u`. */
+const twin = (project: Project) => view(project).units.find((u) => u.id !== 'u')!
+
+/** The block the menu's copy of `t` is, in the second sentence. */
+const twinOfT = (project: Project) => blocksOfSide(project, twin(project).id, 'translation')[0]!
+
+/** The block Ctrl+J made of `t`: the one after it in its own sentence. */
 const copyOfT = (project: Project) => lettering(project).find((id) => id !== 't')!
+
+const letteringBlock = (project: Project, id: string) =>
+  project.blockById(PAGE, id) as TranslationTextLayerEntry
+
+/** The one block of lettering the sentence has, given a drawer and a pick. */
+function proposed(project: Project, lines: string[]) {
+  const block = letteringBlock(project, 't')
+  block.body.candidates = [{ id: 'c', lines }]
+  block.body.chosen = 'c'
+}
 
 beforeEach(() => setActivePinia(createPinia()))
 
 /**
  * ⭐ Ctrl+J and Alt with a drag copy the block pressed and nothing else: another
- * block of the same translation, read right after it, saying the same words.
+ * block of the same sentence, read right after it, saying the same words.
  */
 describe('copying a block of lettering', () => {
-  it('joins its own translation, right after the block it copies', async () => {
+  it('joins its own sentence, right after the block it copies', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer()
 
-    expect(page(project).translationUnits).toHaveLength(1)
-    expect(lettering(project)).toEqual(['t', copyOfT(project)])
-    expect(unit(project).translation.separators).toEqual([''])
-    expect(page(project).readingOrder).toEqual(['u'])
+    expect(view(project).units).toHaveLength(1)
+    expect(unit(project).members).toEqual(['s', 't', copyOfT(project)])
+    expect(view(project).readingOrder).toEqual(['u'])
   })
 
   it('says the same words, its own lines when nothing is chosen', async () => {
@@ -91,33 +103,46 @@ describe('copying a block of lettering', () => {
 
     await merge.duplicateLayer()
 
-    expect(shownLinesOf(page(project), project.blockById(PAGE, copyOfT(project))!)).toEqual(['轟隆'])
+    expect(shownLinesOf(letteringBlock(project, copyOfT(project)))).toEqual(['轟隆'])
   })
 
-  it('says the same words when they come from a chosen proposal, which stays chosen', async () => {
+  /**
+   * ⚠️ The drawer stays with the block it was proposed for. The copy says the
+   * same words because they were written into its own lines, not because it
+   * holds a second copy of somebody's proposal.
+   */
+  it('takes the words a chosen proposal gives but none of the drawer', async () => {
     const { project, merge } = open([])
-    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
-    unit(project).chosen = 'c'
+    proposed(project, ['好痛！'])
 
     await merge.duplicateLayer()
 
-    expect(unit(project).chosen).toBe('c')
-    expect(shownLinesOf(page(project), project.blockById(PAGE, copyOfT(project))!)).toEqual(['好痛！'])
-    expect(shownLinesOf(page(project), project.blockById(PAGE, 't')!)).toEqual(['好痛！'])
+    const copy = letteringBlock(project, copyOfT(project))
+    expect(copy.body.lines).toEqual(['好痛！'])
+    expect(copy.body.candidates).toEqual([])
+    expect(copy.body.chosen).toBeNull()
   })
 
-  it('takes the block and its piece back out when undone, and puts them back on redo', async () => {
-    const { project, editor, merge } = open([])
-    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
-    unit(project).chosen = 'c'
+  it('leaves the block it copied reading what it read', async () => {
+    const { project, merge } = open([])
+    proposed(project, ['好痛！'])
 
     await merge.duplicateLayer()
-    const made = JSON.parse(JSON.stringify(unit(project)))
+
+    expect(letteringBlock(project, 't').body.chosen).toBe('c')
+    expect(shownLinesOf(letteringBlock(project, 't'))).toEqual(['好痛！'])
+  })
+
+  it('takes the block back out when undone, and puts it back on redo', async () => {
+    const { project, editor, merge } = open([])
+    proposed(project, ['好痛！'])
+
+    await merge.duplicateLayer()
+    const made = structuredClone(toRaw(unit(project)))
     editor.undo()
 
     expect(lettering(project)).toEqual(['t'])
-    expect(unit(project).candidates[0]!.pieces).toEqual([['好痛！']])
-    expect(unit(project).translation.separators).toEqual([])
+    expect(letteringBlock(project, 't').body.candidates).toEqual([{ id: 'c', lines: ['好痛！'] }])
 
     editor.redo()
     expect(unit(project)).toEqual(made)
@@ -125,27 +150,27 @@ describe('copying a block of lettering', () => {
 })
 
 /**
- * ⭐ The object menu's copy is a second translation, whole: both sides, its own
+ * ⭐ The object menu's copy is a second sentence, whole: both sides, its own
  * proposals, read right after the one it came from.
  */
-describe('copying a whole translation', () => {
-  it('makes a second translation, read right after the original', async () => {
+describe('copying a whole sentence', () => {
+  it('makes a second sentence, read right after the original', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer({ wholeUnit: true })
 
-    expect(page(project).translationUnits).toHaveLength(2)
-    expect(page(project).readingOrder).toEqual(['u', twin(project).id])
+    expect(view(project).units).toHaveLength(2)
+    expect(view(project).readingOrder).toEqual(['u', twin(project).id])
     expect(lettering(project)).toEqual(['t'])
   })
 
-  /** Half a translation is a row the list cannot draw. */
+  /** Half a sentence is a row the list cannot draw. */
   it('copies the artwork side along with it', async () => {
     const { project, merge } = open(['轟隆'])
 
     await merge.duplicateLayer({ wholeUnit: true })
 
-    const [source] = twin(project).source.members
+    const [source] = blocksOfSide(project, twin(project).id, 'source')
     expect(source).not.toBe('s')
     expect(project.blockById(PAGE, source!)?.side).toBe('source')
   })
@@ -155,50 +180,60 @@ describe('copying a whole translation', () => {
 
     await merge.duplicateLayer({ wholeUnit: true })
 
-    const claimed = new Set(
-      page(project).translationUnits.flatMap((u) => [...u.source.members, ...u.translation.members]),
-    )
+    const claimed = new Set(view(project).units.flatMap((u) => u.members))
     for (const layer of page(project).layers) {
       expect(claimed.has(layer.id)).toBe(true)
     }
   })
 
   /**
-   * ⚠️ The fault this pins. The words a chosen proposal gives live on the
-   * translation, not the block, so copying the block alone left a copy that
-   * said nothing.
+   * ⚠️ The fault this pins. Copying the block alone used to leave a copy that
+   * said nothing, back when the words a chosen proposal gives lived on the
+   * sentence rather than on the block.
    */
   it('says what the original says when its words come from a chosen proposal', async () => {
     const { project, merge } = open([])
-    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
-    unit(project).chosen = 'c'
+    proposed(project, ['好痛！'])
 
     await merge.duplicateLayer({ wholeUnit: true })
 
-    const copy = project.blockById(PAGE, twinOfT(project))!
-    expect(shownLinesOf(page(project), copy)).toEqual(['好痛！'])
-    expect(twin(project).chosen).not.toBe('c')
+    expect(shownLinesOf(letteringBlock(project, twinOfT(project)))).toEqual(['好痛！'])
+  })
+
+  /**
+   * ⭐ The drawer comes too, under ids of its own, and the pick follows them.
+   * Two blocks sharing a candidate id would be one proposal withdrawn twice.
+   */
+  it('brings the drawer over under fresh ids, with the pick remapped onto them', async () => {
+    const { project, merge } = open([])
+    proposed(project, ['好痛！'])
+
+    await merge.duplicateLayer({ wholeUnit: true })
+    const copy = letteringBlock(project, twinOfT(project))
+
+    expect(copy.body.candidates.map((c) => c.lines)).toEqual([['好痛！']])
+    expect(copy.body.candidates[0]!.id).not.toBe('c')
+    expect(copy.body.chosen).toBe(copy.body.candidates[0]!.id)
   })
 
   it('gives it proposals of its own, so retyping one leaves the other alone', async () => {
     const { project, merge } = open([])
-    unit(project).candidates = [{ id: 'c', pieces: [['好痛！']] }]
-    unit(project).chosen = 'c'
+    proposed(project, ['好痛！'])
 
     await merge.duplicateLayer({ wholeUnit: true })
     project.updateLabelText(PAGE, twinOfT(project), '不痛')
 
-    expect(shownLinesOf(page(project), project.blockById(PAGE, 't')!)).toEqual(['好痛！'])
+    expect(shownLinesOf(letteringBlock(project, 't'))).toEqual(['好痛！'])
   })
 
-  it('takes the whole second translation back out when it is undone', async () => {
+  it('takes the whole second sentence back out when it is undone', async () => {
     const { project, editor, merge } = open(['轟隆'])
 
     await merge.duplicateLayer({ wholeUnit: true })
     editor.undo()
 
-    expect(page(project).translationUnits.map((u) => u.id)).toEqual(['u'])
-    expect(page(project).readingOrder).toEqual(['u'])
+    expect(view(project).units.map((u) => u.id)).toEqual(['u'])
+    expect(view(project).readingOrder).toEqual(['u'])
     expect(page(project).layers.map((l) => l.id)).toEqual(['t', 's'])
   })
 
@@ -206,12 +241,12 @@ describe('copying a whole translation', () => {
     const { project, editor, merge } = open(['轟隆'])
 
     await merge.duplicateLayer({ wholeUnit: true })
-    const made = JSON.parse(JSON.stringify(twin(project)))
+    const made = structuredClone(toRaw(twin(project)))
     editor.undo()
     editor.redo()
 
     expect(twin(project)).toEqual(made)
-    expect(page(project).readingOrder).toEqual(['u', made.id])
+    expect(view(project).readingOrder).toEqual(['u', made.id])
   })
 
   /**
@@ -238,15 +273,15 @@ describe('copying a whole translation', () => {
     expect(project.blockById(PAGE, 't')!.body.style.fontSizePx).not.toBe(96)
   })
 
-  /** The artwork's own words copy the same way: a second translation, artwork first. */
-  it('copies a whole translation from its source block too', async () => {
+  /** The artwork's own words copy the same way: a second sentence, artwork first. */
+  it('copies a whole sentence from its source block too', async () => {
     const { project, editor, merge } = open(['轟隆'])
     editor.selectOnly('s')
 
     await merge.duplicateLayer({ wholeUnit: true })
 
-    expect(unit(project).source.members).toEqual(['s'])
-    expect(twin(project).translation.members).toHaveLength(1)
+    expect(blocksOfSide(project, 'u', 'source')).toEqual(['s'])
+    expect(blocksOfSide(project, twin(project).id, 'translation')).toHaveLength(1)
   })
 })
 
@@ -255,13 +290,13 @@ describe('copying a whole translation', () => {
  * the side is read in, so dragging one changes what the page says — which is
  * why it is a step of history and not a write through.
  */
-describe('dragging one block of a translation set in two', () => {
+describe('dragging one block of a sentence set in two', () => {
   function two(first: string, second: string) {
     const opened = open([first])
-    const extra = blankBlock('t2', 'translation', DEFAULT_TEXT_STYLE)
+    const extra = blankTranslationBlock('t2', FACE, DEFAULT_TEXT_STYLE)
     extra.body.lines = [second]
     page(opened.project).layers.unshift(extra)
-    unit(opened.project).translation = { members: ['t', 't2'], separators: [''] }
+    unit(opened.project).members = ['s', 't', 't2']
     return opened
   }
 
@@ -270,7 +305,7 @@ describe('dragging one block of a translation set in two', () => {
 
     editor.cmdReorderMembers(PAGE, 'u', 'translation', ['t2', 't'])
 
-    expect(projectionOf(page(project).layers, unit(project), 'translation')).toBe('隆轟')
+    expect(projectionOf(view(project), unit(project), 'translation')).toBe('隆/轟')
   })
 
   it('is one step of history', () => {
@@ -301,14 +336,13 @@ describe('dragging one block of a translation set in two', () => {
     expect(lettering(project)).toEqual(['t', 't2'])
   })
 
-  /** A seam is a fact about the seam, so only the order moves. */
-  it('leaves the gap between the blocks where it was written', () => {
+  /** ⚠️ The artwork's words are not this side's to move, however the list reads. */
+  it('leaves the other side where it is', () => {
     const { project } = two('轟', '隆')
-    unit(project).translation.separators = ['／']
 
     project.reorderMembers(PAGE, 'u', 'translation', ['t2', 't'])
 
-    expect(unit(project).translation.separators).toEqual(['／'])
+    expect(unit(project).members).toEqual(['s', 't2', 't'])
   })
 })
 
@@ -334,7 +368,7 @@ describe('copying a locked layer', () => {
       opacity: 1,
       blendMode: 'normal',
       effects: [],
-      children: [{ ...page.layers[0], locked: locks.child }],
+      children: [{ ...toRaw(page.layers[0]), locked: locks.child }],
     }
     return page
   }

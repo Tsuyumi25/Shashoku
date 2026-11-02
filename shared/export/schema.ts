@@ -86,6 +86,7 @@ function parseProfile(v: unknown, i: number): ExportProfile {
     size: parseSize(v.size, `${at}.size`),
     maxBytes,
     naming: parseNaming(v.naming, `${at}.naming`),
+    ...(typeof v.face === "string" && v.face.length > 0 ? { face: v.face } : {}),
   };
 }
 
@@ -108,5 +109,6 @@ export function serializeExportProfiles(profiles: readonly ExportProfile[]): unk
     size: p.size,
     maxBytes: p.maxBytes,
     naming: p.naming,
+    ...(p.face === undefined ? {} : { face: p.face }),
   }));
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { LayerEntry, TranslationCandidate, TranslationUnit } from '@shared/page/types'
-import { blankBlock } from '@shared/page/schema'
+import type { TranslationBody, TranslationCandidate, TranslationTextLayerEntry } from '@shared/page/types'
+import { blankTranslationBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import {
   OWN,
@@ -15,39 +15,30 @@ import {
 const PAGE = { width: 1200, height: 1700 }
 const BASE = 12
 
-function unit(over: Partial<TranslationUnit> = {}): TranslationUnit {
-  return {
-    id: 'u1',
-    tags: [],
-    source: { members: ['s'], separators: [] },
-    translation: { members: ['t'], separators: [] },
-    candidates: [],
-    chosen: null,
-    ...over,
-  }
+/**
+ * One block of lettering, with these words typed into it — the whole of what a
+ * card is drawn from, since the pool hangs on the block.
+ */
+function typed(own: string, over: Partial<TranslationBody> = {}): TranslationTextLayerEntry {
+  const block = blankTranslationBlock('t', 'f', DEFAULT_TEXT_STYLE)
+  block.body = { ...block.body, lines: own.split('\n'), ...over }
+  return block
 }
 
-/** The page holding the unit's one block, with these words typed into it. */
-function typed(own: string): LayerEntry[] {
-  const block = blankBlock('t', 'translation', DEFAULT_TEXT_STYLE)
-  block.body.lines = own.split('\n')
-  return [block]
-}
+const candidate = (
+  id: string,
+  text: string,
+  over: Partial<TranslationCandidate> = {},
+): TranslationCandidate => ({ id, lines: text.split('\n'), ...over })
 
-const candidate = (id: string, text: string, over: Partial<TranslationCandidate> = {}) =>
-  ({ id, pieces: [text.split('\n')], ...over }) as TranslationCandidate
-
-describe('what an object can be read as', () => {
-  it('reads an object nobody has proposed for as its own one line', () => {
-    expect(rowsOf(typed('已經打好的'), unit())).toEqual([
-      { id: OWN, text: '已經打好的', by: 'own' },
-    ])
+describe('what a block can be read as', () => {
+  it('reads a block nobody has proposed for as its own one line', () => {
+    expect(rowsOf(typed('已經打好的'))).toEqual([{ id: OWN, text: '已經打好的', by: 'own' }])
   })
 
   it('names the model that proposed a line, and the hand that corrected one', () => {
     const rows = rowsOf(
-      typed(''),
-      unit({
+      typed('', {
         candidates: [
           candidate('m', '模型說的', { source: 'claude' }),
           candidate('h', '我改的', { human: true }),
@@ -62,61 +53,69 @@ describe('what an object can be read as', () => {
   })
 
   /**
-   * ⚠️ Where deleting the picked proposal drops the object back to. A row that
+   * ⚠️ Where deleting the picked proposal drops the block back to. A row that
    * vanished the moment something was picked would make that fall look like the
    * words appearing out of nowhere.
    */
-  it('keeps the line the object typed while a proposal is picked', () => {
-    const rows = rowsOf(typed('自己打的'), unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }))
+  it('keeps the line the block typed while a proposal is picked', () => {
+    const rows = rowsOf(typed('自己打的', { candidates: [candidate('m', '模型的')], chosen: 'm' }))
     expect(rows.map((r) => r.id)).toEqual([OWN, 'm'])
   })
 
   /** With nothing typed and nothing picked it is still the row being read. */
   it('keeps an empty own line while it is the one being read', () => {
-    expect(rowsOf(typed(''), unit()).map((r) => r.id)).toEqual([OWN])
+    expect(rowsOf(typed('')).map((r) => r.id)).toEqual([OWN])
   })
 
   /**
-   * The words typed into the blocks, never what the page reads as. A picked
-   * proposal is what the page shows, and counting it as the object's own words
-   * would list it twice — once under its own name and once as typed by hand.
+   * The words typed into the block, never what it reads as. A picked proposal is
+   * what the page shows, and counting it as the block's own words would list it
+   * twice — once under its own name and once as typed by hand. Empty and not
+   * being read, the own row is saying nothing about nothing.
    */
-  it('does not count a picked proposal as words the object typed', () => {
-    const rows = rowsOf(typed(''), unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }))
+  it('drops an empty own line once a proposal is picked', () => {
+    const rows = rowsOf(typed('', { candidates: [candidate('m', '模型的')], chosen: 'm' }))
     expect(rows.map((r) => [r.id, r.by])).toEqual([['m', 'model']])
   })
 
-  /** Empty and not being read, it is a row saying nothing about nothing. */
-  it('drops an empty own line once a proposal is picked', () => {
-    const rows = rowsOf(typed(''), unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }))
-    expect(rows.map((r) => r.id)).toEqual(['m'])
+  /**
+   * ⭐ One card per block, and this is what that buys: a sentence set in two
+   * blocks has two pools, so neither card offers what the other block was
+   * proposed.
+   */
+  it('offers one block nothing of what another block of the sentence holds', () => {
+    const first = typed('轟', { candidates: [candidate('m1', '第一半')] })
+    const second = typed('隆', { candidates: [candidate('m2', '第二半')] })
+
+    expect(rowsOf(first).map((r) => r.id)).toEqual([OWN, 'm1'])
+    expect(rowsOf(second).map((r) => r.id)).toEqual([OWN, 'm2'])
   })
 })
 
 /**
- * ⭐ The rule the whole card hangs on. One row is not a choice — the object
- * already reads as it, and typing into the object types into that very row.
+ * ⭐ The rule the whole card hangs on. One row is not a choice — the block
+ * already reads as it, and typing into the block types into that very row.
  */
 describe('when a list is worth drawing', () => {
-  it('draws nothing for an object with one way to read it', () => {
-    expect(offersAChoice(rowsOf(typed('一句話'), unit()))).toBe(false)
+  it('draws nothing for a block with one way to read it', () => {
+    expect(offersAChoice(rowsOf(typed('一句話')))).toBe(false)
   })
 
   it('draws a list the moment a second way to read it turns up', () => {
-    const rows = rowsOf(typed('一句話'), unit({ candidates: [candidate('m', '另一句')] }))
+    const rows = rowsOf(typed('一句話', { candidates: [candidate('m', '另一句')] }))
     expect(offersAChoice(rows)).toBe(true)
   })
 
-  /** The picked one is counted, so a proposal against an empty object is a pair. */
+  /** The picked one is counted, so a proposal against a typed block is a pair. */
   it('counts the row being read among the two', () => {
-    const rows = rowsOf(typed('自己打的'), unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }))
+    const rows = rowsOf(typed('自己打的', { candidates: [candidate('m', '模型的')], chosen: 'm' }))
     expect(rows).toHaveLength(2)
     expect(offersAChoice(rows)).toBe(true)
   })
 
-  /** A proposal picked into an object that had nothing typed is one row, not two. */
+  /** A proposal picked into a block that had nothing typed is one row, not two. */
   it('draws nothing where the only proposal replaced an empty line', () => {
-    const rows = rowsOf(typed(''), unit({ candidates: [candidate('m', '模型的')], chosen: 'm' }))
+    const rows = rowsOf(typed('', { candidates: [candidate('m', '模型的')], chosen: 'm' }))
     expect(offersAChoice(rows)).toBe(false)
   })
 })

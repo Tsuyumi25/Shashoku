@@ -245,7 +245,7 @@ function missingFamilyOf(entry: LayerEntry): string | null {
 
 const rows = computed(() =>
   (currentFile.value
-    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value, editor.textSide)
+    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value, editor.textSide, project.activeFace)
     : []
   ).map((row) => ({ ...row, missingFamily: missingFamilyOf(row.entry) })),
 )
@@ -414,7 +414,7 @@ function isUntitled(entry: LayerEntry): boolean {
  */
 function wordsOf(entry: TextLayerEntry): readonly string[] {
   const page = project.pageById(editor.currentPageId ?? '')?.page
-  if (page !== undefined) return shownLinesOf(page, entry)
+  if (page !== undefined) return shownLinesOf(entry)
   // Off-page there is no unit to resolve, and the body is still code — a tree
   // row is a name, so it says the words rather than the tags around them.
   return entry.body.lines.map(plainOf)

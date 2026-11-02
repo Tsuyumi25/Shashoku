@@ -16,33 +16,45 @@ import type { ProjectFile } from '@/types/project'
 import type {
   GroupLayerEntry,
   LayerEntry,
+  Ledger,
   OcrCandidatePersisted,
   RasterLayerEntry,
   SourceTextLayerEntry,
   TextLayerEntry,
   TranslationCandidate,
+  TranslationTextLayerEntry,
   TranslationUnit,
 } from '@shared/page/types'
+import type { ReadingEdge } from '@shared/page/readingGraph'
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from '@shared/page/types'
 import { linesOf } from '@shared/page/text'
-import { blocksOf, blocksOnSide, projectionOf } from '@shared/page/units'
+import {
+  blocksOnSide,
+  facePage,
+  projectionOf,
+  shownCodeOf,
+  sourceBlocksOf,
+  translationBlocksOf,
+} from '@shared/page/units'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, parseManifest, serializeManifest } from '@shared/page/schema'
+import { repairPage } from '@shared/page/repair'
 import { offeredReadings } from '@shared/ocr/offer'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { AppearanceTarget } from '@/lib/appearance'
 
 const PAGE = 'p001.png'
+const FACE = 'face-a'
 
 /**
- * One block of lettering. Its translation is built alongside it and given the
- * same id, so every id in these fixtures still names one thing whichever level
- * is asking.
+ * One block of lettering. The sentence over it is built alongside it and given
+ * the same id, so every id in these fixtures still names one thing whichever
+ * level is asking.
  */
-function label(id: string, text = ''): TextLayerEntry {
-  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+function label(id: string, text = ''): TranslationTextLayerEntry {
+  const entry = blankTranslationBlock(id, FACE, DEFAULT_TEXT_STYLE)
   entry.body.lines = linesOf(text)
   entry.body.x = 200
   entry.body.y = 150
@@ -51,39 +63,42 @@ function label(id: string, text = ''): TextLayerEntry {
 
 const SOURCE_OF = (id: string) => `${id}~s`
 
-function sourceFor(id: string): TextLayerEntry {
-  const entry = blankBlock(SOURCE_OF(id), 'source', DEFAULT_TEXT_STYLE)
+function sourceFor(id: string): SourceTextLayerEntry {
+  const entry = blankSourceBlock(SOURCE_OF(id), DEFAULT_TEXT_STYLE)
   entry.body.x = 200
   entry.body.y = 150
   return entry
 }
 
 function unitFor(id: string): TranslationUnit {
-  return {
-    id,
-    tags: [],
-    source: { members: [SOURCE_OF(id)], separators: [] },
-    translation: { members: [id], separators: [] },
-    candidates: [],
-    chosen: null,
-  }
+  return { id, members: [SOURCE_OF(id), id] }
 }
 
-/** The blocks of both sides for a run of lettering, plus the units over them. */
+/** The one face these fixtures are lettered in, reading these sentences. */
+function ledgersFor(
+  units: readonly TranslationUnit[],
+  readingOrder: readonly string[],
+  readingEdges: readonly ReadingEdge[] = [],
+): Record<string, Ledger> {
+  return { [FACE]: { units: [...units], readingOrder: [...readingOrder], readingEdges: [...readingEdges] } }
+}
+
+/** The blocks of both sides for a run of lettering, plus the ledger over them. */
 const spread = (labels: readonly TextLayerEntry[]) => ({
   layers: labels.flatMap((l) => [l, sourceFor(l.id)]),
-  translationUnits: labels.map((l) => unitFor(l.id)),
+  ledgers: ledgersFor(
+    labels.map((l) => unitFor(l.id)),
+    labels.map((l) => l.id),
+  ),
 })
 
-/** What the artwork says under one block of lettering. */
+/** Which sentence one block of lettering belongs to. */
 const unitOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
   project.placeOf(PAGE, id)!.unit
 
 /** What the artwork says under one block of lettering. */
-const sourceOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
-  const unit = unitOf(project, id)
-  return (project.blockById(PAGE, unit.source.members[0]) as SourceTextLayerEntry).body
-}
+const sourceOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
+  sourceBlocksOf(project.viewOf(PAGE)!, unitOf(project, id))[0]!.body
 
 function openOnePage(labels: TextLayerEntry[] = []) {
   const project = useProjectStore()
@@ -99,8 +114,6 @@ function openOnePage(labels: TextLayerEntry[] = []) {
         width: 1200,
         height: 1700,
         ...spread(labels),
-        readingOrder: labels.map((l) => l.id),
-        readingEdges: [],
       },
       badge: 'ok',
     },
@@ -122,26 +135,24 @@ function pageOf(pageId: string, labels: TextLayerEntry[]): ProjectFile {
       width: 1200,
       height: 1700,
       ...spread(labels),
-      readingOrder: labels.map((l) => l.id),
-      readingEdges: [],
     },
     badge: 'ok',
   }
 }
 
-function labelsOf(project: ReturnType<typeof useProjectStore>): TextLayerEntry[] {
-  return project
-    .labelsOf(PAGE)
-    .flatMap((unit) => blocksOf(project.pageById(PAGE)!.page.layers, unit, 'translation'))
+function labelsOf(project: ReturnType<typeof useProjectStore>): TranslationTextLayerEntry[] {
+  const view = project.viewOf(PAGE)!
+  return project.labelsOf(PAGE).flatMap((unit) => translationBlocksOf(view, unit))
 }
 
 const textsOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-  project
-    .labelsOf(PAGE)
-    .map((unit) => projectionOf(project.pageById(PAGE)!.page.layers, unit, 'translation'))
+  project.labelsOf(PAGE).map((unit) => projectionOf(project.viewOf(PAGE)!, unit, 'translation'))
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  const project = useProjectStore()
+  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.activeFace = FACE
 })
 
 describe('canvas tool', () => {
@@ -260,7 +271,7 @@ describe('addLabelAt', () => {
 
     const added = labelsOf(project).at(-1)
     expect(labelsOf(project)).toHaveLength(2)
-    expect(unitOf(project, added!.id)).toMatchObject({ tags: [] })
+    expect(project.tagsOf(PAGE, added!.id)).toEqual([])
     expect(added?.body).toMatchObject({ x: 100, y: 225, lines: [''] })
     expect(sourceOf(project, added!.id)).toMatchObject({ x: 100, y: 225, lines: [''] })
     expect(added?.body.style).toEqual(project.header.seedStyle)
@@ -1287,9 +1298,7 @@ describe('layer tree edits', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          translationUnits: readingOrder.map(unitFor),
-          readingOrder,
-          readingEdges: [],
+          ledgers: ledgersFor(readingOrder.map(unitFor), readingOrder),
           layers: [...layers, ...readingOrder.map(sourceFor)],
         },
         badge: 'ok',
@@ -1308,7 +1317,7 @@ describe('layer tree edits', () => {
       .map((e) => e.id)
 
   const orderOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-    project.pageById(PAGE)?.page.readingOrder ?? []
+    project.viewOf(PAGE)?.readingOrder ?? []
 
   /**
    * The reason the two orders are held apart at all: restacking is about what
@@ -1673,8 +1682,7 @@ describe('layer tree edits', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          translationUnits: [], readingOrder: ['z'],
-          readingEdges: [],
+          ledgers: ledgersFor([], ['z']),
           layers: [label('z')],
         },
         ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -2006,9 +2014,7 @@ describe('deleteSelection', () => {
         name: 'p',
         width: 1200,
         height: 1700,
-        translationUnits: p.order.map(unitFor),
-        readingOrder: p.order,
-        readingEdges: [],
+        ledgers: ledgersFor(p.order.map(unitFor), p.order),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
@@ -2019,7 +2025,7 @@ describe('deleteSelection', () => {
   }
 
   const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    project.pageById(name)?.page.readingOrder ?? []
+    project.viewOf(name)?.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
     (project.pageById(name)?.page.layers ?? [])
@@ -2256,8 +2262,7 @@ describe('selectLayerBy', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          translationUnits: [], readingOrder: order,
-          readingEdges: [],
+          ledgers: ledgersFor([], order),
           layers,
         },
         badge: 'ok' as const,
@@ -2372,9 +2377,7 @@ describe('moveObjectsTo', () => {
         name: 'p',
         width: 1200,
         height: 1700,
-        translationUnits: p.order.map(unitFor),
-        readingOrder: p.order,
-        readingEdges: p.drawn ?? [],
+        ledgers: ledgersFor(p.order.map(unitFor), p.order, p.drawn ?? []),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
@@ -2385,7 +2388,7 @@ describe('moveObjectsTo', () => {
   }
 
   const orderOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    project.pageById(name)?.page.readingOrder ?? []
+    project.viewOf(name)?.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
     (project.pageById(name)?.page.layers ?? [])
@@ -2408,7 +2411,7 @@ describe('moveObjectsTo', () => {
   })
 
   const edgesOf = (project: ReturnType<typeof useProjectStore>, name: string) =>
-    project.pageById(name)?.page.readingEdges ?? []
+    project.viewOf(name)?.readingEdges ?? []
 
   it('carries a line to the new page when both its ends make the journey', () => {
     const { project, editor } = open([
@@ -2777,8 +2780,9 @@ describe('spraying tags with the brush', () => {
     return { project, editor }
   }
 
+  /** What the sentence a block of lettering belongs to means. */
   const tagsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-    project.unitById(PAGE, id)!.tags
+    project.tagsOf(PAGE, id)
 
   it('replaces the meaning an object carried rather than joining it', () => {
     const { project, editor } = openSprayed([styled('a', ['emphasis'], {})])
@@ -2912,7 +2916,7 @@ describe('spraying tags with the brush', () => {
 
 describe('drawing lines between text objects', () => {
   const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
-    project.pageById(PAGE)?.page.readingEdges ?? []
+    project.viewOf(PAGE)?.readingEdges ?? []
 
   it('draws a line and takes it back in one step', () => {
     const { project, editor } = openOnePage([label('a'), label('b')])
@@ -3029,8 +3033,7 @@ describe('drawing lines between text objects', () => {
       sourceFor('a'),
       sourceFor('b'),
     ]
-    file.page.translationUnits = [unitFor('a'), unitFor('b')]
-    file.page.readingOrder = ['a', 'b']
+    file.page.ledgers = ledgersFor([unitFor('a'), unitFor('b')], ['a', 'b'])
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
     editor.selectOnly('g')
     editor.deleteSelection()
@@ -3041,7 +3044,7 @@ describe('drawing lines between text objects', () => {
 
   it('takes the lines on an object with it when its creation is undone', () => {
     const { project, editor } = openOnePage([label('a')])
-    editor.cmdAddLabel(PAGE, { unit: unitFor('b'), blocks: [label('b'), sourceFor('b')] })
+    editor.cmdAddLabel(PAGE, { units: { [FACE]: unitFor('b') }, blocks: [label('b'), sourceFor('b')] })
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
     editor.undo()
     editor.undo()
@@ -3304,7 +3307,7 @@ describe('a reading dropped on an object that already had one', () => {
   ): string[] =>
     offeredReadings(
       pool,
-      blocksOnSide(project.pageById(PAGE)!.page.layers, 'source').map((b) => ({
+      blocksOnSide(project.pageById(PAGE)!.page.layers, 'source', FACE).map((b) => ({
         source: { from: (b as SourceTextLayerEntry).body.from },
       })),
     ).map((r) => r.hash)
@@ -3375,26 +3378,17 @@ describe('a reading dropped on an object that already had one', () => {
 })
 
 describe('the translation candidates', () => {
-  function withCandidates(...candidates: TranslationCandidate[]): TextLayerEntry {
+  /** ⭐ The pool hangs on the block, so the fixture carries it from the start. */
+  function withCandidates(...candidates: TranslationCandidate[]): TranslationTextLayerEntry {
     const entry = label('a', '自己打的')
-    Object.assign(entry, { __pool: candidates })
+    entry.body.candidates = candidates
     return entry
   }
 
-  /** The pool belongs to the translation, so it is filled once the page exists. */
-  function openPooled(labels: TextLayerEntry[]) {
-    const opened = openOnePage(labels)
-    for (const entry of labels) {
-      const pool = (entry as unknown as { __pool?: TranslationCandidate[] }).__pool
-      if (pool) opened.project.unitById(PAGE, entry.id)!.candidates = pool
-    }
-    return opened
-  }
-
-  const rowsOf = (project: ReturnType<typeof useProjectStore>) =>
-    project.unitById(PAGE, 'a')!.candidates
-  const chosenOf = (project: ReturnType<typeof useProjectStore>) =>
-    project.unitById(PAGE, 'a')!.chosen
+  const bodyOf = (project: ReturnType<typeof useProjectStore>) =>
+    (project.blockById(PAGE, 'a') as TranslationTextLayerEntry).body
+  const rowsOf = (project: ReturnType<typeof useProjectStore>) => bodyOf(project).candidates
+  const chosenOf = (project: ReturnType<typeof useProjectStore>) => bodyOf(project).chosen
 
   /**
    * ⭐ The two doors are one door. Typing reaches whichever row the object is
@@ -3403,35 +3397,35 @@ describe('the translation candidates', () => {
    * person happened to be looking at.
    */
   it('takes a proposal as your own the moment it is typed into, from either door', () => {
-    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     project.updateLabelText(PAGE, 'a', '我改的')
-    expect(rowsOf(project)[0]).toMatchObject({ pieces: [['我改的']], human: true })
+    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我改的'], human: true })
   })
 
   /** Or a model could no longer withdraw words it wrote and nobody kept. */
   it('hands an untouched proposal back to the model when the typing is undone', () => {
-    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.beginTextEdit(PAGE, 'a', '模型的')
     project.updateLabelText(PAGE, 'a', '我改的')
     editor.commitTextEdit()
     editor.undo()
-    expect(rowsOf(project)[0].pieces[0]).toEqual(['模型的'])
+    expect(rowsOf(project)[0].lines).toEqual(['模型的'])
     expect(rowsOf(project)[0].human).toBeUndefined()
   })
 
   /** A proposal that was already somebody's stays theirs through an undo. */
   it('leaves a proposal that was already yours marked as yours', () => {
-    const { project, editor } = openPooled([
-      withCandidates({ id: 'h', pieces: [['我寫的']], human: true }),
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'h', lines: ['我寫的'], human: true }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'h')
     editor.beginTextEdit(PAGE, 'a', '我寫的')
     project.updateLabelText(PAGE, 'a', '再改一次')
     editor.commitTextEdit()
     editor.undo()
-    expect(rowsOf(project)[0]).toMatchObject({ pieces: [['我寫的']], human: true })
+    expect(rowsOf(project)[0]).toMatchObject({ lines: ['我寫的'], human: true })
   })
 
   /**
@@ -3440,7 +3434,7 @@ describe('the translation candidates', () => {
    * moment somebody is sure what they just did.
    */
   it('takes a pick back', () => {
-    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     expect(chosenOf(project)).toBe('m')
     editor.undo()
@@ -3448,15 +3442,15 @@ describe('the translation candidates', () => {
   })
 
   it('has nothing to record for picking the row already being read', () => {
-    const { editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
+    const { editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
     editor.cmdPickTranslation(PAGE, 'a', null)
     expect(editor.canUndo).toBe(false)
   })
 
   it('adds a candidate blank, yours, and already being read', () => {
-    const { project, editor } = openPooled([withCandidates()])
+    const { project, editor } = openOnePage([withCandidates()])
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
-    expect(rowsOf(project)).toEqual([{ id: 'fresh', pieces: [['']], human: true }])
+    expect(rowsOf(project)).toEqual([{ id: 'fresh', lines: [''], human: true }])
     expect(chosenOf(project)).toBe('fresh')
   })
 
@@ -3465,7 +3459,7 @@ describe('the translation candidates', () => {
    * so a redo that minted a fresh one would leave that slot pointing at nothing.
    */
   it('brings the same candidate back on redo', () => {
-    const { project, editor } = openPooled([withCandidates({ id: 'm', pieces: [['模型的']] })])
+    const { project, editor } = openOnePage([withCandidates({ id: 'm', lines: ['模型的'] })])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
     editor.undo()
@@ -3483,8 +3477,8 @@ describe('the translation candidates', () => {
    * about it.
    */
   it('drops the object back to its own lines when the proposal it was reading is thrown away', () => {
-    const { project, editor } = openPooled([
-      withCandidates({ id: 'm', pieces: [['模型的']] }, { id: 'n', pieces: [['另一個']] }),
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdRemoveTranslation(PAGE, 'a', 'm')
@@ -3493,11 +3487,11 @@ describe('the translation candidates', () => {
   })
 
   it('puts a thrown-away proposal back where it was, still being read', () => {
-    const { project, editor } = openPooled([
+    const { project, editor } = openOnePage([
       withCandidates(
-        { id: 'first', pieces: [['一']] },
-        { id: 'second', pieces: [['二']] },
-        { id: 'third', pieces: [['三']] },
+        { id: 'first', lines: ['一'] },
+        { id: 'second', lines: ['二'] },
+        { id: 'third', lines: ['三'] },
       ),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'second')
@@ -3508,8 +3502,8 @@ describe('the translation candidates', () => {
   })
 
   it('leaves the row being read alone when some other proposal is thrown away', () => {
-    const { project, editor } = openPooled([
-      withCandidates({ id: 'm', pieces: [['模型的']] }, { id: 'n', pieces: [['另一個']] }),
+    const { project, editor } = openOnePage([
+      withCandidates({ id: 'm', lines: ['模型的'] }, { id: 'n', lines: ['另一個'] }),
     ])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdRemoveTranslation(PAGE, 'a', 'n')
@@ -3517,9 +3511,9 @@ describe('the translation candidates', () => {
   })
 
   it('refuses every one of them on a locked object', () => {
-    const locked = withCandidates({ id: 'm', pieces: [['模型的']] })
+    const locked = withCandidates({ id: 'm', lines: ['模型的'] })
     locked.locked = true
-    const { project, editor } = openPooled([locked])
+    const { project, editor } = openOnePage([locked])
     editor.cmdPickTranslation(PAGE, 'a', 'm')
     editor.cmdAddTranslationCandidate(PAGE, 'a', 'fresh')
     editor.cmdRemoveTranslation(PAGE, 'a', 'm')
@@ -3666,7 +3660,7 @@ describe('a measured leading out of the range a page can be set in', () => {
 
 describe('a material put down on the page', () => {
   const blocks = (project: ReturnType<typeof useProjectStore>, side: 'source' | 'translation') =>
-    blocksOnSide(project.pageById(PAGE)!.page.layers, side)
+    blocksOnSide(project.pageById(PAGE)!.page.layers, side, FACE)
   const STROKE = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
 
   it('becomes a sentence of its own, giving only what is ticked, on the side the canvas shows', () => {
@@ -3699,12 +3693,12 @@ describe('a material put down on the page', () => {
     editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: null, patch: { color: '#ffffff' }, effects: null }, 'translation')
     expect(blocks(project, 'translation')[0]!.body).toMatchObject({ lines: [''], style: { color: '#ffffff' } })
     editor.undo()
-    expect(project.pageById(PAGE)!.page.translationUnits).toHaveLength(0)
+    expect(project.viewOf(PAGE)!.units).toHaveLength(0)
   })
 })
 
 describe('Ctrl+L on the selection', () => {
-  const units = (project: ReturnType<typeof useProjectStore>) => project.pageById(PAGE)!.page.translationUnits.length
+  const units = (project: ReturnType<typeof useProjectStore>) => project.viewOf(PAGE)!.units.length
 
   it('joins two sentences into one and one undo splits them again', () => {
     const { project, editor } = openOnePage()
@@ -3745,7 +3739,7 @@ describe('the selection seen from the other side', () => {
     editor.setTextSide('translation')
     editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
     const translation = [...editor.selectedIds][0]!
-    const source = project.pageById(PAGE)!.page.translationUnits[0]!.source.members[0]!
+    const source = sourceBlocksOf(project.viewOf(PAGE)!, project.viewOf(PAGE)!.units[0]!)[0]!.id
 
     editor.setTextSide('source')
     expect(editor.selectedNodes().map((t) => t.entry.id)).toEqual([source])
@@ -3759,5 +3753,168 @@ describe('the selection seen from the other side', () => {
     }
     expect(color(source)).toBe('#123456')
     expect(color(translation)).not.toBe('#123456')
+  })
+})
+
+/**
+ * ⚠️ The pool hangs on the block, so what one block of a sentence reads as has
+ * to survive the sentence losing another — including across a write to disk and
+ * a read back, where a model that kept candidates on the sentence instead would
+ * have had to decide which block each one belonged to all over again.
+ */
+describe('a sentence set in two blocks of lettering', () => {
+  function openPair() {
+    const first = label('a', '前')
+    first.body.candidates = [{ id: 'ca', lines: ['甲'] }]
+    first.body.chosen = 'ca'
+    const second = label('b', '後')
+    second.body.candidates = [{ id: 'cb', lines: ['乙'] }]
+    second.body.chosen = 'cb'
+    const { project, editor } = openOnePage()
+    const file = project.pageById(PAGE)!
+    file.page.layers = [sourceFor('a'), first, second]
+    file.page.ledgers = ledgersFor([{ id: 'u', members: [SOURCE_OF('a'), 'a', 'b'] }], ['u'])
+    return { project, editor }
+  }
+
+  const idsOf = (project: ReturnType<typeof useProjectStore>) =>
+    project.pageById(PAGE)!.page.layers.map((e) => e.id)
+
+  it('keeps what the block left reads as through a write to disk and a read back', () => {
+    const { project, editor } = openPair()
+    editor.selectOnly('a')
+    editor.deleteSelection()
+
+    const reopened = repairPage(
+      parseManifest(serializeManifest(project.pageById(PAGE)!.page), FACE),
+      [FACE],
+    ).manifest
+    const page = facePage(reopened, FACE)
+
+    expect(page.units).toHaveLength(1)
+    expect(translationBlocksOf(page, page.units[0]!).map(shownCodeOf)).toEqual(['乙'])
+  })
+
+  /**
+   * The same blocks and the same proposals, not copies of them: the chosen slot
+   * names a candidate by id, so an undo that minted fresh ones would put the
+   * sentence back reading its own words.
+   */
+  it('gives the same blocks back on undo and takes the same ones again on redo', () => {
+    const { project, editor } = openPair()
+    const before = idsOf(project)
+
+    editor.selectOnly('a')
+    editor.deleteSelection()
+    expect(idsOf(project)).toEqual([SOURCE_OF('a'), 'b'])
+
+    editor.undo()
+    expect(idsOf(project)).toEqual(before)
+    expect(project.viewOf(PAGE)!.units[0]!.members).toEqual([SOURCE_OF('a'), 'a', 'b'])
+    expect(textsOf(project)).toEqual(['甲/乙'])
+
+    editor.redo()
+    expect(idsOf(project)).toEqual([SOURCE_OF('a'), 'b'])
+    expect(textsOf(project)).toEqual(['乙'])
+  })
+})
+
+describe('the faces a book is lettered in', () => {
+  it('letters a new face like the one being worked on, and one undo takes it off again', () => {
+    const { project, editor } = openOnePage([label('a', '甲'), label('b', '乙')])
+    project.addTranslation(PAGE, 'a', ['候選'], 'model')
+
+    editor.cmdAddFace('英文')
+    const added = project.activeFace
+    expect(added).not.toBe(FACE)
+
+    const view = project.viewOf(PAGE, added)!
+    expect(view.units).toHaveLength(2)
+    expect(view.readingOrder).toHaveLength(2)
+    const lettering = view.units.flatMap((unit) => translationBlocksOf(view, unit))
+    expect(lettering.map((b) => b.id)).not.toContain('a')
+    expect(lettering.map((b) => b.body.lines.join(''))).toEqual(['', ''])
+    expect(lettering.flatMap((b) => b.body.candidates)).toEqual([])
+    // The artwork's words are every face's, so they are the same blocks.
+    expect(view.units.flatMap((unit) => sourceBlocksOf(view, unit)).map((b) => b.id)).toEqual([
+      SOURCE_OF('a'),
+      SOURCE_OF('b'),
+    ])
+
+    editor.undo()
+    expect(project.faceIds).toEqual([FACE])
+    expect(project.activeFace).toBe(FACE)
+    expect(blocksOnSide(project.pageById(PAGE)!.page.layers, 'translation', added)).toEqual([])
+    expect(textsOf(project)).toEqual(['甲', '乙'])
+  })
+
+  /** A book has to be lettered in something. */
+  it('refuses to take the last face away', () => {
+    const { project, editor } = openOnePage([label('a', '甲')])
+
+    editor.cmdDeleteFace(FACE)
+
+    expect(project.faceIds).toEqual([FACE])
+    expect(editor.canUndo).toBe(false)
+    expect(textsOf(project)).toEqual(['甲'])
+  })
+
+  /**
+   * ⚠️ Which face a step was taken in is settled when it is recorded. Undoing
+   * after turning to another face must write back where the step landed, or the
+   * line comes off a face nobody drew it in and stays on the one they did.
+   */
+  it('takes a line back off the face it was drawn in, whatever is being looked at now', () => {
+    const { project, editor } = openOnePage([label('a'), label('b')])
+    editor.cmdAddFace('英文')
+    const other = project.activeFace
+    editor.setActiveFace(FACE)
+
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    const elsewhere = [...project.viewOf(PAGE, other)!.readingEdges]
+
+    editor.setActiveFace(other)
+    editor.undo()
+
+    expect(project.viewOf(PAGE, FACE)!.readingEdges).toEqual([])
+    expect(project.viewOf(PAGE, other)!.readingEdges).toEqual(elsewhere)
+  })
+})
+
+/**
+ * A sentence's meaning is one fact about the artwork, so it is written onto
+ * every block of the artwork the sentence holds — and taking it back has to
+ * give each of them what it was carrying, which is not the same thing twice.
+ */
+describe('the meaning of a sentence holding two blocks of the artwork', () => {
+  function openTwoSources() {
+    const { project, editor } = openOnePage([label('a', '甲')])
+    const file = project.pageById(PAGE)!
+    file.page.layers.push(sourceFor('b'))
+    file.page.ledgers[FACE]!.units[0]!.members.push(SOURCE_OF('b'))
+    project.setSourceTags(PAGE, SOURCE_OF('a'), ['框内'])
+    project.setSourceTags(PAGE, SOURCE_OF('b'), ['心聲'])
+    return { project, editor }
+  }
+
+  const tagsOfArtwork = (project: ReturnType<typeof useProjectStore>, id: string) => {
+    const block = project.blockById(PAGE, id)!
+    if (block.side !== 'source') throw new Error('not the artwork')
+    return block.body.tags
+  }
+
+  it('writes onto every block of the artwork and gives each its own back on undo', () => {
+    const { project, editor } = openTwoSources()
+    expect(project.tagsOf(PAGE, 'a')).toEqual(['心聲', '框内'])
+
+    editor.cmdSetLabelTags(PAGE, 'a', project.tagsOf(PAGE, 'a'), ['旁白'])
+
+    expect(tagsOfArtwork(project, SOURCE_OF('a'))).toEqual(['旁白'])
+    expect(tagsOfArtwork(project, SOURCE_OF('b'))).toEqual(['旁白'])
+
+    editor.undo()
+
+    expect(tagsOfArtwork(project, SOURCE_OF('a'))).toEqual(['框内'])
+    expect(tagsOfArtwork(project, SOURCE_OF('b'))).toEqual(['心聲'])
   })
 })

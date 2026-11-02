@@ -5,7 +5,8 @@ import type {
   TextLayerEntry,
   TranslationUnit,
 } from '@shared/page/types'
-import { placeOfBlock, unitOfBlock } from '@shared/page/units'
+import { shownCodeOf, unitOfBlock } from '@shared/page/units'
+import { linesOf } from '@shared/page/text'
 import { generateId } from '@shared/page/schema'
 import { cloneEffects } from '@shared/effects/clone'
 import { pageStack } from '@shared/page/stack'
@@ -28,12 +29,7 @@ import {
 import { effectedFrame } from '@/lib/layerEffects'
 import { EMPTY_RECT, clampToPage, isEmptyRect, unionRect, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
-import {
-  useProjectStore,
-  type RemovedEntry,
-  type RemovedTranslation,
-  type SideWords,
-} from '@/stores/projectStore'
+import { useProjectStore } from '@/stores/projectStore'
 
 /**
  * Merging layers, and duplicating one.
@@ -136,7 +132,7 @@ export function useMergeLayers() {
 
     // Hiding is inherited and `pageStack` honours it, so a hidden participant
     // contributes nothing and is still consumed — as merging does anywhere.
-    const nodes = pageStack(parts, 'translation')
+    const nodes = pageStack(parts, 'translation', project.activeFace)
     const page = { w: target.w, h: target.h }
     const frame = frameOf(nodes, page)
 
@@ -168,26 +164,14 @@ export function useMergeLayers() {
     }
 
     const below = parts.slice(0, -1).map((e) => e.id)
-    let removed: RemovedEntry[] = []
-    editor.pushCommand({
-      label: `merge-layers ${parts.length}`,
-      do: () => {
-        removed = below
-          .map((id) => project.removeEntry(id))
-          .filter((r): r is RemovedEntry => r !== null)
-        // Read after the others are gone, so it still says where the topmost
-        // sits — which is where the result belongs.
-        const at = pathOf(open.layers, top.id) ?? undefined
-        const taken = project.removeEntry(top.id)
-        if (taken !== null) removed.push(taken)
-        project.addLayer(open.page, merged, at)
-      },
-      // Backwards, so each recorded path still means what it meant when the
-      // entry was taken out from under it.
-      undo: () => {
-        project.removeEntry(merged.id)
-        for (const r of [...removed].reverse()) project.restoreEntry(r)
-      },
+    editor.cmdReshape(`merge-layers ${parts.length}`, open.page, () => {
+      for (const id of below) project.removeEntry(id)
+      // Read after the others are gone, so it still says where the topmost
+      // sits — which is where the result belongs.
+      const live = project.pageById(open.page)?.page.layers ?? []
+      const at = pathOf(live, top.id) ?? undefined
+      project.removeEntry(top.id)
+      project.addLayer(open.page, merged, at)
     })
     editor.selectOnly(merged.id)
   }
@@ -221,14 +205,16 @@ export function useMergeLayers() {
    * A copy that shares nothing with the original. New ids throughout, and a
    * layer file of its own — two entries naming one file would let deleting
    * either of them take the other's pixels with it when orphans are swept.
-   */
-  /**
+   *
    * ⚠️ Everything a node owns is copied, not shared. A spread alone leaves the
    * copy and its original holding one body and one list of effects between
    * them: dragging either would move both, typing into either would write into
    * both, and what looked like two objects would be one wearing two ids.
+   *
+   * Lettering brings its proposals only with `withDrawer`. Without, the copy's
+   * own words are what the original reads as, so it says the same thing.
    */
-  function cloneEntry(entry: LayerEntry, into: Clone): LayerEntry {
+  function cloneEntry(entry: LayerEntry, into: Clone, withDrawer: boolean): LayerEntry {
     const id = generateId()
     const effects = cloneEffects(entry.effects)
     if (entry.kind === 'raster') {
@@ -238,16 +224,31 @@ export function useMergeLayers() {
     }
     if (entry.kind === 'text') {
       into.texts.push([entry.id, id])
-      const body = { ...entry.body, lines: [...entry.body.lines], style: { ...entry.body.style } }
-      return entry.side === 'source'
-        ? { ...entry, id, effects, side: 'source', body: { ...body, by: entry.body.by } }
-        : { ...entry, id, effects, side: 'translation', body }
+      const own = { lines: [...entry.body.lines], style: { ...entry.body.style } }
+      if (entry.side === 'source') {
+        return { ...entry, id, effects, body: { ...entry.body, ...own, tags: [...entry.body.tags] } }
+      }
+      const body = { ...entry.body, ...own }
+      if (!withDrawer) {
+        return { ...entry, id, effects, body: { ...body, lines: linesOf(shownCodeOf(entry)), candidates: [], chosen: null } }
+      }
+      const ids = new Map(entry.body.candidates.map((c) => [c.id, generateId()]))
+      return {
+        ...entry,
+        id,
+        effects,
+        body: {
+          ...body,
+          candidates: entry.body.candidates.map((c) => ({ ...c, id: ids.get(c.id)!, lines: [...c.lines] })),
+          chosen: entry.body.chosen === null ? null : (ids.get(entry.body.chosen) ?? null),
+        },
+      }
     }
     return {
       ...entry,
       id,
       effects,
-      children: entry.children.map((c) => cloneEntry(c, into)),
+      children: entry.children.map((c) => cloneEntry(c, into, withDrawer)),
     }
   }
 
@@ -259,60 +260,40 @@ export function useMergeLayers() {
   })
 
   /**
-   * A whole translation copied, both sides: every block it holds gets a twin and
-   * the twins make a new unit of their own, read right after the original.
-   *
-   * ⭐ A copy is another translation, independent of the first. The words come
-   * with it — the proposals and which one is chosen are the unit's, not the
-   * block's, so copying only the block would leave a copy with nothing to say.
+   * A whole sentence copied, in the face being worked on: every block it holds
+   * gets a twin, drawer and all, and the twins make a new sentence of their
+   * own, read right after the original.
    */
   function copyUnits(
     page: string,
     clone: Clone,
   ): { units: Array<{ of: string; unit: TranslationUnit }>; extra: TextLayerEntry[] } {
-    const file = project.pageById(page)
-    if (!file) return { units: [], extra: [] }
+    const view = project.viewOf(page)
+    if (!view) return { units: [], extra: [] }
     const twin = new Map(clone.texts)
     const units: Array<{ of: string; unit: TranslationUnit }> = []
     const extra: TextLayerEntry[] = []
     for (const [was] of clone.texts) {
-      const unit = unitOfBlock(file.page, was)
+      const unit = unitOfBlock(view, was)
       if (!unit || units.some((u) => u.of === unit.id)) continue
-      for (const id of [...unit.source.members, ...unit.translation.members]) {
+      for (const id of unit.members) {
         if (twin.has(id)) continue
         const block = project.blockById(page, id)
         if (!block) continue
-        const copy = cloneEntry(block, clone) as TextLayerEntry
+        const copy = cloneEntry(block, clone, true) as TextLayerEntry
         twin.set(id, copy.id)
         extra.push(copy)
       }
-      const chosen = new Map(unit.candidates.map((c) => [c.id, generateId()]))
-      const side = (s: TranslationUnit['source']) => ({
-        members: s.members.flatMap((id) => twin.get(id) ?? []),
-        separators: [...s.separators],
-      })
-      const copy: TranslationUnit = {
-        id: generateId(),
-        tags: [...unit.tags],
-        source: side(unit.source),
-        translation: side(unit.translation),
-        candidates: unit.candidates.map((c) => ({
-          ...c,
-          id: chosen.get(c.id)!,
-          pieces: c.pieces.map((piece) => [...piece]),
-        })),
-        chosen: unit.chosen === null ? null : (chosen.get(unit.chosen) ?? null),
-      }
-      units.push({ of: unit.id, unit: copy })
+      units.push({ of: unit.id, unit: { id: generateId(), members: unit.members.flatMap((id) => twin.get(id) ?? []) } })
     }
     return { units, extra }
   }
 
   /**
-   * ⭐ A text block's copy is another block of the same translation, read right
+   * ⭐ A text block's copy is another block of the same sentence, read right
    * after the one it copies and saying the same words — Ctrl+J and Alt with a
    * drag both copy what was pressed and nothing else. `wholeUnit` is the other
-   * question, a second translation copied whole, asked from the object's menu.
+   * question, a second sentence copied whole, asked from the object's menu.
    *
    * `id` names what to copy when it is not the cursor; `keepSelection` leaves
    * the selection where it is rather than moving it onto the copy — Alt and a
@@ -329,7 +310,7 @@ export function useMergeLayers() {
     if (path === null || source === undefined) return
 
     const clone: Clone = { entry: source, files: [], texts: [] }
-    const copy = cloneEntry(source, clone)
+    const copy = cloneEntry(source, clone, opts.wholeUnit === true)
     if (copy.kind !== 'group') copy.locked = false
     const { units, extra } = opts.wholeUnit
       ? copyUnits(open.page, clone)
@@ -347,70 +328,18 @@ export function useMergeLayers() {
     const at = [...path.slice(0, -1), path[path.length - 1] + 1]
     const originals = new Map(clone.texts.map(([was, now]) => [now, was]))
 
-    // Each copied block joins its original's translation: the words as they
-    // stood, kept for undo, and as they stand once it is in.
-    const joined: Array<{ was: string; before: SideWords; after: SideWords }> = []
-    const joinTranslations = () => {
-      if (opts.wholeUnit) return
-      for (const [was, now] of clone.texts) {
-        const before = project.sideWordsOf(open.page, was)
-        if (before === undefined || !project.addMemberAfter(open.page, was, now)) continue
-        const after = project.sideWordsOf(open.page, was)!
-        const page = project.pageById(open.page)?.page
-        const place = page === undefined ? undefined : placeOfBlock(page, was)
-        if (after.pieces && place !== undefined) {
-          after.pieces.splice(place.at + 1, 0, [...(after.pieces[place.at] ?? [])])
-        }
-        project.setSideWords(open.page, was, after)
-        joined.push({ was, before, after })
+    editor.cmdReshape(`duplicate-layer ${copy.id}`, open.page, () => {
+      project.addLayer(open.page, copy, at)
+      if (!opts.wholeUnit) {
+        for (const [was, now] of clone.texts) project.addMemberAfter(open.page, was, now)
       }
-    }
-
-    let removed: RemovedEntry | null = null
-    let leftovers: RemovedTranslation[] = []
-    editor.pushCommand({
-      label: `duplicate-layer ${copy.id}`,
-      do: () => {
-        if (removed === null) {
-          project.addLayer(open.page, copy, at)
-          joinTranslations()
-          // The other side's twins, each above the block it copies.
-          for (const block of extra) {
-            const live = project.pageById(open.page)?.page.layers ?? []
-            const near = pathOf(live, originals.get(block.id) ?? '')
-            project.addLayer(
-              open.page,
-              block,
-              near === null ? undefined : [...near.slice(0, -1), near[near.length - 1] + 1],
-            )
-          }
-          for (const { of, unit } of units) {
-            const order = project.pageById(open.page)?.page.readingOrder ?? []
-            const after = order.indexOf(of)
-            project.addLabel(
-              open.page,
-              { unit, blocks: [] },
-              { paths: [], orderIndex: after === -1 ? order.length : after + 1, edges: [] },
-            )
-          }
-        } else {
-          for (const gone of leftovers) {
-            project.addLabel(
-              open.page,
-              { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) },
-              { paths: gone.blocks.map((b) => b.path), orderIndex: gone.orderIndex, edges: gone.edges },
-            )
-          }
-          project.restoreEntry(removed)
-          for (const { was, after } of joined) project.setSideWords(open.page, was, after)
-        }
-      },
-      undo: () => {
-        removed = project.removeEntry(copy.id)
-        for (const { was, before } of [...joined].reverse()) project.setSideWords(open.page, was, before)
-        // A twin unit with blocks outside the copied entry is still standing.
-        leftovers = units.flatMap(({ unit }) => project.deleteLabel(open.page, unit.id) ?? [])
-      },
+      // The sentence's other twins, each above the block it copies.
+      for (const block of extra) {
+        const live = project.pageById(open.page)?.page.layers ?? []
+        const near = pathOf(live, originals.get(block.id) ?? '')
+        project.addLayer(open.page, block, near === null ? undefined : [...near.slice(0, -1), near[near.length - 1] + 1])
+      }
+      for (const { of, unit } of units) project.insertUnit(open.page, unit, of)
     })
     if (!opts.keepSelection) editor.selectOnly(copy.id)
   }

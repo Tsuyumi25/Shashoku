@@ -52,6 +52,9 @@ import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
 import { importBaseMap } from "./engine";
 
+// Callers here read only the tree's raster files, which no face owns.
+const LAYERS_ONLY = "";
+
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 async function exists(path: string): Promise<boolean> {
@@ -80,7 +83,7 @@ async function listPageDirs(pagesRoot: string): Promise<string[]> {
 async function manifestIsHealthy(pageDir: string): Promise<boolean> {
   try {
     const raw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
-    parseManifest(raw);
+    parseManifest(raw, LAYERS_ONLY);
     return true;
   } catch {
     return false;
@@ -160,7 +163,7 @@ async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
     let layers;
     try {
       const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
-      layers = parseManifest(raw).layers;
+      layers = parseManifest(raw, LAYERS_ONLY).layers;
     } catch {
       continue;
     }
@@ -269,7 +272,7 @@ async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {
     live.map(async (pageId): Promise<ShelfLeaf> => {
       try {
         const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
-        const manifest = parseManifest(raw);
+        const manifest = parseManifest(raw, LAYERS_ONLY);
         const bottom = pageArtwork(manifest.layers);
         return {
           id: pageId,
@@ -495,7 +498,7 @@ async function gcOrphanLayers(pageDir: string): Promise<void> {
         else if (e.kind === "group") collect(e.children);
       }
     };
-    collect(parseManifest(manifestRaw).layers);
+    collect(parseManifest(manifestRaw, LAYERS_ONLY).layers);
     referenced = new Set(files);
   } catch {
     

@@ -107,6 +107,10 @@ function sizeSlug(size: ImageSize): string {
  *
  * Two profiles that differ only in naming rule derive the same folder, which
  * is why the profile list refuses to hold both — see assertDistinctFolders.
+ *
+ * A profile pinned to a face carries a piece of the face's id rather than its
+ * name: a name may hold anything and may change, and a delivery folder that
+ * moved when a face was renamed would split one face's pages across two.
  */
 export function profileFolderName(profile: ExportProfile): string {
   const kind =
@@ -114,7 +118,9 @@ export function profileFolderName(profile: ExportProfile): string {
       ? FORMAT_SLUG[profile.format]
       : `${FORMAT_SLUG[profile.format]}-${COLOR_SLUG[profile.colorMode]}`;
   const cap = profile.maxBytes === null ? "" : `-max${Math.ceil(profile.maxBytes / 1024)}k`;
-  return `${kind}@${sizeSlug(profile.size)}${cap}`;
+  const face =
+    profile.face === undefined ? "" : `-f${profile.face.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8)}`;
+  return `${kind}@${sizeSlug(profile.size)}${cap}${face}`;
 }
 
 export class DuplicateProfileError extends Error {}

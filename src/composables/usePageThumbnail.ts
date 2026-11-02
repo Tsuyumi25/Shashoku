@@ -41,12 +41,12 @@ export function usePageThumbnail(
   }
 
   async function compositeBytes(of: ProjectFile): Promise<Uint8Array> {
-    const key = await thumbnailKey(of)
+    const key = await thumbnailKey(of, project.activeFace)
     const cached = await window.api.readThumbnail(key)
     if (cached) return cached
 
     return inRenderSlot(async () => {
-      const png = await renderThumbnail(of)
+      const png = await renderThumbnail(of, project.activeFace)
       // Failing to cache costs the next draw, not this one.
       void window.api.writeThumbnail(key, png).catch(() => {})
       return png
@@ -101,7 +101,7 @@ export function usePageThumbnail(
     }
   }
 
-  watch(() => [seen.value, file().pageDir, project.rootPath] as const, () => void load(), {
+  watch(() => [seen.value, file().pageDir, project.rootPath, project.activeFace] as const, () => void load(), {
     immediate: true,
   })
 

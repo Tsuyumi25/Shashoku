@@ -2,6 +2,7 @@ import type {
   GroupLayerEntry,
   LayerEntry,
   LayerEntryBase,
+  Ledger,
   ManifestJson,
   OcrCandidatePersisted,
   OcrJson,
@@ -10,15 +11,15 @@ import type {
   SourceTextLayerEntry,
   TextBody,
   TextLayerEntry,
+  TranslationBody,
   TranslationCandidate,
   TranslationTextLayerEntry,
   TranslationUnit,
-  TranslationUnitSide,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { normalizeEdges, type ReadingEdge } from './readingGraph'
-import type { TextSide } from './text'
-import { linesAt, placeOfBlock } from './units'
+import { linesOf } from './text'
+import { BLOCK_JOINER, shownCodeOf } from './units'
 import { escapeText } from './markup'
 import { textObjects } from './tree'
 import { parseEffects, serializeEffects } from '../effects/schema'
@@ -60,7 +61,10 @@ const PLAIN_TEXT_VERSION = 13
  * style parser already does with a key that is not there — a character scale
  * absent means the face's own proportions — except for the escaping below.
  */
-const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, MANIFEST_SCHEMA_VERSION]
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, MANIFEST_SCHEMA_VERSION]
+
+/** The last version that held one ledger for the page, with candidates on the unit. */
+const ONE_LEDGER_VERSION = 15
 
 
 export class PageParseError extends Error {}
@@ -186,14 +190,19 @@ function parseTags(v: unknown, at: string): string[] {
   return normalizeTagSet(v as string[])
 }
 
-function parseTextEntry(v: Record<string, unknown>, at: string): TextLayerEntry {
+function parseTextEntry(v: Record<string, unknown>, at: string, legacyFace: string | null): TextLayerEntry {
   const base = parseLayerBase(v, at, 'text')
   const { side } = v
   if (side !== 'source' && side !== 'translation')
     fail(`${at}.side 必須是 source 或 translation(取得 ${JSON.stringify(side)})`)
   if (side === 'source')
     return { kind: 'text', ...base, side, body: parseSourceBody(v.body, `${at}.body`) }
-  return { kind: 'text', ...base, side, body: parseTextBody(v.body, `${at}.body`).body }
+  let face = legacyFace
+  if (face === null) {
+    if (typeof v.face !== 'string' || v.face.length === 0) fail(`${at}.face 必須是非空字串`)
+    face = v.face
+  }
+  return { kind: 'text', ...base, side, face, body: parseTranslationBody(v.body, `${at}.body`) }
 }
 
 function parseTextBody(v: unknown, at: string): { body: TextBody; raw: Record<string, unknown> } {
@@ -232,12 +241,31 @@ function parseSourceBody(v: unknown, at: string): SourceBody {
   const { body, raw } = parseTextBody(v, at)
   const { by, from } = raw
   if (by !== undefined && by !== 'auto' && by !== 'human') fail(`${at}.by 必須是 auto 或 human`)
-  const source: SourceBody = { ...body, by: by === 'human' ? 'human' : 'auto' }
+  const source: SourceBody = {
+    ...body,
+    by: by === 'human' ? 'human' : 'auto',
+    tags: parseTags(raw.tags, `${at}.tags`),
+  }
   // A birth certificate naming a reading this page no longer holds is kept
   // rather than dropped: it decides nothing, and the day the reading comes back
   // — an undone delete, a reopened project — it means what it always meant.
   if (typeof from === 'string' && from.length > 0) source.from = from
   return source
+}
+
+/**
+ * A slot naming a candidate that is not in the pool opens empty rather than
+ * failing: the block still holds the person's own words, and refusing the page
+ * over a pointer that has come loose would cost the words to protect the choice.
+ */
+function parseTranslationBody(v: unknown, at: string): TranslationBody {
+  const { body, raw } = parseTextBody(v, at)
+  const candidates = parseCandidates(raw.candidates, `${at}.candidates`)
+  const { chosen } = raw
+  if (chosen !== undefined && chosen !== null && (typeof chosen !== 'string' || chosen.length === 0))
+    fail(`${at}.chosen 必須是非空字串或 null`)
+  const held = typeof chosen === 'string' && candidates.some((c) => c.id === chosen) ? chosen : null
+  return { ...body, candidates, chosen: held }
 }
 
 function parseLines(v: unknown, at: string): string[] {
@@ -249,10 +277,16 @@ function parseLines(v: unknown, at: string): string[] {
   })
 }
 
-function parsePieces(v: unknown, at: string): string[][] {
-  if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
-  if (v.length === 0) fail(`${at} 至少要有一塊`)
-  return v.map((piece, i) => parseLines(piece, `${at}[${i}]`))
+function parseCandidateMarks(entry: Record<string, unknown>, where: string): Pick<TranslationCandidate, 'id' | 'human' | 'source'> {
+  const { id, human, source } = entry
+  if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
+  if (human !== undefined && typeof human !== 'boolean') fail(`${where}.human 必須是布林值`)
+  if (source !== undefined && (typeof source !== 'string' || source.length === 0))
+    fail(`${where}.source 必須是非空字串`)
+  const out: Pick<TranslationCandidate, 'id' | 'human' | 'source'> = { id }
+  if (human) out.human = true
+  if (typeof source === 'string' && source.length > 0) out.source = source
+  return out
 }
 
 function parseCandidates(v: unknown, at: string): TranslationCandidate[] {
@@ -262,73 +296,28 @@ function parseCandidates(v: unknown, at: string): TranslationCandidate[] {
   return v.map((entry, i) => {
     const where = `${at}[${i}]`
     if (!isRecord(entry)) fail(`${where} 必須是物件`)
-    const { id, human, source } = entry
-    if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
+    const marks = parseCandidateMarks(entry, where)
     // The slot names one of these, so two of them answering to the same name
-    // would make what the unit reads as depend on which was searched first.
-    if (seen.has(id)) fail(`${where}.id「${id}」重複`)
-    seen.add(id)
-    if (human !== undefined && typeof human !== 'boolean') fail(`${where}.human 必須是布林值`)
-    if (source !== undefined && (typeof source !== 'string' || source.length === 0))
-      fail(`${where}.source 必須是非空字串`)
-    const candidate: TranslationCandidate = {
-      id,
-      pieces: parsePieces(entry.pieces, `${where}.pieces`),
-    }
-    if (human) candidate.human = true
-    if (typeof source === 'string' && source.length > 0) candidate.source = source
-    return candidate
+    // would make what the block reads as depend on which was searched first.
+    if (seen.has(marks.id)) fail(`${where}.id「${marks.id}」重複`)
+    seen.add(marks.id)
+    return { ...marks, lines: parseLines(entry.lines, `${where}.lines`) }
+  })
+}
+
+function parseIdList(v: unknown, at: string): string[] {
+  if (!Array.isArray(v)) fail(`${at} 必須是字串陣列`)
+  return v.map((id, i) => {
+    if (typeof id !== 'string' || id.length === 0) fail(`${at}[${i}] 必須是非空字串`)
+    return id
   })
 }
 
 /**
- * A slot naming a candidate that is not there, or one that no longer has a
- * piece for every block, opens empty rather than failing: the blocks still hold
- * the person's own words, and refusing the page over a pointer that has come
- * loose would cost the translation to protect the choice.
+ * Naming the same block twice is drift and belongs to repair. Refusing the file
+ * here would make a page nobody can open out of one that reads a word twice.
  */
-function parseChosen(
-  v: unknown,
-  pool: readonly TranslationCandidate[],
-  blocks: number,
-  at: string,
-): string | null {
-  if (v === undefined || v === null) return null
-  if (typeof v !== 'string' || v.length === 0) fail(`${at} 必須是非空字串或 null`)
-  return pool.some((c) => c.id === v && c.pieces.length === blocks) ? v : null
-}
-
-/**
- * ⚠️ `separators` is stored one shorter than `members` and is refused at any
- * other length. A gap count that has to be re-derived on every read is a second
- * place for the two to disagree.
- */
-function parseUnitSide(v: unknown, at: string): TranslationUnitSide {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  const { members, separators } = v
-  if (!Array.isArray(members)) fail(`${at}.members 必須是字串陣列`)
-  if (members.length === 0) fail(`${at}.members 至少要有一塊`)
-  // Naming the same block twice is drift and belongs to repair, which can take
-  // the separator beside it out in the same move. Refusing the file here would
-  // make a page nobody can open out of one that reads a word twice.
-  members.forEach((id, i) => {
-    if (typeof id !== 'string' || id.length === 0) fail(`${at}.members[${i}] 必須是非空字串`)
-  })
-  const gaps = members.length - 1
-  if (separators === undefined) return { members: members as string[], separators: Array(gaps).fill('') }
-  if (!Array.isArray(separators)) fail(`${at}.separators 必須是字串陣列`)
-  if (separators.length !== gaps)
-    fail(`${at}.separators 必須有 ${gaps} 個(比 members 少一個),取得 ${separators.length} 個`)
-  return {
-    members: members as string[],
-    separators: separators.map((s, i) => {
-      if (typeof s !== 'string') fail(`${at}.separators[${i}] 必須是字串`)
-      return s
-    }),
-  }
-}
-
-function parseTranslationUnits(v: unknown, at: string): TranslationUnit[] {
+function parseUnits(v: unknown, at: string): TranslationUnit[] {
   if (v === undefined) return []
   if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
   const seen = new Set<string>()
@@ -339,34 +328,135 @@ function parseTranslationUnits(v: unknown, at: string): TranslationUnit[] {
     if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
     if (seen.has(id)) fail(`${where}.id「${id}」重複`)
     seen.add(id)
-    const translation = parseUnitSide(entry.translation, `${where}.translation`)
-    const candidates = parseCandidates(entry.candidates, `${where}.candidates`)
+    return { id, members: parseIdList(entry.members, `${where}.members`) }
+  })
+}
+
+function parseLedger(v: unknown, at: string): Ledger {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  return {
+    units: parseUnits(v.units, `${at}.units`),
+    readingOrder: parseIdList(v.readingOrder ?? [], `${at}.readingOrder`),
+    readingEdges: parseReadingEdges(v.readingEdges, `${at}.readingEdges`),
+  }
+}
+
+function parseLedgers(v: unknown): Record<string, Ledger> {
+  if (v === undefined) return {}
+  if (!isRecord(v)) fail('manifest.json.ledgers 必須是物件')
+  const out: Record<string, Ledger> = {}
+  for (const [face, ledger] of Object.entries(v)) {
+    if (face.length === 0) fail('manifest.json.ledgers 的 key 必須是非空字串')
+    out[face] = parseLedger(ledger, `manifest.json.ledgers.${face}`)
+  }
+  return out
+}
+
+/**
+ * One unit as a page of the single-ledger format held it: two lists, the gap
+ * between blocks, and a pool of candidates each cut into one piece per block.
+ */
+interface LegacyUnit {
+  id: string
+  tags: string[]
+  source: string[]
+  translation: string[]
+  candidates: (Pick<TranslationCandidate, 'id' | 'human' | 'source'> & { pieces: string[][] })[]
+  chosen: string | null
+}
+
+function parseLegacyUnits(v: unknown, at: string): LegacyUnit[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
+  const seen = new Set<string>()
+  return v.map((entry, i) => {
+    const where = `${at}[${i}]`
+    if (!isRecord(entry)) fail(`${where} 必須是物件`)
+    const { id } = entry
+    if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
+    if (seen.has(id)) fail(`${where}.id「${id}」重複`)
+    seen.add(id)
+    const side = (s: unknown, name: string): string[] => {
+      if (!isRecord(s)) fail(`${where}.${name} 必須是物件`)
+      return parseIdList(s.members, `${where}.${name}.members`)
+    }
+    const pool = entry.candidates === undefined ? [] : entry.candidates
+    if (!Array.isArray(pool)) fail(`${where}.candidates 必須是陣列`)
+    const candidates = pool.map((c, j) => {
+      const at2 = `${where}.candidates[${j}]`
+      if (!isRecord(c)) fail(`${at2} 必須是物件`)
+      if (!Array.isArray(c.pieces) || c.pieces.length === 0) fail(`${at2}.pieces 至少要有一塊`)
+      return {
+        ...parseCandidateMarks(c, at2),
+        pieces: c.pieces.map((p, k) => parseLines(p, `${at2}.pieces[${k}]`)),
+      }
+    })
+    const { chosen } = entry
     return {
       id,
       tags: parseTags(entry.tags, `${where}.tags`),
-      source: parseUnitSide(entry.source, `${where}.source`),
-      translation,
+      source: side(entry.source, 'source'),
+      translation: side(entry.translation, 'translation'),
       candidates,
-      chosen: parseChosen(entry.chosen, candidates, translation.members.length, `${where}.chosen`),
+      chosen: typeof chosen === 'string' && candidates.some((c) => c.id === chosen) ? chosen : null,
     }
   })
 }
 
-function parseGroupEntry(v: Record<string, unknown>, at: string): GroupLayerEntry {
+/**
+ * The single-ledger page brought into the face's ledger.
+ *
+ * A candidate with one piece per block is dealt out, piece by piece, to the
+ * blocks in their order — the order it was written against. One that no longer
+ * fits, which a deleted block used to leave behind, has nowhere else its words
+ * can go: joined, it becomes the first block's candidate, so whatever was typed
+ * into it is choosable again rather than stranded.
+ */
+function migrateLegacyUnits(layers: LayerEntry[], units: LegacyUnit[], face: string): TranslationUnit[] {
+  const blocks = new Map(textObjects(layers).map((t) => [t.id, t]))
+  return units.map((unit) => {
+    for (const id of unit.source) {
+      const block = blocks.get(id)
+      if (block?.side === 'source') block.body.tags = normalizeTagSet([...block.body.tags, ...unit.tags])
+    }
+    const lettering = unit.translation
+      .map((id) => blocks.get(id))
+      .filter((b): b is TranslationTextLayerEntry => b?.side === 'translation' && b.face === face)
+    for (const candidate of unit.candidates) {
+      const { pieces, ...marks } = candidate
+      const chosen = unit.chosen === candidate.id
+      if (pieces.length === lettering.length) {
+        lettering.forEach((block, at) => {
+          block.body.candidates.push({ ...marks, lines: pieces[at]! })
+          if (chosen) block.body.chosen = candidate.id
+        })
+      } else if (lettering[0] !== undefined) {
+        lettering[0].body.candidates.push({
+          ...marks,
+          lines: linesOf(pieces.map((p) => p.join('\n')).join(BLOCK_JOINER)),
+        })
+        if (chosen) lettering[0].body.chosen = candidate.id
+      }
+    }
+    return { id: unit.id, members: [...unit.source, ...unit.translation] }
+  })
+}
+
+function parseGroupEntry(v: Record<string, unknown>, at: string, legacyFace: string | null): GroupLayerEntry {
   const base = parseLayerBase(v, at, 'group')
   const name = parseName(v, at)
   const { children } = v
   if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
-  const parsedChildren = children.map((c, i) => parseLayerEntry(c, `${at}.children[${i}]`))
+  const parsedChildren = children.map((c, i) => parseLayerEntry(c, `${at}.children[${i}]`, legacyFace))
   return { kind: 'group', ...base, name, children: parsedChildren }
 }
 
-function parseLayerEntry(v: unknown, at: string): LayerEntry {
+function parseLayerEntry(v: unknown, at: string, legacyFace: string | null): LayerEntry {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const kind = v.kind
   if (kind === 'raster') return parseRasterEntry(v, at)
-  if (kind === 'text') return parseTextEntry(v, at)
-  if (kind === 'group') return parseGroupEntry(v, at)
+  if (kind === 'text') return parseTextEntry(v, at, legacyFace)
+  if (kind === 'group') return parseGroupEntry(v, at, legacyFace)
   fail(`${at}.kind 必須是 raster | text | group 之一(取得 ${JSON.stringify(kind)})`)
 }
 
@@ -390,9 +480,7 @@ export function defaultManifest(name: string, width: number, height: number): Ma
     name,
     width,
     height,
-    translationUnits: [],
-    readingOrder: [],
-    readingEdges: [],
+    ledgers: {},
     layers: [],
   }
 }
@@ -445,39 +533,29 @@ export function emptyBody(style: TextStyle): TextBody {
   return { lines: [''], x: 0, y: 0, rotation: 0, style: { ...style } }
 }
 
-/** One block with nothing typed into it, on whichever side the caller asks. */
-export function blankBlock(
-  id: string,
-  side: 'source',
-  style: TextStyle,
-): SourceTextLayerEntry
-export function blankBlock(
-  id: string,
-  side: 'translation',
-  style: TextStyle,
-): TranslationTextLayerEntry
-export function blankBlock(id: string, side: TextSide, style: TextStyle): TextLayerEntry {
-  const base: LayerEntryBase & { kind: 'text' } = {
-    kind: 'text',
-    id,
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'normal',
-    effects: [],
-  }
-  if (side === 'source') return { ...base, side: 'source', body: { ...emptyBody(style), by: 'auto' } }
-  return { ...base, side: 'translation', body: emptyBody(style) }
+/** One block of the artwork's words with nothing typed into it. */
+export function blankSourceBlock(id: string, style: TextStyle): SourceTextLayerEntry {
+  return { ...blankBase(id), side: 'source', body: { ...emptyBody(style), by: 'auto', tags: [] } }
 }
 
+/** One block of a face's lettering with nothing typed into it. */
+export function blankTranslationBlock(id: string, face: string, style: TextStyle): TranslationTextLayerEntry {
+  return { ...blankBase(id), side: 'translation', face, body: { ...emptyBody(style), candidates: [], chosen: null } }
+}
+
+function blankBase(id: string): LayerEntryBase & { kind: 'text' } {
+  return { kind: 'text', id, visible: true, locked: false, opacity: 1, blendMode: 'normal', effects: [] }
+}
+
+/** A new sentence's blocks and, for every face, the unit that holds them. */
 export interface BlankTranslation {
-  unit: TranslationUnit
-  blocks: [SourceTextLayerEntry, TranslationTextLayerEntry]
+  blocks: TextLayerEntry[]
+  units: Record<string, TranslationUnit>
 }
 
 /**
- * A translation with nothing in it: one block a side, and the unit that says
- * they are the same piece of content.
+ * A sentence with nothing in it: one block of the artwork's words, one block of
+ * lettering for every face, and in every face's ledger the unit holding its two.
  *
  * ⭐ Unanswered on the source side, and left that way. Which reading a
  * translation stands for is settled once for the whole page, by weighing every
@@ -491,21 +569,18 @@ export interface BlankTranslation {
  */
 export function blankTranslation(
   style: TextStyle,
+  faces: readonly string[],
   newId: () => string = generateId,
 ): BlankTranslation {
-  const source = blankBlock(newId(), 'source', style)
-  const translation = blankBlock(newId(), 'translation', style)
-  return {
-    unit: {
-      id: newId(),
-      tags: [],
-      source: { members: [source.id], separators: [] },
-      translation: { members: [translation.id], separators: [] },
-      candidates: [],
-      chosen: null,
-    },
-    blocks: [source, translation],
+  const source = blankSourceBlock(newId(), style)
+  const blocks: TextLayerEntry[] = [source]
+  const units: Record<string, TranslationUnit> = {}
+  for (const face of faces) {
+    const lettering = blankTranslationBlock(newId(), face, style)
+    blocks.push(lettering)
+    units[face] = { id: newId(), members: [source.id, lettering.id] }
   }
+  return { blocks, units }
 }
 
 /**
@@ -514,12 +589,12 @@ export function blankTranslation(
  * parts have drifted apart, only a file describing something that has no
  * meaning to have.
  */
-function parseReadingEdges(v: unknown): ReadingEdge[] {
+function parseReadingEdges(v: unknown, where: string): ReadingEdge[] {
   if (v === undefined) return []
-  if (!Array.isArray(v)) fail('manifest.json.readingEdges 必須是陣列')
+  if (!Array.isArray(v)) fail(`${where} 必須是陣列`)
   return normalizeEdges(
     v.map((entry, i) => {
-      const at = `manifest.json.readingEdges[${i}]`
+      const at = `${where}[${i}]`
       if (!isRecord(entry)) fail(`${at} 必須是物件`)
       const { from, to } = entry
       if (typeof from !== 'string' || from.length === 0) fail(`${at}.from 必須是非空字串`)
@@ -548,11 +623,14 @@ function parsePageSize(data: Record<string, unknown>): { width: number; height: 
 }
 
 /**
- * Structure only. Whether `readingOrder` and the tree agree with each other is
- * the repair layer's question, not this one — a page whose order has drifted is
+ * Structure only. Whether a ledger and the tree agree with each other is the
+ * repair layer's question, not this one — a page whose order has drifted is
  * still readable, and refusing to open it would be the worse answer.
+ *
+ * `legacyFace` is the project's face that a page from before faces belongs to:
+ * its lettering takes that face, and its one ledger becomes that face's.
  */
-export function parseManifest(raw: string): ManifestJson {
+export function parseManifest(raw: string, legacyFace: string): ManifestJson {
   const data = parseJson(raw, 'manifest.json')
   if (!isRecord(data)) fail('manifest.json 頂層必須是物件')
 
@@ -561,6 +639,7 @@ export function parseManifest(raw: string): ManifestJson {
       fail(`manifest.json 由較新版本建立(schemaVersion ${data.schemaVersion}),請更新軟體`)
     fail(`不支援的 manifest.json 版本:${JSON.stringify(data.schemaVersion)}`)
   }
+  const legacy = (data.schemaVersion as number) <= ONE_LEDGER_VERSION
 
   const revisionRaw = data.revision
   let revision = 0
@@ -575,40 +654,37 @@ export function parseManifest(raw: string): ManifestJson {
 
   const size = parsePageSize(data)
 
-  const readingOrderRaw = data.readingOrder
-  if (!Array.isArray(readingOrderRaw)) fail('manifest.json.readingOrder 必須是陣列')
-  const readingOrder = readingOrderRaw.map((id, i) => {
-    if (typeof id !== 'string' || id.length === 0)
-      fail(`manifest.json.readingOrder[${i}] 必須是非空字串`)
-    return id
-  })
-
   const layersRaw = data.layers
   if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`))
+  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`, legacy ? legacyFace : null))
 
   const files: string[] = []
   collectRasterFiles(layers, files)
   if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
 
-  const manifest: ManifestJson = {
-    schemaVersion: MANIFEST_SCHEMA_VERSION,
-    revision,
-    name: data.name,
-    ...size,
-    translationUnits: parseTranslationUnits(data.translationUnits, 'manifest.json.translationUnits'),
-    readingOrder,
-    readingEdges: parseReadingEdges(data.readingEdges),
-    layers,
-  }
   if (data.schemaVersion === PLAIN_TEXT_VERSION) {
-    for (const block of textObjects(manifest.layers))
-      block.body.lines = block.body.lines.map(escapeText)
-    for (const unit of manifest.translationUnits)
-      for (const candidate of unit.candidates)
-        candidate.pieces = candidate.pieces.map((piece) => piece.map(escapeText))
+    for (const block of textObjects(layers)) block.body.lines = block.body.lines.map(escapeText)
   }
-  return manifest
+
+  let ledgers: Record<string, Ledger>
+  if (legacy) {
+    const units = parseLegacyUnits(data.translationUnits, 'manifest.json.translationUnits')
+    if (data.schemaVersion === PLAIN_TEXT_VERSION)
+      for (const unit of units)
+        for (const candidate of unit.candidates)
+          candidate.pieces = candidate.pieces.map((piece) => piece.map(escapeText))
+    ledgers = {
+      [legacyFace]: {
+        units: migrateLegacyUnits(layers, units, legacyFace),
+        readingOrder: parseIdList(data.readingOrder ?? [], 'manifest.json.readingOrder'),
+        readingEdges: parseReadingEdges(data.readingEdges, 'manifest.json.readingEdges'),
+      },
+    }
+  } else {
+    ledgers = parseLedgers(data.ledgers)
+  }
+
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, name: data.name, ...size, ledgers, layers }
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
@@ -640,27 +716,20 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
   if (l.side === 'source') {
     if (l.body.by !== 'auto') body.by = l.body.by
     if (l.body.from !== undefined) body.from = l.body.from
+    if (l.body.tags.length > 0) body.tags = normalizeTagSet(l.body.tags)
+    return { ...base, side: l.side, body }
   }
-  return { ...base, side: l.side, body }
+  if (l.body.candidates.length > 0) body.candidates = l.body.candidates
+  if (l.body.chosen !== null) body.chosen = l.body.chosen
+  return { ...base, side: l.side, face: l.face, body }
 }
 
-function serializeUnitSide(side: TranslationUnitSide): Record<string, unknown> {
-  const out: Record<string, unknown> = { members: side.members }
-  // Left out when every gap is the empty string, which is what lettering split
-  // out of one sound wants and so is most of them.
-  if (side.separators.some((s) => s.length > 0)) out.separators = side.separators
-  return out
-}
-
-function serializeUnit(unit: TranslationUnit): Record<string, unknown> {
+function serializeLedger(ledger: Ledger): Record<string, unknown> {
   const out: Record<string, unknown> = {
-    id: unit.id,
-    source: serializeUnitSide(unit.source),
-    translation: serializeUnitSide(unit.translation),
+    units: ledger.units.map((u) => ({ id: u.id, members: u.members })),
+    readingOrder: ledger.readingOrder,
   }
-  if (unit.tags.length > 0) out.tags = normalizeTagSet(unit.tags)
-  if (unit.candidates.length > 0) out.candidates = unit.candidates
-  if (unit.chosen !== null) out.chosen = unit.chosen
+  if (ledger.readingEdges.length > 0) out.readingEdges = normalizeEdges(ledger.readingEdges)
   return out
 }
 
@@ -672,33 +741,30 @@ function serializeBody(body: TextBody): Record<string, unknown> {
 }
 
 /**
- * The drawn part of a page, on its own — what a thumbnail's identity is made
- * of.
+ * The drawn part of a page as one face exports it, on its own — what a
+ * thumbnail's identity is made of.
  *
- * Every source block goes, and so does everything a unit holds: they move no
- * pixel — what a page composites is the translation — and keeping them would
- * throw away every thumbnail in the chapter for a pass that changed nothing
- * anybody can see.
+ * Every source block goes, and so does every other face's lettering and every
+ * ledger: they move no pixel of this face's page, and keeping them would throw
+ * away every thumbnail in the chapter for a pass that changed nothing anybody
+ * can see.
  *
- * A translation block collapses to the words it reads as, chosen candidate
- * resolved: the one in the slot is on the artwork, the rest are proposals
- * nobody can see — two pages reading the same way are the same picture.
+ * A block collapses to the words it reads as, chosen candidate resolved: the
+ * one in the slot is on the artwork, the rest are proposals nobody can see.
  */
-export function serializeDrawnLayers(m: ManifestJson): string {
+export function serializeDrawnLayers(m: ManifestJson, face: string): string {
   const drawn = (entry: LayerEntry): Record<string, unknown> | null => {
     if (entry.kind === 'group') {
       const children = entry.children.map(drawn).filter((c) => c !== null)
       return { ...serializeLayerEntry(entry), children }
     }
     if (entry.kind !== 'text') return serializeLayerEntry(entry)
-    if (entry.side === 'source') return null
+    if (entry.side === 'source' || entry.face !== face) return null
     const out = serializeLayerEntry(entry)
-    const place = placeOfBlock(m, entry.id)
     const body = out.body as Record<string, unknown>
-    body.lines =
-      place === undefined
-        ? entry.body.lines
-        : linesAt(place.unit, place.at, entry.body.lines)
+    body.lines = linesOf(shownCodeOf(entry))
+    delete body.candidates
+    delete body.chosen
     return out
   }
   return JSON.stringify(m.layers.map(drawn).filter((l) => l !== null))
@@ -712,9 +778,7 @@ export function serializeManifest(m: ManifestJson): string {
     width: m.width,
     height: m.height,
   }
-  out.translationUnits = m.translationUnits.map(serializeUnit)
-  out.readingOrder = m.readingOrder
-  if (m.readingEdges.length > 0) out.readingEdges = normalizeEdges(m.readingEdges)
+  out.ledgers = Object.fromEntries(Object.entries(m.ledgers).map(([face, l]) => [face, serializeLedger(l)]))
   out.layers = m.layers.map(serializeLayerEntry)
   return `${JSON.stringify(out, null, 2)}\n`
 }

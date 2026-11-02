@@ -1,4 +1,4 @@
-import { blocksOnSide, shownCodeOf, unitOfBlock } from '@shared/page/units'
+import { blocksOnSide, facePage, shownCodeOf, tagsOfBlock } from '@shared/page/units'
 import type { TagRegistry } from '@shared/tags/types'
 import type { WallEntry, WallScene } from '@shared/wall/scene'
 import type { ProjectFile } from '@/types/project'
@@ -12,23 +12,25 @@ export function wallSceneOf(
   files: readonly ProjectFile[],
   registry: TagRegistry,
   currentPageId: string | null,
+  face: string,
 ): WallScene {
   const entries: WallEntry[] = []
   files.forEach((file, i) => {
     if (file.badge !== 'ok') return
+    const page = facePage(file.page, face)
     for (const block of [
-      ...blocksOnSide(file.page.layers, 'translation'),
-      ...blocksOnSide(file.page.layers, 'source'),
+      ...blocksOnSide(file.page.layers, 'translation', face),
+      ...blocksOnSide(file.page.layers, 'source', face),
     ]) {
       entries.push({
         id: block.id,
         side: block.side,
         pageId: file.pageId,
         pageNumber: i + 1,
-        code: shownCodeOf(file.page, block),
+        code: shownCodeOf(block),
         style: { ...block.body.style },
         effects: JSON.parse(JSON.stringify(block.effects)),
-        tags: [...(unitOfBlock(file.page, block.id)?.tags ?? [])],
+        tags: tagsOfBlock(page, block.id),
       })
     }
   })

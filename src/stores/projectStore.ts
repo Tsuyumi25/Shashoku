@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ProjectFile, ProjectHeader } from '@/types/project'
-import type { ProjectJson } from '@shared/project/types'
+import type { ProjectJson, TranslationFace } from '@shared/project/types'
 import type { PageEntry } from '@shared/ipc/channels'
 import type { TagDefinition } from '@shared/tags/types'
 import type {
@@ -9,6 +9,7 @@ import type {
   LayerEntry,
   ManifestJson,
   OcrCandidatePersisted,
+  OcrJson,
   SourceBody,
   TextLayerEntry,
   TranslationCandidate,
@@ -25,6 +26,7 @@ import {
   serializeProjectJson,
 } from '@shared/project/schema'
 import {
+  blankTranslationBlock,
   defaultOcr,
   generateId,
   parseManifest,
@@ -34,8 +36,11 @@ import {
   unreadablePage,
   RETOUCH_LAYER_NAME,
 } from '@shared/page/schema'
+import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { repairPage } from '@shared/page/repair'
+import { copyFace, dropFace } from '@shared/page/faces'
 import {
+  allEntries,
   dissolveGroupAt,
   findEntry,
   findTextObject,
@@ -48,15 +53,19 @@ import {
   type DropTarget,
 } from '@shared/page/tree'
 import { linesOf, type TextSide } from '@shared/page/text'
+import { adoptSources } from '@shared/page/relink'
 import {
-  candidateFits,
+  emptyLedger,
+  facePage,
   findUnit,
   placeOfBlock,
+  tagsOfBlock,
+  tagsOfUnit,
   unitsInReadingOrder,
+  type FacePage,
   type UnitPlace,
 } from '@shared/page/units'
 import {
-  edgesTouching,
   hasEdge,
   normalizeEdges,
   withoutEdges,
@@ -73,85 +82,52 @@ import type { TextStyle } from '@shared/text-style/types'
 import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
 
-/**
- * Where a text object sits, in every sense at once: its place in the tree,
- * which is stacking order, its place in the reading order, and the lines drawn
- * to and from it. Undo has to put a deleted object back into all three, and
- * none of them can be worked out from the others.
- *
- * The lines ride along rather than being left for `repair` to sweep. A sweep
- * happens at the next open, so leaving them would make the undo look right
- * today and lose the lines tomorrow.
- */
+/** The part of a page that says which blocks make which sentence, in every face. */
+export type PageStructure = Pick<ManifestJson, 'ledgers' | 'layers'>
 
-/** The part of a page that says which blocks make which sentence. */
-export type PageStructure = Pick<ManifestJson, 'translationUnits' | 'readingOrder' | 'readingEdges' | 'layers'>
-
-export interface LabelPlace {
-  /** One per block, front to back, so putting them back cannot shift each other. */
-  paths: number[][]
-  orderIndex: number
-  edges: ReadingEdge[]
-}
-
-/** A translation and the blocks that say it, enough to put on a page. */
+/** A new sentence's blocks and, for every face, the unit holding them. */
 export interface TranslationParts {
-  unit: TranslationUnit
   blocks: readonly TextLayerEntry[]
-}
-
-/** One translation taken off a page, with everything needed to put it back. */
-export interface RemovedTranslation {
-  unit: TranslationUnit
-  blocks: Array<{ path: number[]; entry: TextLayerEntry }>
-  orderIndex: number
-  edges: ReadingEdge[]
-}
-
-/** Tree order between two paths: earlier sibling first, parent before child. */
-function comparePaths(a: readonly number[], b: readonly number[]): number {
-  for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
-    if (a[i] !== b[i]) return a[i] - b[i]
-  }
-  return a.length - b.length
-}
-
-
-/** What one side of a translation says; see `sideWordsOf`. */
-export interface SideWords {
-  /** Each block's own lines, by id. */
-  lines: Record<string, string[]>
-  /** The chosen proposal's pieces, or null when nothing is chosen. */
-  pieces: string[][] | null
-  separators: string[]
+  units: Readonly<Record<string, TranslationUnit>>
 }
 
 /**
- * One entry taken off a page, with everything needed to put it back.
+ * A page's structure from before a change, which is what undoing it puts back.
  *
- * A folder carries its whole subtree, so removing one takes text objects out
- * of the reading order that were never named directly. Their places are read
- * off the sequence before anything moves — working them out afterwards is
- * impossible, since each removal shifts the ones behind it.
+ * Whole rather than piece by piece: a block taken off a page leaves every face's
+ * ledger, may take sentences in other faces with it, and the reading of each —
+ * putting all that back by recorded paths and indices is where the positional
+ * bookkeeping this replaced went wrong.
  */
-export interface RemovedEntry {
+export interface PageSnapshot {
   pageId: string
-  path: number[]
-  entry: LayerEntry
-  /**
-   * Where each block it carried stood in its translation, so putting the entry
-   * back puts it back into the same translation at the same place.
-   */
-  membership: Array<{ unit: string; side: TextSide; at: number; separator: string }>
-  /**
-   * The translations that had nothing left once it went. A side with no block
-   * is not a smaller translation, it is a row the list cannot draw — so the
-   * whole thing comes off, and comes back whole.
-   */
-  units: RemovedTranslation[]
-  /** Every line with an end on anything the removal carried away. */
-  edges: ReadingEdge[]
+  before: PageStructure
 }
+
+/** Every page's structure and the face list at one moment. */
+export interface FaceState {
+  pages: Record<string, PageStructure>
+  faces: TranslationFace[]
+  activeFace: string
+}
+
+/**
+ * A ledger for every face, written before the page is reactive: a face's view
+ * creates a missing one on first read, and that read is usually a computed.
+ */
+function withEveryLedger(page: ManifestJson, faces: readonly string[]): void {
+  for (const face of faces) page.ledgers[face] ??= emptyLedger()
+}
+
+/** Whether a page on disk was written before the schema this build writes. */
+function isOlderManifest(raw: string): boolean {
+  try {
+    return (JSON.parse(raw) as { schemaVersion?: unknown }).schemaVersion !== MANIFEST_SCHEMA_VERSION
+  } catch {
+    return false
+  }
+}
+
 
 
 function shashokuDirOf(rootPath: string): string {
@@ -282,6 +258,136 @@ export const useProjectStore = defineStore('project', () => {
     autosave.mark()
   }
 
+  const faces = computed<TranslationFace[]>(() => projectMeta.value.faces ?? [])
+  const faceIds = computed(() => faces.value.map((f) => f.id))
+
+  /** The face the interface works on; the first one when the project names none it has. */
+  const activeFace = computed(() => {
+    const id = projectMeta.value.activeFace
+    return id !== undefined && faces.value.some((f) => f.id === id) ? id : (faces.value[0]?.id ?? '')
+  })
+
+  /** A page as one face reads it — the face being worked on, unless another is named. */
+  function viewOf(pageId: string, face: string = activeFace.value): FacePage | undefined {
+    const file = pageById(pageId)
+    return file ? facePage(file.page, face) : undefined
+  }
+
+  function setActiveFace(id: string): void {
+    if (!faceIds.value.includes(id) || projectMeta.value.activeFace === id) return
+    projectMeta.value.activeFace = id
+    markMetaDirty()
+  }
+
+  function renameFace(id: string, name: string): void {
+    const face = faces.value.find((f) => f.id === id)
+    if (!face || face.name === name) return
+    face.name = name
+    markMetaDirty()
+  }
+
+  /**
+   * A new face, lettered on every page the way the one being worked on is —
+   * every page, deleted ones included, since a page brought back has to read in
+   * every face the book has.
+   */
+  function addFace(name: string): string {
+    const id = generateId()
+    const from = activeFace.value
+    for (const file of allFiles.value) {
+      copyFace(file.page, from, id, generateId)
+      markPageDirty(file.pageId)
+    }
+    projectMeta.value.faces = [...faces.value, { id, name }]
+    markMetaDirty()
+    return id
+  }
+
+  /** Refused for the last face: a book has to be lettered in something. */
+  function deleteFace(id: string): boolean {
+    if (faces.value.length <= 1 || !faceIds.value.includes(id)) return false
+    for (const file of allFiles.value) {
+      dropFace(file.page, id)
+      markPageDirty(file.pageId)
+    }
+    projectMeta.value.faces = faces.value.filter((f) => f.id !== id)
+    if (projectMeta.value.activeFace === id) projectMeta.value.activeFace = projectMeta.value.faces[0]!.id
+    markMetaDirty()
+    return true
+  }
+
+  /**
+   * Every page's structure and the face list, written back whole — what undoing
+   * an added or deleted face puts back.
+   */
+  function setFaceState(state: FaceState): void {
+    for (const [pageId, structure] of Object.entries(state.pages)) setPageStructure(pageId, structure)
+    projectMeta.value.faces = structuredClone(state.faces)
+    projectMeta.value.activeFace = state.activeFace
+    markMetaDirty()
+  }
+
+  function faceState(): FaceState {
+    const pages: Record<string, PageStructure> = {}
+    for (const file of allFiles.value) pages[file.pageId] = structureOf(file.pageId)!
+    return { pages, faces: faces.value.map((f) => ({ ...f })), activeFace: activeFace.value }
+  }
+
+  function structureOf(pageId: string): PageStructure | undefined {
+    const file = pageById(pageId)
+    if (!file) return undefined
+    // A JSON round trip rather than structuredClone: arrays written back
+    // through the reactive page hold proxies as elements, which it refuses.
+    return JSON.parse(JSON.stringify({ ledgers: file.page.ledgers, layers: file.page.layers })) as PageStructure
+  }
+
+  function removeBlock(page: ManifestJson, id: string): void {
+    const path = pathOf(page.layers, id)
+    if (path !== null) removeAtPath(page.layers, path)
+  }
+
+  /**
+   * What taking blocks off a page means for every face, worked out after they
+   * are gone.
+   *
+   * A sentence left without any of the artwork's words is gone, lettering and
+   * all. One left without lettering is gone too, words and all, when this face
+   * is the only one — deleting a row has always taken both. With other faces
+   * the artwork's words are still theirs, so the sentence stays and gets a
+   * blank block of lettering instead, standing on them.
+   */
+  function settleStructure(page: ManifestJson): void {
+    const ids = faceIds.value
+    for (let changed = true; changed; ) {
+      changed = false
+      const present = new Map(textObjects(page.layers).map((t) => [t.id, t]))
+      for (const face of ids) {
+        const view = facePage(page, face)
+        for (const unit of view.units) unit.members = unit.members.filter((id) => present.has(id))
+        for (const unit of [...view.units]) {
+          const sources = unit.members.filter((id) => present.get(id)?.side === 'source')
+          const lettering = unit.members.filter((id) => present.get(id)?.side === 'translation')
+          if (sources.length > 0 && lettering.length > 0) continue
+          if (sources.length > 0 && ids.length > 1) {
+            const near = present.get(sources[0]!)!
+            const blank = blankTranslationBlock(generateId(), face, near.body.style)
+            blank.body.x = near.body.x
+            blank.body.y = near.body.y
+            page.layers.push(blank)
+            unit.members.push(blank.id)
+            continue
+          }
+          for (const id of unit.members) removeBlock(page, id)
+          changed ||= unit.members.length > 0
+          view.units = view.units.filter((u) => u !== unit)
+          view.readingOrder = view.readingOrder.filter((id) => id !== unit.id)
+          view.readingEdges = view.readingEdges.filter((e) => e.from !== unit.id && e.to !== unit.id)
+        }
+      }
+    }
+    adoptSources(page, ids, generateId, projectMeta.value.seedStyle)
+  }
+
   function reset() {
     autosave.cancel()
     rootPath.value = null
@@ -302,18 +408,28 @@ export const useProjectStore = defineStore('project', () => {
     // which is what makes it land where it came from.
     await flush()
     const meta = parseProjectJson(projectMetaRaw)
+    // A book from before faces gets its one face now: every page names it, so
+    // it has to exist before the first page is read.
+    const seeded = meta.faces === undefined
+    if (meta.faces === undefined) {
+      const id = generateId()
+      meta.faces = [{ id, name: '譯文' }]
+      meta.activeFace = id
+    }
+    const ids = meta.faces.map((f) => f.id)
     const loaded: ProjectFile[] = []
-    // A page whose reading order had drifted is put right here and queued to be
-    // written back, so the fix is made once rather than recomputed every open.
+    // A page whose structure had drifted, or that was written before faces, is
+    // put right here and queued to be written back, so the fix is made once
+    // rather than recomputed every open.
     const mended: string[] = []
     for (const p of pages) {
       let page = unreadablePage(p.pageId)
       let ocr = defaultOcr(page.width, page.height)
       try {
         const raw = await window.api.readPage(p.pageDir)
-        const repair = repairPage(parseManifest(raw.manifestRaw))
+        const repair = repairPage(parseManifest(raw.manifestRaw, ids[0]!), ids)
         page = repair.manifest
-        if (repair.repaired.length > 0) mended.push(p.pageId)
+        if (repair.repaired.length > 0 || isOlderManifest(raw.manifestRaw)) mended.push(p.pageId)
         // Readings fail on their own: a page whose ocr.json is unreadable is
         // still a page someone can typeset.
         ocr = raw.ocrRaw === null ? defaultOcr(page.width, page.height) : parseOcr(raw.ocrRaw)
@@ -321,6 +437,7 @@ export const useProjectStore = defineStore('project', () => {
         // Opens empty rather than taking the whole project down. The page
         // already carries a badge saying its manifest could not be read.
       }
+      withEveryLedger(page, ids)
       loaded.push({ pageId: p.pageId, pageDir: p.pageDir, page, ocr, badge: p.badge })
     }
     rootPath.value = newRootPath
@@ -332,7 +449,7 @@ export const useProjectStore = defineStore('project', () => {
     // The open reconciled the list against the directories on disk. Writing
     // that back now is what keeps a page nobody listed from being taken in
     // again at every open for the rest of the project's life.
-    if (!sameOrder(meta.pages, loaded)) markMetaDirty()
+    if (!sameOrder(meta.pages, loaded) || seeded) markMetaDirty()
     if (meta.pinnedLayerNames === undefined) {
       meta.pinnedLayerNames = [...usePreferencesStore().prefs.pinnedLayerSeed]
       markMetaDirty()
@@ -486,15 +603,20 @@ export const useProjectStore = defineStore('project', () => {
    * open in the editor, so it can join `allFiles` without a full reopen.
    */
   async function loadFreshPage(pageId: string, pageDir: string): Promise<ProjectFile> {
+    let page: ManifestJson
+    let ocr: OcrJson
+    let badge: ProjectFile['badge'] = 'ok'
     try {
       const raw = await window.api.readPage(pageDir)
-      const page = repairPage(parseManifest(raw.manifestRaw)).manifest
-      const ocr = raw.ocrRaw === null ? defaultOcr(page.width, page.height) : parseOcr(raw.ocrRaw)
-      return { pageId, pageDir, page, ocr, badge: 'ok' }
+      page = repairPage(parseManifest(raw.manifestRaw, faceIds.value[0]!), faceIds.value).manifest
+      ocr = raw.ocrRaw === null ? defaultOcr(page.width, page.height) : parseOcr(raw.ocrRaw)
     } catch {
-      const page = unreadablePage(pageId)
-      return { pageId, pageDir, page, ocr: defaultOcr(page.width, page.height), badge: 'damaged' }
+      page = unreadablePage(pageId)
+      ocr = defaultOcr(page.width, page.height)
+      badge = 'damaged'
     }
+    withEveryLedger(page, faceIds.value)
+    return { pageId, pageDir, page, ocr, badge }
   }
 
   /** Peels the mark off, which puts each page back where it never stopped being. */
@@ -567,23 +689,23 @@ export const useProjectStore = defineStore('project', () => {
 
 
 
-  /** Which page holds a translation, or null where none does. */
+  /** Which page holds a sentence of the face being worked on, or null where none does. */
   function pageOfUnit(unitId: string): string | null {
     for (const file of files.value) {
-      if (file.page.translationUnits.some((u) => u.id === unitId)) return file.pageId
+      if (facePage(file.page, activeFace.value).units.some((u) => u.id === unitId)) return file.pageId
     }
     return null
   }
 
-  /** A page's translations as a reader meets them — the label list's order. */
+  /** A page's sentences as a reader of the face being worked on meets them — the label list's order. */
   function labelsOf(pageId: string): TranslationUnit[] {
-    const file = pageById(pageId)
-    return file ? unitsInReadingOrder(file.page) : []
+    const view = viewOf(pageId)
+    return view ? unitsInReadingOrder(view) : []
   }
 
-  function unitById(pageId: string, unitId: string): TranslationUnit | undefined {
-    const file = pageById(pageId)
-    return file ? findUnit(file.page, unitId) : undefined
+  function unitById(pageId: string, unitId: string, face: string = activeFace.value): TranslationUnit | undefined {
+    const view = viewOf(pageId, face)
+    return view ? findUnit(view, unitId) : undefined
   }
 
   function blockById(pageId: string, blockId: string): TextLayerEntry | undefined {
@@ -591,82 +713,125 @@ export const useProjectStore = defineStore('project', () => {
     return file ? findTextObject(file.page.layers, blockId) : undefined
   }
 
-  /** Which translation a block of lettering says, and where in it. */
+  /** What the sentence a block belongs to in the face being worked on means. */
+  function tagsOf(pageId: string, blockId: string): string[] {
+    const view = viewOf(pageId)
+    return view ? tagsOfBlock(view, blockId) : []
+  }
+
+  /** Which sentence of the face being worked on a block belongs to. */
   function placeOf(pageId: string, blockId: string): UnitPlace | undefined {
-    const file = pageById(pageId)
-    return file ? placeOfBlock(file.page, blockId) : undefined
+    const view = viewOf(pageId)
+    return view ? placeOfBlock(view, blockId) : undefined
   }
 
   /**
-   * Without a place, a translation joins the end of both orders: the end of the
-   * tree because that is what new lettering stacks on top of, and the end of the
-   * reading order because inserting near the pointer would renumber the page
-   * under whoever is reading it.
+   * A new sentence, on top of the tree and at the end of every face's reading:
+   * the end of the tree because that is what new lettering stacks on top of,
+   * and the end of the reading because inserting near the pointer would
+   * renumber the page under whoever is reading it.
    *
-   * The unit and its blocks arrive together, so no moment exists where a block
-   * is on the page with nothing saying what it is.
+   * The units and their blocks arrive together, so no moment exists where a
+   * block is on the page with nothing saying what it is.
    */
-  function addLabel(pageId: string, label: TranslationParts, at?: LabelPlace) {
+  function addLabel(pageId: string, label: TranslationParts) {
     const file = pageById(pageId)
     if (!file) return
-    const place: LabelPlace = at ?? {
-      paths: label.blocks.map((_, i) => [file.page.layers.length + i]),
-      orderIndex: file.page.readingOrder.length,
-      // A new translation is nowhere in the reading yet. Lines only arrive here
-      // on the way back from a delete, carried by the place that delete recorded.
-      edges: [],
+    file.page.layers.push(...label.blocks)
+    for (const [face, unit] of Object.entries(label.units)) {
+      const view = facePage(file.page, face)
+      view.units.push(unit)
+      view.readingOrder.push(unit.id)
     }
-    label.blocks.forEach((block, i) => {
-      // The tree can have changed shape since the place was taken — a folder the
-      // path went through may be gone. Landing on top beats losing the block.
-      const path = place.paths[i]
-      if (path === undefined || !insertAtPath(file.page.layers, path, block))
-        file.page.layers.push(block)
-    })
-    file.page.translationUnits.push(label.unit)
-    const orderIndex = Math.min(Math.max(place.orderIndex, 0), file.page.readingOrder.length)
-    file.page.readingOrder.splice(orderIndex, 0, label.unit.id)
-    // The translation is back before its lines are, so nothing put back here is
-    // ever a line to somewhere that is not on the page.
-    file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...place.edges])
+    settleStructure(file.page)
     markPageDirty(pageId)
   }
 
   /**
-   * A whole translation off the page: both sides' blocks, the unit, its place in
-   * the reading and every line touching it.
-   *
-   * ⭐ Both sides, always. Half a translation is not a smaller translation, it is
-   * a row the list cannot draw — which is why deleting a row has always taken
-   * the artwork's words with the lettering.
+   * A sentence of the face being worked on, read right after another one — or
+   * last, when that one is not on the page. Its blocks are already there.
    */
-  function deleteLabel(pageId: string, unitId: string): RemovedTranslation | null {
+  function insertUnit(pageId: string, unit: TranslationUnit, after?: string) {
     const file = pageById(pageId)
-    if (!file) return null
-    const at = file.page.translationUnits.findIndex((u) => u.id === unitId)
-    if (at === -1) return null
-    const unit = file.page.translationUnits[at]
-    const ids = [...unit.source.members, ...unit.translation.members]
-    // Deepest and last first, so that taking one out cannot shift the path of
-    // one still to come — and the record then reads front to back for putting
-    // them all back.
-    const removals = ids
-      .map((id) => ({ id, path: pathOf(file.page.layers, id) }))
-      .filter((p): p is { id: string; path: number[] } => p.path !== null)
-      .sort((a, b) => comparePaths(b.path, a.path))
-    const blocks: Array<{ path: number[]; entry: TextLayerEntry }> = []
-    for (const { path } of removals) {
-      const entry = removeAtPath(file.page.layers, path)
-      if (entry !== null && entry.kind === 'text') blocks.unshift({ path, entry })
-    }
-    file.page.translationUnits.splice(at, 1)
-    const found = file.page.readingOrder.indexOf(unitId)
-    const orderIndex = found === -1 ? file.page.readingOrder.length : found
-    if (found !== -1) file.page.readingOrder.splice(found, 1)
-    const edges = edgesTouching(file.page.readingEdges, new Set([unitId]))
-    file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
+    if (!file) return
+    const view = facePage(file.page, activeFace.value)
+    view.units.push(unit)
+    const at = after === undefined ? -1 : view.readingOrder.indexOf(after)
+    view.readingOrder.splice(at === -1 ? view.readingOrder.length : at + 1, 0, unit.id)
+    settleStructure(file.page)
     markPageDirty(pageId)
-    return { unit, blocks, orderIndex, edges }
+  }
+
+  /**
+   * A whole sentence of the face being worked on off the page: its artwork's
+   * words and its lettering, its place in the reading and every line touching
+   * it. The artwork's words leave every other face too, and a sentence there
+   * left with none of them goes with them.
+   */
+  function deleteLabel(pageId: string, unitId: string): PageSnapshot | null {
+    const file = pageById(pageId)
+    const unit = unitById(pageId, unitId)
+    if (!file || !unit) return null
+    const before = structureOf(pageId)!
+    for (const id of unit.members) removeBlock(file.page, id)
+    settleStructure(file.page)
+    markPageDirty(pageId)
+    return { pageId, before }
+  }
+
+  /**
+   * Sentences of the face being worked on carried to another page together,
+   * onto the end of its tree and every reading. Their artwork's words are every
+   * face's, so every sentence that shares one of them goes too, and every block
+   * those hold — a page left with half the lettering of the words that moved
+   * away is a page nobody can work on. Lines between two travellers travel; the
+   * rest stay, which is why the whole batch has to move in one call.
+   */
+  function moveSentences(fromId: string, toId: string, unitIds: readonly string[]): boolean {
+    const from = pageById(fromId)
+    const to = pageById(toId)
+    const starts = unitIds.flatMap((id) => unitById(fromId, id) ?? [])
+    if (!from || !to || starts.length === 0 || fromId === toId) return false
+    const blocks = new Set(starts.flatMap((u) => u.members))
+    const moving = new Map<string, Set<string>>()
+    for (let grew = true; grew; ) {
+      grew = false
+      for (const face of faceIds.value) {
+        for (const unit of facePage(from.page, face).units) {
+          if (!unit.members.some((id) => blocks.has(id))) continue
+          const units = moving.get(face) ?? new Set<string>()
+          moving.set(face, units)
+          if (!units.has(unit.id)) {
+            units.add(unit.id)
+            grew = true
+          }
+          for (const id of unit.members) blocks.add(id)
+        }
+      }
+    }
+    for (const id of blocks) {
+      const path = pathOf(from.page.layers, id)
+      const entry = path === null ? null : removeAtPath(from.page.layers, path)
+      if (entry !== null) to.page.layers.push(entry)
+    }
+    for (const [face, units] of moving) {
+      const src = facePage(from.page, face)
+      const dst = facePage(to.page, face)
+      dst.units.push(...src.units.filter((u) => units.has(u.id)))
+      dst.readingOrder.push(...src.readingOrder.filter((id) => units.has(id)))
+      dst.readingEdges = normalizeEdges([
+        ...dst.readingEdges,
+        ...src.readingEdges.filter((e) => units.has(e.from) && units.has(e.to)),
+      ])
+      src.units = src.units.filter((u) => !units.has(u.id))
+      src.readingOrder = src.readingOrder.filter((id) => !units.has(id))
+      src.readingEdges = src.readingEdges.filter((e) => !units.has(e.from) && !units.has(e.to))
+    }
+    settleStructure(from.page)
+    settleStructure(to.page)
+    markPageDirty(fromId)
+    markPageDirty(toId)
+    return true
   }
 
   /**
@@ -815,30 +980,43 @@ export const useProjectStore = defineStore('project', () => {
 
   /**
    * Everything that says which blocks make which sentence, written back whole:
-   * the sentences, their order, the lines between them, and the tree the blank
-   * placeholders live in. For a step that regroups blocks, whose before and
-   * after are both whole pages of that structure.
+   * every face's ledger and the tree. For a step whose before and after are both
+   * whole pages of that structure — which is how anything that adds, removes or
+   * regroups blocks is undone.
+   *
+   * ⚠️ A raster still on the page keeps the entry it has now. Pixels settle into
+   * a new file outside any step, so the snapshot's entry can name a file that
+   * has since been replaced.
    */
   function setPageStructure(pageId: string, structure: PageStructure) {
     const file = pageById(pageId)
     if (!file) return
-    const copy = structuredClone(structure)
-    file.page.translationUnits = copy.translationUnits
-    file.page.readingOrder = copy.readingOrder
-    file.page.readingEdges = copy.readingEdges
-    file.page.layers = copy.layers
+    const copy = JSON.parse(JSON.stringify(structure)) as PageStructure
+    const live = new Map(
+      allEntries(file.page.layers)
+        .filter((e) => e.kind === 'raster')
+        .map((e) => [e.id, e]),
+    )
+    const graft = (entries: LayerEntry[]): LayerEntry[] =>
+      entries.map((e) => {
+        if (e.kind === 'group') return { ...e, children: graft(e.children) }
+        if (e.kind === 'raster') return live.get(e.id) ?? e
+        return e
+      })
+    file.page.ledgers = copy.ledgers
+    file.page.layers = graft(copy.layers)
     markPageDirty(pageId)
   }
 
   function setReadingOrder(pageId: string, order: string[]) {
-    const file = pageById(pageId)
-    if (!file) return
-    file.page.readingOrder = order
+    const view = viewOf(pageId)
+    if (!view) return
+    view.readingOrder = order
     markPageDirty(pageId)
   }
 
-  function readingEdgesOf(pageId: string): readonly ReadingEdge[] {
-    return pageById(pageId)?.page.readingEdges ?? []
+  function readingEdgesOf(pageId: string, face: string = activeFace.value): readonly ReadingEdge[] {
+    return viewOf(pageId, face)?.readingEdges ?? []
   }
 
   /**
@@ -851,26 +1029,30 @@ export const useProjectStore = defineStore('project', () => {
    * question while the pointer is still down and draws a target it would refuse
    * as refused, so reaching this refusal means something got past that.
    */
-  function addReadingEdges(pageId: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
-    const file = pageById(pageId)
-    if (!file) return []
+  function addReadingEdges(
+    pageId: string,
+    edges: readonly ReadingEdge[],
+    face: string = activeFace.value,
+  ): ReadingEdge[] {
+    const view = viewOf(pageId, face)
+    if (!view) return []
     const taken: ReadingEdge[] = []
     for (const edge of edges) {
-      const held = file.page.readingEdges
+      const held = view.readingEdges
       if (hasEdge(held, edge) || wouldCycle(held, edge)) continue
-      file.page.readingEdges = normalizeEdges([...held, edge])
+      view.readingEdges = normalizeEdges([...held, edge])
       taken.push(edge)
     }
     if (taken.length > 0) markPageDirty(pageId)
     return taken
   }
 
-  function removeReadingEdges(pageId: string, edges: readonly ReadingEdge[]): void {
-    const file = pageById(pageId)
-    if (!file || edges.length === 0) return
-    const left = withoutEdges(file.page.readingEdges, edges)
-    if (left.length === file.page.readingEdges.length) return
-    file.page.readingEdges = left
+  function removeReadingEdges(pageId: string, edges: readonly ReadingEdge[], face: string = activeFace.value): void {
+    const view = viewOf(pageId, face)
+    if (!view || edges.length === 0) return
+    const left = withoutEdges(view.readingEdges, edges)
+    if (left.length === view.readingEdges.length) return
+    view.readingEdges = left
     markPageDirty(pageId)
   }
 
@@ -899,93 +1081,23 @@ export const useProjectStore = defineStore('project', () => {
     return undefined
   }
 
-  function removeEntry(id: string): RemovedEntry | null {
+  /** Any entry, folders taking what they hold; every face's sentences settle around what went. */
+  function removeEntry(id: string): PageSnapshot | null {
     for (const file of files.value) {
       const path = pathOf(file.page.layers, id)
       if (path === null) continue
-      const carried = textObjects([findEntry(file.page.layers, id) as LayerEntry])
-      // Read before anything moves: once a block is out, nothing on the page
-      // can say where in its translation it stood.
-      const membership = carried.flatMap((block) => {
-        const place = placeOfBlock(file.page, block.id)
-        if (place === undefined) return []
-        const list = place.side === 'source' ? place.unit.source : place.unit.translation
-        return [
-          {
-            unit: place.unit.id,
-            side: place.side,
-            at: place.at,
-            separator: list.separators[Math.max(place.at - 1, 0)] ?? '',
-          },
-        ]
-      })
-      const entry = removeAtPath(file.page.layers, path)
-      if (entry === null) return null
-
-      const emptied = new Set<string>()
-      for (const block of carried) {
-        const place = placeOfBlock(file.page, block.id)
-        if (place === undefined) continue
-        const list = place.side === 'source' ? place.unit.source : place.unit.translation
-        const at = list.members.indexOf(block.id)
-        if (at === -1) continue
-        list.members.splice(at, 1)
-        list.separators.splice(Math.max(at - 1, 0), 1)
-        if (list.members.length === 0) emptied.add(place.unit.id)
-      }
-      // A translation left with an empty side comes off whole, which is what
-      // deleting a row has always meant.
-      const units = [...emptied].flatMap((unitId) => {
-        const gone = deleteLabel(file.pageId, unitId)
-        return gone === null ? [] : [gone]
-      })
-
-      const edges = edgesTouching(file.page.readingEdges, new Set(units.map((u) => u.unit.id)))
-      file.page.readingEdges = withoutEdges(file.page.readingEdges, edges)
+      const before = structureOf(file.pageId)!
+      removeAtPath(file.page.layers, path)
+      settleStructure(file.page)
       markPageDirty(file.pageId)
-      return { pageId: file.pageId, path, entry, membership, units, edges }
+      return { pageId: file.pageId, before }
     }
     return null
   }
 
-  /**
-   * Undoes one removal. Reading-order places go back in ascending order, which
-   * is what makes each recorded index still mean what it meant: the ones ahead
-   * of it are already back in place by the time it lands.
-   */
-  function restoreEntry(removed: RemovedEntry): void {
-    const file = pageById(removed.pageId)
-    if (!file) return
-    // The translations first, so the blocks coming back have a list to land in
-    // — and backwards, so each recorded place still means what it meant: the
-    // one taken out last is the one nothing has moved under yet.
-    for (const gone of [...removed.units].reverse()) {
-      addLabel(
-        removed.pageId,
-        { unit: gone.unit, blocks: gone.blocks.map((b) => b.entry) },
-        {
-          paths: gone.blocks.map((b) => b.path),
-          orderIndex: gone.orderIndex,
-          edges: gone.edges,
-        },
-      )
-    }
-    if (!insertAtPath(file.page.layers, removed.path, removed.entry)) {
-      file.page.layers.push(removed.entry)
-    }
-    const carried = textObjects([removed.entry])
-    removed.membership.forEach(({ unit: unitId, side, at, separator }, i) => {
-      const unit = findUnit(file.page, unitId)
-      const block = carried[i]
-      if (unit === undefined || block === undefined) return
-      const list = side === 'source' ? unit.source : unit.translation
-      if (list.members.includes(block.id)) return
-      const index = Math.min(at, list.members.length)
-      list.members.splice(index, 0, block.id)
-      if (list.members.length > 1) list.separators.splice(Math.max(index - 1, 0), 0, separator)
-    })
-    file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...removed.edges])
-    markPageDirty(removed.pageId)
+  /** Undoes one removal — or any step recorded the same way. */
+  function restoreEntry(removed: PageSnapshot): void {
+    setPageStructure(removed.pageId, removed.before)
   }
 
   function moveLayer(pageId: string, fromPath: number[], target: DropTarget): boolean {
@@ -1052,7 +1164,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /**
    * Typing into one block, wherever what it currently reads as lives — while a
-   * candidate is chosen the block is a view of the pool, not a copy. ⚠️ This
+   * candidate is chosen the block is a view of its pool, not a copy. ⚠️ This
    * must never write into the block's own words while it is showing something
    * else, which would put them somewhere nobody can see them.
    *
@@ -1062,30 +1174,27 @@ export const useProjectStore = defineStore('project', () => {
    * still marked as the model's — and the model may withdraw its own.
    */
   function updateLabelText(pageId: string, blockId: string, text: string) {
-    const file = pageById(pageId)
-    const block = file ? findTextObject(file.page.layers, blockId) : undefined
-    if (!file || !block) return
-    const place = block.side === 'translation' ? placeOfBlock(file.page, blockId) : undefined
-    const held = place?.unit.candidates.find((c) => c.id === place.unit.chosen)
-    if (held && place) {
-      held.pieces[place.at] = linesOf(text)
+    const block = blockById(pageId, blockId)
+    if (!block) return
+    const held = block.side === 'translation' ? block.body.candidates.find((c) => c.id === block.body.chosen) : undefined
+    if (held) {
+      held.lines = linesOf(text)
       held.human = true
     } else block.body.lines = linesOf(text)
     markPageDirty(pageId)
   }
 
-  /**
-   * Null reads as the words in the unit's own blocks.
-   *
-   * ⚠️ Refused where the candidate has a different number of blocks than the
-   * lettering is set in: there would be no block to show a piece from, so the
-   * page would read as something no block on it is saying.
-   */
-  function setLabelTranslation(pageId: string, unitId: string, id: string | null) {
-    const unit = unitById(pageId, unitId)
-    if (!unit) return
-    if (id !== null && !candidateFits(unit, id)) return
-    unit.chosen = id
+  function lettering(pageId: string, blockId: string) {
+    const block = blockById(pageId, blockId)
+    return block?.side === 'translation' ? block : undefined
+  }
+
+  /** Null reads as the block's own lines; a candidate not in its pool is refused. */
+  function setLabelTranslation(pageId: string, blockId: string, id: string | null) {
+    const block = lettering(pageId, blockId)
+    if (!block) return
+    if (id !== null && !block.body.candidates.some((c) => c.id === id)) return
+    block.body.chosen = id
     markPageDirty(pageId)
   }
 
@@ -1095,17 +1204,17 @@ export const useProjectStore = defineStore('project', () => {
    */
   function addTranslation(
     pageId: string,
-    unitId: string,
-    pieces: string[][],
+    blockId: string,
+    lines: string[],
     by: 'human' | 'model',
     source?: string,
   ): string | null {
-    const unit = unitById(pageId, unitId)
-    if (!unit) return null
-    const candidate: TranslationCandidate = { id: generateId(), pieces }
+    const block = lettering(pageId, blockId)
+    if (!block) return null
+    const candidate: TranslationCandidate = { id: generateId(), lines: [...lines] }
     if (by === 'human') candidate.human = true
     else if (source) candidate.source = source
-    unit.candidates.push(candidate)
+    block.body.candidates.push(candidate)
     markPageDirty(pageId)
     return candidate.id
   }
@@ -1119,19 +1228,11 @@ export const useProjectStore = defineStore('project', () => {
    * still naming the old one, the chosen slot included, would be left pointing
    * at nothing.
    */
-  function insertTranslation(
-    pageId: string,
-    unitId: string,
-    candidate: TranslationCandidate,
-    at: number,
-  ) {
-    const unit = unitById(pageId, unitId)
-    if (!unit || unit.candidates.some((c) => c.id === candidate.id)) return
-    const list = unit.candidates
-    list.splice(Math.min(Math.max(at, 0), list.length), 0, {
-      ...candidate,
-      pieces: candidate.pieces.map((piece) => [...piece]),
-    })
+  function insertTranslation(pageId: string, blockId: string, candidate: TranslationCandidate, at: number) {
+    const block = lettering(pageId, blockId)
+    if (!block || block.body.candidates.some((c) => c.id === candidate.id)) return
+    const list = block.body.candidates
+    list.splice(Math.min(Math.max(at, 0), list.length), 0, { ...candidate, lines: [...candidate.lines] })
     markPageDirty(pageId)
   }
 
@@ -1143,8 +1244,8 @@ export const useProjectStore = defineStore('project', () => {
    * a flag that only ever went one way would leave a model unable to withdraw
    * its own untouched words.
    */
-  function setTranslationHand(pageId: string, unitId: string, id: string, human: boolean) {
-    const candidate = unitById(pageId, unitId)?.candidates.find((c) => c.id === id)
+  function setTranslationHand(pageId: string, blockId: string, id: string, human: boolean) {
+    const candidate = lettering(pageId, blockId)?.body.candidates.find((c) => c.id === id)
     if (!candidate) return
     if (human) candidate.human = true
     else delete candidate.human
@@ -1152,16 +1253,16 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * The slot goes with it rather than dangling, so the translation falls back
-   * to its typed words — the one thing deleting a proposal must not reach.
+   * The slot goes with it rather than dangling, so the block falls back to its
+   * typed words — the one thing deleting a proposal must not reach.
    */
-  function removeTranslation(pageId: string, unitId: string, id: string) {
-    const unit = unitById(pageId, unitId)
-    if (!unit) return
-    const at = unit.candidates.findIndex((c) => c.id === id)
+  function removeTranslation(pageId: string, blockId: string, id: string) {
+    const block = lettering(pageId, blockId)
+    if (!block) return
+    const at = block.body.candidates.findIndex((c) => c.id === id)
     if (at === -1) return
-    unit.candidates.splice(at, 1)
-    if (unit.chosen === id) unit.chosen = null
+    block.body.candidates.splice(at, 1)
+    if (block.body.chosen === id) block.body.chosen = null
     markPageDirty(pageId)
   }
 
@@ -1272,70 +1373,37 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /** One block of the artwork's words, given exactly these tags — what undoing a tag write puts back. */
+  function setSourceTags(pageId: string, blockId: string, tags: readonly string[]) {
+    const block = blockById(pageId, blockId)
+    if (block?.side !== 'source') return
+    block.body.tags = normalizeTagSet(tags)
+    markPageDirty(pageId)
+  }
+
   /**
-   * Puts a block into the same translation, and the same side, as one already
-   * in it — directly after it.
+   * Puts a block into the sentence of one already on the page, directly after
+   * it — in every face for a block of the artwork's words, which every face
+   * reads, and in its own for lettering.
    *
-   * ⭐ What a copy of a piece of lettering is: another piece of the same
-   * content. A block that landed on the page belonging to nothing would be a
-   * translation nobody can find, drawn on top of the one it came from.
-   *
-   * The gap it arrives with is empty, as a sound split in two wants.
+   * ⭐ What a cut piece of lettering is: another piece of the same content. A
+   * block that landed on the page belonging to nothing would be a sentence
+   * nobody can find, drawn on top of the one it came from.
    */
   function addMemberAfter(pageId: string, afterId: string, blockId: string): boolean {
     const file = pageById(pageId)
-    const place = file ? placeOfBlock(file.page, afterId) : undefined
-    if (!file || place === undefined) return false
-    const list = place.side === 'source' ? place.unit.source : place.unit.translation
-    if (list.members.includes(blockId)) return false
-    list.members.splice(place.at + 1, 0, blockId)
-    list.separators.splice(place.at, 0, '')
-    markPageDirty(pageId)
-    return true
-  }
-
-  /**
-   * Everything one side of a translation says, held apart from where its blocks
-   * stand: each block's own lines, the chosen proposal's pieces, and the seams.
-   * Read and written whole, so a step that cuts one block into several can put
-   * the words back exactly as they were.
-   */
-  function sideWordsOf(pageId: string, blockId: string): SideWords | undefined {
-    const file = pageById(pageId)
-    const place = file ? placeOfBlock(file.page, blockId) : undefined
-    if (!file || place === undefined) return undefined
-    const list = place.side === 'source' ? place.unit.source : place.unit.translation
-    const lines: Record<string, string[]> = {}
-    for (const id of list.members) {
-      const block = findTextObject(file.page.layers, id)
-      if (block) lines[id] = [...block.body.lines]
+    const after = blockById(pageId, afterId)
+    if (!file || !after) return false
+    const faces = after.side === 'source' ? faceIds.value : [after.face]
+    let added = false
+    for (const face of faces) {
+      const unit = facePage(file.page, face).units.find((u) => u.members.includes(afterId))
+      if (!unit || unit.members.includes(blockId)) continue
+      unit.members.splice(unit.members.indexOf(afterId) + 1, 0, blockId)
+      added = true
     }
-    const chosen =
-      place.side === 'translation'
-        ? place.unit.candidates.find((c) => c.id === place.unit.chosen)
-        : undefined
-    return {
-      lines,
-      pieces: chosen ? chosen.pieces.map((piece) => [...piece]) : null,
-      separators: [...list.separators],
-    }
-  }
-
-  function setSideWords(pageId: string, blockId: string, words: SideWords) {
-    const file = pageById(pageId)
-    const place = file ? placeOfBlock(file.page, blockId) : undefined
-    if (!file || place === undefined) return
-    const list = place.side === 'source' ? place.unit.source : place.unit.translation
-    for (const [id, lines] of Object.entries(words.lines)) {
-      const block = findTextObject(file.page.layers, id)
-      if (block) block.body.lines = [...lines]
-    }
-    const chosen = place.unit.candidates.find((c) => c.id === place.unit.chosen)
-    if (chosen && words.pieces && place.side === 'translation') {
-      chosen.pieces = words.pieces.map((piece) => [...piece])
-    }
-    list.separators = [...words.separators]
-    markPageDirty(pageId)
+    if (added) markPageDirty(pageId)
+    return added
   }
 
   /**
@@ -1356,22 +1424,29 @@ export const useProjectStore = defineStore('project', () => {
     unitId: string,
     side: TextSide,
     members: readonly string[],
+    face: string = activeFace.value,
   ): boolean {
-    const unit = unitById(pageId, unitId)
+    const unit = unitById(pageId, unitId, face)
     if (!unit) return false
-    const list = side === 'source' ? unit.source : unit.translation
-    if (members.length !== list.members.length) return false
+    const ofSide = unit.members.filter((id) => blockById(pageId, id)?.side === side)
+    if (members.length !== ofSide.length) return false
     if (new Set(members).size !== members.length) return false
-    if (!members.every((id) => list.members.includes(id))) return false
-    list.members = [...members]
+    if (!members.every((id) => ofSide.includes(id))) return false
+    let next = 0
+    unit.members = unit.members.map((id) => (ofSide.includes(id) ? members[next++]! : id))
     markPageDirty(pageId)
     return true
   }
 
-  function setLabelTags(pageId: string, unitId: string, tags: readonly string[]) {
-    const unit = unitById(pageId, unitId)
+  /** A sentence's meaning, written onto every block of the artwork's words it holds. */
+  function setLabelTags(pageId: string, unitId: string, tags: readonly string[], face: string = activeFace.value) {
+    const unit = unitById(pageId, unitId, face)
     if (!unit) return
-    unit.tags = normalizeTagSet(tags)
+    const normal = normalizeTagSet(tags)
+    for (const id of unit.members) {
+      const block = blockById(pageId, id)
+      if (block?.side === 'source') block.body.tags = [...normal]
+    }
     markPageDirty(pageId)
   }
 
@@ -1405,11 +1480,12 @@ export const useProjectStore = defineStore('project', () => {
     return out
   }
 
-  /** Every translation in the chapter, with the page it is on. */
-  function allUnits(): { pageId: string; unit: TranslationUnit }[] {
-    const out: { pageId: string; unit: TranslationUnit }[] = []
+  /** Every sentence of the face being worked on in the chapter, with the page it is on. */
+  function allUnits(): { pageId: string; unit: TranslationUnit; tags: string[] }[] {
+    const out: { pageId: string; unit: TranslationUnit; tags: string[] }[] = []
     for (const file of files.value) {
-      for (const unit of file.page.translationUnits) out.push({ pageId: file.pageId, unit })
+      const view = facePage(file.page, activeFace.value)
+      for (const unit of view.units) out.push({ pageId: file.pageId, unit, tags: tagsOfUnit(view, unit) })
     }
     return out
   }
@@ -1467,9 +1543,9 @@ export const useProjectStore = defineStore('project', () => {
     if (tags.some((t) => t.name === to)) return false
     tags[index].name = to
     markMetaDirty()
-    for (const { pageId, unit } of allUnits()) {
-      if (!unit.tags.includes(from)) continue
-      unit.tags = normalizeTagSet(unit.tags.map((t) => (t === from ? to : t)))
+    for (const { pageId, label } of allTextObjects()) {
+      if (label.side !== 'source' || !label.body.tags.includes(from)) continue
+      label.body.tags = normalizeTagSet(label.body.tags.map((t) => (t === from ? to : t)))
       markPageDirty(pageId)
     }
     return true
@@ -1538,7 +1614,7 @@ export const useProjectStore = defineStore('project', () => {
     addExportProfile,
     updateExportProfile,
     removeExportProfile,
-    
+
     rootPath,
     projectMeta,
     pinnedLayerNames,
@@ -1549,6 +1625,18 @@ export const useProjectStore = defineStore('project', () => {
     allFiles,
     dirtyPageIds,
 
+    faces,
+    faceIds,
+    activeFace,
+    setActiveFace,
+    addFace,
+    renameFace,
+    deleteFace,
+    setFaceState,
+    faceState,
+    viewOf,
+    structureOf,
+
     folderPath,
     isOpenRoot,
     header,
@@ -1557,13 +1645,14 @@ export const useProjectStore = defineStore('project', () => {
     metaDirty,
     shashokuDir,
     layersDirOf,
-    
+
     pageById,
     labelsOf,
     blockById,
     unitById,
     pageOfUnit,
     placeOf,
+    tagsOf,
     allUnits,
     reset,
     createNewProject,
@@ -1580,16 +1669,17 @@ export const useProjectStore = defineStore('project', () => {
     oweBeforeLayerRead,
     markPageDirty,
     addLabel,
+    insertUnit,
     deleteLabel,
+    moveSentences,
     renamePage,
     moveLabel,
     rotateLabel,
     updateLabelText,
     addMemberAfter,
-    sideWordsOf,
-    setSideWords,
     reorderMembers,
     setLabelTags,
+    setSourceTags,
     setLabelSource,
     setLabelTranslation,
     addTranslation,
@@ -1615,6 +1705,7 @@ export const useProjectStore = defineStore('project', () => {
     pageOfEntry,
     setReadingOrder,
     setPageStructure,
+    settleStructure,
     readingEdgesOf,
     addReadingEdges,
     removeReadingEdges,

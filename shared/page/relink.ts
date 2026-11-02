@@ -1,10 +1,10 @@
 import type { TextStyle } from '../text-style/types'
-import type { ManifestJson, TextLayerEntry, TranslationUnit, TranslationUnitSide } from './types'
+import type { ManifestJson, TextLayerEntry, TranslationUnit } from './types'
 import type { TextSide } from './text'
 import { normalizeEdges } from './readingGraph'
-import { blankBlock } from './schema'
-import { findTextObject, insertAtPath, pathOf, removeAtPath } from './tree'
-import { placeOfBlock, shownCodeOf } from './units'
+import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { findTextObject, insertAtPath, pathOf, removeAtPath, textObjects } from './tree'
+import { facePage, placeOfBlock, shownCodeOf, type FacePage } from './units'
 
 /**
  * What Ctrl+L does with the blocks selected on one page, worked out before
@@ -17,21 +17,21 @@ import { placeOfBlock, shownCodeOf } from './units'
  *              into the first of them in reading order, both sides travelling
  *   two sides  this goes with that: the selected blocks move into the sentence
  *              of the selected source, and nothing else moves
+ *
+ * Only this face's ledger moves. Every face cuts the page into sentences its
+ * own way, so joining two balloons here says nothing about another language.
  */
 export type RelinkPlan =
   | { kind: 'join'; main: string; folded: string[]; moving: string[] }
   | { kind: 'pair'; main: string; moving: string[] }
   | { kind: 'none' }
 
-const sideOf = (unit: TranslationUnit, side: TextSide): TranslationUnitSide =>
-  side === 'source' ? unit.source : unit.translation
-
-function firstInOrder(page: ManifestJson, units: Iterable<string>): string | undefined {
+function firstInOrder(page: FacePage, units: Iterable<string>): string | undefined {
   const wanted = new Set(units)
   return page.readingOrder.find((id) => wanted.has(id)) ?? [...wanted][0]
 }
 
-export function planRelink(page: ManifestJson, selected: readonly string[]): RelinkPlan {
+export function planRelink(page: FacePage, selected: readonly string[]): RelinkPlan {
   const places = selected
     .map((id) => ({ id, place: placeOfBlock(page, id) }))
     .filter((p): p is { id: string; place: NonNullable<ReturnType<typeof placeOfBlock>> } => !!p.place)
@@ -43,9 +43,7 @@ export function planRelink(page: ManifestJson, selected: readonly string[]): Rel
     if (units.size < 2) return { kind: 'none' }
     const main = firstInOrder(page, units)!
     const folded = [...units].filter((u) => u !== main)
-    const moving = page.translationUnits
-      .filter((u) => folded.includes(u.id))
-      .flatMap((u) => [...u.source.members, ...u.translation.members])
+    const moving = page.units.filter((u) => folded.includes(u.id)).flatMap((u) => u.members)
     return { kind: 'join', main, folded, moving }
   }
 
@@ -54,44 +52,26 @@ export function planRelink(page: ManifestJson, selected: readonly string[]): Rel
   return moving.length ? { kind: 'pair', main, moving } : { kind: 'none' }
 }
 
-/** Shown text decides blankness, so a block whose words live in the chosen proposal is not blank. */
-function isBlank(page: ManifestJson, id: string): boolean {
+/** Shown text decides blankness, so a block reading a chosen candidate is not blank. */
+function isBlank(page: FacePage, id: string): boolean {
   const block = findTextObject(page.layers, id)
-  return !block || shownCodeOf(page, block).trim() === ''
+  return !block || shownCodeOf(block).trim() === ''
 }
 
-/**
- * A proposal is pointed at only while it has one piece per translation block.
- * A unit whose translation is about to change shape writes what it shows into
- * its own blocks first and stops pointing, so no word is lost and the pool keeps
- * every proposal for picking again.
- */
-function settleChosen(page: ManifestJson, unit: TranslationUnit) {
-  const chosen = unit.candidates.find((c) => c.id === unit.chosen)
-  if (chosen && chosen.pieces.length === unit.translation.members.length) {
-    unit.translation.members.forEach((id, at) => {
-      const block = findTextObject(page.layers, id)
-      if (block) block.body.lines = [...(chosen.pieces[at] ?? [''])]
-    })
-  }
-  unit.chosen = null
+function sideOfBlock(page: FacePage, id: string): TextSide | undefined {
+  return findTextObject(page.layers, id)?.side
 }
 
-function takeOut(list: TranslationUnitSide, id: string) {
-  const at = list.members.indexOf(id)
-  if (at === -1) return
-  list.members.splice(at, 1)
-  list.separators.splice(Math.max(0, at - 1), 1)
-}
-
-function putIn(list: TranslationUnitSide, id: string) {
-  if (list.members.length) list.separators.push('')
-  list.members.push(id)
-}
-
-function dropBlock(page: ManifestJson, id: string) {
+function dropBlock(page: FacePage, id: string) {
   const path = pathOf(page.layers, id)
   if (path) removeAtPath(page.layers, path)
+}
+
+function moveBlock(page: FacePage, id: string, to: TranslationUnit) {
+  const from = placeOfBlock(page, id)?.unit
+  if (!from || from.id === to.id) return
+  from.members = from.members.filter((m) => m !== id)
+  to.members.push(id)
 }
 
 /**
@@ -99,24 +79,27 @@ function dropBlock(page: ManifestJson, id: string) {
  * nothing gets one, standing where the sentence's other blocks stand; a unit
  * left with nothing but blanks is gone, with its place in the reading and its
  * lines.
+ *
+ * ⚠️ A source block belongs to every face. While other faces exist (`shared`),
+ * no source block is dropped and no sentence is removed for being blank: the
+ * other ledgers still hold those blocks.
  */
-function tidy(page: ManifestJson, unitIds: Iterable<string>, newId: () => string, seed: TextStyle) {
+function tidy(page: FacePage, unitIds: Iterable<string>, newId: () => string, seed: TextStyle, shared: boolean) {
   for (const uid of new Set(unitIds)) {
-    const unit = page.translationUnits.find((u) => u.id === uid)
+    const unit = page.units.find((u) => u.id === uid)
     if (!unit) continue
     for (const side of ['source', 'translation'] as const) {
-      const list = sideOf(unit, side)
-      const real = list.members.filter((id) => !isBlank(page, id))
+      const ofSide = unit.members.filter((id) => sideOfBlock(page, id) === side)
+      const real = ofSide.filter((id) => !isBlank(page, id))
       if (real.length) {
-        for (const id of list.members.filter((m) => !real.includes(m))) {
-          takeOut(list, id)
+        for (const id of ofSide.filter((m) => !real.includes(m))) {
+          if (side === 'source' && shared) continue
+          unit.members = unit.members.filter((m) => m !== id)
           dropBlock(page, id)
         }
-      } else if (!list.members.length) {
-        const near = [...unit.source.members, ...unit.translation.members]
-          .map((id) => findTextObject(page.layers, id))
-          .find((b): b is TextLayerEntry => !!b)
-        const blank: TextLayerEntry = side === 'source' ? blankBlock(newId(), 'source', seed) : blankBlock(newId(), 'translation', seed)
+      } else if (!ofSide.length) {
+        const near = unit.members.map((id) => findTextObject(page.layers, id)).find((b): b is TextLayerEntry => !!b)
+        const blank = side === 'source' ? blankSourceBlock(newId(), seed) : blankTranslationBlock(newId(), page.face, seed)
         if (near) {
           blank.body.x = near.body.x
           blank.body.y = near.body.y
@@ -124,57 +107,41 @@ function tidy(page: ManifestJson, unitIds: Iterable<string>, newId: () => string
         const path = near ? pathOf(page.layers, near.id) : null
         if (!path || !insertAtPath(page.layers, [...path.slice(0, -1), path[path.length - 1]! + 1], blank))
           page.layers.push(blank)
-        putIn(list, blank.id)
+        if (side === 'source') unit.members.unshift(blank.id)
+        else unit.members.push(blank.id)
       }
     }
-    const all = [...unit.source.members, ...unit.translation.members]
-    if (all.every((id) => isBlank(page, id))) {
-      all.forEach((id) => dropBlock(page, id))
-      page.translationUnits = page.translationUnits.filter((u) => u.id !== uid)
+    if (!shared && unit.members.every((id) => isBlank(page, id))) {
+      for (const id of unit.members) dropBlock(page, id)
+      page.units = page.units.filter((u) => u.id !== uid)
       page.readingOrder = page.readingOrder.filter((id) => id !== uid)
       page.readingEdges = page.readingEdges.filter((e) => e.from !== uid && e.to !== uid)
     }
   }
 }
 
-function moveBlock(page: ManifestJson, id: string, to: TranslationUnit) {
-  const place = placeOfBlock(page, id)
-  if (!place || place.unit.id === to.id) return
-  takeOut(sideOf(place.unit, place.side), id)
-  putIn(sideOf(to, place.side), id)
-}
-
-/** The units whose translation side a set of moves changes. */
-function reshaped(page: ManifestJson, main: string, moving: readonly string[]): TranslationUnit[] {
-  const ids = new Set<string>()
-  for (const id of moving) {
-    const place = placeOfBlock(page, id)
-    if (place?.side === 'translation') {
-      ids.add(place.unit.id)
-      ids.add(main)
-    }
-  }
-  return page.translationUnits.filter((u) => ids.has(u.id))
-}
-
-/** Ctrl+L, written into `page` in place. Returns false when there was nothing to do. */
-export function relink(page: ManifestJson, selected: readonly string[], newId: () => string, seed: TextStyle): boolean {
+/**
+ * Ctrl+L, written into `page` in place. Returns false when there was nothing to
+ * do. `shared` says other faces exist, whose ledgers still hold this page's
+ * source blocks.
+ */
+export function relink(
+  page: FacePage,
+  selected: readonly string[],
+  newId: () => string,
+  seed: TextStyle,
+  shared = false,
+): boolean {
   const plan = planRelink(page, selected)
   if (plan.kind === 'none') return false
-  const main = page.translationUnits.find((u) => u.id === plan.main)
+  const main = page.units.find((u) => u.id === plan.main)
   if (!main) return false
   const touched = new Set([plan.main, ...plan.moving.map((id) => placeOfBlock(page, id)?.unit.id ?? '')])
-  reshaped(page, plan.main, plan.moving).forEach((u) => settleChosen(page, u))
   for (const id of plan.moving) moveBlock(page, id, main)
 
   if (plan.kind === 'join') {
     for (const uid of plan.folded) {
-      const gone = page.translationUnits.find((u) => u.id === uid)
-      if (!gone) continue
-      // What was said about the sentence, and what was proposed for it, stays.
-      main.tags = [...new Set([...main.tags, ...gone.tags])].sort()
-      main.candidates.push(...gone.candidates)
-      page.translationUnits = page.translationUnits.filter((u) => u.id !== uid)
+      page.units = page.units.filter((u) => u.id !== uid)
       page.readingOrder = page.readingOrder.filter((id) => id !== uid)
       page.readingEdges = page.readingEdges.map((e) => ({
         from: e.from === uid ? plan.main : e.from,
@@ -184,7 +151,7 @@ export function relink(page: ManifestJson, selected: readonly string[], newId: (
     }
     page.readingEdges = normalizeEdges(page.readingEdges.filter((e) => e.from !== e.to))
   }
-  tidy(page, touched, newId, seed)
+  tidy(page, touched, newId, seed, shared)
   return true
 }
 
@@ -192,26 +159,47 @@ export function relink(page: ManifestJson, selected: readonly string[], newId: (
  * Ctrl+Shift+L: the selected blocks leave for a sentence of their own, standing
  * where they are, read right after the first sentence they came from.
  */
-export function detach(page: ManifestJson, selected: readonly string[], newId: () => string, seed: TextStyle): boolean {
+export function detach(
+  page: FacePage,
+  selected: readonly string[],
+  newId: () => string,
+  seed: TextStyle,
+  shared = false,
+): boolean {
   const places = selected.map((id) => ({ id, place: placeOfBlock(page, id) })).filter((p) => p.place)
   if (!places.length) return false
   const from = new Set(places.map((p) => p.place!.unit.id))
   // Taking every block of the one sentence they share leaves it where it was.
-  const only = from.size === 1 ? page.translationUnits.find((u) => from.has(u.id)) : undefined
-  if (only && [...only.source.members, ...only.translation.members].every((id) => selected.includes(id))) return false
-  const unit: TranslationUnit = {
-    id: newId(),
-    tags: [],
-    source: { members: [], separators: [] },
-    translation: { members: [], separators: [] },
-    candidates: [],
-    chosen: null,
-  }
+  const only = from.size === 1 ? page.units.find((u) => from.has(u.id)) : undefined
+  if (only && only.members.every((id) => selected.includes(id))) return false
+  const unit: TranslationUnit = { id: newId(), members: [] }
   const after = firstInOrder(page, from)
-  page.translationUnits.push(unit)
+  page.units.push(unit)
   page.readingOrder.splice(after ? page.readingOrder.indexOf(after) + 1 : page.readingOrder.length, 0, unit.id)
-  reshaped(page, unit.id, places.map((p) => p.id)).forEach((u) => settleChosen(page, u))
   for (const { id } of places) moveBlock(page, id, unit)
-  tidy(page, [...from, unit.id], newId, seed)
+  tidy(page, [...from, unit.id], newId, seed, shared)
   return true
+}
+
+/**
+ * Gives every face a sentence for any source block its ledger does not hold —
+ * one a regroup in another face had to create — standing on that block with a
+ * blank of the face's own lettering, read last.
+ */
+export function adoptSources(manifest: ManifestJson, faces: readonly string[], newId: () => string, seed: TextStyle): void {
+  const sources = textObjects(manifest.layers).filter((t) => t.side === 'source')
+  for (const face of faces) {
+    const page = facePage(manifest, face)
+    const held = new Set(page.units.flatMap((u) => u.members))
+    for (const source of sources) {
+      if (held.has(source.id)) continue
+      const lettering = blankTranslationBlock(newId(), face, seed)
+      lettering.body.x = source.body.x
+      lettering.body.y = source.body.y
+      manifest.layers.push(lettering)
+      const unit = { id: newId(), members: [source.id, lettering.id] }
+      page.units.push(unit)
+      page.readingOrder.push(unit.id)
+    }
+  }
 }

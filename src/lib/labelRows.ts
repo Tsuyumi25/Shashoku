@@ -2,7 +2,7 @@ import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry, TranslationUnit } from '@shared/page/types'
 import type { TextSide } from '@shared/page/text'
 import { flattenReading } from '@shared/page/readingGraph'
-import { blocksOf, projectionCodeOf, projectionOf, shownCodeOf, unitsInReadingOrder } from '@shared/page/units'
+import { blocksOf, facePage, projectionCodeOf, projectionOf, shownCodeOf, unitsInReadingOrder } from '@shared/page/units'
 
 export interface PageRow {
   kind: 'page'
@@ -87,17 +87,19 @@ export type ChapterRow = PageRow | LabelRow | BlockRow
 export function buildLabelRows(
   files: readonly ProjectFile[],
   side: TextSide,
+  face: string,
   query = '',
 ): ChapterRow[] {
   const needle = query.trim().toLowerCase()
   const other: TextSide = side === 'source' ? 'translation' : 'source'
   const rows: ChapterRow[] = []
   for (const file of files) {
-    const inOrder = unitsInReadingOrder(file.page)
+    const page = facePage(file.page, face)
+    const inOrder = unitsInReadingOrder(page)
     const byId = new Map(inOrder.map((unit) => [unit.id, unit]))
     const numbering = new Map(inOrder.map((unit, at) => [unit.id, at + 1]))
 
-    const laid = flattenReading(file.page.readingEdges, file.page.readingOrder)
+    const laid = flattenReading(page.readingEdges, page.readingOrder)
     const all = laid.flatMap((row) => {
       const unit = byId.get(row.id)
       return unit === undefined ? [] : [{ ...row, unit }]
@@ -109,7 +111,7 @@ export function buildLabelRows(
       needle === ''
         ? all
         : all.filter((row) =>
-            projectionOf(file.page.layers, row.unit, 'translation').toLowerCase().includes(needle),
+            projectionOf(page, row.unit, 'translation').toLowerCase().includes(needle),
           )
     // A page nothing matches on is not a page with an empty result. It is not
     // one of the places the answer is, so it is not one of the places shown.
@@ -123,7 +125,7 @@ export function buildLabelRows(
       count: shown.length,
     })
     for (const row of shown) {
-      const blocks = blocksOf(file.page.layers, row.unit, side)
+      const blocks = blocksOf(page, row.unit, side)
       // Filtering hides rows; it does not renumber the page or move anything.
       const index = numbering.get(row.unit.id) ?? 0
       rows.push({
@@ -132,8 +134,8 @@ export function buildLabelRows(
         pageId: file.pageId,
         unit: row.unit,
         blocks,
-        main: projectionCodeOf(file.page.layers, row.unit, side),
-        opposite: projectionCodeOf(file.page.layers, row.unit, other),
+        main: projectionCodeOf(page, row.unit, side),
+        opposite: projectionCodeOf(page, row.unit, other),
         index,
         depth: row.depth,
         lane: row.lane,
@@ -149,7 +151,7 @@ export function buildLabelRows(
           unit: row.unit,
           block,
           at: at + 1,
-          text: shownCodeOf(file.page, block),
+          text: shownCodeOf(block),
           index,
         })
       })

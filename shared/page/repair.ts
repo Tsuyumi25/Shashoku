@@ -1,25 +1,20 @@
-import type { LayerEntry, ManifestJson, TextLayerEntry, TranslationUnit } from './types'
+import type { LayerEntry, Ledger, ManifestJson, TextLayerEntry, TranslationUnit } from './types'
 import type { PageDefect } from './validate'
 import type { TextSide } from './text'
 import { siftReadingEdges } from './validate'
-import { blankBlock, generateId } from './schema'
+import { blankSourceBlock, blankTranslationBlock, generateId } from './schema'
 import { allEntries, textObjects } from './tree'
+import { emptyLedger } from './units'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 
-const SIDES: readonly TextSide[] = ['source', 'translation']
-
 /**
- * A blank block put where its counterpart stands, so a side that has come back
- * from nothing lands on the balloon it belongs to rather than at the origin.
+ * A blank block put where another block of the same sentence stands, so a side
+ * that has come back from nothing lands on the balloon it belongs to rather
+ * than at the origin.
  */
-function counterpartOf(
-  id: string,
-  side: TextSide,
-  beside: TextLayerEntry | undefined,
-): TextLayerEntry {
+function counterpartOf(id: string, side: TextSide, face: string, beside: TextLayerEntry | undefined): TextLayerEntry {
   const style = beside?.body.style ?? DEFAULT_TEXT_STYLE
-  const block =
-    side === 'source' ? blankBlock(id, 'source', style) : blankBlock(id, 'translation', style)
+  const block = side === 'source' ? blankSourceBlock(id, style) : blankTranslationBlock(id, face, style)
   if (beside !== undefined) {
     block.body.x = beside.body.x
     block.body.y = beside.body.y
@@ -29,28 +24,27 @@ function counterpartOf(
 }
 
 /**
- * One fix per fault named in validate.ts, applied to a copy.
+ * One fix per fault named in validate.ts, applied to a copy, for every face the
+ * project has.
  *
  * Order matters between them: ids are made unique first, because until they
  * are, "which block does this membership mean" has no answer. Membership is
- * settled next, because reading order is over units and a unit is only a unit
- * once both its sides hold something. What a rename leaves behind — a block
- * nothing points at any more — is then picked up by the same pass that catches
- * a block nobody ever pointed at.
+ * settled next, every ledger before any is filled in — a blank source block one
+ * face needs is a block every other face has to place too. Reading order comes
+ * last, because it is over units and a unit is only a unit once both its sides
+ * hold something.
  *
  * ⚠️ Nothing here guesses which unit a loose block belongs to. Position,
  * matching words and a shared reading all look like evidence and none of them
- * are: a block standing on its own becomes its own translation, which is wrong
- * in a way somebody can see and undo.
+ * are: a block standing on its own becomes its own sentence, which is wrong in
+ * a way somebody can see and undo.
  */
 export function repairPage(
   manifest: ManifestJson,
+  faces: readonly string[],
   newId: () => string = generateId,
 ): { manifest: ManifestJson; repaired: PageDefect[] } {
   const layers: LayerEntry[] = structuredClone(manifest.layers) as LayerEntry[]
-  const units: TranslationUnit[] = structuredClone(
-    manifest.translationUnits,
-  ) as TranslationUnit[]
   const repaired: PageDefect[] = []
 
   const takenIds = new Set<string>()
@@ -64,154 +58,137 @@ export function repairPage(
       reportedIds.add(entry.id)
       repaired.push({ kind: 'duplicate-id', id: entry.id })
     }
-    let replacement = newId()
-    while (takenIds.has(replacement)) replacement = newId()
-    takenIds.add(replacement)
-    entry.id = replacement
-  }
-
-  const takenUnitIds = new Set<string>()
-  const reportedUnitIds = new Set<string>()
-  for (const unit of units) {
-    if (!takenUnitIds.has(unit.id)) {
-      takenUnitIds.add(unit.id)
-      continue
-    }
-    if (!reportedUnitIds.has(unit.id)) {
-      reportedUnitIds.add(unit.id)
-      repaired.push({ kind: 'duplicate-unit-id', id: unit.id })
-    }
-    let replacement = newId()
-    while (takenUnitIds.has(replacement)) replacement = newId()
-    takenUnitIds.add(replacement)
-    unit.id = replacement
+    entry.id = freshId(takenIds, newId)
   }
 
   const blocks = new Map(textObjects(layers).map((t) => [t.id, t]))
-  const claimed = new Set<string>()
-  const added: TextLayerEntry[] = []
+  const add = (block: TextLayerEntry) => {
+    takenIds.add(block.id)
+    blocks.set(block.id, block)
+    layers.push(block)
+  }
 
-  for (const unit of units) {
-    for (const side of SIDES) {
-      const list = side === 'source' ? unit.source : unit.translation
-      const keptMembers: string[] = []
-      const keptSeparators: string[] = []
-      list.members.forEach((id, at) => {
+  const ledgers: Record<string, Ledger> = structuredClone(manifest.ledgers)
+  const takenUnitIds = new Set<string>()
+
+  // Membership for every face, adding any source block a sentence lacks.
+  for (const face of faces) {
+    const ledger = (ledgers[face] ??= emptyLedger())
+    const seenUnits = new Set<string>()
+    const reportedUnits = new Set<string>()
+    for (const unit of ledger.units) {
+      if (!seenUnits.has(unit.id)) {
+        seenUnits.add(unit.id)
+        takenUnitIds.add(unit.id)
+        continue
+      }
+      if (!reportedUnits.has(unit.id)) {
+        reportedUnits.add(unit.id)
+        repaired.push({ kind: 'duplicate-unit-id', id: unit.id, face })
+      }
+      unit.id = freshId(takenUnitIds, newId)
+    }
+
+    const claimed = new Set<string>()
+    for (const unit of ledger.units) {
+      unit.members = unit.members.filter((id) => {
         const block = blocks.get(id)
         const fault =
           block === undefined
             ? 'unit-member-dangling'
-            : block.side !== side
-              ? 'unit-member-side-mismatch'
+            : block.side === 'translation' && block.face !== face
+              ? 'unit-member-foreign'
               : claimed.has(id)
                 ? 'unit-member-shared'
                 : null
         if (fault !== null) {
-          repaired.push({ kind: fault, id, unit: unit.id, side })
-          return
+          repaired.push({ kind: fault, id, unit: unit.id, face })
+          return false
         }
         claimed.add(id)
-        // The gap before this block goes with it, so what is left reads as the
-        // blocks that survived with the spacing that was between them.
-        if (keptMembers.length > 0) keptSeparators.push(list.separators[at - 1] ?? '')
-        keptMembers.push(id)
+        return true
       })
-      list.members = keptMembers
-      list.separators = keptSeparators
+      const lettering = unit.members.map((id) => blocks.get(id)!).filter((b) => b.side === 'translation')
+      if (unit.members.length > 0 && lettering.length === unit.members.length) {
+        repaired.push({ kind: 'unit-side-empty', id: unit.id, side: 'source', face })
+        const block = counterpartOf(freshId(takenIds, newId), 'source', face, lettering[0])
+        add(block)
+        unit.members.unshift(block.id)
+        claimed.add(block.id)
+      }
+    }
+
+    for (const block of [...blocks.values()]) {
+      if (block.side !== 'translation' || block.face !== face || claimed.has(block.id)) continue
+      repaired.push({ kind: 'unit-member-orphan', id: block.id, face })
+      const source = counterpartOf(freshId(takenIds, newId), 'source', face, block)
+      add(source)
+      ledger.units.push({ id: freshId(takenUnitIds, newId), members: [source.id, block.id] })
+      claimed.add(block.id)
+      claimed.add(source.id)
     }
   }
 
-  for (const unit of units) {
-    for (const side of SIDES) {
-      const list = side === 'source' ? unit.source : unit.translation
-      if (list.members.length > 0) continue
-      repaired.push({ kind: 'unit-side-empty', id: unit.id, side })
-      const other = side === 'source' ? unit.translation : unit.source
-      const beside = blocks.get(other.members[0] ?? '')
-      let id = newId()
-      while (takenIds.has(id)) id = newId()
-      takenIds.add(id)
-      const block = counterpartOf(id, side, beside)
-      added.push(block)
-      blocks.set(id, block)
-      claimed.add(id)
-      list.members = [id]
-      list.separators = []
+  // Every face now sees every source block, including any added above.
+  for (const face of faces) {
+    const ledger = ledgers[face]!
+    const claimed = new Set(ledger.units.flatMap((u) => u.members))
+    for (const unit of ledger.units) {
+      if (unit.members.length === 0) continue
+      const hasLettering = unit.members.some((id) => blocks.get(id)?.side === 'translation')
+      if (hasLettering) continue
+      repaired.push({ kind: 'unit-side-empty', id: unit.id, side: 'translation', face })
+      const block = counterpartOf(freshId(takenIds, newId), 'translation', face, blocks.get(unit.members[0]!))
+      add(block)
+      unit.members.push(block.id)
     }
+    for (const block of [...blocks.values()]) {
+      if (block.side !== 'source' || claimed.has(block.id)) continue
+      repaired.push({ kind: 'unit-member-orphan', id: block.id, face })
+      const lettering = counterpartOf(freshId(takenIds, newId), 'translation', face, block)
+      add(lettering)
+      ledger.units.push({ id: freshId(takenUnitIds, newId), members: [block.id, lettering.id] })
+    }
+    ledger.units = ledger.units.filter((u) => u.members.length > 0)
+    repairReading(ledger, face, repaired)
   }
 
-  for (const [id, block] of blocks) {
-    if (claimed.has(id)) continue
-    repaired.push({ kind: 'unit-member-orphan', id })
-    const other = block.side === 'source' ? 'translation' : 'source'
-    let counterpartId = newId()
-    while (takenIds.has(counterpartId)) counterpartId = newId()
-    takenIds.add(counterpartId)
-    const counterpart = counterpartOf(counterpartId, other, block)
-    added.push(counterpart)
-    claimed.add(id)
-    claimed.add(counterpartId)
-    let unitId = newId()
-    while (takenUnitIds.has(unitId)) unitId = newId()
-    takenUnitIds.add(unitId)
-    const one = { members: [id], separators: [] }
-    const two = { members: [counterpartId], separators: [] }
-    units.push({
-      id: unitId,
-      tags: [],
-      source: block.side === 'source' ? one : two,
-      translation: block.side === 'source' ? two : one,
-      candidates: [],
-      chosen: null,
-    })
-  }
+  return { manifest: { ...manifest, ledgers, layers }, repaired }
+}
 
-  // A slot pointing at a reading that no longer has a piece for every block is
-  // a pointer that has come loose, and the blocks still hold what was typed.
-  for (const unit of units) {
-    if (unit.chosen === null) continue
-    const candidate = unit.candidates.find((c) => c.id === unit.chosen)
-    if (candidate === undefined || candidate.pieces.length !== unit.translation.members.length)
-      unit.chosen = null
-  }
-
-  const unitIds = new Set(units.map((u) => u.id))
-
+function repairReading(ledger: Ledger, face: string, repaired: PageDefect[]): void {
+  const unitIds = new Set(ledger.units.map((u: TranslationUnit) => u.id))
   const readingOrder: string[] = []
   const placed = new Set<string>()
   const reportedDuplicates = new Set<string>()
-  for (const id of manifest.readingOrder) {
+  for (const id of ledger.readingOrder) {
     if (placed.has(id)) {
       if (reportedDuplicates.has(id)) continue
       reportedDuplicates.add(id)
-      repaired.push({ kind: 'reading-order-duplicate', id })
+      repaired.push({ kind: 'reading-order-duplicate', id, face })
       continue
     }
     placed.add(id)
     if (!unitIds.has(id)) {
-      repaired.push({ kind: 'reading-order-dangling', id })
+      repaired.push({ kind: 'reading-order-dangling', id, face })
       continue
     }
     readingOrder.push(id)
   }
-
-  for (const unit of units) {
+  for (const unit of ledger.units) {
     if (readingOrder.includes(unit.id)) continue
-    repaired.push({ kind: 'reading-order-missing', id: unit.id })
+    repaired.push({ kind: 'reading-order-missing', id: unit.id, face })
     readingOrder.push(unit.id)
   }
-
-  const lines = siftReadingEdges(manifest.readingEdges, unitIds)
+  const lines = siftReadingEdges(ledger.readingEdges, unitIds, face)
   repaired.push(...lines.defects)
+  ledger.readingOrder = readingOrder
+  ledger.readingEdges = lines.kept
+}
 
-  return {
-    manifest: {
-      ...manifest,
-      translationUnits: units,
-      readingOrder,
-      readingEdges: lines.kept,
-      layers: [...layers, ...added],
-    },
-    repaired,
-  }
+function freshId(taken: Set<string>, newId: () => string): string {
+  let id = newId()
+  while (taken.has(id)) id = newId()
+  taken.add(id)
+  return id
 }

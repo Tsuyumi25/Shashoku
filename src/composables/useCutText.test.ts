@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
-import type { TranslationCandidate } from '@shared/page/types'
-import { projectionOf, shownCodeOf, shownLinesOf } from '@shared/page/units'
+import type { TranslationCandidate, TranslationTextLayerEntry } from '@shared/page/types'
+import { facePage, projectionOf, shownCodeOf, shownLinesOf } from '@shared/page/units'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCutText } from '@/composables/useCutText'
@@ -20,12 +20,17 @@ vi.mock('@/lib/labelRaster', () => ({
 }))
 
 const PAGE = 'p001.png'
+const FACE = 'f'
 
 function open(words: string[], candidates: TranslationCandidate[] = [], chosen: string | null = null) {
   const project = useProjectStore()
-  const lettering = blankBlock('t', 'translation', DEFAULT_TEXT_STYLE)
+  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.activeFace = FACE
+  const lettering = blankTranslationBlock('t', FACE, DEFAULT_TEXT_STYLE)
   lettering.body.lines = words
-  const artwork = blankBlock('s', 'source', DEFAULT_TEXT_STYLE)
+  lettering.body.candidates = candidates
+  lettering.body.chosen = chosen
+  const artwork = blankSourceBlock('s', DEFAULT_TEXT_STYLE)
   project.allFiles = [
     {
       pageId: PAGE,
@@ -38,18 +43,9 @@ function open(words: string[], candidates: TranslationCandidate[] = [], chosen: 
         name: 'p',
         width: 1200,
         height: 1700,
-        translationUnits: [
-          {
-            id: 'u',
-            tags: [],
-            source: { members: ['s'], separators: [] },
-            translation: { members: ['t'], separators: [] },
-            candidates,
-            chosen,
-          },
-        ],
-        readingOrder: ['u'],
-        readingEdges: [],
+        ledgers: {
+          [FACE]: { units: [{ id: 'u', members: ['s', 't'] }], readingOrder: ['u'], readingEdges: [] },
+        },
         layers: [lettering, artwork],
       },
     },
@@ -59,20 +55,25 @@ function open(words: string[], candidates: TranslationCandidate[] = [], chosen: 
   return { project, editor, cut: useCutText() }
 }
 
-const page = (project: ReturnType<typeof useProjectStore>) => project.pageById(PAGE)!.page
-const unit = (project: ReturnType<typeof useProjectStore>) => page(project).translationUnits[0]!
-const reads = (project: ReturnType<typeof useProjectStore>) =>
-  projectionOf(page(project).layers, unit(project), 'translation')
-const shown = (project: ReturnType<typeof useProjectStore>) =>
-  unit(project).translation.members.map((id) =>
-    shownLinesOf(page(project), project.blockById(PAGE, id)!).join('\n'),
-  )
-const codes = () => {
-  const project = useProjectStore()
-  return unit(project).translation.members.map((id) =>
-    shownCodeOf(page(project), project.blockById(PAGE, id)!),
-  )
-}
+type Project = ReturnType<typeof useProjectStore>
+
+const view = (project: Project) => facePage(project.pageById(PAGE)!.page, FACE)
+
+const unit = (project: Project) => view(project).units[0]!
+
+const lettering = (project: Project) =>
+  unit(project).members.filter((id) => project.blockById(PAGE, id)?.side === 'translation')
+
+const reads = (project: Project) => projectionOf(view(project), unit(project), 'translation')
+
+const shown = (project: Project) =>
+  lettering(project).map((id) => shownLinesOf(project.blockById(PAGE, id)!).join('\n'))
+
+const codes = (project: Project) =>
+  lettering(project).map((id) => shownCodeOf(project.blockById(PAGE, id)!))
+
+const letteringBlock = (project: Project, id: string) =>
+  project.blockById(PAGE, id) as TranslationTextLayerEntry
 
 beforeEach(() => setActivePinia(createPinia()))
 
@@ -83,7 +84,7 @@ describe('cutting a stretch of lettering into a block of its own', () => {
     cut.cutSelection(PAGE, 't', 3, 5)
 
     expect(shown(project)).toEqual(['這句話', '都是', '分散的'])
-    expect(reads(project)).toBe('這句話都是分散的')
+    expect(reads(project)).toBe('這句話/都是/分散的')
   })
 
   it('selects the stretch that was cut, so a drag moves it', () => {
@@ -91,7 +92,7 @@ describe('cutting a stretch of lettering into a block of its own', () => {
 
     cut.cutSelection(PAGE, 't', 2, 3)
 
-    expect(editor.cursorId).toBe(unit(project).translation.members[1])
+    expect(editor.cursorId).toBe(lettering(project)[1])
     expect(shown(project)).toEqual(['好痛', '！'])
   })
 
@@ -101,36 +102,69 @@ describe('cutting a stretch of lettering into a block of its own', () => {
     cut.cutSelection(PAGE, 't', 4, 7)
 
     expect(shown(project)).toEqual(['第一行', '第二行'])
-    expect(reads(project)).toBe('第一行\n第二行')
   })
 
   it('undoes to one block holding the whole sentence, and redoes to the same cut', () => {
     const { project, editor, cut } = open(['這句話都是分散的'])
     cut.cutSelection(PAGE, 't', 3, 5)
-    const cutInto = [...unit(project).translation.members]
+    const cutInto = [...lettering(project)]
 
     editor.undo()
-    expect(unit(project).translation.members).toEqual(['t'])
+    expect(lettering(project)).toEqual(['t'])
     expect(shown(project)).toEqual(['這句話都是分散的'])
 
     editor.redo()
-    expect(unit(project).translation.members).toEqual(cutInto)
+    expect(lettering(project)).toEqual(cutInto)
     expect(shown(project)).toEqual(['這句話', '都是', '分散的'])
   })
 
   /**
-   * A chosen proposal is what the page reads, so it is what gets cut — and the
-   * block's own words, a different translation, stay whole and come back when
-   * the choice is cleared.
+   * ⭐ A chosen proposal is what the page reads, so it is what gets cut: the
+   * first piece is written back into that very proposal, and the pieces that
+   * leave are their own words in blocks with nothing proposed for them.
    */
-  it('cuts the chosen proposal and keeps the block’s own words whole', () => {
-    const { project, cut } = open(['自己打的'], [{ id: 'c', pieces: [['好痛啊！']] }], 'c')
+  it('writes the first piece into the proposal the block is reading', () => {
+    const { project, cut } = open(['自己打的'], [{ id: 'c', lines: ['好痛啊！'] }], 'c')
 
     cut.cutSelection(PAGE, 't', 3, 4)
 
     expect(shown(project)).toEqual(['好痛啊', '！'])
-    project.setLabelTranslation(PAGE, 'u', null)
-    expect(reads(project)).toBe('自己打的')
+    expect(letteringBlock(project, 't').body.candidates).toEqual([
+      { id: 'c', lines: ['好痛啊'], human: true },
+    ])
+    expect(letteringBlock(project, 't').body.lines).toEqual(['自己打的'])
+  })
+
+  it('leaves the pieces that moved out with nothing proposed for them', () => {
+    const { project, cut } = open(['自己打的'], [{ id: 'c', lines: ['好痛啊！'] }], 'c')
+
+    cut.cutSelection(PAGE, 't', 3, 4)
+    const moved = letteringBlock(project, lettering(project)[1]!)
+
+    expect(moved.body.candidates).toEqual([])
+    expect(moved.body.chosen).toBeNull()
+    expect(moved.body.lines).toEqual(['！'])
+  })
+
+  /** The block's own words are a different translation and stay whole under it. */
+  it('comes back to the block’s own words when the choice is cleared', () => {
+    const { project, cut } = open(['自己打的'], [{ id: 'c', lines: ['好痛啊！'] }], 'c')
+
+    cut.cutSelection(PAGE, 't', 3, 4)
+    project.setLabelTranslation(PAGE, 't', null)
+
+    expect(reads(project)).toBe('自己打的/！')
+  })
+
+  it('puts the cut proposal back whole when it is undone', () => {
+    const { project, editor, cut } = open(['自己打的'], [{ id: 'c', lines: ['好痛啊！'] }], 'c')
+
+    cut.cutSelection(PAGE, 't', 3, 4)
+    editor.undo()
+
+    expect(lettering(project)).toEqual(['t'])
+    expect(letteringBlock(project, 't').body.candidates).toEqual([{ id: 'c', lines: ['好痛啊！'] }])
+    expect(shown(project)).toEqual(['好痛啊！'])
   })
 
   /**
@@ -143,7 +177,7 @@ describe('cutting a stretch of lettering into a block of its own', () => {
     cut.cutSelection(PAGE, 't', 1, 2)
 
     expect(shown(project)).toEqual(['大', '字', '小'])
-    expect(codes()).toEqual(['大', '<size=×2>字</size>', '小'])
+    expect(codes(project)).toEqual(['大', '<size=×2>字</size>', '小'])
   })
 
   it('closes a tag the cut falls inside and opens it again on the other side', () => {
@@ -152,6 +186,10 @@ describe('cutting a stretch of lettering into a block of its own', () => {
     cut.cutSelection(PAGE, 't', 1, 2)
 
     expect(shown(project)).toEqual(['大', '字', '小'])
-    expect(codes()).toEqual(['<size=×2>大</>', '<size=×2>字</>', '<size=×2>小</size>'])
+    expect(codes(project)).toEqual([
+      '<size=×2>大</>',
+      '<size=×2>字</>',
+      '<size=×2>小</size>',
+    ])
   })
 })

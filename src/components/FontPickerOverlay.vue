@@ -297,8 +297,8 @@ const objectText = computed(() =>
         {
           entry: t.entry,
           sentence: place ? `${t.pageId}/${place.unit.id}/${place.side}` : null,
-          at: place?.at ?? 0,
-          lines: shownLinesOf(page, t.entry),
+          at: place?.unit.members.indexOf(t.entry.id) ?? 0,
+          lines: shownLinesOf(t.entry),
         },
       ]
     }),

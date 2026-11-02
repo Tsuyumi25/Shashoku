@@ -3,38 +3,39 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
 import { usePreferencesStore } from './preferencesStore'
-import { defaultManifest, defaultOcr, serializeManifest } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr, serializeManifest } from '@shared/page/schema'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { projectionOf } from '@shared/page/units'
 import type { TranslationParts } from './projectStore'
-import { blankBlock } from '@shared/page/schema'
 
 const ROOT = '/root'
 const PAGE_ID = 'source-260809-1200'
 const PAGE_DIR = `${ROOT}/shashoku/pages/${PAGE_ID}`
+const FACE = 'face-a'
+
+/** A fresh store holding a project lettered in one face. */
+function freshPinia() {
+  setActivePinia(createPinia())
+  const project = useProjectStore()
+  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.activeFace = FACE
+}
 
 /** One ordinary translation, ready to hand to `addLabel`. */
 function label(id: string): TranslationParts {
-  const lettering = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  const lettering = blankTranslationBlock(id, FACE, DEFAULT_TEXT_STYLE)
   lettering.body.lines = ['x']
-  const artwork = blankBlock(`${id}s`, 'source', DEFAULT_TEXT_STYLE)
+  const artwork = blankSourceBlock(`${id}s`, DEFAULT_TEXT_STYLE)
   return {
-    unit: {
-      id: `u-${id}`,
-      tags: [],
-      source: { members: [artwork.id], separators: [] },
-      translation: { members: [lettering.id], separators: [] },
-      candidates: [],
-      chosen: null,
-    },
+    units: { [FACE]: { id: `u-${id}`, members: [artwork.id, lettering.id] } },
     blocks: [lettering, artwork],
   }
 }
 
 /** What a translation reads as today, resolved. */
 const reads = (project: ReturnType<typeof useProjectStore>, unitId: string) =>
-  projectionOf(project.pageById(PAGE_ID)!.page.layers, project.unitById(PAGE_ID, unitId)!, 'translation')
+  projectionOf(project.viewOf(PAGE_ID)!, project.unitById(PAGE_ID, unitId)!, 'translation')
 
 /**
  * What the main process was asked to do, in the order it was asked, plus what
@@ -87,7 +88,7 @@ function openOnePage(project: ReturnType<typeof useProjectStore>) {
 
 describe('reading a project back off disk', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   afterEach(() => {
@@ -115,7 +116,7 @@ describe('reading a project back off disk', () => {
 
 describe('the translation pool on an object', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   afterEach(() => {
@@ -129,20 +130,27 @@ describe('the translation pool on an object', () => {
     return project
   }
 
+  /** The pool hangs on the block, so this is where every assertion looks. */
+  const poolOf = (project: ReturnType<typeof useProjectStore>) => {
+    const block = project.blockById(PAGE_ID, 't1')!
+    if (block.side !== 'translation') throw new Error('not lettering')
+    return block.body
+  }
+
   it('leaves the typed lines alone when a candidate is taken', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
-    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
+    project.setLabelTranslation(PAGE_ID, 't1', id)
 
     expect(reads(project, 'u-t1')).toBe('候選')
-    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['x'])
+    expect(poolOf(project).lines).toEqual(['x'])
   })
 
   it('brings the typed lines back word for word when the slot is emptied', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
-    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
-    project.setLabelTranslation(PAGE_ID, 'u-t1', null)
+    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
+    project.setLabelTranslation(PAGE_ID, 't1', id)
+    project.setLabelTranslation(PAGE_ID, 't1', null)
 
     expect(reads(project, 'u-t1')).toBe('x')
   })
@@ -153,33 +161,42 @@ describe('the translation pool on an object', () => {
    */
   it('types into whichever candidate the object is reading', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
-    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
+    project.setLabelTranslation(PAGE_ID, 't1', id)
     project.updateLabelText(PAGE_ID, 't1', '改過的')
 
-    const unit1 = project.unitById(PAGE_ID, 'u-t1')!
-    expect(unit1.candidates[0].pieces[0]).toEqual(['改過的'])
-    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['x'])
+    expect(poolOf(project).candidates[0]!.lines).toEqual(['改過的'])
+    expect(poolOf(project).lines).toEqual(['x'])
   })
 
   it('types into the object itself when the slot is empty', () => {
     const project = withLabel()
-    project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')
+    project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')
     project.updateLabelText(PAGE_ID, 't1', '改過的')
 
-    const unit1 = project.unitById(PAGE_ID, 'u-t1')!
-    expect(project.blockById(PAGE_ID, 't1')!.body.lines).toEqual(['改過的'])
-    expect(unit1.candidates[0].pieces[0]).toEqual(['候選'])
+    expect(poolOf(project).lines).toEqual(['改過的'])
+    expect(poolOf(project).candidates[0]!.lines).toEqual(['候選'])
   })
 
   it('falls back to the typed lines when what it was reading is thrown away', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 'u-t1', [['候選']], 'model')!
-    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
-    project.removeTranslation(PAGE_ID, 'u-t1', id)
+    const id = project.addTranslation(PAGE_ID, 't1', ['候選'], 'model')!
+    project.setLabelTranslation(PAGE_ID, 't1', id)
+    project.removeTranslation(PAGE_ID, 't1', id)
 
-    expect(project.unitById(PAGE_ID, 'u-t1')!.chosen).toBeNull()
+    expect(poolOf(project).chosen).toBeNull()
     expect(reads(project, 'u-t1')).toBe('x')
+  })
+
+  /** A candidate no block holds is no candidate at all: the slot refuses it. */
+  it('refuses a slot naming a proposal this block never had', () => {
+    const project = withLabel()
+    project.addLabel(PAGE_ID, label('t2'))
+    const elsewhere = project.addTranslation(PAGE_ID, 't2', ['別人的'], 'model')!
+
+    project.setLabelTranslation(PAGE_ID, 't1', elsewhere)
+
+    expect(poolOf(project).chosen).toBeNull()
   })
 
   /**
@@ -189,24 +206,21 @@ describe('the translation pool on an object', () => {
    */
   it('makes a proposal yours the moment you type over it', () => {
     const project = withLabel()
-    const id = project.addTranslation(PAGE_ID, 'u-t1', [['模型的']], 'model')!
-    project.setLabelTranslation(PAGE_ID, 'u-t1', id)
+    const id = project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')!
+    project.setLabelTranslation(PAGE_ID, 't1', id)
     project.updateLabelText(PAGE_ID, 't1', '我改的')
 
-    expect(project.unitById(PAGE_ID, 'u-t1')!.candidates[0]).toMatchObject({
-      pieces: [['我改的']],
-      human: true,
-    })
+    expect(poolOf(project).candidates[0]).toMatchObject({ lines: ['我改的'], human: true })
   })
 
   it('marks only what a person wrote', () => {
     const project = withLabel()
-    project.addTranslation(PAGE_ID, 'u-t1', [['模型的']], 'model')
-    project.addTranslation(PAGE_ID, 'u-t1', [['人的']], 'human')
+    project.addTranslation(PAGE_ID, 't1', ['模型的'], 'model')
+    project.addTranslation(PAGE_ID, 't1', ['人的'], 'human')
 
-    const { candidates } = project.unitById(PAGE_ID, 'u-t1')!
-    expect(candidates[0].human).toBeUndefined()
-    expect(candidates[1].human).toBe(true)
+    const { candidates } = poolOf(project)
+    expect(candidates[0]!.human).toBeUndefined()
+    expect(candidates[1]!.human).toBe(true)
   })
 })
 
@@ -217,7 +231,7 @@ describe('the translation pool on an object', () => {
  */
 describe('deleting pages', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
     vi.stubGlobal('window', {
       api: {
         writeProjectMeta: async () => {},
@@ -304,7 +318,7 @@ describe('deleting pages', () => {
 
 describe('isOpenRoot', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   it('answers only for the book currently held open', () => {
@@ -324,7 +338,7 @@ describe('isOpenRoot', () => {
 
 describe('saving', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   afterEach(() => {
@@ -380,7 +394,7 @@ describe('saving', () => {
  */
 describe('what is owed to the layers folder before anyone reads it', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   afterEach(() => {
@@ -439,7 +453,7 @@ describe('what is owed to the layers folder before anyone reads it', () => {
 
 describe('which layers a page row shows', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    freshPinia()
   })
 
   afterEach(() => {

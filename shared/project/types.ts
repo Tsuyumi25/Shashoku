@@ -18,6 +18,12 @@ export const PROJECT_SCHEMA_VERSION = 4
 
 export type Glossary = Record<string, string>
 
+/** One language the book is lettered in. The id is what pages store; the name is only shown. */
+export interface TranslationFace {
+  id: string
+  name: string
+}
+
 
 export interface ProjectJson {
   schemaVersion: typeof PROJECT_SCHEMA_VERSION
@@ -72,6 +78,14 @@ export interface ProjectJson {
    * Absent only in a file no open has seeded yet.
    */
   pinnedLayerNames?: string[]
+  /**
+   * The translation faces this book is lettered in, in the order the interface
+   * lists them. Every page has a ledger and lettering for each. Absent only in
+   * a file no open has seeded yet; the first open makes one under the default name.
+   */
+  faces?: TranslationFace[]
+  /** Which face the interface works on — the one Shift+S switches to from the source. */
+  activeFace?: string
   /**
    * Layer names the 修圖 opacity buttons write to. Absent until someone changes
    * it, and read as the name a new page gives its working copy.

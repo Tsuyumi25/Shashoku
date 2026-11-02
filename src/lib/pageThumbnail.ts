@@ -25,7 +25,7 @@ async function digest(text: string): Promise<string> {
  * a nudge to a delivery setting used to throw away every thumbnail in the
  * chapter, back when the key hashed the document to catch the styles inside it.
  */
-export function thumbnailKey(file: ProjectFile, edge: number = THUMBNAIL_EDGE): Promise<string> {
+export function thumbnailKey(file: ProjectFile, face: string, edge: number = THUMBNAIL_EDGE): Promise<string> {
   return digest(
     // JSON rather than a joined string: one of these parts is itself a
     // serialized document full of whatever separator would be picked, and a
@@ -40,7 +40,7 @@ export function thumbnailKey(file: ProjectFile, edge: number = THUMBNAIL_EDGE): 
       // The tree alone. Reading order is left out on purpose: it decides which
       // object comes first in the label list, never what the page looks like,
       // and hashing it would throw the picture away for a reordering.
-      serializeDrawnLayers(file.page),
+      serializeDrawnLayers(file.page, face),
     ]),
   )
 }
@@ -143,10 +143,12 @@ export async function renderFitted(
  */
 export async function renderThumbnail(
   file: ProjectFile,
+  face: string,
   edge: number = THUMBNAIL_EDGE,
 ): Promise<Uint8Array> {
   const full = await compositePage({
     page: file.page,
+    face,
     loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
   })
   const size = fitWithin({ w: full.width, h: full.height }, edge)

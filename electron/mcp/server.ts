@@ -80,15 +80,19 @@ function buildServer(getSource: () => string | undefined): McpServer {
   server.registerTool(
     "get_texts",
     {
-      title: "Read text objects' source and translation",
+      title: "Read sentences' source and translation, in every face",
       description:
-        "Read-only. Lists the text objects in the open Shashoku project, page by page in " +
-        "reading order: the object's id, its source text (原文) and what it currently reads " +
-        "as (譯文). An empty 譯文 means the object is untranslated. Both are markup: " +
+        "Read-only. Lists the open Shashoku project page by page and, within a page, one " +
+        "section per translation face (譯文, English, …) named as the person named it. Each " +
+        "section lists that face's sentences in reading order: the sentence's id, its source " +
+        "text (原文) and what it currently reads as (譯文). An empty 譯文 means the sentence " +
+        "is untranslated. Both are markup: " +
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a literal " +
-        "`<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. Candidates are " +
+        "`<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. A sentence set in " +
+        "several blocks of lettering lists each block (塊 <id>) with its own text and its own " +
+        "candidates; the blocks are read as one sentence with `/` between them. Candidates are " +
         "marked （human） for a person's, （你） for yours and （AI） for another client's. " +
-        "page_ids reads only those pages. changed_only answers only the objects that read " +
+        "page_ids reads only those pages. changed_only answers only the sentences that read " +
         "differently since this session last saw them — through get_texts or any write's " +
         "reply — plus the ids that are gone; the first read of a session is all of it.",
       inputSchema: {
@@ -122,16 +126,20 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Propose translation candidates",
       description:
-        "Append translation candidates to text objects, on any number of pages in one batch. " +
-        "Never deletes: every item lands in the object's candidate drawer. Where the object " +
+        "Append translation candidates, on any number of pages in one batch. Never deletes: " +
+        "every item lands in a block of lettering's candidate drawer. Where that block " +
         "currently reads as nothing at all, the new candidate also takes effect immediately; " +
         "anywhere else it stays in the drawer unless the item sets choose, which makes it " +
-        "take effect whatever the object read as (the earlier choice stays in the drawer). " +
-        "Give each item lines or pieces, not both. lines is one array entry per rendered " +
-        "line — no embedded newlines — and means one block. pieces is one array of lines " +
-        "per block, for an object get_texts says is set in several blocks: a candidate " +
-        "takes effect only with as many pieces as the object has blocks. Lines are markup, " +
-        "the same syntax get_texts shows: wrap a stretch in " +
+        "take effect whatever the block read as (the earlier choice stays in the drawer). " +
+        "object_id is the id get_texts shows: a sentence's id, which stands for its block of " +
+        "lettering when it has exactly one, or a block's id (塊 <id>). A sentence set in " +
+        "several blocks is refused by its sentence id — name the block instead. ⚠️ Before " +
+        "proposing for one block of such a sentence, read the whole sentence's 原文 and the " +
+        "other blocks' current text, both of which get_texts gives you: the blocks are read " +
+        "together as one sentence with `/` between them, so a block translated without the " +
+        "rest in view will not read as part of it. lines is one array entry per rendered " +
+        "line of that one block — no embedded newlines. Lines are markup, the same syntax " +
+        "get_texts shows: wrap a stretch in " +
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` to set it apart, and write a " +
         "literal `<` or `&` as `&lt;` or `&amp;`.",
       inputSchema: {
@@ -140,8 +148,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
             z.object({
               page_id: z.string(),
               object_id: z.string(),
-              lines: z.array(z.string()).optional(),
-              pieces: z.array(z.array(z.string())).optional(),
+              lines: z.array(z.string()).min(1),
               choose: z.boolean().optional(),
             }),
           )
@@ -154,9 +161,8 @@ function buildServer(getSource: () => string | undefined): McpServer {
         const result = await askRenderer<WriteResult<ProposeOutcome>>("propose_translations", {
           items: items.map((i) => ({
             pageId: i.page_id,
-            unitId: i.object_id,
+            objectId: i.object_id,
             lines: i.lines,
-            pieces: i.pieces,
             choose: i.choose,
           })),
           source: caller,
@@ -174,13 +180,15 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Withdraw candidates this client proposed",
       description:
-        "Remove translation candidates from objects' drawers, on any number of pages in one " +
-        "batch. Only candidates this client itself proposed (marked （你）) can be withdrawn: " +
-        "human-written candidates and other clients' proposals are refused per item. " +
-        "Withdrawing a current choice falls that object back to its own typed lines. Every " +
-        "candidate is a row on the person's screen beside the page, so withdraw your own " +
-        "once a newer one replaces it or it is plainly not wanted. Replies with each " +
-        "object's full state afterwards.",
+        "Remove translation candidates from a block of lettering's drawer, on any number of " +
+        "pages in one batch. Only candidates this client itself proposed (marked （你）) can " +
+        "be withdrawn: human-written candidates and other clients' proposals are refused per " +
+        "item. Withdrawing a current choice falls that block back to its own typed lines. " +
+        "object_id is a sentence id, which stands for its block of lettering when it has " +
+        "exactly one, or a block id (塊 <id>) — a sentence set in several blocks is refused " +
+        "by its sentence id. Every candidate is a row on the person's screen beside the " +
+        "page, so withdraw your own once a newer one replaces it or it is plainly not " +
+        "wanted. Replies with each touched sentence's full state afterwards.",
       inputSchema: {
         items: z
           .array(
@@ -195,7 +203,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         const result = await askRenderer<WriteResult<WithdrawOutcome>>("withdraw_translation", {
           items: items.map((i) => ({
             pageId: i.page_id,
-            unitId: i.object_id,
+            objectId: i.object_id,
             translationId: i.translation_id,
           })),
           source: caller,
@@ -213,10 +221,12 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Point objects at candidates in their drawers",
       description:
-        "Move text objects' translation slots to candidates already in their drawers " +
+        "Move a block of lettering's translation slot to a candidate already in its drawer " +
         "(candidate ids are listed by get_texts), on any number of pages in one batch. " +
-        "Nothing is deleted: the previous choices stay in the drawers. Replies with each " +
-        "object's full state afterwards.",
+        "object_id is a sentence id, which stands for its block of lettering when it has " +
+        "exactly one, or a block id (塊 <id>) — a sentence set in several blocks is refused " +
+        "by its sentence id. Nothing is deleted: the previous choices stay in the drawers. " +
+        "Replies with each touched sentence's full state afterwards.",
       inputSchema: {
         items: z
           .array(
@@ -231,7 +241,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         const result = await askRenderer<WriteResult<ChooseOutcome>>("choose_translation", {
           items: items.map((i) => ({
             pageId: i.page_id,
-            unitId: i.object_id,
+            objectId: i.object_id,
             translationId: i.translation_id,
           })),
         } satisfies ChooseParams);

@@ -3,11 +3,20 @@ import type { GroupLayerEntry, LayerEntry, RasterLayerEntry, TextLayerEntry } fr
 import { PASS_THROUGH } from '@shared/page/types'
 import { dropTargetFor, flattenLayerRows } from '@/lib/layerRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 
-function text(id: string, visible = true, side: 'source' | 'translation' = 'translation'): TextLayerEntry {
+const FACE = 'f'
+
+function text(
+  id: string,
+  visible = true,
+  side: 'source' | 'translation' = 'translation',
+  face = FACE,
+): TextLayerEntry {
   const entry: TextLayerEntry =
-    side === 'source' ? blankBlock(id, 'source', DEFAULT_TEXT_STYLE) : blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+    side === 'source'
+      ? blankSourceBlock(id, DEFAULT_TEXT_STYLE)
+      : blankTranslationBlock(id, face, DEFAULT_TEXT_STYLE)
   entry.visible = visible
   entry.body.lines = [id]
   return entry
@@ -53,24 +62,36 @@ describe('flattenLayerRows', () => {
   it('lists only the text of the side being worked on, at the paths it really has', () => {
     const layers = [raster('base'), text('s', true, 'source'), group('g', [text('t'), text('s2', true, 'source')])]
 
-    const rows = flattenLayerRows(layers, new Set(), 'translation')
+    const rows = flattenLayerRows(layers, new Set(), 'translation', FACE)
 
     expect(idsOf(rows)).toEqual(['g', 't', 'base'])
     expect(rows.find((r) => r.entry.id === 't')?.path).toEqual([2, 0])
-    expect(idsOf(flattenLayerRows(layers, new Set(), 'source'))).toEqual(['g', 's2', 's', 'base'])
+    expect(idsOf(flattenLayerRows(layers, new Set(), 'source', FACE))).toEqual(['g', 's2', 's', 'base'])
   })
+
+  /**
+   * A second face's lettering stands on the same page and is not what the hand
+   * is on: listing it would show every balloon twice.
+   */
+  it('lists only the face being worked on', () => {
+    const layers = [text('mine'), text('theirs', true, 'translation', 'other')]
+
+    expect(idsOf(flattenLayerRows(layers, new Set(), 'translation', FACE))).toEqual(['mine'])
+    expect(idsOf(flattenLayerRows(layers, new Set(), 'translation', 'other'))).toEqual(['theirs'])
+  })
+
   // The last entry is drawn last, so it is the one on top — and a layer panel
   // that put the topmost at the bottom would read backwards to anyone who has
   // used one before.
   it('shows the topmost first', () => {
-    expect(idsOf(flattenLayerRows([text('under'), text('over')], new Set(), 'translation'))).toEqual([
+    expect(idsOf(flattenLayerRows([text('under'), text('over')], new Set(), 'translation', FACE))).toEqual([
       'over',
       'under',
     ])
   })
 
   it('puts a folder above its own contents and indents them', () => {
-    const rows = flattenLayerRows([group('g', [text('a'), text('b')])], new Set(), 'translation')
+    const rows = flattenLayerRows([group('g', [text('a'), text('b')])], new Set(), 'translation', FACE)
     expect(idsOf(rows)).toEqual(['g', 'b', 'a'])
     expect(rows.map((r) => r.depth)).toEqual([0, 1, 1])
   })
@@ -78,7 +99,7 @@ describe('flattenLayerRows', () => {
   // Paths address the real array, which is what the store's edits take, so they
   // keep counting from the bottom however the panel chooses to show them.
   it('names each entry by where it actually sits', () => {
-    const rows = flattenLayerRows([raster('r'), group('g', [text('a'), text('b')])], new Set(), 'translation')
+    const rows = flattenLayerRows([raster('r'), group('g', [text('a'), text('b')])], new Set(), 'translation', FACE)
     expect(rows.map((r) => [r.entry.id, r.path])).toEqual([
       ['g', [1]],
       ['b', [1, 1]],
@@ -88,17 +109,17 @@ describe('flattenLayerRows', () => {
   })
 
   it('keeps a collapsed folder and drops what is inside it', () => {
-    const rows = flattenLayerRows([group('g', [text('a')]), text('b')], new Set(['g']), 'translation')
+    const rows = flattenLayerRows([group('g', [text('a')]), text('b')], new Set(['g']), 'translation', FACE)
     expect(idsOf(rows)).toEqual(['b', 'g'])
   })
 
   it('collapses a folder nested inside an open one', () => {
-    const rows = flattenLayerRows([group('outer', [group('inner', [text('a')])])], new Set(['inner']), 'translation')
+    const rows = flattenLayerRows([group('outer', [group('inner', [text('a')])])], new Set(['inner']), 'translation', FACE)
     expect(idsOf(rows)).toEqual(['outer', 'inner'])
   })
 
   it('goes several levels deep', () => {
-    const rows = flattenLayerRows([group('a', [group('b', [text('c')])])], new Set(), 'translation')
+    const rows = flattenLayerRows([group('a', [group('b', [text('c')])])], new Set(), 'translation', FACE)
     expect(rows.map((r) => r.depth)).toEqual([0, 1, 2])
   })
 
@@ -108,7 +129,7 @@ describe('flattenLayerRows', () => {
    * visible, so it has to be told apart from being hidden outright.
    */
   it('marks what a hidden folder takes down with it', () => {
-    const rows = flattenLayerRows([group('g', [text('a'), text('b', false)], false)], new Set(), 'translation')
+    const rows = flattenLayerRows([group('g', [text('a'), text('b', false)], false)], new Set(), 'translation', FACE)
     expect(rows.map((r) => [r.entry.id, r.entry.visible, r.hiddenByAncestor])).toEqual([
       ['g', false, false],
       ['b', false, true],
@@ -117,7 +138,7 @@ describe('flattenLayerRows', () => {
   })
 
   it('leaves what is inside a shown folder unmarked', () => {
-    const rows = flattenLayerRows([group('g', [text('a')])], new Set(), 'translation')
+    const rows = flattenLayerRows([group('g', [text('a')])], new Set(), 'translation', FACE)
     expect(rows.every((r) => !r.hiddenByAncestor)).toBe(true)
   })
 
@@ -128,7 +149,7 @@ describe('flattenLayerRows', () => {
    */
   it('marks what a locked folder locks under it, apart from the folder itself', () => {
     const layers = [{ ...group('g', [text('a'), { ...text('b'), locked: true }]), locked: true }]
-    const rows = flattenLayerRows(layers, new Set(), 'translation')
+    const rows = flattenLayerRows(layers, new Set(), 'translation', FACE)
     expect(rows.map((r) => [r.entry.id, r.entry.locked, r.lockedByAncestor])).toEqual([
       ['g', true, false],
       ['b', true, true],
@@ -137,13 +158,13 @@ describe('flattenLayerRows', () => {
   })
 
   it('leaves what is inside an unlocked folder unmarked', () => {
-    const rows = flattenLayerRows([group('g', [text('a')])], new Set(), 'translation')
+    const rows = flattenLayerRows([group('g', [text('a')])], new Set(), 'translation', FACE)
     expect(rows.every((r) => !r.lockedByAncestor)).toBe(true)
   })
 })
 
 describe('dropTargetFor', () => {
-  const rowsOf = (layers: LayerEntry[]) => flattenLayerRows(layers, new Set(), 'translation')
+  const rowsOf = (layers: LayerEntry[]) => flattenLayerRows(layers, new Set(), 'translation', FACE)
 
   // Rows read top to bottom while the array counts bottom to top, so landing
   // above a row on screen means landing after it in the array.

@@ -15,7 +15,7 @@ import { drawnLabel } from '@/lib/labelRaster'
 import { textProjection } from '@/lib/textProjection'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
-import { useProjectStore, type RemovedEntry, type SideWords } from '@/stores/projectStore'
+import { useProjectStore } from '@/stores/projectStore'
 
 /** Where the caret before plain character `index` stands on the page. */
 function caretOnPage(
@@ -63,10 +63,11 @@ function codeOfPieces(code: string, plainLength: number, cut: CutText): string[]
 /**
  * Cutting the selected stretch of a block out into a block of its own.
  *
- * The pieces stay in the same translation, in reading order, with whatever
- * stood between them as the seams — so the sentence reads exactly as it did,
- * and each piece starts where its first character was drawn. Nothing moves on
- * the page until the new block is dragged.
+ * The pieces stay in the same sentence, each directly after the one before, so
+ * the sentence reads in the same order, and each piece starts where its first
+ * character was drawn. Nothing moves on the page until the new block is
+ * dragged. The first piece stays in the block, wherever what it reads as lives;
+ * the others are their own words in blocks with no proposals of their own.
  */
 export function useCutText() {
   const project = useProjectStore()
@@ -78,10 +79,9 @@ export function useCutText() {
     const block = project.blockById(pageId, blockId)
     const place = project.placeOf(pageId, blockId)
     const path = file ? pathOf(file.page.layers, blockId) : null
-    const before = project.sideWordsOf(pageId, blockId)
-    if (!file || !block || !place || path === null || !before) return
+    if (!file || !block || !place || path === null) return
 
-    const code = shownCodeOf(file.page, block)
+    const code = shownCodeOf(block)
     const text = plainOf(code)
     const cut = cutText(text, start, end)
     if (cut === null) {
@@ -89,69 +89,34 @@ export function useCutText() {
       return
     }
 
-    const chosen = before.pieces !== null
     const codePieces = codeOfPieces(code, text.length, cut)
-    const pieces = codePieces.map(linesOf)
     const { style, x, y, rotation } = block.body
     const copies: TextLayerEntry[] = codePieces.slice(1).map((piece, i) => {
       const want = caretOnPage(code, style, block.effects, { x, y }, rotation, cut.offsets[i + 1]!)
       const has = caretOnPage(piece, style, block.effects, { x, y }, rotation, 0)
-      const body = {
-        ...block.body,
-        // A chosen proposal holds the words being cut, and the block's own
-        // lines are a different translation that stays whole in the first one.
-        lines: chosen ? [] : pieces[i + 1]!,
+      const placed = {
+        lines: linesOf(piece),
         style: { ...style },
         x: x + want.x - has.x,
         y: y + want.y - has.y,
+        rotation,
       }
       const id = generateId()
+      const effects = cloneEffects(block.effects)
       return block.side === 'source'
-        ? { ...block, id, effects: cloneEffects(block.effects), side: 'source', body: { ...body, by: block.body.by } }
-        : { ...block, id, effects: cloneEffects(block.effects), side: 'translation', body }
+        ? { ...block, id, effects, body: { ...block.body, ...placed, tags: [...block.body.tags] } }
+        : { ...block, id, effects, body: { ...block.body, ...placed, candidates: [], chosen: null } }
     })
-
-    const after: SideWords = {
-      lines: { ...before.lines, ...(chosen ? {} : { [blockId]: pieces[0]! }) },
-      pieces: before.pieces && [
-        ...before.pieces.slice(0, place.at),
-        ...pieces,
-        ...before.pieces.slice(place.at + 1),
-      ],
-      separators: [
-        ...before.separators.slice(0, place.at),
-        ...cut.seams,
-        ...before.separators.slice(place.at),
-      ],
-    }
-    for (const [i, copy] of copies.entries()) {
-      after.lines[copy.id] = chosen ? [] : pieces[i + 1]!
-    }
 
     // Each piece directly above the one before it, as a copy lands.
     const above = (i: number) => [...path.slice(0, -1), path[path.length - 1]! + 1 + i]
 
-    let removed: RemovedEntry[] | null = null
-    editor.pushCommand({
-      label: `cut-text ${blockId}`,
-      do: () => {
-        if (removed === null) {
-          copies.forEach((copy, i) => {
-            project.addLayer(pageId, copy, above(i))
-            project.addMemberAfter(pageId, i === 0 ? blockId : copies[i - 1]!.id, copy.id)
-          })
-        } else {
-          for (const entry of removed) project.restoreEntry(entry)
-        }
-        project.setSideWords(pageId, blockId, after)
-      },
-      undo: () => {
-        removed = [...copies]
-          .reverse()
-          .flatMap((copy) => project.removeEntry(copy.id) ?? [])
-          .reverse()
-        project.setSideWords(pageId, blockId, before)
-      },
+    editor.cmdReshape(`cut-text ${blockId}`, pageId, () => {
+      copies.forEach((copy, i) => {
+        project.addLayer(pageId, copy, above(i))
+        project.addMemberAfter(pageId, i === 0 ? blockId : copies[i - 1]!.id, copy.id)
+      })
+      project.updateLabelText(pageId, blockId, codePieces[0]!)
     })
     // The selected stretch is what was picked up, so it is what a drag moves —
     // the first block itself when the selection began at the start.

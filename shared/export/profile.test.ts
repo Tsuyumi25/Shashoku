@@ -159,6 +159,25 @@ describe("profileFolderName", () => {
     expect(a).not.toBe(b);
   });
 
+  /**
+   * ⚠️ Two faces delivered through one profile would have the second overwrite
+   * the first page for page, so the folder has to say which face it holds.
+   */
+  it("tells two profiles apart by the face they are pinned to", () => {
+    const a = profileFolderName(profile({ face: "a1b2c3d4e5" }));
+    const b = profileFolderName(profile({ face: "f6e5d4c3b2" }));
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(profileFolderName(profile()));
+  });
+
+  /**
+   * A piece of the id rather than the name: a delivery folder that moved when a
+   * face was renamed would split one face's pages across two.
+   */
+  it("keeps a face's folder a file system name, whatever the id is made of", () => {
+    expect(profileFolderName(profile({ face: "AB-CD_ef/gh.ij" }))).toBe("png@original-fabcdefgh");
+  });
+
   it("gives every distinct set of settings a name of its own", () => {
     const names = new Set<string>();
     let count = 0;

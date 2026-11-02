@@ -58,7 +58,7 @@ const pinned = computed<NamedRow[]>(() => {
   const names = new Set(project.pinnedLayerNames)
   const file = project.pageById(props.pageId)
   if (!file || names.size === 0) return []
-  return flattenLayerRows(file.page.layers, new Set(), editor.textSide).filter(
+  return flattenLayerRows(file.page.layers, new Set(), editor.textSide, project.activeFace).filter(
     (row): row is NamedRow => row.entry.kind !== 'text' && names.has(row.entry.name),
   )
 })

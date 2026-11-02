@@ -3,19 +3,18 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useConnectStore } from './connectStore'
 import { useEditorStore } from './editorStore'
 import { useProjectStore } from './projectStore'
-import type { TextLayerEntry } from '@shared/page/types'
+import type { TranslationTextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
-import { blankBlock } from '@shared/page/schema'
+import { blankTranslationBlock } from '@shared/page/schema'
 
 const PAGE = 'p001.png'
+const FACE = 'face-a'
 const AT = { x: 0, y: 0 }
 
-function label(id: string): TextLayerEntry {
-  return {
-    ...blankBlock(id, 'translation', DEFAULT_TEXT_STYLE),
-  }
+function label(id: string): TranslationTextLayerEntry {
+  return blankTranslationBlock(id, FACE, DEFAULT_TEXT_STYLE)
 }
 
 function openPage(ids: string[]) {
@@ -32,16 +31,13 @@ function openPage(ids: string[]) {
         height: 1700,
         // A unit's id is never its block's: the lines join units, and a press
         // lands on a block.
-        translationUnits: ids.map((id) => ({
-          id: `u-${id}`,
-          tags: [],
-          source: { members: [], separators: [] },
-          translation: { members: [id], separators: [] },
-          candidates: [],
-          chosen: null,
-        })),
-        readingOrder: ids.map((id) => `u-${id}`),
-        readingEdges: [],
+        ledgers: {
+          [FACE]: {
+            units: ids.map((id) => ({ id: `u-${id}`, members: [id] })),
+            readingOrder: ids.map((id) => `u-${id}`),
+            readingEdges: [],
+          },
+        },
         layers: ids.map(label),
       },
       ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -54,10 +50,13 @@ function openPage(ids: string[]) {
 }
 
 const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
-  project.pageById(PAGE)?.page.readingEdges ?? []
+  project.viewOf(PAGE)?.readingEdges ?? []
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  const project = useProjectStore()
+  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.activeFace = FACE
 })
 
 describe('a chain being drawn', () => {

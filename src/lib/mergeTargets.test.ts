@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blankBlock } from '@shared/page/schema'
+import { blankTranslationBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type {
   GroupLayerEntry,
@@ -36,7 +36,7 @@ function raster(id: string): RasterLayerEntry {
 }
 
 function text(id: string): TextLayerEntry {
-  const entry = blankBlock(id, 'translation', DEFAULT_TEXT_STYLE)
+  const entry = blankTranslationBlock(id, 'f', DEFAULT_TEXT_STYLE)
   entry.body.lines = [id]
   return entry
 }

@@ -1,6 +1,14 @@
 <template>
   <div class="flex flex-col gap-2 p-2">
     <label class="field">
+      <span>譯文面</span>
+      <select :value="profile.face ?? ''" @change="onFace">
+        <option value="">目前的譯文面（{{ activeName }}）</option>
+        <option v-for="f in project.faces" :key="f.id" :value="f.id">{{ f.name }}</option>
+      </select>
+    </label>
+
+    <label class="field">
       <span>編碼格式</span>
       <select :value="profile.format" @change="onFormat">
         <option v-for="f in FORMATS" :key="f.value" :value="f.value">{{ f.label }}</option>
@@ -79,6 +87,10 @@ import {
   type ExportProfile,
 } from '@shared/export/types'
 import { outputFilename, profileFolderName, withFormat } from '@shared/export/profile'
+import { useProjectStore } from '@/stores/projectStore'
+
+const project = useProjectStore()
+const activeName = computed(() => project.faces.find((f) => f.id === project.activeFace)?.name ?? '')
 
 const props = defineProps<{ profile: ExportProfile }>()
 const emit = defineEmits<{ change: [ExportProfile] }>()
@@ -121,6 +133,12 @@ function valueOf(e: Event): string {
 
 function onFormat(e: Event) {
   push(withFormat(props.profile, valueOf(e) as ExportFormat))
+}
+
+function onFace(e: Event) {
+  const face = valueOf(e)
+  const { face: _, ...rest } = props.profile
+  push(face === '' ? rest : { ...rest, face })
 }
 
 function onColorMode(e: Event) {
