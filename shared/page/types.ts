@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 16
+export const MANIFEST_SCHEMA_VERSION = 17
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -182,6 +182,8 @@ export interface SourceBody extends TextBody {
  */
 export interface TranslationCandidate {
   id: string
+  /** Its short name in its block's drawer, shown as a letter: 1 is `a`. Never reissued. */
+  no?: number
   lines: string[]
   human?: boolean
   /**
@@ -225,6 +227,12 @@ export interface TranslationBody extends TextBody {
  */
 interface TextLayerEntryBase extends LayerEntryBase {
   kind: 'text'
+  /**
+   * The block's short name, issued by its container and never reissued there:
+   * the page for the artwork's words, the sentence for a face's lettering.
+   * Absent only between a block being made and the page being numbered.
+   */
+  no?: number
 }
 
 /** One block of what the artwork says. */
@@ -238,6 +246,11 @@ export interface TranslationTextLayerEntry extends TextLayerEntryBase {
   side: 'translation'
   /** Which translation face this block belongs to — a project-wide id. */
   face: string
+  /**
+   * The sentence that issued `no`. A block found in any other sentence has
+   * changed container and is given a number there.
+   */
+  numberedIn?: string
   body: TranslationBody
 }
 
@@ -269,6 +282,8 @@ export type LayerEntry = RasterLayerEntry | TextLayerEntry | GroupLayerEntry
  */
 export interface TranslationUnit {
   id: string
+  /** The sentence's short name in its face, issued by the page and never reissued. */
+  no?: number
   members: string[]
 }
 
@@ -328,7 +343,30 @@ export interface ManifestJson {
    */
   ledgers: Record<string, Ledger>
 
+  /**
+   * The next number each container issues. Kept outside the ledgers and the
+   * tree, which are what undo writes back: a counter undo could rewind would
+   * hand out a number something has already worn.
+   */
+  counters: NumberCounters
+
   layers: LayerEntry[]
+}
+
+/**
+ * Each entry is the next number that container hands out. Containers that are
+ * gone keep their entry: undo can bring one back, and it must not then reissue
+ * a number it already gave.
+ */
+export interface NumberCounters {
+  /** Blocks of the artwork's words, issued by the page. */
+  source: number
+  /** Sentences, by face id. */
+  units: Record<string, number>
+  /** A face's lettering, by the id of the sentence that issues it. */
+  blocks: Record<string, number>
+  /** Candidates, by the id of the block whose drawer they are in. */
+  candidates: Record<string, number>
 }
 
 

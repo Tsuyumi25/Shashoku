@@ -8,6 +8,7 @@ import type {
 } from './types'
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
+import { emptyCounters } from './numbers'
 import { blankSourceBlock, blankTranslationBlock } from './schema'
 import {
   blocksOnSide,
@@ -54,6 +55,7 @@ function manifestOf(layers: LayerEntry[], units: TranslationUnit[], face = FACE)
     width: 1200,
     height: 1700,
     ledgers: { [face]: { units, readingOrder: units.map((u) => u.id), readingEdges: [] } },
+    counters: emptyCounters(),
     layers,
   }
 }

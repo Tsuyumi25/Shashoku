@@ -9,6 +9,7 @@ import type { ProjectFile } from '@/types/project'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { ProjectJson } from '@shared/project/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters } from '@shared/page/numbers'
 
 const metaByRoot = new Map<string, ProjectJson>()
 let pageCounter = 0
@@ -55,6 +56,7 @@ function pageOf(pageId: string): ProjectFile {
       width: 100,
       height: 100,
       ledgers: {},
+      counters: emptyCounters(),
       layers: [],
     },
     badge: 'ok',

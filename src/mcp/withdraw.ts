@@ -1,4 +1,4 @@
-import type { TranslationTextLayerEntry } from '@shared/page/types'
+import type { TranslationCandidate, TranslationTextLayerEntry } from '@shared/page/types'
 
 export type WithdrawPlan =
   | { action: 'refuse'; reason: string }
@@ -17,11 +17,9 @@ export type WithdrawPlan =
  */
 export function planWithdraw(
   block: TranslationTextLayerEntry,
-  translationId: string,
+  candidate: TranslationCandidate,
   source: string | undefined,
 ): WithdrawPlan {
-  const candidate = block.body.candidates.find((c) => c.id === translationId)
-  if (!candidate) return { action: 'refuse', reason: `候選 ${translationId} 不在這個物件的抽屜裡` }
   if (candidate.human) return { action: 'refuse', reason: '這是人寫過的候選——不可撤' }
   if (!candidate.source) {
     return { action: 'refuse', reason: '這則候選沒有署名——不確定是誰的，留給人在介面上清' }
@@ -29,5 +27,5 @@ export function planWithdraw(
   if (source === undefined || candidate.source !== source) {
     return { action: 'refuse', reason: `這是 ${candidate.source} 的提案——只能撤自己署名的候選` }
   }
-  return { action: 'remove', wasChosen: block.body.chosen === translationId }
+  return { action: 'remove', wasChosen: block.body.chosen === candidate.id }
 }

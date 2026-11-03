@@ -63,10 +63,25 @@ function parseFaces(v: unknown): TranslationFace[] | undefined {
     if (!isRecord(f)) fail(`faces[${i}] 必須是物件`)
     if (typeof f.id !== 'string' || f.id.length === 0) fail(`faces[${i}].id 必須是非空字串`)
     if (typeof f.name !== 'string') fail(`faces[${i}].name 必須是字串`)
-    return { id: f.id, name: f.name }
+    const no = typeof f.no === 'number' && Number.isInteger(f.no) && f.no > 0 ? f.no : 0
+    return { id: f.id, no, name: f.name }
   })
   if (new Set(faces.map((f) => f.id)).size !== faces.length) fail('faces 的 id 不可重複')
+  // A face with no number, or one another face already wears, takes the next
+  // one: an agent naming `f2` must reach one face and only one.
+  let next = Math.max(0, ...faces.map((f) => f.no)) + 1
+  const taken = new Set<number>()
+  for (const f of faces) {
+    if (f.no === 0 || taken.has(f.no)) f.no = next++
+    taken.add(f.no)
+  }
   return faces.length > 0 ? faces : undefined
+}
+
+function parseNextFace(v: unknown, faces: readonly TranslationFace[] | undefined): number | undefined {
+  if (faces === undefined) return undefined
+  const floor = Math.max(...faces.map((f) => f.no)) + 1
+  return typeof v === 'number' && Number.isInteger(v) && v > floor ? v : floor
 }
 
 function parseGlossary(v: unknown): Glossary | undefined {
@@ -154,6 +169,8 @@ export function parseProjectJson(raw: string): ProjectJson {
 
   const pages = parsePageList(data.pages)
 
+  const faces = parseFaces(data.faces)
+
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     pages,
@@ -164,7 +181,8 @@ export function parseProjectJson(raw: string): ProjectJson {
     glossary: parseGlossary(data.glossary),
     pinnedLayerNames: parseLayerNames(data.pinnedLayerNames, 'pinnedLayerNames'),
     retouchLayerNames: parseLayerNames(data.retouchLayerNames, 'retouchLayerNames'),
-    faces: parseFaces(data.faces),
+    faces,
+    nextFace: parseNextFace(data.nextFace, faces),
     activeFace: typeof data.activeFace === 'string' && data.activeFace.length > 0 ? data.activeFace : undefined,
     exportProfiles: parseExportProfiles(data.exportProfiles),
   }
@@ -185,6 +203,7 @@ export function serializeProjectJson(project: ProjectJson): string {
   if (project.retouchLayerNames !== undefined) out.retouchLayerNames = project.retouchLayerNames
   if (project.faces !== undefined) out.faces = project.faces
   if (project.activeFace !== undefined) out.activeFace = project.activeFace
+  if (project.nextFace !== undefined) out.nextFace = project.nextFace
   out.exportProfiles = serializeExportProfiles(project.exportProfiles)
   return `${JSON.stringify(out, null, 2)}\n`
 }

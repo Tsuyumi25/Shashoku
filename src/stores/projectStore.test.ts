@@ -7,6 +7,7 @@ import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr, s
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { projectionOf } from '@shared/page/units'
+import { letterOf } from '@shared/page/numbers'
 import type { TranslationParts } from './projectStore'
 
 const ROOT = '/root'
@@ -18,7 +19,7 @@ const FACE = 'face-a'
 function freshPinia() {
   setActivePinia(createPinia())
   const project = useProjectStore()
-  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
   project.projectMeta.activeFace = FACE
 }
 
@@ -221,6 +222,75 @@ describe('the translation pool on an object', () => {
     const { candidates } = poolOf(project)
     expect(candidates[0]!.human).toBeUndefined()
     expect(candidates[1]!.human).toBe(true)
+  })
+
+  /**
+   * ⭐ A letter is the name a proposal is discussed under, so it is never
+   * handed on: withdrawing `b` leaves the drawer reading `a` and `c`.
+   */
+  it('letters a new proposal after the last one, withdrawn or not', () => {
+    const project = withLabel()
+    project.addTranslation(PAGE_ID, 't1', ['甲'], 'model')
+    const second = project.addTranslation(PAGE_ID, 't1', ['乙'], 'model')!
+    expect(poolOf(project).candidates.map((c) => letterOf(c.no!))).toEqual(['a', 'b'])
+
+    project.removeTranslation(PAGE_ID, 't1', second)
+    project.addTranslation(PAGE_ID, 't1', ['丙'], 'model')
+
+    expect(poolOf(project).candidates.map((c) => letterOf(c.no!))).toEqual(['a', 'c'])
+  })
+})
+
+describe('a sentence carried to another page', () => {
+  const OTHER_PAGE = 'p2'
+
+  beforeEach(() => {
+    freshPinia()
+  })
+
+  function twoPages() {
+    const project = useProjectStore()
+    openOnePage(project)
+    project.allFiles.push({
+      pageId: OTHER_PAGE,
+      pageDir: `${ROOT}/shashoku/pages/${OTHER_PAGE}`,
+      page: defaultManifest('other', 1200, 1700),
+      ocr: defaultOcr(1200, 1700),
+      badge: 'ok',
+    })
+    for (const id of ['t1', 't2']) project.addLabel(PAGE_ID, label(id))
+    for (const id of ['o1', 'o2']) project.addLabel(OTHER_PAGE, label(id))
+    return project
+  }
+
+  /**
+   * ⭐ A sentence's number names it on its page, so arriving somewhere else is
+   * arriving under a new one. What it numbers inside itself — its blocks, their
+   * proposals — is its own and travels untouched.
+   */
+  it('takes a number from the page it joins and keeps the ones it issued', () => {
+    const project = twoPages()
+    project.addTranslation(PAGE_ID, 't2', ['候選'], 'model')
+    expect(project.unitById(PAGE_ID, 'u-t2')!.no).toBe(2)
+    expect(project.blockById(PAGE_ID, 't2')!.no).toBe(1)
+
+    expect(project.moveSentences(PAGE_ID, OTHER_PAGE, ['u-t2'])).toBe(true)
+
+    expect(project.unitById(OTHER_PAGE, 'u-t2')!.no).toBe(3)
+    const moved = project.blockById(OTHER_PAGE, 't2')!
+    expect(moved.no).toBe(1)
+    expect(moved.side === 'translation' && moved.body.candidates.map((c) => letterOf(c.no!))).toEqual(['a'])
+    expect(project.blockById(OTHER_PAGE, 't2s')!.no).toBe(3)
+  })
+
+  /** The number it left behind is spent: the page it left never hands it out again. */
+  it('leaves its old number spent on the page it left', () => {
+    const project = twoPages()
+    project.moveSentences(PAGE_ID, OTHER_PAGE, ['u-t2'])
+
+    project.addLabel(PAGE_ID, label('t3'))
+
+    expect(project.unitById(PAGE_ID, 'u-t3')!.no).toBe(3)
   })
 })
 

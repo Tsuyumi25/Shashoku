@@ -5,6 +5,7 @@ import { siftReadingEdges } from './validate'
 import { blankSourceBlock, blankTranslationBlock, generateId } from './schema'
 import { allEntries, textObjects } from './tree'
 import { emptyLedger } from './units'
+import { numberPage } from './numbers'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 
 /**
@@ -153,7 +154,9 @@ export function repairPage(
     repairReading(ledger, face, repaired)
   }
 
-  return { manifest: { ...manifest, ledgers, layers }, repaired }
+  const out = { ...manifest, counters: structuredClone(manifest.counters), ledgers, layers }
+  numberPage(out, faces)
+  return { manifest: out, repaired }
 }
 
 function repairReading(ledger: Ledger, face: string, repaired: PageDefect[]): void {

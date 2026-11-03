@@ -6,6 +6,7 @@ import { buildLabelRows, type LabelRow } from '@/lib/labelRows'
 import { laneOffset, railMarks, railWidth } from '@/lib/readingRail'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 
 const FACE = 'f'
@@ -46,6 +47,7 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
           }),
         },
       },
+      counters: emptyCounters(),
       layers,
     },
   }

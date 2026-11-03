@@ -10,6 +10,8 @@ export interface PageRow {
   pageId: string
   /** What the page is called, which is not what it is keyed by. */
   name: string
+  /** Where it reads in the chapter, counting from one; its id is its permanent name. */
+  position: number
   count: number
 }
 
@@ -25,6 +27,8 @@ export interface LabelRow {
   key: string
   pageId: string
   unit: TranslationUnit
+  /** The sentence's permanent number in its face — the name an agent uses for it. */
+  no: number
   /** The blocks of the side being shown, in the order they are read. */
   blocks: readonly TextLayerEntry[]
   /** This side's markup, whole — every block of it with the gaps between — as the list shows and edits it. */
@@ -60,8 +64,11 @@ export interface BlockRow {
   pageId: string
   unit: TranslationUnit
   block: TextLayerEntry
-  /** Which block of this side it is, counting from one, which is what it shows. */
-  at: number
+  /**
+   * The block's permanent name, which is what the row shows: `15.2` for
+   * lettering, `s18` for the artwork's words.
+   */
+  label: string
   /** This block's markup, chosen candidate resolved. */
   text: string
   /** Where its unit sits in the reading order, so a drop on it lands there. */
@@ -93,7 +100,7 @@ export function buildLabelRows(
   const needle = query.trim().toLowerCase()
   const other: TextSide = side === 'source' ? 'translation' : 'source'
   const rows: ChapterRow[] = []
-  for (const file of files) {
+  for (const [at, file] of files.entries()) {
     const page = facePage(file.page, face)
     const inOrder = unitsInReadingOrder(page)
     const byId = new Map(inOrder.map((unit) => [unit.id, unit]))
@@ -122,6 +129,7 @@ export function buildLabelRows(
       key: `page/${file.pageId}`,
       pageId: file.pageId,
       name: file.page.name,
+      position: at + 1,
       count: shown.length,
     })
     for (const row of shown) {
@@ -133,6 +141,7 @@ export function buildLabelRows(
         key: `label/${file.pageId}/${row.unit.id}`,
         pageId: file.pageId,
         unit: row.unit,
+        no: row.unit.no ?? 0,
         blocks,
         main: projectionCodeOf(page, row.unit, side),
         opposite: projectionCodeOf(page, row.unit, other),
@@ -143,14 +152,14 @@ export function buildLabelRows(
         carries: row.carries,
       })
       if (blocks.length < 2) continue
-      blocks.forEach((block, at) => {
+      blocks.forEach((block) => {
         rows.push({
           kind: 'block',
           key: `block/${file.pageId}/${block.id}`,
           pageId: file.pageId,
           unit: row.unit,
           block,
-          at: at + 1,
+          label: block.side === 'source' ? `s${block.no ?? '?'}` : `${row.unit.no ?? '?'}.${block.no ?? '?'}`,
           text: shownCodeOf(block),
           index,
         })

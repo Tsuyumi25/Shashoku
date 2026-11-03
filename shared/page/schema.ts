@@ -4,6 +4,7 @@ import type {
   LayerEntryBase,
   Ledger,
   ManifestJson,
+  NumberCounters,
   OcrCandidatePersisted,
   OcrJson,
   RasterLayerEntry,
@@ -22,6 +23,7 @@ import { linesOf } from './text'
 import { BLOCK_JOINER, shownCodeOf } from './units'
 import { escapeText } from './markup'
 import { textObjects } from './tree'
+import { emptyCounters } from './numbers'
 import { parseEffects, serializeEffects } from '../effects/schema'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import type { TextStyle } from '../text-style/types'
@@ -61,7 +63,7 @@ const PLAIN_TEXT_VERSION = 13
  * style parser already does with a key that is not there — a character scale
  * absent means the face's own proportions — except for the escaping below.
  */
-const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, MANIFEST_SCHEMA_VERSION]
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, MANIFEST_SCHEMA_VERSION]
 
 /** The last version that held one ledger for the page, with candidates on the unit. */
 const ONE_LEDGER_VERSION = 15
@@ -195,14 +197,43 @@ function parseTextEntry(v: Record<string, unknown>, at: string, legacyFace: stri
   const { side } = v
   if (side !== 'source' && side !== 'translation')
     fail(`${at}.side 必須是 source 或 translation(取得 ${JSON.stringify(side)})`)
+  const no = numberOf(v.no)
   if (side === 'source')
-    return { kind: 'text', ...base, side, body: parseSourceBody(v.body, `${at}.body`) }
+    return { kind: 'text', ...base, side, ...(no === undefined ? {} : { no }), body: parseSourceBody(v.body, `${at}.body`) }
   let face = legacyFace
   if (face === null) {
     if (typeof v.face !== 'string' || v.face.length === 0) fail(`${at}.face 必須是非空字串`)
     face = v.face
   }
-  return { kind: 'text', ...base, side, face, body: parseTranslationBody(v.body, `${at}.body`) }
+  const numbered =
+    no !== undefined && typeof v.numberedIn === 'string' && v.numberedIn.length > 0
+      ? { no, numberedIn: v.numberedIn }
+      : {}
+  return { kind: 'text', ...base, side, face, ...numbered, body: parseTranslationBody(v.body, `${at}.body`) }
+}
+
+/**
+ * A short name as stored, or nothing for anything that is not one. Never a
+ * refusal: a page whose numbers are damaged is numbered again on open, and
+ * numbering is what repairs it.
+ */
+function numberOf(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined
+}
+
+function parseCounters(v: unknown): NumberCounters {
+  const out = emptyCounters()
+  if (!isRecord(v)) return out
+  out.source = numberOf(v.source) ?? 1
+  for (const key of ['units', 'blocks', 'candidates'] as const) {
+    const table = v[key]
+    if (!isRecord(table)) continue
+    for (const [id, n] of Object.entries(table)) {
+      const no = numberOf(n)
+      if (no !== undefined) out[key][id] = no
+    }
+  }
+  return out
 }
 
 function parseTextBody(v: unknown, at: string): { body: TextBody; raw: Record<string, unknown> } {
@@ -301,7 +332,8 @@ function parseCandidates(v: unknown, at: string): TranslationCandidate[] {
     // would make what the block reads as depend on which was searched first.
     if (seen.has(marks.id)) fail(`${where}.id「${marks.id}」重複`)
     seen.add(marks.id)
-    return { ...marks, lines: parseLines(entry.lines, `${where}.lines`) }
+    const no = numberOf(entry.no)
+    return { ...marks, ...(no === undefined ? {} : { no }), lines: parseLines(entry.lines, `${where}.lines`) }
   })
 }
 
@@ -328,7 +360,8 @@ function parseUnits(v: unknown, at: string): TranslationUnit[] {
     if (typeof id !== 'string' || id.length === 0) fail(`${where}.id 必須是非空字串`)
     if (seen.has(id)) fail(`${where}.id「${id}」重複`)
     seen.add(id)
-    return { id, members: parseIdList(entry.members, `${where}.members`) }
+    const no = numberOf(entry.no)
+    return { id, ...(no === undefined ? {} : { no }), members: parseIdList(entry.members, `${where}.members`) }
   })
 }
 
@@ -481,6 +514,7 @@ export function defaultManifest(name: string, width: number, height: number): Ma
     width,
     height,
     ledgers: {},
+    counters: emptyCounters(),
     layers: [],
   }
 }
@@ -684,7 +718,8 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
     ledgers = parseLedgers(data.ledgers)
   }
 
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, name: data.name, ...size, ledgers, layers }
+  const counters = parseCounters(data.counters)
+  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, name: data.name, ...size, ledgers, counters, layers }
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
@@ -713,20 +748,30 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
     return { ...base, name: l.name, children: l.children.map(serializeLayerEntry) }
   }
   const body = serializeBody(l.body)
+  if (l.no !== undefined) base.no = l.no
   if (l.side === 'source') {
     if (l.body.by !== 'auto') body.by = l.body.by
     if (l.body.from !== undefined) body.from = l.body.from
     if (l.body.tags.length > 0) body.tags = normalizeTagSet(l.body.tags)
     return { ...base, side: l.side, body }
   }
-  if (l.body.candidates.length > 0) body.candidates = l.body.candidates
+  if (l.body.candidates.length > 0) {
+    body.candidates = l.body.candidates.map((c) => ({
+      id: c.id,
+      ...(c.no === undefined ? {} : { no: c.no }),
+      lines: c.lines,
+      ...(c.human ? { human: true } : {}),
+      ...(c.source === undefined ? {} : { source: c.source }),
+    }))
+  }
   if (l.body.chosen !== null) body.chosen = l.body.chosen
-  return { ...base, side: l.side, face: l.face, body }
+  const numberedIn = l.no !== undefined && l.numberedIn !== undefined ? { numberedIn: l.numberedIn } : {}
+  return { ...base, side: l.side, face: l.face, ...numberedIn, body }
 }
 
 function serializeLedger(ledger: Ledger): Record<string, unknown> {
   const out: Record<string, unknown> = {
-    units: ledger.units.map((u) => ({ id: u.id, members: u.members })),
+    units: ledger.units.map((u) => ({ id: u.id, ...(u.no === undefined ? {} : { no: u.no }), members: u.members })),
     readingOrder: ledger.readingOrder,
   }
   if (ledger.readingEdges.length > 0) out.readingEdges = normalizeEdges(ledger.readingEdges)
@@ -761,6 +806,8 @@ export function serializeDrawnLayers(m: ManifestJson, face: string): string {
     if (entry.kind !== 'text') return serializeLayerEntry(entry)
     if (entry.side === 'source' || entry.face !== face) return null
     const out = serializeLayerEntry(entry)
+    delete out.no
+    delete out.numberedIn
     const body = out.body as Record<string, unknown>
     body.lines = linesOf(shownCodeOf(entry))
     delete body.candidates
@@ -779,6 +826,7 @@ export function serializeManifest(m: ManifestJson): string {
     height: m.height,
   }
   out.ledgers = Object.fromEntries(Object.entries(m.ledgers).map(([face, l]) => [face, serializeLedger(l)]))
+  out.counters = m.counters
   out.layers = m.layers.map(serializeLayerEntry)
   return `${JSON.stringify(out, null, 2)}\n`
 }

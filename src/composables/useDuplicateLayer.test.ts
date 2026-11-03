@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
@@ -17,7 +18,7 @@ const FACE = 'f'
 /** One ordinary balloon: a block a side, and the sentence over them. */
 function open(words: string[]) {
   const project = useProjectStore()
-  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
   project.projectMeta.activeFace = FACE
   const lettering = blankTranslationBlock('t', FACE, DEFAULT_TEXT_STYLE)
   lettering.body.lines = words
@@ -37,6 +38,7 @@ function open(words: string[]) {
         ledgers: {
           [FACE]: { units: [{ id: 'u', members: ['s', 't'] }], readingOrder: ['u'], readingEdges: [] },
         },
+        counters: emptyCounters(),
         layers: [lettering, artwork],
       },
     },

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectFile } from '@/types/project'
-import type { LayerEntry, TextLayerEntry, TranslationTextLayerEntry } from '@shared/page/types'
+import type { LayerEntry, ManifestJson, TextLayerEntry, TranslationTextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { buildLabelRows, chapterStops, dropAt, type ChapterRow, type LabelRow } from '@/lib/labelRows'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters, numberPage } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 
 const FACE = 'f'
@@ -37,20 +38,23 @@ function file(
     const [from, to] = pair.split('>')
     return { from, to }
   })
+  const page: ManifestJson = {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision: 0,
+    name: 'p',
+    width: 1200,
+    height: 1700,
+    ledgers: { [FACE]: { units, readingOrder, readingEdges } },
+    counters: emptyCounters(),
+    layers,
+  }
+  numberPage(page, [FACE])
   return {
     pageId,
     pageDir: `/p/${pageId}`,
     ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
     badge: 'ok',
-    page: {
-      schemaVersion: MANIFEST_SCHEMA_VERSION,
-      revision: 0,
-      name: 'p',
-      width: 1200,
-      height: 1700,
-      ledgers: { [FACE]: { units, readingOrder, readingEdges } },
-      layers,
-    },
+    page,
   }
 }
 
@@ -164,6 +168,36 @@ describe('buildLabelRows', () => {
     expect(labels(buildLabelRows([page], 'translation', 'other'))).toEqual([])
     expect(buildLabelRows([page], 'translation', 'other')[0]).toMatchObject({ count: 0 })
   })
+
+  /**
+   * The heading says where the page reads in the chapter, which is not where
+   * it is in the list being shown: a search that drops the pages before it
+   * must not move the one that matched.
+   */
+  it('heads each page with where it reads in the chapter, filtered or not', () => {
+    const chapter = [file('001.png', ['a'], ['a']), file('002.png', ['b'], ['b'])]
+
+    expect(
+      buildLabelRows(chapter, 'translation', FACE).flatMap((r) =>
+        r.kind === 'page' ? [r.position] : [],
+      ),
+    ).toEqual([1, 2])
+    expect(
+      buildLabelRows(chapter, 'translation', FACE, 'b').flatMap((r) =>
+        r.kind === 'page' ? [[r.pageId, r.position]] : [],
+      ),
+    ).toEqual([['002.png', 2]])
+  })
+
+  /** The sentence's permanent number, not its place — the name an agent writes. */
+  it('carries each sentence its own number', () => {
+    const rows = labels(buildLabelRows([file('001.png', ['a', 'b'], ['b', 'a'])], 'translation', FACE))
+
+    expect(rows.map((r) => [r.unit.id, r.no])).toEqual([
+      ['b', 1],
+      ['a', 2],
+    ])
+  })
 })
 
 /**
@@ -176,6 +210,8 @@ describe('a sentence set in more than one block', () => {
     const unit = page.page.ledgers[FACE].units[0]
     unit.members = ['us', ...ids]
     page.page.layers = [...ids.map((id) => text(id)), sourceText('u')]
+    page.page.counters = emptyCounters()
+    numberPage(page.page, [FACE])
     return page
   }
 
@@ -183,9 +219,9 @@ describe('a sentence set in more than one block', () => {
     const rows = buildLabelRows([split(['x', 'y'])], 'translation', FACE)
 
     expect(rows.map((r) => r.kind)).toEqual(['page', 'label', 'block', 'block'])
-    expect(rows.flatMap((r) => (r.kind === 'block' ? [[r.at, r.text]] : []))).toEqual([
-      [1, 'x'],
-      [2, 'y'],
+    expect(rows.flatMap((r) => (r.kind === 'block' ? [[r.label, r.text]] : []))).toEqual([
+      ['1.1', 'x'],
+      ['1.2', 'y'],
     ])
   })
 
@@ -200,6 +236,22 @@ describe('a sentence set in more than one block', () => {
     const [, sentence] = buildLabelRows([split(['x', 'y'])], 'translation', FACE)
 
     expect(sentence.kind === 'label' && sentence.main).toBe('x/y')
+  })
+
+  /**
+   * The artwork's words are numbered by the page and not by any sentence, so
+   * their rows are named for the page: `s1`, never `1.1`.
+   */
+  it("names a block of the artwork's words for the page", () => {
+    const page = file('001.png', ['u'], ['u'])
+    page.page.ledgers[FACE].units[0].members = ['xs', 'ys', 'ut']
+    page.page.layers = [sourceText('x'), sourceText('y'), text('ut')]
+    page.page.counters = emptyCounters()
+    numberPage(page.page, [FACE])
+
+    const rows = buildLabelRows([page], 'source', FACE)
+
+    expect(rows.flatMap((r) => (r.kind === 'block' ? [r.label] : []))).toEqual(['s1', 's2'])
   })
 })
 
@@ -256,6 +308,7 @@ describe('buildLabelRows filtered', () => {
             readingEdges: [],
           },
         },
+        counters: emptyCounters(),
         layers: ids.flatMap((id) => {
           const entry = text(id)
           entry.body.lines = lines[id]

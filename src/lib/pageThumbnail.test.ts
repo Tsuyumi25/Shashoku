@@ -4,6 +4,7 @@ import type { SourceTextLayerEntry, TranslationTextLayerEntry } from '@shared/pa
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 
 const FACE = 'f'
@@ -21,6 +22,7 @@ function page(): ProjectFile {
       width: 1200,
       height: 1700,
       ledgers: { [FACE]: { units: [{ id: 'u', members: ['s', 'a'] }], readingOrder: ['u'], readingEdges: [] } },
+      counters: emptyCounters(),
       layers: [
         blankTranslationBlock('a', FACE, DEFAULT_TEXT_STYLE),
         blankSourceBlock('s', DEFAULT_TEXT_STYLE),

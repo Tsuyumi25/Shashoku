@@ -19,8 +19,10 @@ import type {
   TranslationUnit,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
+import { emptyCounters, letterOf } from './numbers'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { shownLinesOf } from './units'
+import { repairPage } from './repair'
 
 /** The face every page in this file is written for. */
 const FACE = 'face-1'
@@ -102,6 +104,7 @@ function manifestWith(entry: TextLayerEntry, unit = unitFor(entry.id)): Manifest
     width: 1200,
     height: 1700,
     ledgers: { [FACE]: { units: [unit], readingOrder: [unit.id], readingEdges: [] } },
+    counters: emptyCounters(),
     layers: [entry],
   }
 }
@@ -333,6 +336,7 @@ describe("every face's reading of one page", () => {
           readingEdges: [],
         },
       },
+      counters: emptyCounters(),
       layers: [s1, s2, t1, t2, t3],
     }
   }
@@ -746,6 +750,7 @@ describe('parseManifest', () => {
           readingEdges: [],
         },
       },
+      counters: emptyCounters(),
       layers: [
         {
           kind: 'group',
@@ -1179,5 +1184,113 @@ describe("a text object's source", () => {
     const written = JSON.parse(serializeManifest(m))
     expect(written.layers[1].body).not.toHaveProperty('by')
     expect(written.layers[1].body).not.toHaveProperty('from')
+  })
+})
+
+describe('the short numbers everything on a page wears', () => {
+  /** A page numbered the way an edit leaves it, with every counter past its holders. */
+  function numbered(): ManifestJson {
+    const s1 = blankSourceBlock('s1', DEFAULT_TEXT_STYLE)
+    s1.no = 1
+    const t1 = blankTranslationBlock('t1', FACE, DEFAULT_TEXT_STYLE)
+    t1.no = 1
+    t1.numberedIn = 'u-a'
+    t1.body.candidates = [
+      { id: 'c1', no: 1, lines: ['一'], human: true },
+      { id: 'c2', no: 3, lines: ['三'], source: 'claude-code' },
+    ]
+    return {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 3,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      ledgers: {
+        [FACE]: {
+          units: [{ id: 'u-a', no: 4, members: ['s1', 't1'] }],
+          readingOrder: ['u-a'],
+          readingEdges: [],
+        },
+      },
+      counters: { source: 2, units: { [FACE]: 5 }, blocks: { 'u-a': 2 }, candidates: { t1: 4 } },
+      layers: [s1, t1],
+    }
+  }
+
+  it('round trips every number and every counter', () => {
+    const m = numbered()
+    expect(parseManifest(serializeManifest(m), FACE)).toEqual(m)
+  })
+
+  /**
+   * A thumbnail is identified by what it draws. Numbers move no pixel, so a
+   * renumbering must not throw away every thumbnail in the chapter.
+   */
+  it('leaves the drawn layers unchanged when the numbers change', () => {
+    const m = numbered()
+    const drawn = serializeDrawnLayers(m, FACE)
+    const moved = numbered()
+    const block = moved.layers[1] as TranslationTextLayerEntry
+    block.no = 9
+    block.numberedIn = 'u-z'
+    moved.counters.source = 40
+
+    expect(serializeDrawnLayers(moved, FACE)).toBe(drawn)
+  })
+
+  it('drops a number that is not one and lets repair hand out another', () => {
+    const page = JSON.parse(serializeManifest(numbered()))
+    page.layers[0].no = 0
+    page.ledgers[FACE].units[0].no = 'four'
+    page.layers[1].body.candidates[1].no = -2
+
+    const parsed = parseManifest(JSON.stringify(page), FACE)
+    expect((parsed.layers[0] as SourceTextLayerEntry).no).toBeUndefined()
+    expect(parsed.ledgers[FACE].units[0].no).toBeUndefined()
+
+    const { manifest } = repairPage(parsed, [FACE])
+    const block = manifest.layers[1] as TranslationTextLayerEntry
+    expect((manifest.layers[0] as SourceTextLayerEntry).no).toBe(2)
+    expect(manifest.ledgers[FACE].units[0].no).toBe(5)
+    expect(block.body.candidates.map((c) => c.no)).toEqual([1, 4])
+  })
+
+  /** A block whose sentence is written down nowhere has no number to keep. */
+  it('forgets a number no sentence claims to have issued', () => {
+    const page = JSON.parse(serializeManifest(numbered()))
+    delete page.layers[1].numberedIn
+
+    const parsed = parseManifest(JSON.stringify(page), FACE)
+    expect((parsed.layers[1] as TranslationTextLayerEntry).no).toBeUndefined()
+  })
+
+  /** v16 is the last version written before anything on a page had a number. */
+  it('reads a page from before the numbers and lets repair number it', () => {
+    const page = JSON.parse(serializeManifest(numbered()))
+    page.schemaVersion = 16
+    delete page.counters
+    delete page.layers[0].no
+    delete page.layers[1].no
+    delete page.layers[1].numberedIn
+    delete page.ledgers[FACE].units[0].no
+    for (const c of page.layers[1].body.candidates) delete c.no
+
+    const parsed = parseManifest(JSON.stringify(page), FACE)
+    expect(parsed.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(parsed.counters).toEqual(emptyCounters())
+
+    const { manifest } = repairPage(parsed, [FACE])
+    const block = manifest.layers[1] as TranslationTextLayerEntry
+    expect((manifest.layers[0] as SourceTextLayerEntry).no).toBe(1)
+    expect(manifest.ledgers[FACE].units[0].no).toBe(1)
+    expect(block.no).toBe(1)
+    expect(block.numberedIn).toBe('u-a')
+    expect(block.body.candidates.map((c) => letterOf(c.no!))).toEqual(['a', 'b'])
+    expect(manifest.counters).toEqual({
+      source: 2,
+      units: { [FACE]: 2 },
+      blocks: { 'u-a': 2 },
+      candidates: { t1: 3 },
+    })
   })
 })

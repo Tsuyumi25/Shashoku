@@ -6,6 +6,7 @@ import { validatePage } from './validate'
 import { textObjects } from './tree'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { emptyCounters } from './numbers'
 import { blankSourceBlock, blankTranslationBlock } from './schema'
 
 const FACE = 'fa'
@@ -52,6 +53,7 @@ function page(
     width: 1200,
     height: 1700,
     ledgers: { [FACE]: { units: units.map((s) => s.unit), readingOrder, readingEdges } },
+    counters: emptyCounters(),
     layers: [...units.flatMap((s) => s.blocks), ...extra],
   }
 }
@@ -200,7 +202,7 @@ describe('repairing a page more than one face reads', () => {
     expect(ledger.units).toHaveLength(1)
     expect(ledger.units[0].members[0]).toBe('as')
     expect(ledger.readingOrder).toEqual([ledger.units[0].id])
-    expect(manifest.ledgers[FACE].units).toEqual([{ id: 'a', members: ['as', 'at'] }])
+    expect(manifest.ledgers[FACE].units).toMatchObject([{ id: 'a', members: ['as', 'at'] }])
     expect(validatePage(manifest, [FACE, OTHER])).toEqual([])
   })
 
@@ -245,8 +247,8 @@ describe('repairing a page more than one face reads', () => {
     expect(repaired).toEqual([
       { kind: 'unit-member-foreign', id: 'at', unit: 'ub', face: OTHER },
     ])
-    expect(manifest.ledgers[OTHER].units).toEqual([{ id: 'ub', members: ['as', 'bt'] }])
-    expect(manifest.ledgers[FACE].units).toEqual([{ id: 'a', members: ['as', 'at'] }])
+    expect(manifest.ledgers[OTHER].units).toMatchObject([{ id: 'ub', members: ['as', 'bt'] }])
+    expect(manifest.ledgers[FACE].units).toMatchObject([{ id: 'a', members: ['as', 'at'] }])
     expect(validatePage(manifest, [FACE, OTHER])).toEqual([])
   })
 
@@ -267,7 +269,7 @@ describe('repairing a page more than one face reads', () => {
       readingEdges: [],
     }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
-    expect(manifest.ledgers[OTHER].units).toEqual([
+    expect(manifest.ledgers[OTHER].units).toMatchObject([
       { id: 'uc', members: ['as', 'bs', 'ct'] },
       { id: 'ud', members: [expect.any(String), 'dt'] },
     ])

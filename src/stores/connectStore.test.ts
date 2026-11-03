@@ -7,6 +7,7 @@ import type { TranslationTextLayerEntry } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankTranslationBlock } from '@shared/page/schema'
 
 const PAGE = 'p001.png'
@@ -38,6 +39,7 @@ function openPage(ids: string[]) {
             readingEdges: [],
           },
         },
+        counters: emptyCounters(),
         layers: ids.map(label),
       },
       ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -55,7 +57,7 @@ const edgesOf = (project: ReturnType<typeof useProjectStore>) =>
 beforeEach(() => {
   setActivePinia(createPinia())
   const project = useProjectStore()
-  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
   project.projectMeta.activeFace = FACE
 })
 

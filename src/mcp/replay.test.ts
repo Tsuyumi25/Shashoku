@@ -18,7 +18,7 @@ type Project = ReturnType<typeof useProjectStore>
 /** One balloon of one face, open in the store, ready to be written to. */
 function openWith(project: Project, words: string[] = [], over: Partial<TranslationBody> = {}) {
   project.rootPath = '/root'
-  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
   const artwork = blankSourceBlock('src', DEFAULT_TEXT_STYLE)
   const lettering = blankTranslationBlock(BLOCK, FACE, DEFAULT_TEXT_STYLE)
   lettering.body = { ...lettering.body, lines: words, ...over }
@@ -46,7 +46,10 @@ function propose(project: Project, lines: string[]) {
 }
 
 function withdraw(project: Project, id: string) {
-  const plan = planWithdraw(letteringOf(project), id, CLIENT)
+  const block = letteringOf(project)
+  const candidate = block.body.candidates.find((c) => c.id === id)
+  if (!candidate) throw new Error(`沒有候選 ${id}`)
+  const plan = planWithdraw(block, candidate, CLIENT)
   if (plan.action === 'refuse') throw new Error(plan.reason)
   project.removeTranslation(PAGE_ID, BLOCK, id)
 }

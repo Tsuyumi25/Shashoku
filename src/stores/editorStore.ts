@@ -36,6 +36,7 @@ import { escapeText } from '@shared/page/markup'
 import type { ManifestJson, TranslationTextLayerEntry } from '@shared/page/types'
 import { allEntries, findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
 import { adoptSources, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
+import { numberPage } from '@shared/page/numbers'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
@@ -1403,6 +1404,7 @@ export const useEditorStore = defineStore('editor', () => {
         }
         before = snap()
         if (before.size === 0 || mutate() === false) return false
+        for (const p of pageIds) project.renumber(p)
         after = snap()
       },
       undo: () => {
@@ -1670,6 +1672,8 @@ export const useEditorStore = defineStore('editor', () => {
     const before = project.structureOf(at.pageId)!
     if (!change(facePage(draft, project.activeFace))) return
     adoptSources(draft, project.faceIds, generateLabelId, project.header.seedStyle)
+    numberPage(draft, project.faceIds)
+    project.raiseCounters(at.pageId, draft.counters)
     const after: PageStructure = { ledgers: draft.ledgers, layers: draft.layers }
     pushCommand({
       label: `${label} ${at.ids.length}`,

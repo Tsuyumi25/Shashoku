@@ -8,6 +8,7 @@ import type {
   GroupLayerEntry,
   LayerEntry,
   ManifestJson,
+  NumberCounters,
   OcrCandidatePersisted,
   OcrJson,
   SourceBody,
@@ -39,6 +40,7 @@ import {
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { repairPage } from '@shared/page/repair'
 import { copyFace, dropFace } from '@shared/page/faces'
+import { numberPage } from '@shared/page/numbers'
 import {
   allEntries,
   dissolveGroupAt,
@@ -117,6 +119,15 @@ export interface FaceState {
  */
 function withEveryLedger(page: ManifestJson, faces: readonly string[]): void {
   for (const face of faces) page.ledgers[face] ??= emptyLedger()
+}
+
+/**
+ * A container's counter, carried to the page it moves to, so what it numbered
+ * before the move is never numbered again after it.
+ */
+function carryCounter(from: Record<string, number>, to: Record<string, number>, id: string): void {
+  const next = from[id]
+  if (next !== undefined) to[id] = Math.max(to[id] ?? 1, next)
 }
 
 /** Whether a page on disk was written before the schema this build writes. */
@@ -298,7 +309,9 @@ export const useProjectStore = defineStore('project', () => {
       copyFace(file.page, from, id, generateId)
       markPageDirty(file.pageId)
     }
-    projectMeta.value.faces = [...faces.value, { id, name }]
+    const no = projectMeta.value.nextFace ?? Math.max(0, ...faces.value.map((f) => f.no)) + 1
+    projectMeta.value.faces = [...faces.value, { id, no, name }]
+    projectMeta.value.nextFace = no + 1
     markMetaDirty()
     return id
   }
@@ -386,6 +399,28 @@ export const useProjectStore = defineStore('project', () => {
       }
     }
     adoptSources(page, ids, generateId, projectMeta.value.seedStyle)
+    numberPage(page, ids)
+  }
+
+  /**
+   * Counters worked out on a copy of the page, taken over where they are ahead.
+   * Only ever forward: undo writes structure back, never counters.
+   */
+  function raiseCounters(pageId: string, counters: NumberCounters): void {
+    const file = pageById(pageId)
+    if (!file) return
+    const live = file.page.counters
+    live.source = Math.max(live.source, counters.source)
+    for (const key of ['units', 'blocks', 'candidates'] as const) {
+      for (const id of Object.keys(counters[key])) carryCounter(counters[key], live[key], id)
+    }
+    markPageDirty(pageId)
+  }
+
+  /** Numbers what a step left without one; see `numberPage`. */
+  function renumber(pageId: string): void {
+    const file = pageById(pageId)
+    if (file) numberPage(file.page, faceIds.value)
   }
 
   function reset() {
@@ -413,7 +448,8 @@ export const useProjectStore = defineStore('project', () => {
     const seeded = meta.faces === undefined
     if (meta.faces === undefined) {
       const id = generateId()
-      meta.faces = [{ id, name: '譯文' }]
+      meta.faces = [{ id, no: 1, name: '譯文' }]
+      meta.nextFace = 2
       meta.activeFace = id
     }
     const ids = meta.faces.map((f) => f.id)
@@ -812,11 +848,21 @@ export const useProjectStore = defineStore('project', () => {
     for (const id of blocks) {
       const path = pathOf(from.page.layers, id)
       const entry = path === null ? null : removeAtPath(from.page.layers, path)
-      if (entry !== null) to.page.layers.push(entry)
+      if (entry === null) continue
+      // Numbered by the page it left; the page it joins numbers it again. What
+      // it numbers inside itself travels with it.
+      if (entry.kind === 'text' && entry.side === 'source') delete entry.no
+      to.page.layers.push(entry)
+      carryCounter(from.page.counters.candidates, to.page.counters.candidates, id)
     }
     for (const [face, units] of moving) {
       const src = facePage(from.page, face)
       const dst = facePage(to.page, face)
+      for (const u of src.units) {
+        if (!units.has(u.id)) continue
+        delete u.no
+        carryCounter(from.page.counters.blocks, to.page.counters.blocks, u.id)
+      }
       dst.units.push(...src.units.filter((u) => units.has(u.id)))
       dst.readingOrder.push(...src.readingOrder.filter((id) => units.has(id)))
       dst.readingEdges = normalizeEdges([
@@ -1215,6 +1261,8 @@ export const useProjectStore = defineStore('project', () => {
     if (by === 'human') candidate.human = true
     else if (source) candidate.source = source
     block.body.candidates.push(candidate)
+    const file = pageById(pageId)
+    if (file) numberPage(file.page, faceIds.value)
     markPageDirty(pageId)
     return candidate.id
   }
@@ -1706,6 +1754,8 @@ export const useProjectStore = defineStore('project', () => {
     setReadingOrder,
     setPageStructure,
     settleStructure,
+    renumber,
+    raiseCounters,
     readingEdgesOf,
     addReadingEdges,
     removeReadingEdges,

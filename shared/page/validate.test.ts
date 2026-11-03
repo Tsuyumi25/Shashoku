@@ -4,6 +4,7 @@ import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { validatePage } from './validate'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
+import { emptyCounters } from './numbers'
 import { blankSourceBlock, blankTranslationBlock } from './schema'
 
 const FACE = 'fa'
@@ -50,6 +51,7 @@ function page(
     width: 1200,
     height: 1700,
     ledgers: { [FACE]: { units: said.map((s) => s.unit), readingOrder, readingEdges } },
+    counters: emptyCounters(),
     layers: [...said.flatMap((s) => s.blocks), ...extra],
   }
 }

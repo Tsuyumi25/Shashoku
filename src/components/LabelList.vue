@@ -54,6 +54,9 @@
         <PageRowThumb v-if="fileOf(group.page.pageId)" :file="fileOf(group.page.pageId)!" />
         <div class="flex min-w-0 flex-1 flex-col gap-1 self-stretch overflow-hidden">
           <div class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 text-xs text-muted-foreground tabular-nums"
+              >第 {{ group.page.position }} 頁 · {{ group.page.pageId }}</span
+            >
             <span class="min-w-0 truncate text-xs font-medium">{{ group.page.name }}</span>
             <span class="ml-auto shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
               {{ group.page.count }}
@@ -194,13 +197,19 @@
               <!--
                 ⭐ A block of a split translation is a row like any other — same
                 rule, same padding, same type. What tells it apart is one step of
-                indent and this number, so the column of them reads as the order
-                the side is set in.
+                indent and its permanent name. A sentence row wears its own
+                number the same way: the names an agent writes are the ones on
+                screen.
               -->
               <span
                 v-if="(element as Row).kind === 'block'"
                 class="shrink-0 text-sm leading-snug text-muted-foreground/60 tabular-nums"
-                >{{ (element as BlockRow).at }}</span
+                >{{ (element as BlockRow).label }}</span
+              >
+              <span
+                v-else-if="(element as Row).kind === 'label'"
+                class="shrink-0 text-sm leading-snug text-muted-foreground/60 tabular-nums"
+                >{{ (element as LabelRow).no }}</span
               >
 
               <!--

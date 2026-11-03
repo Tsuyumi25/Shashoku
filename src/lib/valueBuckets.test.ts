@@ -3,6 +3,7 @@ import type { TagDefinition } from '@shared/tags/types'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import type { ManifestJson } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
 import type { TextSide } from '@shared/page/text'
 import { bucketObjectsOf, groupByValue, type BucketObject } from './valueBuckets'
@@ -144,6 +145,7 @@ describe('which body the statistics count', () => {
         readingEdges: [],
       },
     },
+    counters: emptyCounters(),
     layers: said.flatMap((s) => s.blocks),
   }
 

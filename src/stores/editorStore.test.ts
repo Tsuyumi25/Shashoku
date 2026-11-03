@@ -39,6 +39,7 @@ import {
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
+import { emptyCounters } from '@shared/page/numbers'
 import { blankSourceBlock, blankTranslationBlock, parseManifest, serializeManifest } from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
 import { offeredReadings } from '@shared/ocr/offer'
@@ -86,6 +87,7 @@ function ledgersFor(
 /** The blocks of both sides for a run of lettering, plus the ledger over them. */
 const spread = (labels: readonly TextLayerEntry[]) => ({
   layers: labels.flatMap((l) => [l, sourceFor(l.id)]),
+  counters: emptyCounters(),
   ledgers: ledgersFor(
     labels.map((l) => unitFor(l.id)),
     labels.map((l) => l.id),
@@ -148,10 +150,14 @@ function labelsOf(project: ReturnType<typeof useProjectStore>): TranslationTextL
 const textsOf = (project: ReturnType<typeof useProjectStore>): string[] =>
   project.labelsOf(PAGE).map((unit) => projectionOf(project.viewOf(PAGE)!, unit, 'translation'))
 
+/** A block of lettering's number in the sentence that issued it. */
+const noOf = (project: ReturnType<typeof useProjectStore>, id: string, page = PAGE) =>
+  (project.blockById(page, id) as TranslationTextLayerEntry | undefined)?.no
+
 beforeEach(() => {
   setActivePinia(createPinia())
   const project = useProjectStore()
-  project.projectMeta.faces = [{ id: FACE, name: '譯文' }]
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
   project.projectMeta.activeFace = FACE
 })
 
@@ -1299,6 +1305,7 @@ describe('layer tree edits', () => {
           width: 1200,
           height: 1700,
           ledgers: ledgersFor(readingOrder.map(unitFor), readingOrder),
+          counters: emptyCounters(),
           layers: [...layers, ...readingOrder.map(sourceFor)],
         },
         badge: 'ok',
@@ -1683,6 +1690,7 @@ describe('layer tree edits', () => {
           width: 1200,
           height: 1700,
           ledgers: ledgersFor([], ['z']),
+          counters: emptyCounters(),
           layers: [label('z')],
         },
         ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
@@ -2015,6 +2023,7 @@ describe('deleteSelection', () => {
         width: 1200,
         height: 1700,
         ledgers: ledgersFor(p.order.map(unitFor), p.order),
+        counters: emptyCounters(),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
@@ -2263,6 +2272,7 @@ describe('selectLayerBy', () => {
           width: 1200,
           height: 1700,
           ledgers: ledgersFor([], order),
+          counters: emptyCounters(),
           layers,
         },
         badge: 'ok' as const,
@@ -2378,6 +2388,7 @@ describe('moveObjectsTo', () => {
         width: 1200,
         height: 1700,
         ledgers: ledgersFor(p.order.map(unitFor), p.order, p.drawn ?? []),
+        counters: emptyCounters(),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
       badge: 'ok' as const,
@@ -3051,6 +3062,24 @@ describe('drawing lines between text objects', () => {
     expect(edgesOf(project)).toEqual([])
     editor.redo()
     expect(project.labelsOf(PAGE).map((l) => l.id)).toEqual(['a', 'b'])
+  })
+
+  /**
+   * ⭐ Undo writes the ledgers and the tree back; the counters sit outside
+   * both. A number an undone sentence wore is spent for good, or a note
+   * somebody wrote against it would end up against a different sentence.
+   */
+  it('does not hand out again the number a sentence it undid was wearing', () => {
+    const { project, editor } = openOnePage([label('a', '甲')])
+    project.renumber(PAGE)
+    editor.cmdAddLabel(PAGE, { units: { [FACE]: unitFor('b') }, blocks: [label('b', '乙'), sourceFor('b')] })
+    expect(project.unitById(PAGE, 'b')!.no).toBe(2)
+
+    editor.undo()
+    editor.cmdAddLabel(PAGE, { units: { [FACE]: unitFor('c') }, blocks: [label('c', '丙'), sourceFor('c')] })
+
+    expect(project.unitById(PAGE, 'c')!.no).toBe(3)
+    expect(project.blockById(PAGE, SOURCE_OF('c'))!.no).toBe(3)
   })
 })
 
@@ -3731,6 +3760,27 @@ describe('Ctrl+L on the selection', () => {
     editor.cmdDetachSelection()
     expect(units(project)).toBe(2)
   })
+
+  /**
+   * The sentence that stays is the one the reader already knows by number, so
+   * nothing it holds is renamed; what arrives is new to it and counted on from
+   * where it had got to.
+   */
+  it('leaves the surviving sentence its numbers and counts the arrival on', () => {
+    const { project, editor } = openOnePage([label('a', '甲'), label('b', '乙')])
+    project.renumber(PAGE)
+    const page = project.pageById(PAGE)!.page
+    expect([noOf(project, 'a'), noOf(project, 'b')]).toEqual([1, 1])
+
+    editor.selectOnly('a')
+    editor.toggleSelected('b')
+    editor.cmdLinkSelection()
+
+    expect(project.viewOf(PAGE)!.units).toHaveLength(1)
+    expect(project.viewOf(PAGE)!.units[0]!.no).toBe(1)
+    expect([noOf(project, 'a'), noOf(project, 'b')]).toEqual([1, 2])
+    expect(page.counters.blocks[project.viewOf(PAGE)!.units[0]!.id]).toBe(3)
+  })
 })
 
 describe('the selection seen from the other side', () => {
@@ -3857,6 +3907,27 @@ describe('the faces a book is lettered in', () => {
     expect(project.faceIds).toEqual([FACE])
     expect(editor.canUndo).toBe(false)
     expect(textsOf(project)).toEqual(['甲'])
+  })
+
+  /**
+   * ⭐ A sentence made in every face at once reads under one number in all of
+   * them, which is what makes a number an address a person can hand over.
+   */
+  it('letters the new face under the numbers the one it was copied from wears', () => {
+    const { project, editor } = openOnePage([label('a', '甲'), label('b', '乙')])
+    project.renumber(PAGE)
+
+    editor.cmdAddFace('英文')
+    const view = project.viewOf(PAGE, project.activeFace)!
+    const numbers = () => view.units.flatMap((u) => translationBlocksOf(view, u)).map((b) => b.no)
+
+    expect(view.units.map((u) => u.no)).toEqual([1, 2])
+    expect(numbers()).toEqual([1, 1])
+
+    project.renumber(PAGE)
+
+    expect(view.units.map((u) => u.no)).toEqual([1, 2])
+    expect(numbers()).toEqual([1, 1])
   })
 
   /**

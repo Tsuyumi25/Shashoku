@@ -451,9 +451,20 @@ async function makePage(
  */
 export async function createPage(rootPath: string, sourceName: string): Promise<string> {
   const pagesRoot = join(rootPath, SHASHOKU_DIR, DIR_PAGES);
-  const pageId = pageDirName(sourceName, new Date(), new Set(await listPageDirs(pagesRoot)));
+  const pageId = pageDirName([...(await listPageDirs(pagesRoot)), ...(await listedPages(rootPath))]);
   await makePage(rootPath, pagesRoot, sourceName, pageId);
   return pageId;
+}
+
+/** The page names a book's list holds on disk, or none where it cannot be read. */
+async function listedPages(rootPath: string): Promise<string[]> {
+  const raw = await readProjectMeta(rootPath).catch(() => null);
+  if (raw === null) return [];
+  try {
+    return parseProjectJson(raw).pages;
+  } catch {
+    return [];
+  }
 }
 
 export async function createProject(rootPath: string): Promise<OpenProjectResult> {

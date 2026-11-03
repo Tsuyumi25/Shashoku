@@ -27,6 +27,8 @@ export interface McpReply {
 
 export interface TranslationCandidateView {
   id: string;
+  /** Its name in the drawer — 1 is `a`, which is what an address spells. */
+  letter: string;
   text: string;
   /** A person wrote or corrected this one; it may never be edited, only appended after. */
   human: boolean;
@@ -36,43 +38,49 @@ export interface TranslationCandidateView {
   source?: string;
 }
 
-/**
- * One block of lettering a sentence is set in, named only where there are
- * several: a sentence set in one block is addressed by the sentence's own id,
- * and listing its single block again would be two names for one thing.
- */
+/** One block of lettering a sentence is set in. */
 export interface BlockTexts {
   id: string;
+  no: number;
+  /**
+   * Every address that reaches this block, the first being the one to show.
+   * A sentence set in one block has two: `p7/14` and `p7/14.1`.
+   */
+  refs: string[];
   /** What this block reads as today — its slot resolved, its own words otherwise. */
   text: string;
   candidates: TranslationCandidateView[];
 }
 
-export interface SentenceTexts {
-  id: string;
-  /** Resolved source text, or null where no reading names what the artwork says. */
-  source: string | null;
-  /** What the whole sentence reads as today, its blocks joined as they are read. */
-  translation: string;
-  /**
-   * The blocks of lettering, only where the sentence is set in more than one.
-   * Writes then address a block rather than the sentence, since no candidate
-   * can speak for a stretch of lettering no block shows.
-   */
-  blocks?: BlockTexts[];
-  /** The one block's drawer, where the sentence is set in one block. */
-  candidates: TranslationCandidateView[];
+export interface SourceBlockTexts {
+  no: number;
+  text: string;
 }
 
-/** One face's reading of a page: its name as the person set it, and its sentences. */
+export interface SentenceTexts {
+  id: string;
+  no: number;
+  /** The artwork's words, block by block, each under the number it wears. */
+  sources: SourceBlockTexts[];
+  /** What the whole sentence reads as today, its blocks joined as they are read. */
+  translation: string;
+  blocks: BlockTexts[];
+}
+
+/** One face's reading of a page: its number, its name as the person set it, its sentences. */
 export interface FaceTexts {
   faceId: string;
+  faceNo: number;
   name: string;
   sentences: SentenceTexts[];
 }
 
 export interface PageTexts {
   pageId: string;
+  /** Where the page reads among the chapter's pages, 1-based. */
+  no: number;
+  /** The page's name as the manifest holds it. */
+  name: string;
   badge: PageBadge;
   faces: FaceTexts[];
 }
@@ -80,16 +88,22 @@ export interface PageTexts {
 export interface GetTextsParams {
   /** Only these pages, in the project's order. Every page when absent. */
   pageIds?: string[];
+  /** `f2`. Every face when absent. */
+  face?: string;
 }
 
 /**
- * What a write names: a block of lettering, or a sentence standing for its one
- * block. A sentence set in several is refused rather than resolved, since
- * nothing says which of its blocks the words were meant for.
+ * What a write names, and what that name stood for the last time this session
+ * was shown it. The session's memory is the only thing that catches a page
+ * regrouped since: nothing in the project records that a number changed hands.
  */
-export interface ProposeItem {
-  pageId: string;
-  objectId: string;
+export interface WriteRef {
+  ref: string;
+  /** The object id the ref stood for when the session saw it, by face id. */
+  seen?: Record<string, string>;
+}
+
+export interface ProposeItem extends WriteRef {
   /** The translation of that one block, one line per array entry. */
   lines: string[];
   /** Point the block at the new candidate whatever it reads as now. */
@@ -97,39 +111,39 @@ export interface ProposeItem {
 }
 
 export interface ProposeParams {
+  /** `f2`. The active face when absent; every ref in the call resolves in it. */
+  face?: string;
   items: ProposeItem[];
   /** The proposing client, from the session's clientInfo — not model-supplied. */
   source?: string;
 }
 
 export type ProposeOutcome =
-  | { pageId: string; objectId: string; ok: true; translationId: string; filledSlot: boolean }
-  | { pageId: string; objectId: string; ok: false; reason: string };
-
-export interface ChooseItem {
-  pageId: string;
-  objectId: string;
-  translationId: string;
-}
+  | { ref: string; ok: true; candidateRef: string; filledSlot: boolean }
+  | { ref: string; ok: false; reason: string };
 
 export interface ChooseParams {
-  items: ChooseItem[];
+  face?: string;
+  items: WriteRef[];
 }
 
-export type ChooseOutcome = (ChooseItem & { ok: true }) | (ChooseItem & { ok: false; reason: string });
+export type ChooseOutcome =
+  | { ref: string; ok: true }
+  | { ref: string; ok: false; reason: string };
 
 export interface WithdrawParams {
-  items: ChooseItem[];
+  face?: string;
+  items: WriteRef[];
   /** The withdrawing client's clientInfo — must match each candidate's stamp. */
   source?: string;
 }
 
 export type WithdrawOutcome =
-  | (ChooseItem & { ok: true; clearedSlot: boolean })
-  | (ChooseItem & { ok: false; reason: string });
+  | { ref: string; ok: true; clearedSlot: boolean }
+  | { ref: string; ok: false; reason: string };
 
 /**
- * Every write answers with the touched objects' full current state, page by
+ * Every write answers with the touched sentences' full current state, page by
  * page, so a caller audits what actually happened in the same breath rather
  * than by a second read.
  */

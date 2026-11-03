@@ -21,6 +21,8 @@ export type Glossary = Record<string, string>
 /** One language the book is lettered in. The id is what pages store; the name is only shown. */
 export interface TranslationFace {
   id: string
+  /** Its short name, `f2` in an agent's call, never given to another face. */
+  no: number
   name: string
 }
 
@@ -86,6 +88,8 @@ export interface ProjectJson {
   faces?: TranslationFace[]
   /** Which face the interface works on — the one Shift+S switches to from the source. */
   activeFace?: string
+  /** The number the next face added is given. */
+  nextFace?: number
   /**
    * Layer names the 修圖 opacity buttons write to. Absent until someone changes
    * it, and read as the name a new page gives its working copy.

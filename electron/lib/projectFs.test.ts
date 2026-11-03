@@ -133,12 +133,14 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     expect(opened.pages).toEqual([]);
   });
 
-  it("is named after the image and the moment it was made", async () => {
+  it("is named p and the next number in the book, whatever the image is called", async () => {
     await writeFile(join(root, "001.png"), sourcePng(6, 4));
+    await writeFile(join(root, "第02話.png"), sourcePng(6, 4));
     await createProject(root);
 
-    expect(await createPage(root, "001.png")).toMatch(/^001-\d{6}-\d{4}$/);
-    expect((await openProject(root)).pages.map((p) => p.badge)).toEqual(["ok"]);
+    expect(await createPage(root, "001.png")).toBe("p1");
+    expect(await createPage(root, "第02話.png")).toBe("p2");
+    expect((await openProject(root)).pages.map((p) => p.badge)).toEqual(["ok", "ok"]);
   });
 
   it("leaves the source behind entirely", async () => {
@@ -300,22 +302,21 @@ describe.skipIf(!haveEngine)("the page list and the directories", () => {
     const opened = await openProject(root);
 
     expect(opened.pages).toHaveLength(4);
-    expect(opened.pages[3].pageId).toMatch(/^004-/);
+    expect(opened.pages[3].pageId).toBe("p4");
   });
 
   /**
-   * Two pages from the same source name, made in the same minute, would want
-   * the same directory. The second is counted past rather than overwriting the
-   * first — which is the whole of what makes creating a page repeatable.
+   * A page whose directory went missing still answers to its name in the list,
+   * and handing that name out again would make the next page collide with it
+   * the moment the directory came back.
    */
-  it("counts past a name a page already answers to", async () => {
-    await writeFile(join(root, "001.png"), sourcePng(4, 4));
-    await createProject(root);
-    const first = await createPage(root, "001.png");
-    const second = await createPage(root, "001.png");
+  it("does not reissue the number of a listed page whose directory is gone", async () => {
+    const made = await threePages();
+    await writeList(made);
+    await rm(join(pagesRoot(), made[2]), { recursive: true });
+    await writeFile(join(root, "004.png"), sourcePng(4, 4));
 
-    expect(second).toBe(`${first}-2`);
-    expect((await openProject(root)).pages).toHaveLength(2);
+    expect(await createPage(root, "004.png")).toBe("p4");
   });
 
   it("has no pages in a folder of no images", async () => {
