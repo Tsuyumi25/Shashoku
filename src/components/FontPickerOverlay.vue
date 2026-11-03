@@ -240,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { refDebounced, useElementSize } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Maximize2, Star } from '@lucide/vue'
@@ -256,6 +256,7 @@ import { engineStrokeFor } from '@shared/effects/stroke'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 import FontSampleCanvas from '@/components/FontSampleCanvas.vue'
 import FontSampleOptions from '@/components/FontSampleOptions.vue'
 import FontSampleZoom from '@/components/FontSampleZoom.vue'
@@ -272,13 +273,39 @@ const picker = useFontPicker()
 const preferences = usePreferencesStore()
 const editor = useEditorStore()
 const project = useProjectStore()
+const ui = useUiStore()
 
-/** The text objects selected now, which is what the picker reads from and writes to. */
-const targets = computed(() =>
-  editor
-    .selectedNodes()
-    .filter((t): t is AppearanceTarget<TextLayerEntry> => t.entry.kind === 'text'),
-)
+/** Whether anyone can see the picker. It stays mounted either way, so its catalogue and scroll are kept. */
+const seen = computed(() => picker.isOpen.value && ui.view === 'editor')
+
+/**
+ * The text objects selected, as the picker shows them: read while the picker
+ * can be seen, and only once the frame showing the new selection is painted.
+ * The picker follows the selection and nothing waits on it — a hundred objects
+ * picked on the wall would otherwise wait for every sample in the grid to be
+ * asked for again. Writes read the selection afresh, so this lagging never
+ * sends a change to what is no longer selected.
+ */
+const targets = shallowRef<AppearanceTarget<TextLayerEntry>[]>(seen.value ? editor.selectedTextObjects() : [])
+let pending = false
+let unmounted = false
+// Every undo, redo and command too: one can put back objects the targets no longer hold.
+const followed = [() => editor.selectedIds, () => editor.textSide, () => project.activeFace, () => editor.historyStep, seen]
+watch(followed, () => {
+  if (!seen.value || pending) return
+  pending = true
+  // A frame callback runs before that frame paints; a task queued from it runs after.
+  requestAnimationFrame(() =>
+    setTimeout(() => {
+      pending = false
+      if (!unmounted && seen.value) targets.value = editor.selectedTextObjects()
+    }),
+  )
+})
+onBeforeUnmount(() => {
+  unmounted = true
+})
+
 const lead = computed(() => targets.value[0]?.entry)
 function agreed<K extends keyof TextStyle>(field: K): boolean {
   return sharedValue(targets.value.map((t) => t.entry.body.style), field).kind !== 'many'
@@ -432,7 +459,8 @@ watch(objectWeight, (w) => (weightPx.value = w))
 function setWeight(px: number) {
   if (px === weightPx.value) return
   weightPx.value = px
-  if (targets.value.length > 0) editor.cmdApplyStyle(targets.value, { weightPx: px })
+  const now = editor.selectedTextObjects()
+  if (now.length > 0) editor.cmdApplyStyle(now, { weightPx: px })
 }
 
 const currentFamily = computed(() =>
@@ -481,7 +509,7 @@ function choose(face: FontEntry) {
     fontFace: face.postscriptName,
     fontStyleName: face.style,
   }
-  editor.cmdApplyStyle(targets.value, patch)
+  editor.cmdApplyStyle(editor.selectedTextObjects(), patch)
 }
 
 const enumerating = ref(false)
