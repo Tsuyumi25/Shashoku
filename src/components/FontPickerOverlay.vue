@@ -141,8 +141,6 @@
                 :fit-width="box.w"
                 :fit-height="box.h"
                 :overflows="fit.floored"
-                :offset="sampleOffset"
-                @scroll="sampleOffset = $event"
                 :fill-color="fillColor"
                 :stroke="sampleStroke"
                 :vertical="vertical"
@@ -381,13 +379,6 @@ const box = computed(() => {
 
 const fit = computed(() => sampleFit(sampleText.value, box.value, vertical.value))
 
-/**
- * How far every clipped cell is scrolled, one value for the grid so a
- * selection dragged along one sample shows the same place in all of them.
- * Back to the start whenever what is being compared changes shape.
- */
-const sampleOffset = ref({ x: 0, y: 0 })
-watch([box, objectText], () => (sampleOffset.value = { x: 0, y: 0 }))
 const samplePx = computed(() => fit.value.sizePx)
 
 const minCellWidth = computed(() => box.value.w + CELL_SIDE_PADDING_PX)

@@ -2,13 +2,9 @@
   <div
     ref="holder"
     class="sample-holder"
-    :class="overflows && 'sample-clipped'"
+    :class="[overflows && 'sample-clipped', overflows && vertical && 'sample-columns']"
   >
-    <!--
-      The plain wheel belongs to the list the cell sits in; Shift and the wheel
-      scroll the sample, as does a selection dragged past its edge.
-    -->
-    <div ref="scroller" class="sample-scroller" @wheel="onWheel">
+    <div class="sample-scroller">
     <div
       v-if="current"
       ref="boxEl"
@@ -49,28 +45,19 @@
       }"
     />
     </div>
-    <!--
-      Bars for whichever way the sample runs out, taken by the thumb or a press
-      on the track.
-    -->
-    <div v-if="overflows && reach.x > 0" class="sample-bar sample-bar-x" @pointerdown="onBarDown('x', $event)">
-      <div class="sample-thumb" :style="thumbStyle('x')" />
-    </div>
-    <div v-if="overflows && reach.y > 0" class="sample-bar sample-bar-y" @pointerdown="onBarDown('y', $event)">
-      <div class="sample-thumb" :style="thumbStyle('y')" />
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import { useElementSize, useElementVisibility, useEventListener } from '@vueuse/core'
+import { useElementVisibility, useEventListener } from '@vueuse/core'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import type { FontEntry } from '@shared/fonts/types'
 import { cachedSample, sampleFor, type Sample, type SampleRequest } from '@/lib/fontSampleCache'
 import { enqueueSample } from '@/lib/sampleQueue'
 import { textProjection } from '@/lib/textProjection'
 import { spanOf, type TextSelection } from '@/lib/textSelection'
+import { clipSample, nearestShownIndex, shownIndex, wholeIndex } from '@/lib/sampleFit'
 import type { CaretOnScreen } from '@/lib/pinnedInput'
 
 const props = defineProps<{
@@ -91,15 +78,9 @@ const props = defineProps<{
   fitHeight: number
   /**
    * The size was held up at a floor rather than fitted, so the sample is shown
-   * at its size and what will not fit runs out of the box instead of shrinking.
+   * at its size and only as much of it as the box holds is drawn.
    */
   overflows?: boolean
-  /**
-   * How far a clipped sample is scrolled from where it starts — the left edge
-   * of rows, the right edge of columns — in CSS pixels. Shared by every cell,
-   * so dragging a selection along one moves them all to the same place.
-   */
-  offset?: { x: number; y: number }
   /** Outline the characters this family has no glyph for. */
   mark?: boolean
   /**
@@ -124,8 +105,6 @@ const emit = defineEmits<{
   selectText: [anchor: number, focus: number]
   /** The word under the pointer, for a double click to take. */
   selectWord: [at: number]
-  /** A selection dragged past the edge asks for the shared offset to move here. */
-  scroll: [offset: { x: number; y: number }]
   /** Where the caret stands on screen, or nothing while this is not the cell. */
   caretAt: [at: CaretOnScreen | null]
 }>()
@@ -150,9 +129,27 @@ const failure = ref('')
 // panel, which is the entire point of looking at a sample.
 const dpr = window.devicePixelRatio || 1
 
+/** What the box shows of the text: all of it while the sample fits. */
+const clip = computed(() =>
+  props.overflows
+    ? clipSample(props.text, { w: props.fitWidth, h: props.fitHeight }, props.vertical === true, props.sizePx)
+    : null,
+)
+const shownText = computed(() => clip.value?.text ?? props.text)
+
+function toShown(index: number): number | null {
+  return clip.value ? shownIndex(clip.value, index) : index
+}
+function toNearestShown(index: number): number {
+  return clip.value ? nearestShownIndex(clip.value, index) : index
+}
+function toWhole(index: number): number {
+  return clip.value ? wholeIndex(clip.value, index) : index
+}
+
 const request = computed<SampleRequest>(() => ({
   entry: props.entry,
-  text: props.text,
+  text: shownText.value,
   sizePx: Math.round(props.sizePx * dpr),
   fillColor: props.fillColor,
   // Device pixels, as the size is.
@@ -191,7 +188,7 @@ const vertical = computed(() => props.vertical === true)
 const projection = computed(() => {
   const sample = current.value
   return textProjection({
-    text: props.text,
+    text: shownText.value,
     clusters: sample?.clusters ?? [],
     vertical: vertical.value,
     padding: sample?.padding ?? 0,
@@ -207,7 +204,9 @@ function shown(value: number): number {
 const caretBox = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return null
-  const r = projection.value.caret(at.focus)
+  const focus = toShown(at.focus)
+  if (focus === null) return null
+  const r = projection.value.caret(focus)
   return vertical.value
     ? {
         left: `${shown(r.x)}px`,
@@ -232,7 +231,7 @@ const selectionBoxes = computed(() => {
   const at = props.selection
   if (!props.editing || !at) return []
   const { from, to } = spanOf(at)
-  return projection.value.selection(from, to).map((box) => ({
+  return projection.value.selection(toNearestShown(from), toNearestShown(to)).map((box) => ({
     left: `${shown(box.x)}px`,
     top: `${shown(box.y)}px`,
     width: `${shown(box.width)}px`,
@@ -250,7 +249,7 @@ const selectionBoxes = computed(() => {
 function indexAtPointer(e: { clientX: number; clientY: number }): number | null {
   const rect = boxEl.value?.getBoundingClientRect()
   if (!rect) return null
-  return projection.value.indexAt((e.clientX - rect.left) / scale.value, (e.clientY - rect.top) / scale.value)
+  return toWhole(projection.value.indexAt((e.clientX - rect.left) / scale.value, (e.clientY - rect.top) / scale.value))
 }
 
 /**
@@ -283,14 +282,11 @@ function onPointerMove(e: PointerEvent) {
   if (anchor === null) return
   const at = indexAtPointer(e)
   if (at !== null) emit('selectText', anchor, at)
-  dragAt = { clientX: e.clientX, clientY: e.clientY }
-  edgeFrame ??= requestAnimationFrame(edgeScroll)
 }
 
 function onPointerUp(e: PointerEvent) {
   if (anchor === null) return
   anchor = null
-  dragAt = null
   const el = e.currentTarget as HTMLElement
   if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
 }
@@ -316,7 +312,7 @@ function publishCaret(): void {
   if (!props.editing || !at) return
   const rect = boxEl.value?.getBoundingClientRect()
   if (!rect) return
-  const r = projection.value.caret(at.focus)
+  const r = projection.value.caret(toNearestShown(at.focus))
   emit('caretAt', {
     x: rect.left + shown(r.x),
     y: rect.top + shown(r.y),
@@ -362,200 +358,6 @@ function rasterize() {
  * the one being typed into, skip the queue.
  */
 const holder = useTemplateRef<HTMLElement>('holder')
-const scroller = useTemplateRef<HTMLElement>('scroller')
-
-/** The sample as shown, and how far past the box it runs on each axis. */
-const content = computed(() => {
-  const sample = current.value
-  return sample ? { w: sample.image.width * scale.value, h: sample.image.height * scale.value } : { w: 0, h: 0 }
-})
-/**
- * The window a clipped sample is seen through: all the room the cell gives
- * it, which is wider or taller than the box its size was fitted to whenever
- * the grid's columns come out wider than one box.
- */
-const { width: viewW, height: viewH } = useElementSize(scroller)
-const reach = computed(() => ({
-  x: Math.max(0, content.value.w - viewW.value),
-  y: Math.max(0, content.value.h - viewH.value),
-}))
-
-/** Asks for an offset, kept inside how far this sample can go; nothing when that is where it is. */
-function scrollTo(x: number, y: number) {
-  const next = {
-    x: Math.max(0, Math.min(reach.value.x, x)),
-    y: Math.max(0, Math.min(reach.value.y, y)),
-  }
-  if (next.x === (props.offset?.x ?? 0) && next.y === (props.offset?.y ?? 0)) return
-  emit('scroll', next)
-}
-
-/**
- * Shift and the wheel move a clipped sample along the way it runs out — across
- * for columns, down for rows — with down always reading on. Shift is free for
- * this: the lists these cells sit in only ever scroll one way, so there is no
- * second axis for it to stand for.
- */
-function onWheel(e: WheelEvent) {
-  if (!e.shiftKey || !props.overflows) return
-  // Chromium hands a shifted wheel over as a horizontal delta on some platforms.
-  const delta = e.deltaY || e.deltaX
-  if (delta === 0) return
-  // Along the way the sample reads on, or the other way when that is the only
-  // way it runs out — a single long row, a single tall column.
-  const across = props.vertical ? reach.value.x > 0 || reach.value.y === 0 : reach.value.y === 0
-  e.preventDefault()
-  e.stopPropagation()
-  const x = props.offset?.x ?? 0
-  const y = props.offset?.y ?? 0
-  if (across) scrollTo(x + delta, y)
-  else scrollTo(x, y + delta)
-}
-
-/** The share of its track a thumb covers, never so little it cannot be taken hold of. */
-const MIN_THUMB_SHARE = 0.08
-
-function thumbShare(axis: 'x' | 'y'): number {
-  const view = axis === 'x' ? viewW.value : viewH.value
-  const whole = axis === 'x' ? content.value.w : content.value.h
-  return Math.max(MIN_THUMB_SHARE, view / whole)
-}
-
-/** Where along its track a thumb sits, as a share: columns start at the right. */
-function thumbStyle(axis: 'x' | 'y') {
-  const size = thumbShare(axis)
-  const at = reach.value[axis] > 0 ? (props.offset?.[axis] ?? 0) / reach.value[axis] : 0
-  const from = (axis === 'x' && props.vertical ? 1 - at : at) * (1 - size)
-  return axis === 'x'
-    ? { left: `${from * 100}%`, width: `${size * 100}%` }
-    : { top: `${from * 100}%`, height: `${size * 100}%` }
-}
-
-function scrollAlong(axis: 'x' | 'y', to: number) {
-  if (axis === 'x') scrollTo(to, props.offset?.y ?? 0)
-  else scrollTo(props.offset?.x ?? 0, to)
-}
-
-let barDrag: { axis: 'x' | 'y'; pointerId: number; from: number; offset: number; perPx: number } | null = null
-
-/**
- * A press on the thumb drags it; a press elsewhere on the track jumps there
- * first and then drags, as a native bar does.
- */
-function onBarDown(axis: 'x' | 'y', e: PointerEvent) {
-  if (e.button !== 0) return
-  e.preventDefault()
-  e.stopPropagation()
-  const track = e.currentTarget as HTMLElement
-  const rect = track.getBoundingClientRect()
-  const length = axis === 'x' ? rect.width : rect.height
-  const sign = axis === 'x' && props.vertical ? -1 : 1
-  // The thumb travels the track less its own length, and that travel is the whole reach.
-  const perPx = (reach.value[axis] / (length * (1 - thumbShare(axis)))) * sign
-  const at = axis === 'x' ? e.clientX : e.clientY
-  let offset = props.offset?.[axis] ?? 0
-  if (!(e.target as HTMLElement).classList.contains('sample-thumb')) {
-    const share = (at - (axis === 'x' ? rect.left : rect.top)) / length
-    const toward = axis === 'x' && props.vertical ? 1 - share : share
-    offset = toward * reach.value[axis]
-    scrollAlong(axis, offset)
-  }
-  track.setPointerCapture(e.pointerId)
-  barDrag = { axis, pointerId: e.pointerId, from: at, offset, perPx }
-  track.onpointermove = (m) => {
-    if (!barDrag || m.pointerId !== barDrag.pointerId) return
-    const moved = ((barDrag.axis === 'x' ? m.clientX : m.clientY) - barDrag.from) * barDrag.perPx
-    const next = barDrag.offset + moved
-    scrollAlong(barDrag.axis, next)
-  }
-  track.onpointerup = track.onpointercancel = () => {
-    barDrag = null
-    track.onpointermove = null
-    track.onpointerup = null
-    track.onpointercancel = null
-  }
-}
-
-/** Room kept between a caret brought into view and the box's edge. */
-const CARET_MARGIN_PX = 8
-
-/**
- * Keep the caret in view as the keyboard moves it, the way a text field
- * scrolls to follow its caret — the shared offset, so every cell follows.
- */
-watch(
-  [() => props.selection?.focus, () => props.caretKey],
-  () => {
-    const at = props.selection
-    if (!props.editing || !props.overflows || !at || anchor !== null) return
-    const r = projection.value.caret(at.focus)
-    const x0 = shown(r.x)
-    const x1 = x0 + Math.max(shown(r.width), CARET_PX)
-    const y0 = shown(r.y)
-    const y1 = y0 + Math.max(shown(r.height), CARET_PX)
-    const x = props.offset?.x ?? 0
-    const y = props.offset?.y ?? 0
-    let left = props.vertical ? reach.value.x - x : x
-    let top = y
-    if (x0 < left) left = x0 - CARET_MARGIN_PX
-    else if (x1 > left + viewW.value) left = x1 - viewW.value + CARET_MARGIN_PX
-    if (y0 < top) top = y0 - CARET_MARGIN_PX
-    else if (y1 > top + viewH.value) top = y1 - viewH.value + CARET_MARGIN_PX
-    const nextX = props.vertical ? reach.value.x - left : left
-    if (Math.abs(nextX - x) > 0.5 || Math.abs(top - y) > 0.5) scrollTo(nextX, top)
-  },
-  { flush: 'post' },
-)
-
-function applyOffset() {
-  const el = scroller.value
-  if (!el) return
-  const x = props.offset?.x ?? 0
-  el.scrollLeft = props.vertical ? el.scrollWidth - el.clientWidth - x : x
-  el.scrollTop = props.offset?.y ?? 0
-}
-watch([current, () => props.offset, () => props.overflows, () => props.vertical], applyOffset, {
-  flush: 'post',
-})
-
-/** Where the pointer was last seen while a selection is being dragged. */
-let dragAt: { clientX: number; clientY: number } | null = null
-let edgeFrame: number | null = null
-
-/** Pixels a frame moves per pixel the pointer is past the edge, and the most it moves. */
-const EDGE_GAIN = 0.25
-const EDGE_MAX_STEP = 24
-
-function overshoot(at: number, lo: number, hi: number): number {
-  const past = at < lo ? at - lo : at > hi ? at - hi : 0
-  return Math.max(-EDGE_MAX_STEP, Math.min(EDGE_MAX_STEP, past * EDGE_GAIN))
-}
-
-/**
- * While a selection is held past the box's edge, scroll toward the pointer a
- * little every frame and extend the selection over what comes into view — the
- * way a browser's text field does, without the pointer having to keep moving.
- */
-function edgeScroll() {
-  edgeFrame = null
-  const el = scroller.value
-  if (anchor === null || !dragAt || !el || !props.overflows) return
-  const box = el.getBoundingClientRect()
-  const dx = overshoot(dragAt.clientX, box.left, box.right)
-  const dy = overshoot(dragAt.clientY, box.top, box.bottom)
-  if (dx !== 0 || dy !== 0) {
-    const maxX = el.scrollWidth - el.clientWidth
-    const maxY = el.scrollHeight - el.clientHeight
-    const left = Math.max(0, Math.min(maxX, el.scrollLeft + dx))
-    const top = Math.max(0, Math.min(maxY, el.scrollTop + dy))
-    el.scrollLeft = left
-    el.scrollTop = top
-    emit('scroll', { x: props.vertical ? maxX - left : left, y: top })
-    const at = indexAtPointer(dragAt)
-    if (at !== null) emit('selectText', anchor, at)
-  }
-  edgeFrame = requestAnimationFrame(edgeScroll)
-}
 const onScreen = useElementVisibility(holder)
 let unqueue: (() => void) | null = null
 watch(
@@ -581,7 +383,6 @@ watch(
 )
 onBeforeUnmount(() => {
   unqueue?.()
-  if (edgeFrame !== null) cancelAnimationFrame(edgeFrame)
 })
 
 function paint() {
@@ -635,40 +436,9 @@ watch([current, () => props.mark], paint, { flush: 'post' })
 .sample-scroller {
   display: flex;
 }
-/* Thin and quiet until hovered, like the platform's overlay bars. */
-.sample-bar {
-  position: absolute;
-  z-index: 2;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
-  cursor: default;
-}
-.sample-bar-x {
-  right: 2px;
-  bottom: 1px;
-  left: 2px;
-  height: 5px;
-}
-.sample-bar-y {
-  top: 2px;
-  right: 1px;
-  bottom: 2px;
-  width: 5px;
-}
-.sample-bar:hover {
-  background: color-mix(in srgb, var(--muted-foreground) 22%, transparent);
-}
-.sample-thumb {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
-}
-.sample-bar-x .sample-thumb {
-  right: auto;
-}
-.sample-bar-y .sample-thumb {
-  bottom: auto;
+/* Columns start at the right, so whatever the estimate left over is cut from the far side. */
+.sample-columns .sample-scroller {
+  justify-content: flex-end;
 }
 .sample-box {
   position: relative;

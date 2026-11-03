@@ -55,8 +55,6 @@
               :fit-width="sampleWidth"
               :fit-height="boxPx"
               :overflows="fit.floored"
-              :offset="sampleOffset"
-              @scroll="sampleOffset = $event"
               :fill-color="isDark ? DARK_INK : LIGHT_INK"
               :mark="markMissing"
               :editing="aimedAt === shown[vrow.index]!.family"
@@ -216,9 +214,6 @@ const MIN_ROW_PX = 84
 const scrollEl = ref<HTMLElement | null>(null)
 const { width: listWidth } = useElementSize(scrollEl)
 const sampleWidth = computed(() => Math.max(120, listWidth.value - NAME_COLUMN_PX - ROW_GAP_PX - 2 * ROW_SIDE_PX))
-/** How far every clipped row is scrolled; one value, so all rows move together. */
-const sampleOffset = ref({ x: 0, y: 0 })
-watch([boxPx, sampleWidth], () => (sampleOffset.value = { x: 0, y: 0 }))
 const fit = computed(() => sampleFit(sampleText.value, { w: sampleWidth.value, h: boxPx.value }, false))
 const rowHeight = computed(() => Math.max(MIN_ROW_PX, boxPx.value + ROW_PADDING_PX))
 

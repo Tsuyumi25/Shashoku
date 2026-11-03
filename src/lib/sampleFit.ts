@@ -1,5 +1,7 @@
 /** Matches the column advance the engine uses for vertical runs. */
 const VERTICAL_COLUMN_EM = 1.2
+/** What one character takes down a vertical column, with the room the engine leaves between them. */
+const VERTICAL_ADVANCE_EM = 1.05
 /**
  * Widest a character that is not full-width comes out across this font library.
  * Only horizontal needs guessing: a vertical column advances by a constant the
@@ -19,14 +21,16 @@ const BOX_MARGIN_PX = 8
  */
 const FLOOR_SHARE = 1 / 5
 
+function charEm(ch: string): number {
+  // Everything from Hangul Jamo upward is either full-width or ambiguous
+  // punctuation that a CJK face draws full-width; guessing wide only costs
+  // space, guessing narrow costs the end of the line.
+  return (ch.codePointAt(0) ?? 0) >= 0x1100 ? 1 : NARROW_ADVANCE_EM
+}
+
 function advanceEm(line: string): number {
   let em = 0
-  for (const ch of line) {
-    // Everything from Hangul Jamo upward is either full-width or ambiguous
-    // punctuation that a CJK face draws full-width; guessing wide only costs
-    // space, guessing narrow costs the end of the line.
-    em += (ch.codePointAt(0) ?? 0) >= 0x1100 ? 1 : NARROW_ADVANCE_EM
-  }
+  for (const ch of line) em += charEm(ch)
   return em
 }
 
@@ -46,7 +50,7 @@ export function fittedSize(text: string, box: { w: number; h: number }, vertical
   const fit = vertical
     ? Math.min(
         (box.w - BOX_MARGIN_PX) / (VERTICAL_COLUMN_EM * lines.length),
-        (box.h - BOX_MARGIN_PX) / (lines.reduce((most, line) => Math.max(most, [...line].length), 1) * 1.05),
+        (box.h - BOX_MARGIN_PX) / (lines.reduce((most, line) => Math.max(most, [...line].length), 1) * VERTICAL_ADVANCE_EM),
       )
     : Math.min(
         (box.w - BOX_MARGIN_PX) / lines.reduce((most, line) => Math.max(most, advanceEm(line)), 1),
@@ -60,4 +64,77 @@ export function sampleFit(text: string, box: { w: number; h: number }, vertical:
   const floor = Math.floor((vertical ? box.w : box.h) * FLOOR_SHARE)
   const sizePx = fittedSize(text, box, vertical)
   return sizePx < floor ? { sizePx: floor, floored: true } : { sizePx, floored: false }
+}
+
+/** One line of a sample kept in its clipped form: where it starts in the whole text, where in the clipped one, and how much of it is kept. */
+export interface KeptLine {
+  from: number
+  at: number
+  length: number
+}
+
+export interface ClippedSample {
+  text: string
+  lines: KeptLine[]
+}
+
+/**
+ * As much of the text as a box shows at this size: the lines that fit, each cut
+ * where it would run out. The engine draws every character it is handed, and a
+ * long sample set at the floor is a bitmap many times the cell for every face
+ * on screen, nearly all of it never seen.
+ *
+ * Estimated the way `fittedSize` is, guessing wide, so what is kept fits and
+ * the rest of the box may stand a little empty.
+ */
+export function clipSample(text: string, box: { w: number; h: number }, vertical: boolean, sizePx: number): ClippedSample {
+  const runs = Math.max(
+    1,
+    Math.floor(
+      vertical
+        ? (box.w - BOX_MARGIN_PX) / (VERTICAL_COLUMN_EM * sizePx)
+        : (box.h - BOX_MARGIN_PX) / (LINE_HEIGHT_RATIO * sizePx),
+    ),
+  )
+  const room = (vertical ? box.h : box.w) - BOX_MARGIN_PX
+  const lines: KeptLine[] = []
+  let from = 0
+  let at = 0
+  for (const line of text.split('\n')) {
+    if (lines.length === runs) break
+    let length = 0
+    let em = 0
+    for (const ch of line) {
+      em += vertical ? VERTICAL_ADVANCE_EM : charEm(ch)
+      if (em * sizePx > room && length > 0) break
+      length += ch.length
+    }
+    lines.push({ from, at, length })
+    from += line.length + 1
+    at += length + 1
+  }
+  return { text: lines.map((l) => text.slice(l.from, l.from + l.length)).join('\n'), lines }
+}
+
+/** Where an index into the whole text stands in the clipped one, or null when it was cut away. */
+export function shownIndex(clip: ClippedSample, index: number): number | null {
+  for (const l of clip.lines) {
+    if (index >= l.from && index <= l.from + l.length) return l.at + index - l.from
+  }
+  return null
+}
+
+/** As `shownIndex`, but an index cut away stands at the end of the kept text before it. */
+export function nearestShownIndex(clip: ClippedSample, index: number): number {
+  for (const l of clip.lines) {
+    if (index <= l.from + l.length) return index >= l.from ? l.at + index - l.from : l.at - 1
+  }
+  return clip.text.length
+}
+
+/** Where an index into the clipped text stands in the whole one. */
+export function wholeIndex(clip: ClippedSample, index: number): number {
+  let line = clip.lines[0]
+  for (const l of clip.lines) if (l.at <= index) line = l
+  return line === undefined ? index : line.from + Math.min(index - line.at, line.length)
 }
