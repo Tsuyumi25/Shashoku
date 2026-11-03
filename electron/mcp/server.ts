@@ -107,17 +107,24 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "section per translation face (譯文, English, …) named as the person named it. A " +
         "section's header reads `第 3 頁 · p7 · 001.jpg · f1 譯文 · 19 句`: where the page " +
         "reads in the chapter, its id, its name, the face, and how many sentences it holds. " +
-        "Under it each sentence is listed in reading order under its number — `14  原文 …` " +
+        "Under it each sentence is listed under its number in the order the story reads: " +
+        "first along the reading lines the person drew, then the sentences no line touches " +
+        "yet, in the order they were typed — the numbers are names, not the order. `14  原文 …` " +
         "is the artwork's words, each block of them under `s<n>`, `譯文` is what the whole " +
         "sentence reads as today, and `候選` is the drawer, each candidate under a letter " +
         "with `✓` on the one in effect. An empty 譯文 means the sentence is untranslated. " +
         "A sentence set in several blocks of lettering lists each block on its own line as " +
         "`14.2 <text>  候選 …`; the blocks are read as one sentence with `/` between them. " +
+        "Each section ends with a mermaid flowchart of those lines, one node per sentence " +
+        "(`n14`, holding its 譯, 原 and 標記) and one arrow per line; a sentence inside " +
+        "`subgraph 未維護` has no line yet, so where it falls in the story is not known. " +
+        "Two arrows out of one node are two things read at the same time. " +
         GRAMMAR +
         " page_ids reads only those pages; face reads only that face. changed_only answers " +
         "only the sentences that read differently since this session last saw them — " +
-        "through get_texts or any write's reply — plus the addresses that are gone; the " +
-        "first read of a session is all of it. 原文 and 譯文 are markup: " +
+        "through get_texts or any write's reply — plus the addresses that are gone, and a " +
+        "face's flowchart again only when its lines or sentences changed; the first read of " +
+        "a session is all of it, flowcharts included. 原文 and 譯文 are markup: " +
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a " +
         "literal `<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. A " +
         "line break inside one block is shown as `⏎`. Candidates are marked （human） for a " +
@@ -143,6 +150,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
           caller,
           missing,
           changedOnly: since?.gone,
+          graphs: since?.graphs,
         });
         return { content: [{ type: "text", text }] };
       } catch (err) {

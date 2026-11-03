@@ -149,7 +149,7 @@ function statesOf(
         no: at + 1,
         name: file.page.name,
         badge: file.badge,
-        faces: [{ faceId: face.id, faceNo: face.no, name: face.name, sentences: [] }],
+        faces: [{ faceId: face.id, faceNo: face.no, name: face.name, sentences: [], edges: [] }],
       }
       pages.set(place.pageId, page)
     }

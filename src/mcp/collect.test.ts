@@ -157,6 +157,7 @@ describe('collectTexts', () => {
                 no: 1,
                 sources: [{ no: 1, text: '何言ってんの' }],
                 translation: 'from slot',
+                tags: [],
                 blocks: [
                   {
                     id: 'at',
@@ -170,6 +171,7 @@ describe('collectTexts', () => {
                 ],
               },
             ],
+            edges: [],
           },
         ],
       },
@@ -221,6 +223,16 @@ describe('collectTexts', () => {
     expect(pages[0].faces[0].sentences.map((s) => s.no)).toEqual([1, 2])
     expect(pages[0].faces[0].sentences.map((s) => s.id)).toEqual(['u-b', 'u-a'])
     expect(pages[1]).toEqual({ pageId: 'p2', no: 2, name: '002.jpg', badge: 'damaged', faces: [] })
+  })
+
+  /** ⭐ The order list is how the page was typed; the lines are the story. */
+  it('walks the reading lines before the order list, and hands the lines over by number', () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((id) => balloon(id, [], []))
+    const page = pageOf([...a.blocks, ...b.blocks, ...c.blocks], { [ZH]: [a.unit, b.unit, c.unit] })
+    page.readingEdges = [{ from: 'cs', to: 'as' }]
+    const [face] = collectTexts([file('p1', page)], ZH_ONLY)[0].faces
+    expect(face.sentences.map((s) => s.id)).toEqual(['u-c', 'u-a', 'u-b'])
+    expect(face.edges).toEqual([{ from: 3, to: 1 }])
   })
 
   /** ⚠️ A page read alone still says where it reads in the chapter. */
@@ -320,7 +332,7 @@ describe('renderTexts', () => {
     const rendered = renderTexts(collectTexts([file('p7', page)], ZH_ONLY), {
       caller: 'claude-code 2.1.219',
     })
-    expect(rendered).toBe(
+    expect(rendered.split('\n```mermaid')[0]).toBe(
       [
         '專案 · 1 頁 · 2 句',
         '',
@@ -336,6 +348,50 @@ describe('renderTexts', () => {
     )
   })
 
+  it('draws the lines as mermaid, with labels made safe for it', () => {
+    const a = balloon('a', ['あ'], ['say "hi" &lt;3', '<size=×1.3>go</>'])
+    const b = balloon('b', ['い'], [])
+    const c = balloon('c', ['う'], ['three'])
+    ;(a.blocks[0] as SourceTextLayerEntry).body.tags = ['框内']
+    const page = pageOf([...a.blocks, ...b.blocks, ...c.blocks], { [ZH]: [a.unit, b.unit, c.unit] })
+    page.readingEdges = [{ from: 'bs', to: 'as' }]
+    const pages = collectTexts([file('p1', page)], ZH_ONLY)
+    const graph = renderTexts(pages).split('```mermaid\n')[1]
+    expect(graph).toBe(
+      [
+        'flowchart TD',
+        '  n2["2 譯：（未翻）<br/>原：い"]',
+        '  n1["1 譯：say #quot;hi#quot; #lt;3 go<br/>原：あ<br/>標記：框内"]',
+        '  n2 --> n1',
+        '  subgraph unlinked["未維護"]',
+        '    n3["3 譯：three<br/>原：う"]',
+        '  end',
+        '```',
+      ].join('\n'),
+    )
+  })
+
+  /** ⚠️ An agent that only ever reads changes must still be shown the lines, once and whenever they move. */
+  it('sends a face its graph on a first changes-only read and when the lines move, not for a retranslation', () => {
+    const a = balloon('a', ['あ'], ['one'])
+    const b = balloon('b', ['い'], ['two'])
+    const page = pageOf([...a.blocks, ...b.blocks], { [ZH]: [a.unit, b.unit] })
+    const seen: SeenTexts = new Map()
+    const read = () => {
+      const pages = collectTexts([file('p1', page)], ZH_ONLY)
+      const since = sinceSeen(seen, pages, undefined)
+      noteSeen(seen, pages, undefined, true)
+      return renderTexts(since.pages, { changedOnly: since.gone, graphs: since.graphs })
+    }
+    expect(read()).toContain('```mermaid')
+    ;(b.blocks[1] as TranslationTextLayerEntry).body.lines = ['two, again']
+    expect(read()).not.toContain('```mermaid')
+    page.readingEdges = [{ from: 'bs', to: 'as' }]
+    const moved = read()
+    expect(moved).toContain('  n2 --> n1')
+    expect(moved).toContain('自上次讀取後 · 1 頁有變動 · 0 句')
+  })
+
   it('says the empty answers out loud and keeps a damaged page in the list', () => {
     const rendered = renderTexts(
       [
@@ -349,7 +405,8 @@ describe('renderTexts', () => {
               faceId: ZH,
               faceNo: 1,
               name: '譯文',
-              sentences: [{ id: 'a', no: 1, sources: [], translation: '', blocks: [] }],
+              sentences: [{ id: 'a', no: 1, sources: [], translation: '', blocks: [], tags: [] }],
+              edges: [],
             },
           ],
         },
@@ -374,12 +431,14 @@ describe('what one session was shown', () => {
     blocks: [
       { id: `t${no}`, no: 1, refs: [`p1/${no}`, `p1/${no}.1`], text: translation, candidates: [] },
     ],
+    tags: [],
   })
   const face = (faceId: string, sentences: SentenceTexts[]): FaceTexts => ({
     faceId,
     faceNo: faceId === ZH ? 1 : 2,
     name: faceId === ZH ? '譯文' : 'English',
     sentences,
+    edges: [],
   })
   const page = (pageId: string, faces: FaceTexts[]): PageTexts => ({
     pageId,
@@ -441,6 +500,7 @@ describe('what one session was shown', () => {
             no: 1,
             sources: [],
             translation: '甲',
+            tags: [],
             blocks: [
               {
                 id: 'blk',
@@ -502,12 +562,14 @@ describe('write replies', () => {
           faceId: ZH,
           faceNo: 1,
           name: '譯文',
+          edges: [],
           sentences: [
             {
               id: 'u1',
               no: 1,
               sources: [{ no: 1, text: 'ゴゴゴ' }],
               translation: '新譯',
+              tags: [],
               blocks: [
                 {
                   id: 't1',

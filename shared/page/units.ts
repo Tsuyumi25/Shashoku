@@ -8,7 +8,7 @@ import type {
   TranslationTextLayerEntry,
   TranslationUnit,
 } from './types'
-import type { ReadingEdge } from './readingGraph'
+import { flattenReading, type ReadingEdge, type ReadingRow } from './readingGraph'
 import type { TextSide } from './text'
 import { linesOf } from './text'
 import { plainOf } from './markup'
@@ -147,6 +147,20 @@ export function unitsInReadingOrder(page: FacePage): TranslationUnit[] {
     out.push(unit)
   }
   return out
+}
+
+/**
+ * The page as its lines read it: what a line touches first, in an order every
+ * line points down, then the rest as `readingOrder` has them. The order list
+ * alone is how the page was typed, not the story — on a page whose lines run
+ * 9 → 5 → 3 it still says 1, 2, 3.
+ */
+export function unitsAlongLines(page: FacePage): (ReadingRow & { unit: TranslationUnit })[] {
+  const byId = new Map(unitsInReadingOrder(page).map((u) => [u.id, u]))
+  return flattenReading(page.readingEdges, page.readingOrder).flatMap((row) => {
+    const unit = byId.get(row.id)
+    return unit === undefined ? [] : [{ ...row, unit }]
+  })
 }
 
 /** The candidate a block reads as, or null for its own lines — a slot naming one that is gone reads as its own. */

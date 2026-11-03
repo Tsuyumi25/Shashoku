@@ -10,7 +10,8 @@ import {
   shownCodeOf,
   sourceBlocksOf,
   translationBlocksOf,
-  unitsInReadingOrder,
+  tagsOfUnit,
+  unitsAlongLines,
   type FacePage,
 } from '@shared/page/units'
 import { letterOf } from '@shared/page/numbers'
@@ -68,6 +69,7 @@ export function textsOfUnit(pageId: string, page: FacePage, unit: TranslationUni
       text: shownCodeOf(block),
       candidates: drawerOf(block),
     })),
+    tags: tagsOfUnit(page, unit),
   }
 }
 
@@ -77,11 +79,14 @@ export function textsOfFace(
   face: TranslationFace,
 ): FaceTexts {
   const page = facePage(manifest, face.id)
+  const rows = unitsAlongLines(page)
+  const noOf = new Map(rows.map((row) => [row.id, row.unit.no!]))
   return {
     faceId: face.id,
     faceNo: face.no,
     name: face.name,
-    sentences: unitsInReadingOrder(page).map((unit) => textsOfUnit(pageId, page, unit)),
+    sentences: rows.map((row) => textsOfUnit(pageId, page, row.unit)),
+    edges: rows.flatMap((row) => row.parents.map((from) => ({ from: noOf.get(from)!, to: row.unit.no! }))),
   }
 }
 

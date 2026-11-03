@@ -1,8 +1,7 @@
 import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry, TranslationUnit } from '@shared/page/types'
 import type { TextSide } from '@shared/page/text'
-import { flattenReading } from '@shared/page/readingGraph'
-import { blocksOf, facePage, projectionCodeOf, projectionOf, shownCodeOf, unitsInReadingOrder } from '@shared/page/units'
+import { blocksOf, facePage, projectionCodeOf, projectionOf, shownCodeOf, unitsAlongLines, unitsInReadingOrder } from '@shared/page/units'
 
 export interface PageRow {
   kind: 'page'
@@ -102,15 +101,8 @@ export function buildLabelRows(
   const rows: ChapterRow[] = []
   for (const [at, file] of files.entries()) {
     const page = facePage(file.page, face)
-    const inOrder = unitsInReadingOrder(page)
-    const byId = new Map(inOrder.map((unit) => [unit.id, unit]))
-    const numbering = new Map(inOrder.map((unit, at) => [unit.id, at + 1]))
-
-    const laid = flattenReading(page.readingEdges, page.readingOrder)
-    const all = laid.flatMap((row) => {
-      const unit = byId.get(row.id)
-      return unit === undefined ? [] : [{ ...row, unit }]
-    })
+    const numbering = new Map(unitsInReadingOrder(page).map((unit, at) => [unit.id, at + 1]))
+    const all = unitsAlongLines(page)
     // Searching what the page will say rather than what is on the artwork: the
     // question a search answers is where a line of the translation went, and
     // that is the same question whichever side is open.

@@ -10,6 +10,7 @@ import type {
   WriteResult,
 } from "./types";
 import { withoutFace } from "./refs";
+import { plainOf } from "../page/markup";
 
 /**
  * The wire answer is a script for a model to read, not JSON: every address
@@ -70,22 +71,65 @@ function headOf(page: PageTexts): string {
   return `第 ${page.no} 頁 · ${page.pageId} · ${page.name}`;
 }
 
+/**
+ * Mermaid takes `#name;` for what its label syntax would otherwise read; the
+ * markup is dropped first, since a label is for reading the story by and the
+ * list above it keeps the tags.
+ */
+function labelText(code: string): string {
+  return plainOf(code)
+    .replaceAll("\n", " ")
+    .replaceAll("&", "#amp;")
+    .replaceAll('"', "#quot;")
+    .replaceAll("<", "#lt;")
+    .replaceAll(">", "#gt;");
+}
+
+function nodeOf(sentence: SentenceTexts): string {
+  const source = sentence.sources.filter((b) => b.text !== "").map((b) => labelText(b.text));
+  const parts = [
+    `${sentence.no} 譯：${sentence.translation === "" ? "（未翻）" : labelText(sentence.translation)}`,
+    `原：${source.length === 0 ? "（無）" : source.join(" / ")}`,
+  ];
+  if (sentence.tags.length > 0) parts.push(`標記：${sentence.tags.map(labelText).join("、")}`);
+  return `n${sentence.no}["${parts.join("<br/>")}"]`;
+}
+
+/** Lines drawn as the graph; what no line touches stays apart, in list order, and is not read into it. */
+function renderMermaid(face: FaceTexts): string {
+  const touched = new Set(face.edges.flatMap((e) => [e.from, e.to]));
+  const out = ["```mermaid", "flowchart TD"];
+  for (const s of face.sentences) if (touched.has(s.no)) out.push(`  ${nodeOf(s)}`);
+  for (const e of face.edges) out.push(`  n${e.from} --> n${e.to}`);
+  const loose = face.sentences.filter((s) => !touched.has(s.no));
+  if (loose.length > 0) {
+    out.push('  subgraph unlinked["未維護"]');
+    for (const s of loose) out.push(`    ${nodeOf(s)}`);
+    out.push("  end");
+  }
+  out.push("```");
+  return out.join("\n");
+}
+
 function renderFace(
   page: PageTexts,
   face: FaceTexts,
   caller: string | undefined,
   gone: readonly string[] | undefined,
+  graph: string | undefined,
   out: string[],
 ): void {
   out.push(`${headOf(page)} · f${face.faceNo} ${face.name} · ${face.sentences.length} 句`);
   for (const sentence of face.sentences) out.push(renderSentence(sentence, caller));
   if (gone && gone.length > 0) out.push(`${INDENT}已不存在：${gone.join("、")}`);
+  if (graph !== undefined) out.push(graph);
 }
 
 function renderPage(
   page: PageTexts,
   caller: string | undefined,
   gone: ReadonlyMap<string, readonly string[]> | undefined,
+  graphs: ReadonlyMap<string, string> | undefined,
   out: string[],
 ): void {
   if (page.badge !== "ok") {
@@ -96,7 +140,9 @@ function renderPage(
     out.push(`${headOf(page)} ·（沒有翻譯面）`);
     return;
   }
-  for (const face of page.faces) renderFace(page, face, caller, gone?.get(face.faceId), out);
+  for (const face of page.faces) {
+    renderFace(page, face, caller, gone?.get(face.faceId), graphs?.get(face.faceId), out);
+  }
 }
 
 export interface TextsView {
@@ -108,6 +154,8 @@ export interface TextsView {
    * that are gone since, per page and then per face.
    */
   changedOnly?: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
+  /** With `changedOnly`, the graphs drawn differently since, per page and face; a whole read draws every one. */
+  graphs?: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
 export function renderTexts(pages: PageTexts[], view: TextsView = {}): string {
@@ -120,13 +168,33 @@ export function renderTexts(pages: PageTexts[], view: TextsView = {}): string {
   if (view.missing && view.missing.length > 0) out.push(`沒有這些頁：${view.missing.join("、")}`);
   for (const page of pages) {
     out.push("");
-    renderPage(page, view.caller, view.changedOnly?.get(page.pageId), out);
+    const graphs = view.changedOnly ? view.graphs?.get(page.pageId) : graphsOf(page);
+    renderPage(page, view.caller, view.changedOnly?.get(page.pageId), graphs, out);
   }
   return out.join("\n");
 }
 
-/** What one session last read of each sentence, rendered, per page, face and sentence number. */
-export type SeenTexts = Map<string, Map<string, Map<number, string>>>;
+function graphsOf(page: PageTexts): Map<string, string> {
+  return new Map(page.faces.flatMap((face) => (face.sentences.length > 0 ? [[face.faceId, renderMermaid(face)]] : [])));
+}
+
+/**
+ * Which sentences a face holds and which lines join them, short of the words:
+ * a retranslation alone does not send the whole graph again.
+ */
+function shapeOf(face: FaceTexts): string {
+  return JSON.stringify([face.sentences.map((s) => s.no), face.edges]);
+}
+
+interface SeenFace {
+  /** Each sentence as rendered, by number. */
+  sentences: Map<number, string>;
+  /** Absent until a whole read of the face: a write's reply holds only what it touched. */
+  shape?: string;
+}
+
+/** What one session last read, per page and face. */
+export type SeenTexts = Map<string, Map<string, SeenFace>>;
 
 /**
  * Records what these pages read as now, so the next `sinceSeen` compares
@@ -148,10 +216,11 @@ export function noteSeen(
     for (const face of page.faces) {
       let held = whole ? undefined : faces.get(face.faceId);
       if (!held) {
-        held = new Map();
+        held = { sentences: new Map() };
         faces.set(face.faceId, held);
       }
-      for (const sentence of face.sentences) held.set(sentence.no, renderSentence(sentence, caller));
+      if (whole) held.shape = shapeOf(face);
+      for (const sentence of face.sentences) held.sentences.set(sentence.no, renderSentence(sentence, caller));
     }
   }
 }
@@ -159,8 +228,10 @@ export function noteSeen(
 /**
  * These pages cut down to the sentences that read differently from the last
  * time this session saw them, one never seen counting as changed, plus the
- * addresses seen before that are no longer there. A page with neither is left
- * out; a damaged page is kept, since its badge is the change worth saying.
+ * addresses seen before that are no longer there, and the graph of every face
+ * whose lines or sentences are not the ones last drawn. A page with none of
+ * these is left out; a damaged page is kept, since its badge is the change
+ * worth saying.
  *
  * ⚠️ A write's reply is a read too, so the caller's own writes do not come
  * back as changes — only what somebody else did since.
@@ -169,28 +240,37 @@ export function sinceSeen(
   seen: SeenTexts,
   pages: readonly PageTexts[],
   caller: string | undefined,
-): { pages: PageTexts[]; gone: Map<string, Map<string, string[]>> } {
+): {
+  pages: PageTexts[];
+  gone: Map<string, Map<string, string[]>>;
+  graphs: Map<string, Map<string, string>>;
+} {
   const changed: PageTexts[] = [];
   const gone = new Map<string, Map<string, string[]>>();
+  const graphs = new Map<string, Map<string, string>>();
   for (const page of pages) {
     const heldFaces = seen.get(page.pageId);
     const faces: FaceTexts[] = [];
     const lostHere = new Map<string, string[]>();
+    const redrawn = new Map<string, string>();
     for (const face of page.faces) {
       const held = heldFaces?.get(face.faceId);
-      const sentences = face.sentences.filter((s) => held?.get(s.no) !== renderSentence(s, caller));
+      const sentences = face.sentences.filter((s) => held?.sentences.get(s.no) !== renderSentence(s, caller));
       const here = new Set(face.sentences.map((s) => s.no));
       const lost =
         page.badge === "ok" && held
-          ? [...held.keys()].filter((no) => !here.has(no)).map((no) => `${page.pageId}/${no}`)
+          ? [...held.sentences.keys()].filter((no) => !here.has(no)).map((no) => `${page.pageId}/${no}`)
           : [];
+      const reshaped = face.sentences.length > 0 && held?.shape !== shapeOf(face);
       if (lost.length > 0) lostHere.set(face.faceId, lost);
-      if (sentences.length > 0 || lost.length > 0) faces.push({ ...face, sentences });
+      if (reshaped) redrawn.set(face.faceId, renderMermaid(face));
+      if (sentences.length > 0 || lost.length > 0 || reshaped) faces.push({ ...face, sentences });
     }
     if (lostHere.size > 0) gone.set(page.pageId, lostHere);
+    if (redrawn.size > 0) graphs.set(page.pageId, redrawn);
     if (faces.length > 0 || page.badge !== "ok") changed.push({ ...page, faces });
   }
-  return { pages: changed, gone };
+  return { pages: changed, gone, graphs };
 }
 
 /**
@@ -244,7 +324,7 @@ export function seenIdsFor(memory: RefMemory, ref: string): Record<string, strin
 function withStates(head: string[], pages: PageTexts[], caller: string | undefined): string {
   if (pages.length > 0) {
     head.push("", "操作後的狀態：");
-    for (const page of pages) renderPage(page, caller, undefined, head);
+    for (const page of pages) renderPage(page, caller, undefined, undefined, head);
   }
   return head.join("\n");
 }

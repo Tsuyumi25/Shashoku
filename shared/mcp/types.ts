@@ -65,6 +65,8 @@ export interface SentenceTexts {
   /** What the whole sentence reads as today, its blocks joined as they are read. */
   translation: string;
   blocks: BlockTexts[];
+  /** What the sentence means, as the artwork's blocks are tagged. */
+  tags: string[];
 }
 
 /** One face's reading of a page: its number, its name as the person set it, its sentences. */
@@ -72,7 +74,10 @@ export interface FaceTexts {
   faceId: string;
   faceNo: number;
   name: string;
+  /** In the order the reading lines lay them out, then those no line touches. */
   sentences: SentenceTexts[];
+  /** The reading lines between sentences, by number: `from` is read before `to`. */
+  edges: { from: number; to: number }[];
 }
 
 export interface PageTexts {
