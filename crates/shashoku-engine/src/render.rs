@@ -1,4 +1,4 @@
-use harfrust::{Direction, Feature, ShapeOptions, ShaperData, Tag, UnicodeBuffer};
+use harfrust::{Direction, Feature, ShapeOptions, Shaper, ShaperData, Tag, UnicodeBuffer};
 use skrifa::{
     FontRef, GlyphId, MetadataProvider,
     instance::{LocationRef, Size},
@@ -207,6 +207,8 @@ pub fn uncovered_clusters(
 ) -> Result<Vec<u32>, String> {
     let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
+    let shaper_data = ShaperData::new(&hr_font);
+    let shaper = shaper_data.shaper(&hr_font).build();
     let sk_font = FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
 
@@ -220,7 +222,7 @@ pub fn uncovered_clusters(
     let mut flagged = Vec::new();
     let mut line_offset = 0u32;
     for line in text.split('\n') {
-        for glyph in shape_line(&hr_font, line, COVERAGE_SIZE_PX, 1.0, false) {
+        for glyph in shape_line(&shaper, line, COVERAGE_SIZE_PX, 1.0, false) {
             let blank = match outlines.get(GlyphId::new(glyph.gid)) {
                 None => true,
                 Some(outline) => {
@@ -399,7 +401,7 @@ struct ShapedGlyph {
 }
 
 fn shape_line(
-    hr_font: &harfrust::FontRef,
+    shaper: &Shaper,
     text: &str,
     size_px: f32,
     scale: f32,
@@ -421,8 +423,6 @@ fn shape_line(
         &[]
     };
 
-    let shaper_data = ShaperData::new(hr_font);
-    let shaper = shaper_data.shaper(hr_font).build();
     let output = shaper.shape(
         buffer,
         ShapeOptions::new()
@@ -451,14 +451,14 @@ fn shape_line(
 /// vertical module's table says. A stretch with nothing but plain upright
 /// characters is shaped whole.
 fn shape_column(
-    hr_font: &harfrust::FontRef,
+    shaper: &Shaper,
     sk_font: &FontRef,
     text: &str,
     size_px: f32,
     scale: f32,
 ) -> Vec<ShapedGlyph> {
     if !vertical::may_need_help(text) {
-        return shape_line(hr_font, text, size_px, scale, true);
+        return shape_line(shaper, text, size_px, scale, true);
     }
     let charmap = sk_font.charmap();
     let drawn = |c: char| charmap.map(c).is_some_and(|gid| gid.to_u32() != 0);
@@ -469,7 +469,7 @@ fn shape_column(
             return false;
         };
         let mut one = [0u8; 4];
-        shape_line(hr_font, c.encode_utf8(&mut one), size_px, scale, true)
+        shape_line(shaper, c.encode_utf8(&mut one), size_px, scale, true)
             .first()
             .is_some_and(|g| g.gid != nominal.to_u32())
     };
@@ -495,7 +495,7 @@ fn shape_column(
             j += 1;
         }
         let end = ways.get(j).map_or(text.len(), |w| w.0);
-        for mut g in shape_line(hr_font, &text[start..end], size_px, scale, !turned) {
+        for mut g in shape_line(shaper, &text[start..end], size_px, scale, !turned) {
             g.cluster += start as u32;
             g.sideways = turned;
             out.push(g);
@@ -648,6 +648,8 @@ fn build_horizontal_path(
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
     let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
+    let shaper_data = ShaperData::new(&hr_font);
+    let shaper = shaper_data.shaper(&hr_font).build();
 
     let loc = LocationRef::default();
     let upem = sk_font.metrics(Size::new(size_px), loc).units_per_em as f32;
@@ -671,7 +673,7 @@ fn build_horizontal_path(
             l.ascent = l.ascent.max(seg_ascent * scale.y);
             l.height = l.height.max(seg_height * scale.y);
             l.pitch = l.pitch.max(seg.size_px * leading * scale.y);
-            let glyphs = shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false);
+            let glyphs = shape_line(&shaper, seg.text, seg.size_px, seg.size_px / upem, false);
             l.width += glyphs.iter().map(|g| g.x_advance).sum::<f32>() * scale.x;
             l.laid.push(LaidSegment { seg, glyphs });
         }
@@ -772,6 +774,8 @@ fn build_vertical_path(
         .map_err(|e| format!("skrifa parse (index {face_index}): {e:?}"))?;
     let hr_font = harfrust::FontRef::from_index(font_bytes, face_index)
         .map_err(|e| format!("harfrust parse (index {face_index}): {e:?}"))?;
+    let shaper_data = ShaperData::new(&hr_font);
+    let shaper = shaper_data.shaper(&hr_font).build();
 
     let loc = LocationRef::default();
     let upem = sk_font.metrics(Size::new(size_px), loc).units_per_em as f32;
@@ -789,15 +793,9 @@ fn build_vertical_path(
         for seg in segments_of(line, offset, size_px, spans) {
             width = width.max(seg.size_px * leading * scale.x);
             let glyphs = if seg.upright {
-                shape_line(&hr_font, seg.text, seg.size_px, seg.size_px / upem, false)
+                shape_line(&shaper, seg.text, seg.size_px, seg.size_px / upem, false)
             } else {
-                shape_column(
-                    &hr_font,
-                    &sk_font,
-                    seg.text,
-                    seg.size_px,
-                    seg.size_px / upem,
-                )
+                shape_column(&shaper, &sk_font, seg.text, seg.size_px, seg.size_px / upem)
             };
             height += if seg.upright {
                 seg.size_px * scale.y
