@@ -20,7 +20,7 @@
       <button
         type="button"
         class="route-btn route-btn-go"
-        :disabled="reading || !currentFile"
+        :disabled="reading || !currentFile || ocr.chapter !== null"
         title="兩個偵測器找出哪裡有字，量出每個區域怎麼排，四個辨識器每一個都被問"
         @click="readPage"
       >
@@ -28,6 +28,30 @@
         <ScanText v-else :size="12" />
         <span>辨識本頁</span>
         <span v-if="pool.length" class="route-count">{{ pool.length }}</span>
+      </button>
+
+      <button
+        v-if="ocr.chapter === null"
+        type="button"
+        class="route-btn"
+        :disabled="ocr.running.size > 0 || project.files.length === 0"
+        title="從第一頁讀到最後一頁，一頁讀完才讀下一頁；每一頁做的跟「辨識本頁」一樣"
+        @click="ocr.readChapter()"
+      >
+        <ScanText :size="12" />
+        <span>辨識全部頁面</span>
+      </button>
+      <button
+        v-else
+        type="button"
+        class="route-btn"
+        :disabled="ocr.stopping"
+        title="讀完手上這一頁就停"
+        @click="ocr.stopChapter()"
+      >
+        <LoaderCircle :size="12" class="animate-spin" />
+        <span>{{ ocr.stopping ? '這頁讀完就停' : '停止' }}</span>
+        <span class="route-count">{{ ocr.chapter.at }}/{{ ocr.chapter.of }}</span>
       </button>
 
       <button
@@ -65,7 +89,7 @@
       the station is what keeps that from reading as a hang.
     -->
     <p v-if="ocr.station" class="station">
-      {{ ocr.station.name }}
+      <template v-if="ocr.chapter">{{ ocr.chapter.pageId }} · </template>{{ ocr.station.name }}
       <span class="route-count">{{ ocr.station.at }}/{{ ocr.station.of }}</span>
     </p>
     <p v-else-if="ocr.problem" class="station station-bad">{{ ocr.problem }}</p>

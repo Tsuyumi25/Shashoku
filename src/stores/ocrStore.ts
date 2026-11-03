@@ -201,15 +201,18 @@ export const useOcrStore = defineStore('ocr', () => {
    * Pressing it a second time on the same page is free and changes nothing: the
    * same weights over the same artwork produce the same identities, which the
    * pool already holds.
+   *
+   * Answers whether the page was read, so a run over the chapter knows to stop
+   * rather than fail the same way on every page after.
    */
-  async function readPage(pageId: string, pageDir: string, layers: readonly LayerEntry[]) {
-    if (busy(pageId)) return
+  async function readPage(pageId: string, pageDir: string, layers: readonly LayerEntry[]): Promise<boolean> {
+    if (busy(pageId)) return true
     problem.value = null
 
     const artwork = bottomRaster(layers)?.file ?? null
     if (!artwork) {
       problem.value = '這一頁底下沒有點陣圖層可以辨識'
-      return
+      return false
     }
 
     mark(pageId, true)
@@ -221,12 +224,51 @@ export const useOcrStore = defineStore('ocr', () => {
       useProjectStore().absorbReadings(pageId, arrivalsOf(found))
       settle(pageId)
       shown.value = new Set(shown.value).add(pageId)
+      return true
     } catch (e) {
       problem.value = e instanceof Error ? e.message : String(e)
+      return false
     } finally {
       station.value = null
       mark(pageId, false)
     }
+  }
+
+  /** Where a run over the whole chapter has got to; null while none is going. */
+  const chapter = ref<{ at: number; of: number; pageId: string } | null>(null)
+  /** Asked to stop, and finishing the page in hand first. */
+  const stopping = ref(false)
+
+  /**
+   * Every page with artwork, one after another: a trip holds one model's
+   * weights at a time, and two pages read at once would hold two. The pages are
+   * the ones there when the run starts; one removed since is passed over.
+   *
+   * ⚠️ Stopped between pages, never inside one — a page half read is a page
+   * whose readings and verdict disagree.
+   */
+  async function readChapter() {
+    if (chapter.value !== null || running.value.size > 0) return
+    const project = useProjectStore()
+    const pages = project.files.filter((f) => f.badge === 'ok' && bottomRaster(f.page.layers) !== null)
+    stopping.value = false
+    problem.value = null
+    try {
+      for (const [at, file] of pages.entries()) {
+        if (stopping.value) break
+        const live = project.pageById(file.pageId)
+        if (!live) continue
+        chapter.value = { at: at + 1, of: pages.length, pageId: file.pageId }
+        if (!(await readPage(live.pageId, live.pageDir, live.page.layers))) break
+      }
+    } finally {
+      chapter.value = null
+      stopping.value = false
+    }
+  }
+
+  function stopChapter() {
+    if (chapter.value !== null) stopping.value = true
   }
 
   /**
@@ -278,6 +320,10 @@ export const useOcrStore = defineStore('ocr', () => {
     busy,
     station,
     readPage,
+    chapter,
+    readChapter,
+    stopChapter,
+    stopping,
     forget,
     problem,
     settings,
