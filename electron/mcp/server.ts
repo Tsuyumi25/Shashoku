@@ -92,9 +92,11 @@ function buildServer(getSource: () => string | undefined): McpServer {
     "sentence's block 2, `p7/14.2b` is candidate b in that block's drawer, and `p7/14b` is " +
     "the same where the sentence has one block. `p7` is the page's id. Numbers are never " +
     "reused, so an address either still names what you were shown or is refused — it never " +
-    "quietly comes to mean something else. face names the face every address in the call " +
-    "resolves in (`f1`, `f2`, … as get_texts' headers show them); without it, the face the " +
-    "person is working on.";
+    "quietly comes to mean something else. face names the face the call's addresses " +
+    "resolve in (`f1`, `f2`, … as get_texts' headers show them); without it, the face the " +
+    "person is working on. An address may carry its face itself — `p7/f2/14.2` — and then " +
+    "means that face whatever face the call names; an address a person copies from the " +
+    "app is always written this way.";
 
   server.registerTool(
     "get_texts",

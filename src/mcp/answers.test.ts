@@ -302,6 +302,38 @@ describe('answer — the orchestration the bridge drives', () => {
     expect(drawerOf(project, 'e').candidates).toHaveLength(1)
   })
 
+  it('writes into the face an address names, whatever face the call names', async () => {
+    const project = useProjectStore()
+    openWith(project, [src('s', ['何言ってんの']), tr('z', ZH), tr('e', EN)], {
+      [ZH]: [{ id: 'u-zh', members: ['s', 'z'] }],
+      [EN]: [{ id: 'u-en', members: ['s', 'e'] }],
+    })
+    const result = await propose(
+      [
+        { ref: 'p1/f2/1', lines: ['What are you on about'] },
+        { ref: 'p1/f9/1', lines: ['nowhere'] },
+      ],
+      'f1',
+    )
+    expect(result.outcomes[0]).toMatchObject({ ok: true })
+    expect(drawerOf(project, 'e').candidates).toHaveLength(1)
+    expect(drawerOf(project, 'z').candidates).toEqual([])
+    expect(refusalOf(result.outcomes[1]!)).toBe('沒有 f9 這一面——這本書的面有：f1 譯文、f2 English')
+  })
+
+  it('refuses an address the session was only shown in another face, naming the face', async () => {
+    const project = useProjectStore()
+    openWith(project, [src('s', ['何言ってんの']), tr('z', ZH), tr('e', EN)], {
+      [ZH]: [{ id: 'u-zh', members: ['s', 'z'] }],
+      [EN]: [{ id: 'u-en', members: ['s', 'e'] }],
+    })
+    const result = await propose([{ ref: 'p1/1', lines: ['What are you on about'], seen: { [EN]: 'e' } }])
+    expect(refusalOf(result.outcomes[0]!)).toBe(
+      'p1/1 是你在 f2 English 讀到的，這次呼叫卻是 f1——請寫成 p1/f2/1，或在呼叫裡帶 face: "f2"',
+    )
+    expect(drawerOf(project, 'z').candidates).toEqual([])
+  })
+
   it('reads only the face asked for, and refuses a face the project does not have', async () => {
     const project = useProjectStore()
     openWith(project, [src('s'), tr('z', ZH), tr('e', EN)], {

@@ -11,7 +11,7 @@ import type {
   WriteRef,
   WriteResult,
 } from '@shared/mcp/types'
-import { parseFaceRef, parseRef, REF_SYNTAX, type TextRef } from '@shared/mcp/refs'
+import { formatRef, parseFaceRef, parseRef, REF_SYNTAX, type TextRef } from '@shared/mcp/refs'
 import { letterOf } from '@shared/page/numbers'
 import type { TranslationFace } from '@shared/project/types'
 import { useProjectStore } from '@/stores/projectStore'
@@ -82,7 +82,7 @@ function staleRefusal(
 /** The block an item names, or the reason it names nothing writable. */
 function placeOf(
   project: Project,
-  face: TranslationFace,
+  callFace: TranslationFace,
   item: WriteRef,
   need: Need,
   tool: string,
@@ -91,11 +91,26 @@ function placeOf(
   if (ref === null) return `看不懂的位址 ${item.ref}——${REF_SYNTAX}`
   const shape = shapeRefusal(ref, item.ref, need, tool)
   if (shape !== null) return shape
+  // A face written in the address is the one it means, whatever the call names.
+  const face = ref.face === undefined ? callFace : project.faces.find((f) => f.no === ref.face)
+  if (face === undefined) {
+    const listed = project.faces.map((f) => `f${f.no} ${f.name}`).join('、')
+    return `沒有 f${ref.face} 這一面——這本書的面有：${listed}`
+  }
   const file = project.files.find((f) => f.pageId === ref.pageId)
   if (!file) return `沒有 ${ref.pageId} 這一頁`
   if (file.badge !== 'ok') return `${ref.pageId} 是 ${file.badge}，拒絕寫入`
   const found = resolveRef(file.page, ref.pageId, face, ref)
   const seenId = item.seen?.[face.id]
+  // Numbers are per face: an address this session was only ever shown in
+  // another face would land on whatever that number is here.
+  if (ref.face === undefined && item.seen !== undefined && seenId === undefined) {
+    const shownIn = project.faces.find((f) => item.seen![f.id] !== undefined)
+    if (shownIn !== undefined) {
+      const full = formatRef({ ...ref, face: shownIn.no })
+      return `${item.ref} 是你在 f${shownIn.no} ${shownIn.name} 讀到的，這次呼叫卻是 f${face.no}——請寫成 ${full}，或在呼叫裡帶 face: "f${shownIn.no}"`
+    }
+  }
   if ('refusal' in found) {
     return seenId === undefined
       ? found.refusal

@@ -372,6 +372,8 @@ import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueus
 import Notice from '@/components/Notice.vue'
 import GroupWheel from '@/components/GroupWheel.vue'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
+import { useNoticeStore } from '@/stores/noticeStore'
+import { refOfBlock } from '@shared/mcp/refs'
 import { logActivity } from '@/lib/activityLog'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
@@ -747,19 +749,38 @@ function onRightPress(e: PointerEvent) {
 /** An object's own menu, and which object it is for. */
 const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null)
 
+/** The address an agent uses for the object the menu is open on, or null where it has none. */
+const objectRef = computed(() => {
+  const id = objectMenu.value?.id
+  const pageId = id === undefined ? null : project.pageOfEntry(id)
+  const view = pageId === null ? undefined : project.viewOf(pageId)
+  const face = project.faces.find((f) => f.id === project.activeFace)
+  return id === undefined || pageId === null || !view || !face ? null : refOfBlock(pageId, face.no, view, id)
+})
+
 /**
  * A copy of the whole translation, both sides, read right after the original —
  * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
  */
 const OBJECT_MENU = computed<MenuItem[]>(() => [
+  ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
   { id: 'duplicate-unit', label: '製作副本（整句）' },
   ...preferences.prefs.materialRecipes.map((r) => ({ id: `save:${r.id}`, label: `存成素材：${r.name}` })),
 ])
 
 function onObjectMenu(pick: string) {
   const at = objectMenu.value
+  const address = objectRef.value
   objectMenu.value = null
   if (at === null) return
+  if (pick === 'copy-ref') {
+    if (address === null) return
+    navigator.clipboard.writeText(address).then(
+      () => useNoticeStore().say(`已複製 ${address}`),
+      (err: unknown) => console.error('copy ref failed', err),
+    )
+    return
+  }
   if (pick === 'duplicate-unit') {
     void merge.duplicateLayer({ id: at.id, wholeUnit: true }).catch((err: unknown) =>
       console.error('duplicate failed', err),

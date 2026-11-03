@@ -14,7 +14,8 @@ import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr } 
 import { numberPage } from '@shared/page/numbers'
 import type { ProjectFile } from '@/types/project'
 import type { FaceTexts, PageTexts, SentenceTexts } from '@shared/mcp/types'
-import { formatRef, parseFaceRef, parseRef } from '@shared/mcp/refs'
+import { formatRef, parseFaceRef, parseRef, refOfBlock, withoutFace } from '@shared/mcp/refs'
+import { facePage } from '@shared/page/units'
 import { addressOf, collectTexts, resolveRef } from './collect'
 import { planWithdraw } from './withdraw'
 import {
@@ -111,6 +112,27 @@ describe('addresses', () => {
     }
     expect(parseFaceRef('f2')).toBe(2)
     expect(parseFaceRef('zh')).toBeNull()
+  })
+
+  it('reads a face written into the address, and leaves it out on request', () => {
+    expect(parseRef('p7/f2/14.2b')).toEqual({ pageId: 'p7', face: 2, sentence: 14, block: 2, candidate: 2 })
+    expect(formatRef({ pageId: 'p7', face: 2, sentence: 14, block: 2 })).toBe('p7/f2/14.2')
+    expect(withoutFace('p7/f2/14.2b')).toBe('p7/14.2b')
+    for (const bad of ['p7/f0/14', 'p7/f2', 'p7/f2/f3/1']) expect(parseRef(bad)).toBeNull()
+  })
+
+  it('copies a block under the address an agent can write to, face and all', () => {
+    const split = {
+      blocks: [src('s', ['ゴゴ']), tr('t1', ZH, ['轟']), tr('t2', ZH, ['隆'])],
+      unit: { id: 'u', members: ['s', 't1', 't2'] },
+    }
+    const single = balloon('a', ['何'], ['什麼'])
+    const page = pageOf([...split.blocks, ...single.blocks], { [ZH]: [split.unit, single.unit] })
+    const view = facePage(page, ZH)
+    expect(refOfBlock('p7', 1, view, 't2')).toBe('p7/f1/1.2')
+    expect(refOfBlock('p7', 1, view, 'at')).toBe('p7/f1/2')
+    expect(refOfBlock('p7', 1, view, 's')).toBe('p7/f1/1')
+    expect(refOfBlock('p7', 1, view, 'nothing')).toBeNull()
   })
 })
 
@@ -437,6 +459,7 @@ describe('what one session was shown', () => {
     expect(seenIdsFor(memory, 'p1/1a')).toEqual({ [ZH]: 'cand' })
     expect(seenIdsFor(memory, 'p1/1.1a')).toEqual({ [ZH]: 'cand' })
     expect(seenIdsFor(memory, 'p1/2')).toBeUndefined()
+    expect(seenIdsFor(memory, 'p1/f1/1.1a')).toEqual({ [ZH]: 'cand' })
   })
 })
 

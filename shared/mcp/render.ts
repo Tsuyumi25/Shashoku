@@ -9,6 +9,7 @@ import type {
   WithdrawOutcome,
   WriteResult,
 } from "./types";
+import { withoutFace } from "./refs";
 
 /**
  * The wire answer is a script for a model to read, not JSON: every address
@@ -221,12 +222,17 @@ export function noteRefs(memory: RefMemory, pages: readonly PageTexts[]): void {
   }
 }
 
-/** What this address stood for in each face that ever showed it. */
+/**
+ * What this address stood for in each face that ever showed it. A face written
+ * in the address is looked past here: listings spell refs without one, and the
+ * caller picks the face it resolves in.
+ */
 export function seenIdsFor(memory: RefMemory, ref: string): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   let any = false;
+  const spelled = withoutFace(ref);
   for (const [faceId, held] of memory) {
-    const id = held.get(ref);
+    const id = held.get(spelled);
     if (id !== undefined) {
       out[faceId] = id;
       any = true;
