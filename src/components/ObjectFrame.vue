@@ -138,6 +138,11 @@ const props = defineProps<{
   /** In the selection, cursor or not. Outlined, but without handles. */
   inSelection: boolean
   /**
+   * In the selection even where nothing here outlines it, as a member of the
+   * box round several does: a press on it is still one on what is in hand.
+   */
+  held?: boolean
+  /**
    * Its own lock or a folder's above it. Still selectable — there would be no
    * way to reach the lock otherwise — but it offers no gesture that would move
    * it, so the refusal is visible before the drag rather than after it.
@@ -314,10 +319,10 @@ const boxStyle = computed(() => ({
   // is what "nobody has said what this is" looks like.
   outlineColor: props.member ?? props.accent ?? 'var(--primary)',
   pointerEvents: props.pointer === 'box' ? ('auto' as const) : ('none' as const),
-  // The object in hand answers before its neighbours, handles and box alike:
+  // What is in hand answers before its neighbours, handles and box alike:
   // objects set close together overlap, and a press meant for the one being
   // worked on must not land on the frame of the one beside it.
-  zIndex: props.selected ? 1 : undefined,
+  zIndex: props.selected || props.held ? 1 : undefined,
 }))
 
 interface Corner {

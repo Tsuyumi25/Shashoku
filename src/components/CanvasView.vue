@@ -208,6 +208,7 @@
             :view="view"
             :selected="object.id === editor.cursorId && !inGroup(object.id)"
             :in-selection="editor.isSelected(object.id) && !inGroup(object.id)"
+            :held="editor.isSelected(object.id)"
             :locked="object.locked"
             :editing="object.id === textEditingId"
             :selection="object.id === textEditingId ? markup.plainRange.value : null"

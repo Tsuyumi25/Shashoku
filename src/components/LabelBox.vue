@@ -6,6 +6,7 @@
     :rotation="rotation"
     :selected="selected"
     :in-selection="inSelection"
+    :held="held"
     :locked="locked"
     :handles="!editing && (handles ?? true)"
     :accent="accent"
@@ -196,6 +197,7 @@ const props = defineProps<{
   view: ViewTransform
   selected: boolean
   inSelection: boolean
+  held: boolean
   locked: boolean
   /**
    * This object is the one being typed into. The keyboard is elsewhere — in the
