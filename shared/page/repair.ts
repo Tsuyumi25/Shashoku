@@ -1,4 +1,5 @@
-import type { LayerEntry, Ledger, ManifestJson, TextLayerEntry, TranslationUnit } from './types'
+import type { LayerEntry, Ledger, ManifestJson, TextLayerEntry } from './types'
+import type { ReadingEdge } from './readingGraph'
 import type { PageDefect } from './validate'
 import type { TextSide } from './text'
 import { siftReadingEdges } from './validate'
@@ -151,42 +152,46 @@ export function repairPage(
       ledger.units.push({ id: freshId(takenUnitIds, newId), members: [block.id, lettering.id] })
     }
     ledger.units = ledger.units.filter((u) => u.members.length > 0)
-    repairReading(ledger, face, repaired)
   }
 
-  const out = { ...manifest, counters: structuredClone(manifest.counters), ledgers, layers }
+  const sources = new Set([...blocks.values()].flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  const reading = repairReading(manifest.readingOrder, manifest.readingEdges, sources, repaired)
+  const out = { ...manifest, ...reading, counters: structuredClone(manifest.counters), ledgers, layers }
   numberPage(out, faces)
   return { manifest: out, repaired }
 }
 
-function repairReading(ledger: Ledger, face: string, repaired: PageDefect[]): void {
-  const unitIds = new Set(ledger.units.map((u: TranslationUnit) => u.id))
+/**
+ * The page's reading, holding only the artwork's words on the page. Words it
+ * does not name are left unnamed: they read after the named ones in tree
+ * order, which is what naming them at the end would say anyway.
+ */
+function repairReading(
+  order: readonly string[],
+  edges: readonly ReadingEdge[],
+  sources: ReadonlySet<string>,
+  repaired: PageDefect[],
+): { readingOrder: string[]; readingEdges: ReadingEdge[] } {
   const readingOrder: string[] = []
   const placed = new Set<string>()
   const reportedDuplicates = new Set<string>()
-  for (const id of ledger.readingOrder) {
+  for (const id of order) {
     if (placed.has(id)) {
       if (reportedDuplicates.has(id)) continue
       reportedDuplicates.add(id)
-      repaired.push({ kind: 'reading-order-duplicate', id, face })
+      repaired.push({ kind: 'reading-order-duplicate', id })
       continue
     }
     placed.add(id)
-    if (!unitIds.has(id)) {
-      repaired.push({ kind: 'reading-order-dangling', id, face })
+    if (!sources.has(id)) {
+      repaired.push({ kind: 'reading-order-dangling', id })
       continue
     }
     readingOrder.push(id)
   }
-  for (const unit of ledger.units) {
-    if (readingOrder.includes(unit.id)) continue
-    repaired.push({ kind: 'reading-order-missing', id: unit.id, face })
-    readingOrder.push(unit.id)
-  }
-  const lines = siftReadingEdges(ledger.readingEdges, unitIds, face)
+  const lines = siftReadingEdges(edges, sources)
   repaired.push(...lines.defects)
-  ledger.readingOrder = readingOrder
-  ledger.readingEdges = lines.kept
+  return { readingOrder, readingEdges: lines.kept }
 }
 
 function freshId(taken: Set<string>, newId: () => string): string {

@@ -75,23 +75,31 @@ function unitFor(id: string): TranslationUnit {
   return { id, members: [SOURCE_OF(id), id] }
 }
 
-/** The one face these fixtures are lettered in, reading these sentences. */
-function ledgersFor(
-  units: readonly TranslationUnit[],
-  readingOrder: readonly string[],
-  readingEdges: readonly ReadingEdge[] = [],
-): Record<string, Ledger> {
-  return { [FACE]: { units: [...units], readingOrder: [...readingOrder], readingEdges: [...readingEdges] } }
+/** The one face these fixtures are lettered in. */
+function ledgersFor(units: readonly TranslationUnit[]): Record<string, Ledger> {
+  return { [FACE]: { units: [...units] } }
 }
 
-/** The blocks of both sides for a run of lettering, plus the ledger over them. */
+/**
+ * The page's own reading, given as the sentences — every fixture here names a
+ * sentence after its block of lettering, so the artwork's block follows.
+ */
+function readingFor(
+  order: readonly string[],
+  drawn: readonly ReadingEdge[] = [],
+): { readingOrder: string[]; readingEdges: ReadingEdge[] } {
+  return {
+    readingOrder: order.map(SOURCE_OF),
+    readingEdges: drawn.map((e) => ({ from: SOURCE_OF(e.from), to: SOURCE_OF(e.to) })),
+  }
+}
+
+/** The blocks of both sides for a run of lettering, plus the ledger and reading over them. */
 const spread = (labels: readonly TextLayerEntry[]) => ({
   layers: labels.flatMap((l) => [l, sourceFor(l.id)]),
   counters: emptyCounters(),
-  ledgers: ledgersFor(
-    labels.map((l) => unitFor(l.id)),
-    labels.map((l) => l.id),
-  ),
+  ledgers: ledgersFor(labels.map((l) => unitFor(l.id))),
+  ...readingFor(labels.map((l) => l.id)),
 })
 
 /** Which sentence one block of lettering belongs to. */
@@ -1304,7 +1312,8 @@ describe('layer tree edits', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          ledgers: ledgersFor(readingOrder.map(unitFor), readingOrder),
+          ledgers: ledgersFor(readingOrder.map(unitFor)),
+          ...readingFor(readingOrder),
           counters: emptyCounters(),
           layers: [...layers, ...readingOrder.map(sourceFor)],
         },
@@ -1689,7 +1698,8 @@ describe('layer tree edits', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          ledgers: ledgersFor([], ['z']),
+          ledgers: ledgersFor([]),
+          ...readingFor([]),
           counters: emptyCounters(),
           layers: [label('z')],
         },
@@ -2022,7 +2032,8 @@ describe('deleteSelection', () => {
         name: 'p',
         width: 1200,
         height: 1700,
-        ledgers: ledgersFor(p.order.map(unitFor), p.order),
+        ledgers: ledgersFor(p.order.map(unitFor)),
+        ...readingFor(p.order),
         counters: emptyCounters(),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
@@ -2271,7 +2282,8 @@ describe('selectLayerBy', () => {
           name: 'p',
           width: 1200,
           height: 1700,
-          ledgers: ledgersFor([], order),
+          ledgers: ledgersFor([]),
+          ...readingFor(order),
           counters: emptyCounters(),
           layers,
         },
@@ -2387,7 +2399,8 @@ describe('moveObjectsTo', () => {
         name: 'p',
         width: 1200,
         height: 1700,
-        ledgers: ledgersFor(p.order.map(unitFor), p.order, p.drawn ?? []),
+        ledgers: ledgersFor(p.order.map(unitFor)),
+        ...readingFor(p.order, p.drawn ?? []),
         counters: emptyCounters(),
         layers: [...p.layers, ...p.order.map(sourceFor)],
       },
@@ -3044,7 +3057,8 @@ describe('drawing lines between text objects', () => {
       sourceFor('a'),
       sourceFor('b'),
     ]
-    file.page.ledgers = ledgersFor([unitFor('a'), unitFor('b')], ['a', 'b'])
+    file.page.ledgers = ledgersFor([unitFor('a'), unitFor('b')])
+    Object.assign(file.page, readingFor(['a', 'b']))
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
     editor.selectOnly('g')
     editor.deleteSelection()
@@ -3823,7 +3837,8 @@ describe('a sentence set in two blocks of lettering', () => {
     const { project, editor } = openOnePage()
     const file = project.pageById(PAGE)!
     file.page.layers = [sourceFor('a'), first, second]
-    file.page.ledgers = ledgersFor([{ id: 'u', members: [SOURCE_OF('a'), 'a', 'b'] }], ['u'])
+    file.page.ledgers = ledgersFor([{ id: 'u', members: [SOURCE_OF('a'), 'a', 'b'] }])
+    file.page.readingOrder = [SOURCE_OF('a')]
     return { project, editor }
   }
 
@@ -3931,24 +3946,25 @@ describe('the faces a book is lettered in', () => {
   })
 
   /**
-   * ⚠️ Which face a step was taken in is settled when it is recorded. Undoing
-   * after turning to another face must write back where the step landed, or the
-   * line comes off a face nobody drew it in and stays on the one they did.
+   * ⚠️ A line is one fact about the artwork, so taking it back takes it off
+   * every face at once — including the one being looked at, which is not the
+   * one it was drawn in.
    */
-  it('takes a line back off the face it was drawn in, whatever is being looked at now', () => {
+  it('takes a line back off every face, whatever is being looked at now', () => {
     const { project, editor } = openOnePage([label('a'), label('b')])
     editor.cmdAddFace('英文')
     const other = project.activeFace
     editor.setActiveFace(FACE)
 
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
-    const elsewhere = [...project.viewOf(PAGE, other)!.readingEdges]
+    expect(project.viewOf(PAGE, other)!.readingEdges).toHaveLength(1)
 
     editor.setActiveFace(other)
     editor.undo()
 
     expect(project.viewOf(PAGE, FACE)!.readingEdges).toEqual([])
-    expect(project.viewOf(PAGE, other)!.readingEdges).toEqual(elsewhere)
+    expect(project.viewOf(PAGE, other)!.readingEdges).toEqual([])
+    expect(project.pageById(PAGE)!.page.readingEdges).toEqual([])
   })
 })
 
@@ -3987,5 +4003,114 @@ describe('the meaning of a sentence holding two blocks of the artwork', () => {
 
     expect(tagsOfArtwork(project, SOURCE_OF('a'))).toEqual(['框内'])
     expect(tagsOfArtwork(project, SOURCE_OF('b'))).toEqual(['心聲'])
+  })
+})
+
+/**
+ * ⭐ The reading is one fact about the artwork, so every face reads the page
+ * the same way through its own sentences: a line drawn in one shows in the
+ * others, a row dragged in one moves them all, and a face that groups two
+ * balloons as one sentence simply has nothing to show between them.
+ */
+describe('the reading every face shares', () => {
+  type Project = ReturnType<typeof useProjectStore>
+
+  function openTwoFaces(ids: string[]) {
+    const { project, editor } = openOnePage(ids.map((id) => label(id)))
+    editor.cmdAddFace('英文')
+    const other = project.activeFace
+    editor.setActiveFace(FACE)
+    return { project, editor, other }
+  }
+
+  const edgesIn = (project: Project, face: string) => project.viewOf(PAGE, face)!.readingEdges
+
+  const orderIn = (project: Project, face: string) => project.viewOf(PAGE, face)!.readingOrder
+
+  /** The sentence of one face standing over one block of the artwork. */
+  const sentenceOver = (project: Project, face: string, id: string) =>
+    project.viewOf(PAGE, face)!.units.find((u) => u.members.includes(SOURCE_OF(id)))!.id
+
+  const factOf = (project: Project) => project.pageById(PAGE)!.page.readingEdges
+
+  it('shows a line drawn in one face in the other', () => {
+    const { project, editor, other } = openTwoFaces(['a', 'b'])
+
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+
+    expect(edgesIn(project, FACE)).toEqual([{ from: 'a', to: 'b' }])
+    expect(edgesIn(project, other)).toEqual([
+      { from: sentenceOver(project, other, 'a'), to: sentenceOver(project, other, 'b') },
+    ])
+    expect(factOf(project)).toEqual([{ from: SOURCE_OF('a'), to: SOURCE_OF('b') }])
+  })
+
+  /** ⚠️ Between two blocks of one sentence the line says nothing, so that face shows none. */
+  it('hides it from a face reading both of its ends as one sentence', () => {
+    const { project, editor, other } = openTwoFaces(['a', 'b'])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+
+    editor.setActiveFace(other)
+    const theirs = blocksOnSide(project.pageById(PAGE)!.page.layers, 'translation', other)
+    editor.selectOnly(theirs[0]!.id)
+    editor.toggleSelected(theirs[1]!.id)
+    editor.cmdLinkSelection()
+
+    expect(project.viewOf(PAGE, other)!.units).toHaveLength(1)
+    expect(edgesIn(project, other)).toEqual([])
+    expect(edgesIn(project, FACE)).toEqual([{ from: 'a', to: 'b' }])
+    expect(factOf(project)).toEqual([{ from: SOURCE_OF('a'), to: SOURCE_OF('b') }])
+  })
+
+  it('rubs out in one face a line drawn in another, and brings it back on undo', () => {
+    const { project, editor, other } = openTwoFaces(['a', 'b'])
+    editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
+    editor.setActiveFace(other)
+
+    editor.cmdEraseReadingEdges(PAGE, [
+      { from: sentenceOver(project, other, 'a'), to: sentenceOver(project, other, 'b') },
+    ])
+
+    expect(factOf(project)).toEqual([])
+    expect(edgesIn(project, FACE)).toEqual([])
+
+    editor.undo()
+
+    expect(factOf(project)).toEqual([{ from: SOURCE_OF('a'), to: SOURCE_OF('b') }])
+    expect(edgesIn(project, FACE)).toEqual([{ from: 'a', to: 'b' }])
+  })
+
+  it('reorders every face when a row is dragged in one', () => {
+    const { project, editor, other } = openTwoFaces(['a', 'b', 'c'])
+
+    editor.moveObjectsTo(['c'], PAGE, 0)
+
+    expect(orderIn(project, FACE)).toEqual(['c', 'a', 'b'])
+    expect(orderIn(project, other)).toEqual(
+      ['c', 'a', 'b'].map((id) => sentenceOver(project, other, id)),
+    )
+  })
+
+  /** Ctrl+Shift+L. The sentence it left is where it is read from, in every face. */
+  it('reads a block sent out on its own right after the sentence it left', () => {
+    const { project, editor, other } = openTwoFaces(['a', 'b', 'c'])
+    editor.selectOnly('a')
+
+    editor.cmdDetachSelection()
+
+    const mine = project.viewOf(PAGE, FACE)!
+    const made = mine.units.find((u) => u.members.includes('a'))!
+    expect(orderIn(project, FACE)).toEqual([sentenceOver(project, FACE, 'a'), made.id, 'b', 'c'])
+
+    // The blank block of artwork it was given is a block the other face has to
+    // place too, and it places it in the same stretch of the reading.
+    const blank = made.members.find((id) => id !== 'a')!
+    const theirs = project.viewOf(PAGE, other)!
+    expect(orderIn(project, other)).toEqual([
+      sentenceOver(project, other, 'a'),
+      theirs.units.find((u) => u.members.includes(blank))!.id,
+      sentenceOver(project, other, 'b'),
+      sentenceOver(project, other, 'c'),
+    ])
   })
 })

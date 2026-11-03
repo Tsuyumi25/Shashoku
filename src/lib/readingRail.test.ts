@@ -37,16 +37,12 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
       name: 'p',
       width: 1200,
       height: 1700,
-      ledgers: {
-        [FACE]: {
-          units,
-          readingOrder: order,
-          readingEdges: drawn.map((pair) => {
-            const [from, to] = pair.split('>')
-            return { from, to }
-          }),
-        },
-      },
+      ledgers: { [FACE]: { units } },
+      readingOrder: order.map((id) => `${id}s`),
+      readingEdges: drawn.map((pair) => {
+        const [from, to] = pair.split('>')
+        return { from: `${from}s`, to: `${to}s` }
+      }),
       counters: emptyCounters(),
       layers,
     },

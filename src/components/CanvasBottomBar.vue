@@ -34,7 +34,7 @@
     >
       <option v-if="!project.isOpen" value="">未開啟專案</option>
       <option v-for="f in project.files" :key="f.pageId" :value="f.pageId">
-        {{ f.page.name }}{{ (f.page.ledgers[project.activeFace]?.readingOrder.length ?? 0) > 0 ? `（${f.page.ledgers[project.activeFace]!.readingOrder.length}）` : '' }}
+        {{ f.page.name }}{{ (f.page.ledgers[project.activeFace]?.units.length ?? 0) > 0 ? `（${f.page.ledgers[project.activeFace]!.units.length}）` : '' }}
       </option>
     </select>
     <button class="page-btn" title="上一頁" @click="editor.pageBy(-1)">

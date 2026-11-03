@@ -83,7 +83,7 @@ const PATCH = {
 function raw(
   entry: Record<string, unknown>,
   units: TranslationUnit[] = [unitFor(String(entry.id ?? 'a'))],
-  readingOrder: string[] = units.map((u) => u.id),
+  readingOrder: string[] = [],
 ): string {
   return JSON.stringify({
     schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -91,7 +91,8 @@ function raw(
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units, readingOrder } },
+    ledgers: { [FACE]: { units } },
+    readingOrder,
     layers: [entry],
   })
 }
@@ -103,7 +104,9 @@ function manifestWith(entry: TextLayerEntry, unit = unitFor(entry.id)): Manifest
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units: [unit], readingOrder: [unit.id], readingEdges: [] } },
+    ledgers: { [FACE]: { units: [unit] } },
+    readingOrder: [],
+    readingEdges: [],
     counters: emptyCounters(),
     layers: [entry],
   }
@@ -327,15 +330,11 @@ describe("every face's reading of one page", () => {
             { id: 'u-a', members: ['s1', 't1'] },
             { id: 'u-b', members: ['s2', 't2'] },
           ],
-          readingOrder: ['u-b', 'u-a'],
-          readingEdges: [{ from: 'u-b', to: 'u-a' }],
         },
-        [OTHER]: {
-          units: [{ id: 'u-c', members: ['s1', 's2', 't3'] }],
-          readingOrder: ['u-c'],
-          readingEdges: [],
-        },
+        [OTHER]: { units: [{ id: 'u-c', members: ['s1', 's2', 't3'] }] },
       },
+      readingOrder: ['s2', 's1'],
+      readingEdges: [{ from: 's2', to: 's1' }],
       counters: emptyCounters(),
       layers: [s1, s2, t1, t2, t3],
     }
@@ -353,7 +352,7 @@ describe("every face's reading of one page", () => {
 
   it('refuses a ledger kept under no name at all', () => {
     const page = JSON.parse(serializeManifest(twoFaces()))
-    page.ledgers[''] = { units: [], readingOrder: [] }
+    page.ledgers[''] = { units: [] }
     expect(() => parseManifest(JSON.stringify(page), FACE)).toThrow(PageParseError)
   })
 
@@ -462,15 +461,44 @@ describe('a page from before faces', () => {
 
   /** ⭐ One ledger, filed under the face the project opened the page as. */
   it('files the one ledger under the face it is opened as', () => {
-    const page = opened([twoWay({})], threeBlocks, {
-      readingEdges: [{ from: 'u-1', to: 'u-2' }],
-    })
+    const page = opened([twoWay({})], threeBlocks)
     expect(Object.keys(page.ledgers)).toEqual([LEGACY_FACE])
     expect(page.ledgers[LEGACY_FACE]).toEqual({
       units: [{ id: 'u-1', members: ['s1', 't1', 't2'] }],
-      readingOrder: ['u-1'],
+    })
+  })
+
+  /**
+   * ⭐ The one reading it held was between sentences; the page keeps it between
+   * the artwork's words, where every face can see it.
+   */
+  it("lifts its reading onto the artwork's words", () => {
+    const page = opened(
+      [
+        legacyUnit({ id: 'u-1', source: { members: ['s1'], separators: [] } }),
+        legacyUnit({
+          id: 'u-2',
+          source: { members: ['s2'], separators: [] },
+          translation: { members: ['t2'], separators: [] },
+        }),
+      ],
+      [
+        legacyText('s1', 'source'),
+        legacyText('s2', 'source'),
+        legacyText('t1', 'translation'),
+        legacyText('t2', 'translation'),
+      ],
+      { readingOrder: ['u-2', 'u-1'], readingEdges: [{ from: 'u-2', to: 'u-1' }] },
+    )
+    expect(page.readingOrder).toEqual(['s2', 's1'])
+    expect(page.readingEdges).toEqual([{ from: 's2', to: 's1' }])
+  })
+
+  it('drops a line with an end no sentence answers to', () => {
+    const page = opened([twoWay({})], threeBlocks, {
       readingEdges: [{ from: 'u-1', to: 'u-2' }],
     })
+    expect(page.readingEdges).toEqual([])
   })
 
   it('stamps every block of lettering with that face', () => {
@@ -484,10 +512,124 @@ describe('a page from before faces', () => {
     const written = JSON.parse(serializeManifest(page))
     expect(written.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
     expect(written).not.toHaveProperty('translationUnits')
-    expect(written).not.toHaveProperty('readingOrder')
+    expect(written.readingOrder).toEqual(['s1'])
     expect(Object.keys(written.ledgers)).toEqual([LEGACY_FACE])
     expect(written.layers[1].face).toBe(LEGACY_FACE)
     expect(written.layers[1].body.candidates).toEqual([{ id: 'c1', lines: ['左'] }])
+  })
+})
+
+/**
+ * ⭐ Before v18 each face kept its own reading, over its own sentences. Opening
+ * one lifts those readings onto the artwork's words, where they are one fact
+ * every face can see: the order comes from the face the project opens the page
+ * as, and the lines from every ledger, since a line one face drew is a line
+ * about the artwork whichever face drew it.
+ */
+describe('a page from before the reading belonged to the page', () => {
+  const sourceAt = (id: string) => ({ ...withSource({}), id })
+
+  const letteringAt = (id: string, face: string) => ({
+    kind: 'text',
+    id,
+    visible: true,
+    locked: false,
+    side: 'translation',
+    face,
+    body: body(),
+  })
+
+  function perFace(version: number, faceEdges: unknown[], otherEdges: unknown[]): string {
+    return JSON.stringify({
+      schemaVersion: version,
+      revision: 1,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      ledgers: {
+        [FACE]: {
+          units: [
+            { id: 'u-a', members: ['s1', 't1'] },
+            { id: 'u-b', members: ['s2', 't2'] },
+            { id: 'u-c', members: ['s3', 't3'] },
+          ],
+          readingOrder: ['u-c', 'u-a', 'u-b'],
+          readingEdges: faceEdges,
+        },
+        [OTHER]: {
+          units: [
+            { id: 'v-a', members: ['s1', 's2', 'g1'] },
+            { id: 'v-b', members: ['s3', 'g2'] },
+          ],
+          readingOrder: ['v-a', 'v-b'],
+          readingEdges: otherEdges,
+        },
+      },
+      layers: [
+        sourceAt('s1'),
+        sourceAt('s2'),
+        sourceAt('s3'),
+        letteringAt('t1', FACE),
+        letteringAt('t2', FACE),
+        letteringAt('t3', FACE),
+        letteringAt('g1', OTHER),
+        letteringAt('g2', OTHER),
+      ],
+    })
+  }
+
+  it('takes the order from the face it is opened as, sentence by sentence', () => {
+    const page = parseManifest(perFace(17, [], []), FACE)
+    expect(page.readingOrder).toEqual(['s3', 's1', 's2'])
+    expect(page.ledgers[FACE]).toEqual({
+      units: [
+        { id: 'u-a', members: ['s1', 't1'] },
+        { id: 'u-b', members: ['s2', 't2'] },
+        { id: 'u-c', members: ['s3', 't3'] },
+      ],
+    })
+  })
+
+  /** The first ledger, rather than nothing: an order somebody set beats tree order. */
+  it('falls back to the first ledger when it is opened as a face the page never had', () => {
+    const page = parseManifest(perFace(17, [], []), 'face-nobody')
+    expect(page.readingOrder).toEqual(['s3', 's1', 's2'])
+  })
+
+  /** A line between two sentences becomes one between the last word of the first and the first of the second. */
+  it('lifts the lines of every ledger, not only the one it is opened as', () => {
+    const page = parseManifest(
+      perFace(17, [{ from: 'u-a', to: 'u-b' }], [{ from: 'v-a', to: 'v-b' }]),
+      FACE,
+    )
+    expect(page.readingEdges).toEqual([
+      { from: 's1', to: 's2' },
+      { from: 's2', to: 's3' },
+    ])
+  })
+
+  it('drops a lifted line that would close a ring', () => {
+    const page = parseManifest(
+      perFace(
+        17,
+        [
+          { from: 'u-a', to: 'u-b' },
+          { from: 'u-b', to: 'u-c' },
+        ],
+        [{ from: 'v-b', to: 'v-a' }],
+      ),
+      FACE,
+    )
+    expect(page.readingEdges).toEqual([
+      { from: 's1', to: 's2' },
+      { from: 's2', to: 's3' },
+    ])
+  })
+
+  it('reads a page of the version before that the same way', () => {
+    const page = parseManifest(perFace(16, [{ from: 'u-a', to: 'u-b' }], []), FACE)
+    expect(page.readingOrder).toEqual(['s3', 's1', 's2'])
+    expect(page.readingEdges).toEqual([{ from: 's1', to: 's2' }])
   })
 })
 
@@ -743,13 +885,9 @@ describe('parseManifest', () => {
       name: 'p',
       width: 1200,
       height: 1700,
-      ledgers: {
-        [FACE]: {
-          units: [{ id: 'u-a', members: ['a', 'b'] }],
-          readingOrder: ['u-a'],
-          readingEdges: [],
-        },
-      },
+      ledgers: { [FACE]: { units: [{ id: 'u-a', members: ['a', 'b'] }] } },
+      readingOrder: [],
+      readingEdges: [],
       counters: emptyCounters(),
       layers: [
         {
@@ -928,13 +1066,13 @@ describe('parseManifest', () => {
 
   // Structure is this layer's whole job: a page whose order has drifted still
   // opens, and repair puts it right.
-  it('opens a page whose reading order disagrees with its sentences', () => {
+  it('opens a page whose reading order disagrees with its artwork', () => {
     const parsed = parseManifest(raw(UPRIGHT, [unitFor('a')], ['ghost']), FACE)
-    expect(parsed.ledgers[FACE]!.readingOrder).toEqual(['ghost'])
+    expect(parsed.readingOrder).toEqual(['ghost'])
   })
 })
 
-describe('the lines drawn between sentences', () => {
+describe("the lines drawn between the artwork's words", () => {
   function withEdges(edges: unknown): string {
     return JSON.stringify({
       schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -942,18 +1080,14 @@ describe('the lines drawn between sentences', () => {
       name: 'p',
       width: 1200,
       height: 1700,
-      ledgers: {
-        [FACE]: {
-          units: [unitFor('a'), unitFor('b')],
-          readingOrder: ['u-a', 'u-b'],
-          readingEdges: edges,
-        },
-      },
-      layers: [UPRIGHT, { ...UPRIGHT, id: 'b' }],
+      ledgers: { [FACE]: { units: [unitFor('a', ['s1', 'a']), unitFor('b', ['s2', 'b'])] } },
+      readingOrder: ['s1', 's2'],
+      readingEdges: edges,
+      layers: [UPRIGHT, { ...UPRIGHT, id: 'b' }, { ...withSource({}), id: 's1' }, { ...withSource({}), id: 's2' }],
     })
   }
 
-  const edgesOf = (rawPage: string) => parseManifest(rawPage, FACE).ledgers[FACE]!.readingEdges
+  const edgesOf = (rawPage: string) => parseManifest(rawPage, FACE).readingEdges
 
   // A page nobody has drawn on is the model's ordinary starting state, not a
   // page missing something.
@@ -962,26 +1096,26 @@ describe('the lines drawn between sentences', () => {
   })
 
   it('carries a line through', () => {
-    expect(edgesOf(withEdges([{ from: 'u-a', to: 'u-b' }]))).toEqual([{ from: 'u-a', to: 'u-b' }])
+    expect(edgesOf(withEdges([{ from: 's1', to: 's2' }]))).toEqual([{ from: 's1', to: 's2' }])
   })
 
-  it('refuses a sentence pointed at itself, which says nothing', () => {
-    expect(() => edgesOf(withEdges([{ from: 'u-a', to: 'u-a' }]))).toThrow(PageParseError)
+  it('refuses a block pointed at itself, which says nothing', () => {
+    expect(() => edgesOf(withEdges([{ from: 's1', to: 's1' }]))).toThrow(PageParseError)
   })
 
   it('refuses an end that names nothing', () => {
-    expect(() => edgesOf(withEdges([{ from: 'u-a', to: '' }]))).toThrow(PageParseError)
-    expect(() => edgesOf(withEdges([{ from: 'u-a' }]))).toThrow(PageParseError)
+    expect(() => edgesOf(withEdges([{ from: 's1', to: '' }]))).toThrow(PageParseError)
+    expect(() => edgesOf(withEdges([{ from: 's1' }]))).toThrow(PageParseError)
     expect(() => edgesOf(withEdges(['a>b']))).toThrow(PageParseError)
-    expect(() => edgesOf(withEdges({ from: 'u-a', to: 'u-b' }))).toThrow(PageParseError)
+    expect(() => edgesOf(withEdges({ from: 's1', to: 's2' }))).toThrow(PageParseError)
   })
 
   it('keeps one line where a file names the same one twice', () => {
     const twice = [
-      { from: 'u-a', to: 'u-b' },
-      { from: 'u-a', to: 'u-b' },
+      { from: 's1', to: 's2' },
+      { from: 's1', to: 's2' },
     ]
-    expect(edgesOf(withEdges(twice))).toEqual([{ from: 'u-a', to: 'u-b' }])
+    expect(edgesOf(withEdges(twice))).toEqual([{ from: 's1', to: 's2' }])
   })
 
   // The order lines were drawn in says nothing, so two files meaning the same
@@ -989,31 +1123,31 @@ describe('the lines drawn between sentences', () => {
   it('writes two spellings of the same lines identically', () => {
     const one = parseManifest(
       withEdges([
-        { from: 'u-b', to: 'u-a' },
-        { from: 'u-a', to: 'u-b' },
+        { from: 's2', to: 's1' },
+        { from: 's1', to: 's2' },
       ]),
       FACE,
     )
     const other = parseManifest(
       withEdges([
-        { from: 'u-a', to: 'u-b' },
-        { from: 'u-b', to: 'u-a' },
+        { from: 's1', to: 's2' },
+        { from: 's2', to: 's1' },
       ]),
       FACE,
     )
     expect(serializeManifest(one)).toBe(serializeManifest(other))
   })
 
-  it('writes no lines key for a ledger with none', () => {
+  it('writes no lines key for a page with none', () => {
     const written = JSON.parse(serializeManifest(manifestWith(textEntry())))
-    expect(written.ledgers[FACE]).not.toHaveProperty('readingEdges')
+    expect(written).not.toHaveProperty('readingEdges')
   })
 
-  // Structure only, as with the reading order: whether both ends name sentences
+  // Structure only, as with the reading order: whether both ends name blocks
   // that are on the page is repair's question.
-  it('opens a page whose line names a sentence that is not there', () => {
-    expect(edgesOf(withEdges([{ from: 'u-a', to: 'ghost' }]))).toEqual([
-      { from: 'u-a', to: 'ghost' },
+  it('opens a page whose line names a block that is not there', () => {
+    expect(edgesOf(withEdges([{ from: 's1', to: 'ghost' }]))).toEqual([
+      { from: 's1', to: 'ghost' },
     ])
   })
 })
@@ -1205,13 +1339,9 @@ describe('the short numbers everything on a page wears', () => {
       name: 'p',
       width: 1200,
       height: 1700,
-      ledgers: {
-        [FACE]: {
-          units: [{ id: 'u-a', no: 4, members: ['s1', 't1'] }],
-          readingOrder: ['u-a'],
-          readingEdges: [],
-        },
-      },
+      ledgers: { [FACE]: { units: [{ id: 'u-a', no: 4, members: ['s1', 't1'] }] } },
+      readingOrder: ['s1'],
+      readingEdges: [],
       counters: { source: 2, units: { [FACE]: 5 }, blocks: { 'u-a': 2 }, candidates: { t1: 4 } },
       layers: [s1, t1],
     }

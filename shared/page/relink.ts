@@ -1,7 +1,7 @@
 import type { TextStyle } from '../text-style/types'
 import type { ManifestJson, TextLayerEntry, TranslationUnit } from './types'
 import type { TextSide } from './text'
-import { normalizeEdges } from './readingGraph'
+import { readAfter, sourceOrder } from './reading'
 import { blankSourceBlock, blankTranslationBlock } from './schema'
 import { findTextObject, insertAtPath, pathOf, removeAtPath, textObjects } from './tree'
 import { facePage, placeOfBlock, shownCodeOf, type FacePage } from './units'
@@ -114,8 +114,6 @@ function tidy(page: FacePage, unitIds: Iterable<string>, newId: () => string, se
     if (!shared && unit.members.every((id) => isBlank(page, id))) {
       for (const id of unit.members) dropBlock(page, id)
       page.units = page.units.filter((u) => u.id !== uid)
-      page.readingOrder = page.readingOrder.filter((id) => id !== uid)
-      page.readingEdges = page.readingEdges.filter((e) => e.from !== uid && e.to !== uid)
     }
   }
 }
@@ -137,22 +135,49 @@ export function relink(
   const main = page.units.find((u) => u.id === plan.main)
   if (!main) return false
   const touched = new Set([plan.main, ...plan.moving.map((id) => placeOfBlock(page, id)?.unit.id ?? '')])
+  const places = placesOf(page, touched)
   for (const id of plan.moving) moveBlock(page, id, main)
 
   if (plan.kind === 'join') {
     for (const uid of plan.folded) {
       page.units = page.units.filter((u) => u.id !== uid)
-      page.readingOrder = page.readingOrder.filter((id) => id !== uid)
-      page.readingEdges = page.readingEdges.map((e) => ({
-        from: e.from === uid ? plan.main : e.from,
-        to: e.to === uid ? plan.main : e.to,
-      }))
       touched.delete(uid)
     }
-    page.readingEdges = normalizeEdges(page.readingEdges.filter((e) => e.from !== e.to))
   }
   tidy(page, touched, newId, seed, shared)
+  keepPlaces(page, places)
   return true
+}
+
+/** Where each sentence reads now: the first of its words in the page's order. */
+function placesOf(page: FacePage, unitIds: Iterable<string>): Map<string, string> {
+  const order = sourceOrder(page.manifest)
+  const out = new Map<string, string>()
+  for (const uid of unitIds) {
+    const unit = page.units.find((u) => u.id === uid)
+    const first = unit && order.find((id) => unit.members.includes(id))
+    if (first !== undefined) out.set(uid, first)
+  }
+  return out
+}
+
+/**
+ * A sentence that lost every word it read by, and got a blank one instead,
+ * reads that blank where its first word stood — or it would fall to the end
+ * of the page, where words nobody has placed read.
+ */
+function keepPlaces(page: FacePage, places: ReadonlyMap<string, string>): void {
+  for (const [uid, first] of places) {
+    const unit = page.units.find((u) => u.id === uid)
+    if (!unit || unit.members.includes(first)) continue
+    const named = new Set(page.manifest.readingOrder)
+    const blanks = unit.members.filter((id) => !named.has(id) && sourceOrder(page.manifest).includes(id))
+    if (blanks.length === 0) continue
+    const order = sourceOrder(page.manifest).filter((id) => !blanks.includes(id))
+    const at = order.indexOf(first)
+    order.splice(at === -1 ? order.length : at, 0, ...blanks)
+    page.manifest.readingOrder = order
+  }
 }
 
 /**
@@ -174,10 +199,13 @@ export function detach(
   if (only && only.members.every((id) => selected.includes(id))) return false
   const unit: TranslationUnit = { id: newId(), members: [] }
   const after = firstInOrder(page, from)
+  const kept = placesOf(page, from)
   page.units.push(unit)
-  page.readingOrder.splice(after ? page.readingOrder.indexOf(after) + 1 : page.readingOrder.length, 0, unit.id)
   for (const { id } of places) moveBlock(page, id, unit)
   tidy(page, [...from, unit.id], newId, seed, shared)
+  keepPlaces(page, kept)
+  const behind = page.units.find((u) => u.id === after)
+  if (behind) readAfter(page.manifest, unit.members, behind.members)
   return true
 }
 
@@ -199,7 +227,6 @@ export function adoptSources(manifest: ManifestJson, faces: readonly string[], n
       manifest.layers.push(lettering)
       const unit = { id: newId(), members: [source.id, lettering.id] }
       page.units.push(unit)
-      page.readingOrder.push(unit.id)
     }
   }
 }

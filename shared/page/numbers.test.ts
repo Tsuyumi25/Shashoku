@@ -28,7 +28,8 @@ function unit(id: string, members: string[]): TranslationUnit {
 
 function page(
   layers: LayerEntry[],
-  ledgers: Record<string, { units: TranslationUnit[]; readingOrder?: string[] }>,
+  ledgers: Record<string, { units: TranslationUnit[] }>,
+  readingOrder: string[] = [],
 ): ManifestJson {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -36,12 +37,9 @@ function page(
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: Object.fromEntries(
-      Object.entries(ledgers).map(([face, { units, readingOrder }]) => [
-        face,
-        { units, readingOrder: readingOrder ?? units.map((u) => u.id), readingEdges: [] },
-      ]),
-    ),
+    ledgers: Object.fromEntries(Object.entries(ledgers).map(([face, { units }]) => [face, { units }])),
+    readingOrder,
+    readingEdges: [],
     counters: emptyCounters(),
     layers,
   }
@@ -60,12 +58,8 @@ describe('numbering a page that has none', () => {
   it('numbers sentences in the order they are read, not the order they are stored', () => {
     const m = page(
       [src('s1'), tr('t1'), src('s2'), tr('t2'), src('s3'), tr('t3')],
-      {
-        [FACE]: {
-          units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2']), unit('u3', ['s3', 't3'])],
-          readingOrder: ['u2', 'u3', 'u1'],
-        },
-      },
+      { [FACE]: { units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2']), unit('u3', ['s3', 't3'])] } },
+      ['s2', 's3', 's1'],
     )
 
     numberPage(m, [FACE])
@@ -73,13 +67,12 @@ describe('numbering a page that has none', () => {
     expect([unitNo(m, FACE, 'u2'), unitNo(m, FACE, 'u3'), unitNo(m, FACE, 'u1')]).toEqual([1, 2, 3])
   })
 
-  it('numbers a sentence the reading order left out after the ones it holds', () => {
-    const m = page([src('s1'), tr('t1'), src('s2'), tr('t2')], {
-      [FACE]: {
-        units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])],
-        readingOrder: ['u2'],
-      },
-    })
+  it('numbers a sentence the reading order does not name after the ones it does', () => {
+    const m = page(
+      [src('s1'), tr('t1'), src('s2'), tr('t2')],
+      { [FACE]: { units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])] } },
+      ['s2'],
+    )
 
     numberPage(m, [FACE])
 
@@ -131,12 +124,10 @@ describe('a number its holder has lost', () => {
     const m = twoSentences()
 
     m.ledgers[FACE].units = m.ledgers[FACE].units.filter((u) => u.id !== 'u2')
-    m.ledgers[FACE].readingOrder = ['u1']
     m.layers = m.layers.filter((l) => l.id !== 's2' && l.id !== 't2')
     numberPage(m, [FACE])
     m.layers.push(src('s3'), tr('t3'))
     m.ledgers[FACE].units.push(unit('u3', ['s3', 't3']))
-    m.ledgers[FACE].readingOrder.push('u3')
     numberPage(m, [FACE])
 
     expect(unitNo(m, FACE, 'u3')).toBe(3)
@@ -154,11 +145,9 @@ describe('a number its holder has lost', () => {
     const layers = structuredClone(m.layers)
 
     m.ledgers[FACE].units = m.ledgers[FACE].units.filter((u) => u.id !== 'u2')
-    m.ledgers[FACE].readingOrder = ['u1']
     m.layers = m.layers.filter((l) => l.id !== 's2' && l.id !== 't2')
     m.layers.push(src('s3'), tr('t3'))
     m.ledgers[FACE].units.push(unit('u3', ['s3', 't3']))
-    m.ledgers[FACE].readingOrder.push('u3')
     numberPage(m, [FACE])
     expect(unitNo(m, FACE, 'u3')).toBe(3)
 
@@ -169,7 +158,6 @@ describe('a number its holder has lost', () => {
 
     m.layers.push(src('s4'), tr('t4'))
     m.ledgers[FACE].units.push(unit('u4', ['s4', 't4']))
-    m.ledgers[FACE].readingOrder.push('u4')
     numberPage(m, [FACE])
 
     expect(unitNo(m, FACE, 'u4')).toBe(4)
@@ -217,10 +205,7 @@ describe('a sentence in a second face', () => {
   it("reads under the number the first face's sentence over the same artwork wears", () => {
     const m = page([src('s1'), src('s2'), tr('t1'), tr('t2'), tr('g1', OTHER), tr('g2', OTHER)], {
       [FACE]: { units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])] },
-      [OTHER]: {
-        units: [unit('v1', ['s2', 'g1']), unit('v2', ['s1', 'g2'])],
-        readingOrder: ['v1', 'v2'],
-      },
+      [OTHER]: { units: [unit('v1', ['s2', 'g1']), unit('v2', ['s1', 'g2'])] },
     })
 
     numberPage(m, [FACE, OTHER])
@@ -229,27 +214,32 @@ describe('a sentence in a second face', () => {
     expect(unitNo(m, OTHER, 'v1')).toBe(2)
   })
 
+  /**
+   * `v1` is read first — it holds the block the page reads first — and takes
+   * the number of the sentence over `s3`, which is its own first member. The
+   * sentence after it can only count on.
+   */
   it('falls back to its own count when that number is already behind it', () => {
-    const m = page([src('s1'), src('s2'), tr('t1'), tr('t2'), tr('g1', OTHER), tr('g2', OTHER)], {
-      [FACE]: { units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])] },
-      [OTHER]: {
-        units: [unit('v1', ['s2', 'g1']), unit('v2', ['s1', 'g2'])],
-        readingOrder: ['v1', 'v2'],
+    const m = page(
+      [src('s1'), src('s2'), src('s3'), tr('t1'), tr('t2'), tr('t3'), tr('g1', OTHER), tr('g2', OTHER)],
+      {
+        [FACE]: {
+          units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2']), unit('u3', ['s3', 't3'])],
+        },
+        [OTHER]: { units: [unit('v1', ['s3', 's1', 'g1']), unit('v2', ['s2', 'g2'])] },
       },
-    })
+    )
 
     numberPage(m, [FACE, OTHER])
 
-    expect(unitNo(m, OTHER, 'v2')).toBe(3)
+    expect(unitNo(m, OTHER, 'v1')).toBe(3)
+    expect(unitNo(m, OTHER, 'v2')).toBe(4)
   })
 
   it('does not take a number a sentence of its own face already wears', () => {
     const m = page([src('s1'), src('s2'), tr('t1'), tr('t2'), tr('g1', OTHER), tr('g2', OTHER)], {
       [FACE]: { units: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])] },
-      [OTHER]: {
-        units: [unit('v1', ['s1', 'g1']), unit('v2', ['s2', 'g2'])],
-        readingOrder: ['v1', 'v2'],
-      },
+      [OTHER]: { units: [unit('v1', ['s1', 'g1']), unit('v2', ['s2', 'g2'])] },
     })
     m.ledgers[OTHER].units[1].no = 1
 

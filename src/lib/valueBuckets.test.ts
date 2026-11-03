@@ -138,13 +138,9 @@ describe('which body the statistics count', () => {
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: {
-      [FACE]: {
-        units: said.map((s) => s.unit),
-        readingOrder: said.map((s) => s.unit.id),
-        readingEdges: [],
-      },
-    },
+    ledgers: { [FACE]: { units: said.map((s) => s.unit) } },
+    readingOrder: said.map((s) => s.unit.members[0]),
+    readingEdges: [],
     counters: emptyCounters(),
     layers: said.flatMap((s) => s.blocks),
   }

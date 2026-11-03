@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 17
+export const MANIFEST_SCHEMA_VERSION = 18
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -288,27 +288,17 @@ export interface TranslationUnit {
 }
 
 /**
- * How one translation face cuts the page into sentences and reads them.
+ * How one translation face cuts the page into sentences.
  *
  * One per face, because each language groups the artwork's words its own way:
  * two balloons may be one sentence in one face and two in another, which is a
  * translation decision and not something faces can share. Every source block
  * belongs to exactly one unit of every ledger; a face's blocks belong to exactly
- * one unit of its own.
+ * one unit of its own. Which sentence is read first is not here: that is the
+ * page's, and a face reads it through its sentences (see `reading.ts`).
  */
 export interface Ledger {
   units: TranslationUnit[]
-  /**
-   * Every unit, in the order a reader meets them. Units and not blocks: how
-   * many blocks a sentence was split into says nothing about which comes first.
-   */
-  readingOrder: string[]
-  /**
-   * Lines drawn between units, each saying that one is read before another.
-   * Empty is the ordinary state. ⚠️ No line does not mean read together — it
-   * means nobody has said. See `readingGraph.ts`.
-   */
-  readingEdges: ReadingEdge[]
 }
 
 
@@ -342,6 +332,20 @@ export interface ManifestJson {
    * a sentence is neither.
    */
   ledgers: Record<string, Ledger>
+
+  /**
+   * The artwork's words in the order a reader meets them, by block id. Every
+   * face orders its sentences from this; a block it does not name reads after
+   * the ones it does.
+   */
+  readingOrder: string[]
+
+  /**
+   * Lines between blocks of the artwork's words, each saying that one is read
+   * before another. Empty is the ordinary state. ⚠️ No line does not mean read
+   * together — it means nobody has said. See `readingGraph.ts`.
+   */
+  readingEdges: ReadingEdge[]
 
   /**
    * The next number each container issues. Kept outside the ledgers and the

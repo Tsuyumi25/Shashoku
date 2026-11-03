@@ -62,9 +62,10 @@ function pageOf(
 ): ManifestJson {
   const page = defaultManifest(name, 1200, 1700)
   page.layers = blocks
-  for (const [face, units] of Object.entries(ledgers)) {
-    page.ledgers[face] = { units, readingOrder: units.map((u) => u.id), readingEdges: [] }
-  }
+  for (const [face, units] of Object.entries(ledgers)) page.ledgers[face] = { units }
+  const sources = new Set(blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  page.readingOrder =
+    Object.values(ledgers)[0]?.flatMap((u) => u.members.filter((id) => sources.has(id))) ?? []
   numberPage(page, Object.keys(ledgers))
   return page
 }

@@ -37,7 +37,10 @@ function group(id: string, children: LayerEntry[]): GroupLayerEntry {
   }
 }
 
-/** A page one face reads; a second ledger is laid on by the tests that want one. */
+/**
+ * A page one face reads; a second ledger is laid on by the tests that want one.
+ * The reading is the page's own, so it is given in blocks of the artwork.
+ */
 function page(
   said: Said[],
   readingOrder: string[],
@@ -50,7 +53,9 @@ function page(
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units: said.map((s) => s.unit), readingOrder, readingEdges } },
+    ledgers: { [FACE]: { units: said.map((s) => s.unit) } },
+    readingOrder,
+    readingEdges,
     counters: emptyCounters(),
     layers: [...said.flatMap((s) => s.blocks), ...extra],
   }
@@ -70,40 +75,47 @@ describe('validatePage', () => {
   it('finds nothing wrong with a page whose order covers it exactly', () => {
     const a = said('a')
     const b = said('b')
-    expect(validatePage(page([a, b], ['a', 'b']), [FACE])).toEqual([])
+    expect(validatePage(page([a, b], ['as', 'bs']), [FACE])).toEqual([])
   })
 
-  it('names a sentence the order never mentions', () => {
+  /** ⭐ A block the order leaves out reads last; nothing is missing. */
+  it('finds nothing wrong with an order that names only some of the artwork', () => {
     const a = said('a')
     const b = said('b')
-    expect(validatePage(page([a, b], ['a']), [FACE])).toEqual([
-      { kind: 'reading-order-missing', id: 'b', face: FACE },
+    expect(validatePage(page([a, b], ['as']), [FACE])).toEqual([])
+  })
+
+  it('names an order entry no block of the artwork answers to', () => {
+    const a = said('a')
+    expect(validatePage(page([a], ['as', 'ghost']), [FACE])).toEqual([
+      { kind: 'reading-order-dangling', id: 'ghost' },
     ])
   })
 
-  it('names an order entry no sentence answers to', () => {
+  /** ⭐ Lettering is read through the sentence holding it, never named itself. */
+  it('names an order entry naming lettering rather than the artwork', () => {
     const a = said('a')
-    expect(validatePage(page([a], ['a', 'ghost']), [FACE])).toEqual([
-      { kind: 'reading-order-dangling', id: 'ghost', face: FACE },
+    expect(validatePage(page([a], ['as', 'at']), [FACE])).toEqual([
+      { kind: 'reading-order-dangling', id: 'at' },
     ])
   })
 
   it('names a repeated order entry once per extra appearance', () => {
     const a = said('a')
-    expect(kinds(page([a], ['a', 'a', 'a']))).toEqual(['reading-order-duplicate'])
+    expect(kinds(page([a], ['as', 'as', 'as']))).toEqual(['reading-order-duplicate'])
   })
 
   it('names two units sharing one id', () => {
     const a = said('a')
     const twin = said('a')
     twin.blocks = []
-    const m = page([a, twin], ['a'])
+    const m = page([a, twin], ['as'])
     expect(kinds(m)).toContain('duplicate-unit-id')
   })
 
   it('names two entries sharing one id', () => {
     const a = said('a')
-    const m = page([a], ['a'], [], [group('as', [])])
+    const m = page([a], ['as'], [], [group('as', [])])
     expect(kinds(m)).toContain('duplicate-id')
   })
 })
@@ -112,7 +124,7 @@ describe('what a unit says it is made of', () => {
   it('names a member the page does not hold', () => {
     const a = said('a')
     a.unit.members = ['as', 'at', 'gone']
-    const m = page([a], ['a'])
+    const m = page([a], ['as'])
     expect(validatePage(m, [FACE])).toContainEqual({
       kind: 'unit-member-dangling',
       id: 'gone',
@@ -125,7 +137,7 @@ describe('what a unit says it is made of', () => {
     const a = said('a')
     const b = said('b')
     b.unit.members = ['bs', 'at', 'bt']
-    const m = page([a, b], ['a', 'b'])
+    const m = page([a, b], ['as', 'bs'])
     expect(kinds(m)).toContain('unit-member-shared')
   })
 
@@ -133,7 +145,7 @@ describe('what a unit says it is made of', () => {
     const a = said('a')
     a.blocks = [a.blocks[0]]
     a.unit.members = ['as']
-    expect(validatePage(page([a], ['a']), [FACE])).toContainEqual({
+    expect(validatePage(page([a], ['as']), [FACE])).toContainEqual({
       kind: 'unit-side-empty',
       id: 'a',
       side: 'translation',
@@ -145,7 +157,7 @@ describe('what a unit says it is made of', () => {
     const a = said('a')
     a.blocks = [a.blocks[1]]
     a.unit.members = ['at']
-    expect(validatePage(page([a], ['a']), [FACE])).toContainEqual({
+    expect(validatePage(page([a], []), [FACE])).toContainEqual({
       kind: 'unit-side-empty',
       id: 'a',
       side: 'source',
@@ -156,7 +168,7 @@ describe('what a unit says it is made of', () => {
   it('names a block no unit claims at all', () => {
     const a = said('a')
     const stray = blankTranslationBlock('stray', FACE, DEFAULT_TEXT_STYLE)
-    const m = page([a], ['a'], [], [stray])
+    const m = page([a], ['as'], [], [stray])
     expect(validatePage(m, [FACE])).toContainEqual({
       kind: 'unit-member-orphan',
       id: 'stray',
@@ -168,14 +180,13 @@ describe('what a unit says it is made of', () => {
     const a = said('a')
     const b = said('b')
     a.unit.members = ['as', 'gone']
-    const m = page([a, b], ['a', 'ghost'])
+    const m = page([a, b], ['as', 'ghost'])
     expect(new Set(kinds(m))).toEqual(
       new Set([
         'unit-member-dangling',
         'unit-side-empty',
         'unit-member-orphan',
         'reading-order-dangling',
-        'reading-order-missing',
       ]),
     )
   })
@@ -183,14 +194,10 @@ describe('what a unit says it is made of', () => {
 
 describe('what each face sees of the page', () => {
   it('names a block of artwork one face has left out of its ledger', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'])
+    const m = page([said('a'), said('b')], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(theirs)
-    m.ledgers[OTHER] = {
-      units: [{ id: 'ub', members: ['as', 'ct'] }],
-      readingOrder: ['ub'],
-      readingEdges: [],
-    }
+    m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'ct'] }] }
     expect(validatePage(m, [FACE, OTHER])).toContainEqual({
       kind: 'unit-member-orphan',
       id: 'bs',
@@ -200,73 +207,65 @@ describe('what each face sees of the page', () => {
 
   /** ⭐ Lettering belongs to the face that wrote it, whatever another ledger says. */
   it("names a unit holding another face's lettering", () => {
-    const m = page([said('a')], ['a'])
+    const m = page([said('a')], ['as'])
     const theirs = blankTranslationBlock('bt', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(theirs)
-    m.ledgers[OTHER] = {
-      units: [{ id: 'ub', members: ['as', 'at', 'bt'] }],
-      readingOrder: ['ub'],
-      readingEdges: [],
-    }
+    m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'at', 'bt'] }] }
     expect(validatePage(m, [FACE, OTHER])).toEqual([
       { kind: 'unit-member-foreign', id: 'at', unit: 'ub', face: OTHER },
     ])
   })
 
   it('finds nothing wrong with two faces that each read the page their own way', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'])
+    const m = page([said('a'), said('b')], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(theirs)
-    m.ledgers[OTHER] = {
-      units: [{ id: 'ub', members: ['as', 'bs', 'ct'] }],
-      readingOrder: ['ub'],
-      readingEdges: [],
-    }
+    m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'bs', 'ct'] }] }
     expect(validatePage(m, [FACE, OTHER])).toEqual([])
   })
 
   it('says nothing about a face the project does not have', () => {
-    const m = page([said('a')], ['a'])
-    m.ledgers['gone'] = { units: [{ id: 'ub', members: ['nowhere'] }], readingOrder: [], readingEdges: [] }
+    const m = page([said('a')], ['as'])
+    m.ledgers['gone'] = { units: [{ id: 'ub', members: ['nowhere'] }] }
     expect(validatePage(m, [FACE])).toEqual([])
   })
 })
 
-describe('the lines drawn between sentences', () => {
-  it('finds nothing wrong with lines between units that are all there', () => {
+describe("the lines drawn between the artwork's words", () => {
+  it('finds nothing wrong with lines between blocks that are all there', () => {
     const a = said('a')
     const b = said('b')
-    expect(validatePage(page([a, b], ['a', 'b'], edges('a>b')), [FACE])).toEqual([])
+    expect(validatePage(page([a, b], ['as', 'bs'], edges('as>bs')), [FACE])).toEqual([])
   })
 
-  it('names a line reaching for a unit that is not on the page', () => {
+  it('names a line reaching for a block that is not on the page', () => {
     const a = said('a')
-    expect(validatePage(page([a], ['a'], edges('a>ghost')), [FACE])).toEqual([
-      { kind: 'reading-edge-dangling', id: 'a', to: 'ghost', face: FACE },
+    expect(validatePage(page([a], ['as'], edges('as>ghost')), [FACE])).toEqual([
+      { kind: 'reading-edge-dangling', id: 'as', to: 'ghost' },
     ])
   })
 
-  /** ⭐ A block is not a unit: lines join sentences, not lettering. */
-  it('names a line reaching for a block rather than a sentence', () => {
+  /** ⭐ Lines join the artwork's words, never lettering. */
+  it('names a line reaching for lettering rather than the artwork', () => {
     const a = said('a')
     const b = said('b')
-    expect(validatePage(page([a, b], ['a', 'b'], edges('a>bt')), [FACE])).toEqual([
-      { kind: 'reading-edge-dangling', id: 'a', to: 'bt', face: FACE },
+    expect(validatePage(page([a, b], ['as', 'bs'], edges('as>bt')), [FACE])).toEqual([
+      { kind: 'reading-edge-dangling', id: 'as', to: 'bt' },
     ])
   })
 
   it('names the line that closes a ring', () => {
     const a = said('a')
     const b = said('b')
-    const m = page([a, b], ['a', 'b'], edges('a>b', 'b>a'))
-    expect(validatePage(m, [FACE])).toEqual([{ kind: 'reading-edge-cycle', id: 'b', to: 'a', face: FACE }])
+    const m = page([a, b], ['as', 'bs'], edges('as>bs', 'bs>as'))
+    expect(validatePage(m, [FACE])).toEqual([{ kind: 'reading-edge-cycle', id: 'bs', to: 'as' }])
   })
 
   it('leaves two chains that meet again alone, which is not a ring', () => {
     const a = said('a')
     const b = said('b')
     const c = said('c')
-    const m = page([a, b, c], ['a', 'b', 'c'], edges('a>b', 'a>c', 'b>c'))
+    const m = page([a, b, c], ['as', 'bs', 'cs'], edges('as>bs', 'as>cs', 'bs>cs'))
     expect(validatePage(m, [FACE])).toEqual([])
   })
 })

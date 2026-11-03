@@ -4,6 +4,7 @@ import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { repairPage } from './repair'
 import { validatePage } from './validate'
 import { textObjects } from './tree'
+import { facePage } from './units'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { emptyCounters } from './numbers'
@@ -39,7 +40,10 @@ function group(id: string, children: LayerEntry[]): GroupLayerEntry {
   }
 }
 
-/** A page one face reads; a second ledger is laid on by the tests that want one. */
+/**
+ * A page one face reads; a second ledger is laid on by the tests that want one.
+ * The reading is the page's own, so it is given in blocks of the artwork.
+ */
 function page(
   units: Said[],
   readingOrder: string[],
@@ -52,7 +56,9 @@ function page(
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units: units.map((s) => s.unit), readingOrder, readingEdges } },
+    ledgers: { [FACE]: { units: units.map((s) => s.unit) } },
+    readingOrder,
+    readingEdges,
     counters: emptyCounters(),
     layers: [...units.flatMap((s) => s.blocks), ...extra],
   }
@@ -73,33 +79,38 @@ function counter(): () => string {
 
 describe('repairPage', () => {
   it('leaves a sound page exactly as it was', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'])
+    const m = page([said('a'), said('b')], ['as', 'bs'])
     const { manifest, repaired } = repairPage(m, [FACE], counter())
     expect(repaired).toEqual([])
-    expect(manifest.ledgers[FACE].readingOrder).toEqual(['a', 'b'])
+    expect(manifest.readingOrder).toEqual(['as', 'bs'])
     expect(validatePage(manifest, [FACE])).toEqual([])
   })
 
-  it('puts an unmentioned sentence at the end of the order', () => {
-    const m = page([said('a'), said('b')], ['a'])
+  /**
+   * ⭐ Left unnamed rather than appended: a block the order passes over reads
+   * after the ones it names, which is what writing it down would have said.
+   */
+  it('leaves a block of artwork the order never mentions out of it', () => {
+    const m = page([said('a'), said('b')], ['as'])
     const { manifest, repaired } = repairPage(m, [FACE], counter())
-    expect(manifest.ledgers[FACE].readingOrder).toEqual(['a', 'b'])
-    expect(repaired).toEqual([{ kind: 'reading-order-missing', id: 'b', face: FACE }])
+    expect(manifest.readingOrder).toEqual(['as'])
+    expect(repaired).toEqual([])
+    expect(facePage(manifest, FACE).readingOrder).toEqual(['a', 'b'])
   })
 
   it('drops an order entry that lands on nothing', () => {
-    const { manifest } = repairPage(page([said('a')], ['a', 'ghost']), [FACE], counter())
-    expect(manifest.ledgers[FACE].readingOrder).toEqual(['a'])
+    const { manifest } = repairPage(page([said('a')], ['as', 'ghost']), [FACE], counter())
+    expect(manifest.readingOrder).toEqual(['as'])
   })
 
   it('keeps the first of a repeated entry and drops the rest', () => {
-    const { manifest } = repairPage(page([said('a')], ['a', 'a']), [FACE], counter())
-    expect(manifest.ledgers[FACE].readingOrder).toEqual(['a'])
+    const { manifest } = repairPage(page([said('a')], ['as', 'as']), [FACE], counter())
+    expect(manifest.readingOrder).toEqual(['as'])
   })
 
   it('renames the later of two entries sharing an id', () => {
     const a = said('a')
-    const m = page([a], ['a'], [], [group('as', [])])
+    const m = page([a], ['as'], [], [group('as', [])])
     const { manifest, repaired } = repairPage(m, [FACE], counter())
     expect(repaired.map((d) => d.kind)).toContain('duplicate-id')
     const ids = textObjects(manifest.layers).map((t) => t.id)
@@ -109,13 +120,13 @@ describe('repairPage', () => {
   it('answers with a page nothing is left to say about', () => {
     const a = said('a')
     a.unit.members = ['as', 'ghost']
-    const m = page([a], ['a', 'ghost'], edges('a>ghost'))
+    const m = page([a], ['as', 'ghost'], edges('as>ghost'))
     const { manifest } = repairPage(m, [FACE], counter())
     expect(validatePage(manifest, [FACE])).toEqual([])
   })
 
   it('does not write over the page it was given', () => {
-    const m = page([said('a'), said('b')], ['a'])
+    const m = page([said('a'), said('b')], ['as'])
     const before = JSON.stringify(m)
     repairPage(m, [FACE], counter())
     expect(JSON.stringify(m)).toBe(before)
@@ -128,7 +139,7 @@ describe('repairing what a unit says it is made of', () => {
     const second = blankTranslationBlock('at2', FACE, DEFAULT_TEXT_STYLE)
     a.blocks.push(second)
     a.unit.members = ['as', 'at', 'gone', 'at2']
-    const { manifest, repaired } = repairPage(page([a], ['a']), [FACE], counter())
+    const { manifest, repaired } = repairPage(page([a], ['as']), [FACE], counter())
     expect(manifest.ledgers[FACE].units[0].members).toEqual(['as', 'at', 'at2'])
     expect(repaired).toEqual([{ kind: 'unit-member-dangling', id: 'gone', unit: 'a', face: FACE }])
     expect(validatePage(manifest, [FACE])).toEqual([])
@@ -138,7 +149,7 @@ describe('repairing what a unit says it is made of', () => {
     const a = said('a')
     const b = said('b')
     b.unit.members = ['bs', 'at', 'bt']
-    const { manifest } = repairPage(page([a, b], ['a', 'b']), [FACE], counter())
+    const { manifest } = repairPage(page([a, b], ['as', 'bs']), [FACE], counter())
     const claims = manifest.ledgers[FACE].units.flatMap((u) => u.members)
     expect(claims.filter((id) => id === 'at')).toHaveLength(1)
     expect(validatePage(manifest, [FACE])).toEqual([])
@@ -154,7 +165,7 @@ describe('repairing what a unit says it is made of', () => {
     a.blocks[0].body.y = 90
     a.blocks = [a.blocks[0]]
     a.unit.members = ['as']
-    const { manifest, repaired } = repairPage(page([a], ['a']), [FACE], counter())
+    const { manifest, repaired } = repairPage(page([a], ['as']), [FACE], counter())
     expect(repaired).toEqual([{ kind: 'unit-side-empty', id: 'a', side: 'translation', face: FACE }])
     const unit = manifest.ledgers[FACE].units[0]
     expect(unit.members).toHaveLength(2)
@@ -167,7 +178,7 @@ describe('repairing what a unit says it is made of', () => {
     const a = said('a')
     a.blocks = [a.blocks[1]]
     a.unit.members = ['at']
-    const { manifest, repaired } = repairPage(page([a], ['a']), [FACE], counter())
+    const { manifest, repaired } = repairPage(page([a], []), [FACE], counter())
     expect(repaired).toEqual([{ kind: 'unit-side-empty', id: 'a', side: 'source', face: FACE }])
     const unit = manifest.ledgers[FACE].units[0]
     expect(unit.members[1]).toBe('at')
@@ -179,29 +190,26 @@ describe('repairing what a unit says it is made of', () => {
   it('stands a block no unit claims up as its own sentence', () => {
     const a = said('a')
     const stray = blankTranslationBlock('stray', FACE, DEFAULT_TEXT_STYLE)
-    const { manifest } = repairPage(page([a], ['a'], [], [stray]), [FACE], counter())
+    const { manifest } = repairPage(page([a], ['as'], [], [stray]), [FACE], counter())
     const ledger = manifest.ledgers[FACE]
     expect(ledger.units).toHaveLength(2)
     const own = ledger.units.find((u) => u.members.includes('stray'))
     expect(own?.members).toHaveLength(2)
     expect(textObjects(manifest.layers).find((t) => t.id === own?.members[0])?.side).toBe('source')
-    expect(ledger.readingOrder).toContain(own?.id)
+    expect(facePage(manifest, FACE).readingOrder).toContain(own?.id)
     expect(validatePage(manifest, [FACE])).toEqual([])
   })
 })
 
 describe('repairing a page more than one face reads', () => {
   it('gives a face with no ledger of its own a sentence per block of artwork', () => {
-    const m = page([said('a')], ['a'])
+    const m = page([said('a')], ['as'])
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
-    expect(repaired).toEqual([
-      { kind: 'unit-member-orphan', id: 'as', face: OTHER },
-      { kind: 'reading-order-missing', id: expect.any(String), face: OTHER },
-    ])
+    expect(repaired).toEqual([{ kind: 'unit-member-orphan', id: 'as', face: OTHER }])
     const ledger = manifest.ledgers[OTHER]
     expect(ledger.units).toHaveLength(1)
     expect(ledger.units[0].members[0]).toBe('as')
-    expect(ledger.readingOrder).toEqual([ledger.units[0].id])
+    expect(facePage(manifest, OTHER).readingOrder).toEqual([ledger.units[0].id])
     expect(manifest.ledgers[FACE].units).toMatchObject([{ id: 'a', members: ['as', 'at'] }])
     expect(validatePage(manifest, [FACE, OTHER])).toEqual([])
   })
@@ -210,19 +218,12 @@ describe('repairing a page more than one face reads', () => {
     const a = said('a')
     const b = said('b')
     b.blocks[0].body.x = 70
-    const m = page([a, b], ['a', 'b'])
+    const m = page([a, b], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(theirs)
-    m.ledgers[OTHER] = {
-      units: [{ id: 'ub', members: ['as', 'ct'] }],
-      readingOrder: ['ub'],
-      readingEdges: [],
-    }
+    m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'ct'] }] }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
-    expect(repaired).toEqual([
-      { kind: 'unit-member-orphan', id: 'bs', face: OTHER },
-      { kind: 'reading-order-missing', id: expect.any(String), face: OTHER },
-    ])
+    expect(repaired).toEqual([{ kind: 'unit-member-orphan', id: 'bs', face: OTHER }])
     const ledger = manifest.ledgers[OTHER]
     expect(ledger.units).toHaveLength(2)
     const own = ledger.units.find((u) => u.members.includes('bs'))!
@@ -235,14 +236,10 @@ describe('repairing a page more than one face reads', () => {
   })
 
   it("takes another face's lettering out of a unit and leaves its own alone", () => {
-    const m = page([said('a')], ['a'])
+    const m = page([said('a')], ['as'])
     const theirs = blankTranslationBlock('bt', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(theirs)
-    m.ledgers[OTHER] = {
-      units: [{ id: 'ub', members: ['as', 'at', 'bt'] }],
-      readingOrder: ['ub'],
-      readingEdges: [],
-    }
+    m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'at', 'bt'] }] }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
     expect(repaired).toEqual([
       { kind: 'unit-member-foreign', id: 'at', unit: 'ub', face: OTHER },
@@ -256,7 +253,7 @@ describe('repairing a page more than one face reads', () => {
   it('mends a block of artwork two units of one face claim, and seats the blank in the other', () => {
     const a = said('a')
     const b = said('b')
-    const m = page([a, b], ['a', 'b'])
+    const m = page([a, b], ['as', 'bs'])
     const mine = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
     const theirs = blankTranslationBlock('dt', OTHER, DEFAULT_TEXT_STYLE)
     m.layers.push(mine, theirs)
@@ -265,8 +262,6 @@ describe('repairing a page more than one face reads', () => {
         { id: 'uc', members: ['as', 'bs', 'ct'] },
         { id: 'ud', members: ['bs', 'dt'] },
       ],
-      readingOrder: ['uc', 'ud'],
-      readingEdges: [],
     }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
     expect(manifest.ledgers[OTHER].units).toMatchObject([
@@ -278,7 +273,6 @@ describe('repairing a page more than one face reads', () => {
       { kind: 'unit-member-shared', id: 'bs', unit: 'ud', face: OTHER },
       { kind: 'unit-side-empty', id: 'ud', side: 'source', face: OTHER },
       { kind: 'unit-member-orphan', id: blank, face: FACE },
-      { kind: 'reading-order-missing', id: expect.any(String), face: FACE },
     ])
     expect(manifest.ledgers[FACE].units).toHaveLength(3)
     expect(manifest.ledgers[FACE].units[2].members[0]).toBe(blank)
@@ -286,51 +280,36 @@ describe('repairing a page more than one face reads', () => {
   })
 })
 
-describe('repairing the lines drawn between sentences', () => {
+describe("repairing the lines drawn between the artwork's words", () => {
   it('leaves sound lines exactly as they were', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'], edges('a>b'))
+    const m = page([said('a'), said('b')], ['as', 'bs'], edges('as>bs'))
     const { manifest, repaired } = repairPage(m, [FACE], counter())
-    expect(manifest.ledgers[FACE].readingEdges).toEqual(edges('a>b'))
+    expect(manifest.readingEdges).toEqual(edges('as>bs'))
     expect(repaired).toEqual([])
   })
 
-  it('drops a line reaching for a sentence that is not on the page', () => {
-    const m = page([said('a')], ['a'], edges('a>ghost'))
+  it('drops a line reaching for a block that is not on the page', () => {
+    const m = page([said('a')], ['as'], edges('as>ghost'))
     const { manifest, repaired } = repairPage(m, [FACE], counter())
-    expect(manifest.ledgers[FACE].readingEdges).toEqual([])
-    expect(repaired).toEqual([{ kind: 'reading-edge-dangling', id: 'a', to: 'ghost', face: FACE }])
+    expect(manifest.readingEdges).toEqual([])
+    expect(repaired).toEqual([{ kind: 'reading-edge-dangling', id: 'as', to: 'ghost' }])
   })
 
   it('opens the ring rather than refusing the page', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'], edges('a>b', 'b>a'))
+    const m = page([said('a'), said('b')], ['as', 'bs'], edges('as>bs', 'bs>as'))
     const { manifest, repaired } = repairPage(m, [FACE], counter())
-    expect(manifest.ledgers[FACE].readingEdges).toEqual(edges('a>b'))
-    expect(repaired).toEqual([{ kind: 'reading-edge-cycle', id: 'b', to: 'a', face: FACE }])
+    expect(manifest.readingEdges).toEqual(edges('as>bs'))
+    expect(repaired).toEqual([{ kind: 'reading-edge-cycle', id: 'bs', to: 'as' }])
   })
 
   it('leaves a page whose lines meet again untouched', () => {
-    const m = page([said('a'), said('b'), said('c')], ['a', 'b', 'c'], edges('a>b', 'a>c', 'b>c'))
+    const m = page(
+      [said('a'), said('b'), said('c')],
+      ['as', 'bs', 'cs'],
+      edges('as>bs', 'as>cs', 'bs>cs'),
+    )
     const { manifest, repaired } = repairPage(m, [FACE], counter())
-    expect(manifest.ledgers[FACE].readingEdges).toEqual(edges('a>b', 'a>c', 'b>c'))
+    expect(manifest.readingEdges).toEqual(edges('as>bs', 'as>cs', 'bs>cs'))
     expect(repaired).toEqual([])
-  })
-
-  it('mends one face\u2019s lines without touching another\u2019s', () => {
-    const m = page([said('a'), said('b')], ['a', 'b'], edges('a>b'))
-    const mine = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
-    const theirs = blankTranslationBlock('dt', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(mine, theirs)
-    m.ledgers[OTHER] = {
-      units: [
-        { id: 'uc', members: ['as', 'ct'] },
-        { id: 'ud', members: ['bs', 'dt'] },
-      ],
-      readingOrder: ['uc', 'ud'],
-      readingEdges: edges('uc>ud', 'ud>uc'),
-    }
-    const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
-    expect(repaired).toEqual([{ kind: 'reading-edge-cycle', id: 'ud', to: 'uc', face: OTHER }])
-    expect(manifest.ledgers[FACE].readingEdges).toEqual(edges('a>b'))
-    expect(manifest.ledgers[OTHER].readingEdges).toEqual(edges('uc>ud'))
   })
 })

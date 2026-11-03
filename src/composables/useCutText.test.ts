@@ -44,9 +44,9 @@ function open(words: string[], candidates: TranslationCandidate[] = [], chosen: 
         name: 'p',
         width: 1200,
         height: 1700,
-        ledgers: {
-          [FACE]: { units: [{ id: 'u', members: ['s', 't'] }], readingOrder: ['u'], readingEdges: [] },
-        },
+        ledgers: { [FACE]: { units: [{ id: 'u', members: ['s', 't'] }] } },
+        readingOrder: ['s'],
+        readingEdges: [],
         counters: emptyCounters(),
         layers: [lettering, artwork],
       },

@@ -1320,7 +1320,7 @@ function objectAt(p: Anchor): string | null {
 }
 
 const heldEdges = computed<readonly ReadingEdge[]>(
-  () => currentFile.value?.page.ledgers[project.activeFace]?.readingEdges ?? [],
+  () => (currentFile.value ? project.readingEdgesOf(currentFile.value.pageId) : []),
 )
 
 function toScreen(p: Anchor): Anchor {

@@ -41,12 +41,9 @@ function manifestOf(layers: LayerEntry[], ledgers: Record<string, TranslationUni
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: Object.fromEntries(
-      Object.entries(ledgers).map(([face, units]) => [
-        face,
-        { units, readingOrder: units.map((u) => u.id), readingEdges: [] },
-      ]),
-    ),
+    ledgers: Object.fromEntries(Object.entries(ledgers).map(([face, units]) => [face, { units }])),
+    readingOrder: [],
+    readingEdges: [],
     counters: emptyCounters(),
     layers,
   }
@@ -137,13 +134,24 @@ describe('Ctrl+L', () => {
     expect(block.body.chosen).toBe('c')
   })
 
-  it('carries the lines drawn to a folded sentence over to the one it joined', () => {
-    const page = facePage(gasps(), FACE)
-    page.readingEdges = [
-      { from: 'u2', to: 'u3' },
-      { from: 'u1', to: 'u2' },
+  /**
+   * ⭐ Nothing is rewritten: the lines belong to the artwork, and folding two
+   * sentences into one only changes what this face sees of them.
+   */
+  it('leaves the lines where they were, so one into a folded sentence reads from the one it joined', () => {
+    const m = gasps()
+    const page = facePage(m, FACE)
+    m.readingEdges = [
+      { from: 's2', to: 's3' },
+      { from: 's1', to: 's2' },
     ]
+
     relink(page, ['t1', 't2'], newId, DEFAULT_TEXT_STYLE)
+
+    expect(m.readingEdges).toEqual([
+      { from: 's2', to: 's3' },
+      { from: 's1', to: 's2' },
+    ])
     expect(page.readingEdges).toEqual([{ from: 'u1', to: 'u3' }])
   })
 })
@@ -156,6 +164,17 @@ describe('Ctrl+Shift+L', () => {
     const page = facePage(m, FACE)
     expect(detach(page, ['b'], newId, DEFAULT_TEXT_STYLE)).toBe(true)
     expect(read(page)).toEqual(['ドキ | 撲', '□ | 通', 'はぁ | 哈'])
+    expect(validatePage(m, [FACE])).toEqual([])
+  })
+
+  it("keeps a sentence's place when it loses the only word of the artwork it read by", () => {
+    const m = manifestOf([src('s1', 'あ'), tr('t1', '一'), src('s2', 'い'), tr('t2', '二')], {
+      [FACE]: [unit('u1', ['s1', 't1']), unit('u2', ['s2', 't2'])],
+    })
+    m.readingOrder = ['s1', 's2']
+    const page = facePage(m, FACE)
+    expect(detach(page, ['s1'], newId, DEFAULT_TEXT_STYLE)).toBe(true)
+    expect(read(page)).toEqual(['□ | 一', 'あ | □', 'い | 二'])
     expect(validatePage(m, [FACE])).toEqual([])
   })
 
@@ -223,10 +242,10 @@ describe('adoptSources', () => {
   })
 
   /** The blank source a regroup in one face had to create is a block every other face now has to place. */
-  it('places a source block a regroup in another face created, reading it last', () => {
+  it('places a source block a regroup in another face created, reading it where the page reads it', () => {
     const m = gasps([FACE, OTHER])
     const page = facePage(m, FACE)
-    detach(page, ['s3'], newId, DEFAULT_TEXT_STYLE, true)
+    detach(page, ['t3'], newId, DEFAULT_TEXT_STYLE, true)
     expect(validatePage(m, [FACE, OTHER])).toContainEqual(
       expect.objectContaining({ kind: 'unit-member-orphan', face: OTHER }),
     )
@@ -234,7 +253,7 @@ describe('adoptSources', () => {
     adoptSources(m, [FACE, OTHER], newId, DEFAULT_TEXT_STYLE)
 
     const other = facePage(m, OTHER)
-    expect(read(other)).toEqual(['はぁ | ハ', 'はっ | ハ', 'れろ | ペロ', '□ | ん', '□ | □'])
+    expect(read(other)).toEqual(['はぁ | ハ', 'はっ | ハ', 'れろ | ペロ', '□ | □', '□ | ん'])
     expect(validatePage(m, [FACE, OTHER])).toEqual([])
   })
 

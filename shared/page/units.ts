@@ -14,6 +14,7 @@ import { linesOf } from './text'
 import { plainOf } from './markup'
 import { normalizeTagSet } from '../tags/set'
 import { textObjects } from './tree'
+import { projectedEdges, projectedOrder } from './reading'
 
 /**
  * What stands between the blocks of one sentence when it is read as one
@@ -24,29 +25,31 @@ import { textObjects } from './tree'
 export const BLOCK_JOINER = '/'
 
 export function emptyLedger(): Ledger {
-  return { units: [], readingOrder: [], readingEdges: [] }
+  return { units: [] }
 }
 
 /**
- * A page as one translation face reads it: the shared tree, and that face's
- * ledger.
+ * A page as one translation face reads it: the shared tree, that face's
+ * sentences, and the page's reading seen through them.
  *
- * The ledger fields read and write straight through to the manifest, so code
- * that reassigns `page.readingOrder` is writing the face's ledger and nothing
- * else.
+ * `units` reads and writes straight through to the face's ledger. The reading
+ * fields are read-only projections: the reading belongs to the artwork, and is
+ * changed through `reading.ts` on `manifest`.
  */
 export interface FacePage {
   readonly face: string
+  readonly manifest: ManifestJson
   layers: LayerEntry[]
   units: TranslationUnit[]
-  readingOrder: string[]
-  readingEdges: ReadingEdge[]
+  readonly readingOrder: string[]
+  readonly readingEdges: ReadingEdge[]
 }
 
 export function facePage(manifest: ManifestJson, face: string): FacePage {
   const ledger = (): Ledger => (manifest.ledgers[face] ??= emptyLedger())
   return {
     face,
+    manifest,
     get layers() {
       return manifest.layers
     },
@@ -60,16 +63,10 @@ export function facePage(manifest: ManifestJson, face: string): FacePage {
       ledger().units = v
     },
     get readingOrder() {
-      return ledger().readingOrder
-    },
-    set readingOrder(v) {
-      ledger().readingOrder = v
+      return projectedOrder(manifest, ledger().units)
     },
     get readingEdges() {
-      return ledger().readingEdges
-    },
-    set readingEdges(v) {
-      ledger().readingEdges = v
+      return projectedEdges(manifest, ledger().units)
     },
   }
 }

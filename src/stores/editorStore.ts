@@ -1674,7 +1674,12 @@ export const useEditorStore = defineStore('editor', () => {
     adoptSources(draft, project.faceIds, generateLabelId, project.header.seedStyle)
     numberPage(draft, project.faceIds)
     project.raiseCounters(at.pageId, draft.counters)
-    const after: PageStructure = { ledgers: draft.ledgers, layers: draft.layers }
+    const after: PageStructure = {
+      ledgers: draft.ledgers,
+      layers: draft.layers,
+      readingOrder: draft.readingOrder,
+      readingEdges: draft.readingEdges,
+    }
     pushCommand({
       label: `${label} ${at.ids.length}`,
       detail: { page: at.pageId, ids: at.ids },
@@ -2925,24 +2930,22 @@ export const useEditorStore = defineStore('editor', () => {
    *
    * Applied first, like a restack: the lines a page refuses — a ring, or one
    * already drawn — must not reach the stack as an entry that undoes to
-   * nothing. What is recorded is what the page actually took, so taking the
-   * gesture back cannot rub out a line that was there before it.
+   * nothing. What is recorded is the artwork's lines the page actually took,
+   * so taking the gesture back cannot rub out a line that was there before it,
+   * and is the same whichever face is being looked at by then.
    */
   function cmdDrawReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
     // Where an object is read is one of the things a lock is put on to hold
     // still, and a line is a statement about exactly that.
     const allowed = edges.filter((e) => !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to))
-    const face = project.activeFace
-    const taken = project.addReadingEdges(pageId, allowed, face)
+    const taken = project.addReadingEdges(pageId, allowed)
     if (taken.length === 0) return
     pushCommand(
       {
         label: `draw-reading-edges ${taken.length}`,
-        do: () => {
-          project.addReadingEdges(pageId, taken, face)
-        },
-        undo: () => project.removeReadingEdges(pageId, taken, face),
+        do: () => project.addSourceEdges(pageId, taken),
+        undo: () => project.removeSourceEdges(pageId, taken),
       },
       { alreadyApplied: true },
     )
@@ -2950,18 +2953,18 @@ export const useEditorStore = defineStore('editor', () => {
 
   function cmdEraseReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
-    const face = project.activeFace
-    const held = project.readingEdgesOf(pageId, face)
+    const held = project.readingEdgesOf(pageId)
     const going = edges.filter(
       (e) => hasEdge(held, e) && !isUnitLocked(pageId, e.from) && !isUnitLocked(pageId, e.to),
     )
     if (going.length === 0) return
+    let taken: ReadingEdge[] = []
     pushCommand({
       label: `erase-reading-edges ${going.length}`,
-      do: () => project.removeReadingEdges(pageId, going, face),
-      undo: () => {
-        project.addReadingEdges(pageId, going, face)
+      do: () => {
+        taken = project.removeReadingEdges(pageId, going)
       },
+      undo: () => project.addSourceEdges(pageId, taken),
     })
   }
 

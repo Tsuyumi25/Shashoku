@@ -21,7 +21,9 @@ function page(): ProjectFile {
       name: 'p',
       width: 1200,
       height: 1700,
-      ledgers: { [FACE]: { units: [{ id: 'u', members: ['s', 'a'] }], readingOrder: ['u'], readingEdges: [] } },
+      ledgers: { [FACE]: { units: [{ id: 'u', members: ['s', 'a'] }] } },
+      readingOrder: ['s'],
+      readingEdges: [],
       counters: emptyCounters(),
       layers: [
         blankTranslationBlock('a', FACE, DEFAULT_TEXT_STYLE),
@@ -81,7 +83,7 @@ describe('thumbnailKey', () => {
   // what the page looks like.
   it('is unchanged by the page being reordered for reading', async () => {
     const reordered = page()
-    reordered.page.ledgers[FACE].readingOrder = ['zz', 'u']
+    reordered.page.readingOrder = ['zz', 's']
 
     expect(await thumbnailKey(reordered, FACE)).toBe(await thumbnailKey(page(), FACE))
   })

@@ -54,7 +54,9 @@ function manifestOf(layers: LayerEntry[], units: TranslationUnit[], face = FACE)
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [face]: { units, readingOrder: units.map((u) => u.id), readingEdges: [] } },
+    ledgers: { [face]: { units } },
+    readingOrder: [],
+    readingEdges: [],
     counters: emptyCounters(),
     layers,
   }
@@ -72,9 +74,9 @@ describe('facePage', () => {
     const manifest = manifestOf(SOUND, [SPLIT])
     const page = facePage(manifest, FACE)
 
-    page.readingOrder = ['u1', 'u2']
+    page.units = [unit('u2', ['s', 't1'])]
 
-    expect(manifest.ledgers[FACE]?.readingOrder).toEqual(['u1', 'u2'])
+    expect(manifest.ledgers[FACE]?.units.map((u) => u.id)).toEqual(['u2'])
     expect(page.units).toBe(manifest.ledgers[FACE]?.units)
   })
 
@@ -255,21 +257,16 @@ describe('tagsOfUnit', () => {
 })
 
 describe('unitsInReadingOrder', () => {
-  it('follows the order and never falls back to the tree', () => {
-    const page = pageOf(SOUND, [unit('a', ['s']), unit('b', ['t1'])])
-    page.readingOrder = ['b', 'a']
+  const TWO = [src('s1', ['ゴ']), tr('t1', ['轟']), src('s2', ['ゴゴ']), tr('t2', ['隆'])]
+
+  it("follows the page's reading of the artwork, not the tree", () => {
+    const manifest = manifestOf(TWO, [unit('a', ['s1', 't1']), unit('b', ['s2', 't2'])])
+    manifest.readingOrder = ['s2', 's1']
+    expect(unitsInReadingOrder(facePage(manifest, FACE)).map((u) => u.id)).toEqual(['b', 'a'])
+  })
+
+  it('reads a sentence holding no block of the artwork last', () => {
+    const page = pageOf(TWO, [unit('a', ['t1']), unit('b', ['s1', 's2', 't2'])])
     expect(unitsInReadingOrder(page).map((u) => u.id)).toEqual(['b', 'a'])
-  })
-
-  it('leaves out a sentence the order does not name', () => {
-    const page = pageOf(SOUND, [unit('a', ['s']), unit('b', ['t1'])])
-    page.readingOrder = ['a']
-    expect(unitsInReadingOrder(page).map((u) => u.id)).toEqual(['a'])
-  })
-
-  it('reads a sentence the order names twice only once', () => {
-    const page = pageOf(SOUND, [unit('a', ['s']), unit('b', ['t1'])])
-    page.readingOrder = ['a', 'b', 'a']
-    expect(unitsInReadingOrder(page).map((u) => u.id)).toEqual(['a', 'b'])
   })
 })

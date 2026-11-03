@@ -23,13 +23,11 @@ export type PageDefectKind =
   | 'unit-side-empty'
   /** A block no unit of a ledger claims, so nothing says what it is in that face. */
   | 'unit-member-orphan'
-  /** The reading order names the same unit more than once. */
+  /** The page's reading order names the same block of the artwork more than once. */
   | 'reading-order-duplicate'
-  /** The reading order names something no unit answers to. */
+  /** The page's reading order names something that is no block of the artwork on the page. */
   | 'reading-order-dangling'
-  /** A unit the reading order never names. */
-  | 'reading-order-missing'
-  /** A line with an end on something no unit of the ledger answers to. */
+  /** A line with an end on something that is no block of the artwork on the page. */
   | 'reading-edge-dangling'
   /** A line that closes a ring, which no reading of a page can mean. */
   | 'reading-edge-cycle'
@@ -37,7 +35,7 @@ export type PageDefectKind =
 export interface PageDefect {
   kind: PageDefectKind
   id: string
-  /** Which face's ledger the fault was found in. Absent for one about the tree. */
+  /** Which face's ledger the fault was found in. Absent for one about the tree or the page's reading. */
   face?: string
   /** The far end, for a fault about a line. Absent for every other kind. */
   to?: string
@@ -59,18 +57,17 @@ export interface PageDefect {
  */
 export function siftReadingEdges(
   edges: readonly ReadingEdge[],
-  unitIds: ReadonlySet<string>,
-  face: string,
+  ids: ReadonlySet<string>,
 ): { kept: ReadingEdge[]; defects: PageDefect[] } {
   const kept: ReadingEdge[] = []
   const defects: PageDefect[] = []
   for (const edge of edges) {
-    if (!unitIds.has(edge.from) || !unitIds.has(edge.to)) {
-      defects.push({ kind: 'reading-edge-dangling', id: edge.from, to: edge.to, face })
+    if (!ids.has(edge.from) || !ids.has(edge.to)) {
+      defects.push({ kind: 'reading-edge-dangling', id: edge.from, to: edge.to })
       continue
     }
     if (wouldCycle(kept, edge)) {
-      defects.push({ kind: 'reading-edge-cycle', id: edge.from, to: edge.to, face })
+      defects.push({ kind: 'reading-edge-cycle', id: edge.from, to: edge.to })
       continue
     }
     kept.push(edge)

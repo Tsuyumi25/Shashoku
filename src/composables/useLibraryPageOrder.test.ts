@@ -56,6 +56,8 @@ function pageOf(pageId: string): ProjectFile {
       width: 100,
       height: 100,
       ledgers: {},
+      readingOrder: [],
+      readingEdges: [],
       counters: emptyCounters(),
       layers: [],
     },

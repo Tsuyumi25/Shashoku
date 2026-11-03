@@ -24,11 +24,8 @@ function openWith(project: Project, words: string[] = [], over: Partial<Translat
   lettering.body = { ...lettering.body, lines: words, ...over }
   const page = defaultManifest('p', 1200, 1700)
   page.layers = [artwork, lettering]
-  page.ledgers[FACE] = {
-    units: [{ id: 'u-obj', members: [artwork.id, lettering.id] }],
-    readingOrder: ['u-obj'],
-    readingEdges: [],
-  }
+  page.ledgers[FACE] = { units: [{ id: 'u-obj', members: [artwork.id, lettering.id] }] }
+  page.readingOrder = [artwork.id]
   project.allFiles = [{ pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge: 'ok' }]
 }
 

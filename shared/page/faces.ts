@@ -3,10 +3,10 @@ import { pathOf, removeAtPath, textObjects } from './tree'
 import { emptyLedger, facePage } from './units'
 
 /**
- * A new face lettered the way an existing one is: every sentence and its
- * reading carried over under new ids, every block of lettering copied where it
- * stands and how it looks, with no words and no candidates. The artwork's words
- * are shared, so they are the same blocks.
+ * A new face lettered the way an existing one is: every sentence carried over
+ * under a new id, every block of lettering copied where it stands and how it
+ * looks, with no words and no candidates. The artwork's words and the page's
+ * reading are shared, so the new face reads in the same order from the start.
  *
  * Numbers are copied too, sentences and blocks alike, so a sentence reads under
  * the same name in both faces until one of them regroups it.
@@ -18,7 +18,6 @@ export function copyFace(manifest: ManifestJson, from: string, to: string, newId
       .filter((t): t is TranslationTextLayerEntry => t.side === 'translation' && t.face === from)
       .map((t) => [t.id, t]),
   )
-  const unitIds = new Map<string, string>()
   const copied = emptyLedger()
   const counters = manifest.counters
   if (counters.units[from] !== undefined) counters.units[to] = counters.units[from]
@@ -39,16 +38,9 @@ export function copyFace(manifest: ManifestJson, from: string, to: string, newId
       manifest.layers.push(copy)
       return copy.id
     })
-    unitIds.set(unit.id, unitId)
     copied.units.push({ id: unitId, ...(unit.no === undefined ? {} : { no: unit.no }), members })
     if (counters.blocks[unit.id] !== undefined) counters.blocks[unitId] = counters.blocks[unit.id]
   }
-  copied.readingOrder = template.readingOrder.flatMap((id) => unitIds.get(id) ?? [])
-  copied.readingEdges = template.readingEdges.flatMap((e) => {
-    const a = unitIds.get(e.from)
-    const b = unitIds.get(e.to)
-    return a !== undefined && b !== undefined ? [{ from: a, to: b }] : []
-  })
   manifest.ledgers[to] = copied
 }
 

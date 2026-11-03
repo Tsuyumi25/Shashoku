@@ -18,7 +18,7 @@ import type {
   TranslationUnit,
 } from './types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
-import { normalizeEdges, type ReadingEdge } from './readingGraph'
+import { hasEdge, normalizeEdges, wouldCycle, type ReadingEdge } from './readingGraph'
 import { linesOf } from './text'
 import { BLOCK_JOINER, shownCodeOf } from './units'
 import { escapeText } from './markup'
@@ -63,10 +63,13 @@ const PLAIN_TEXT_VERSION = 13
  * style parser already does with a key that is not there — a character scale
  * absent means the face's own proportions — except for the escaping below.
  */
-const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, MANIFEST_SCHEMA_VERSION]
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, 17, MANIFEST_SCHEMA_VERSION]
 
 /** The last version that held one ledger for the page, with candidates on the unit. */
 const ONE_LEDGER_VERSION = 15
+
+/** The last version whose ledgers each held their own reading, between sentences. */
+const FACE_READING_VERSION = 17
 
 
 export class PageParseError extends Error {}
@@ -365,24 +368,77 @@ function parseUnits(v: unknown, at: string): TranslationUnit[] {
   })
 }
 
-function parseLedger(v: unknown, at: string): Ledger {
-  if (!isRecord(v)) fail(`${at} 必須是物件`)
-  return {
-    units: parseUnits(v.units, `${at}.units`),
-    readingOrder: parseIdList(v.readingOrder ?? [], `${at}.readingOrder`),
-    readingEdges: parseReadingEdges(v.readingEdges, `${at}.readingEdges`),
-  }
+/** A sentence-level reading as a page from before v18 held it, per ledger. */
+interface SentenceReading {
+  face: string
+  units: TranslationUnit[]
+  order: string[]
+  edges: ReadingEdge[]
 }
 
-function parseLedgers(v: unknown): Record<string, Ledger> {
+function parseLedgers(v: unknown, sentenceReadings: SentenceReading[] | null): Record<string, Ledger> {
   if (v === undefined) return {}
   if (!isRecord(v)) fail('manifest.json.ledgers 必須是物件')
   const out: Record<string, Ledger> = {}
   for (const [face, ledger] of Object.entries(v)) {
     if (face.length === 0) fail('manifest.json.ledgers 的 key 必須是非空字串')
-    out[face] = parseLedger(ledger, `manifest.json.ledgers.${face}`)
+    const at = `manifest.json.ledgers.${face}`
+    if (!isRecord(ledger)) fail(`${at} 必須是物件`)
+    out[face] = { units: parseUnits(ledger.units, `${at}.units`) }
+    sentenceReadings?.push({
+      face,
+      units: out[face].units,
+      order: parseIdList(ledger.readingOrder ?? [], `${at}.readingOrder`),
+      edges: parseReadingEdges(ledger.readingEdges, `${at}.readingEdges`),
+    })
   }
   return out
+}
+
+/**
+ * Sentence-level readings lifted onto the artwork's words, as a page from
+ * before v18 is opened. The order is `primary`'s: its sentences' words, each
+ * sentence's in the order it reads them. Lines come from every ledger, each
+ * landing between the last word of one sentence and the first of the next;
+ * one that would close a ring, or repeats one, is dropped.
+ */
+function liftReading(
+  layers: readonly LayerEntry[],
+  readings: readonly SentenceReading[],
+  primary: string,
+): { readingOrder: string[]; readingEdges: ReadingEdge[] } {
+  const sources = new Set(textObjects(layers).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  const wordsOf = (unit: TranslationUnit) => unit.members.filter((id) => sources.has(id))
+  const first = readings.find((r) => r.face === primary) ?? readings[0]
+  const readingOrder: string[] = []
+  if (first) {
+    const byId = new Map(first.units.map((u) => [u.id, u]))
+    const placed = new Set<string>()
+    for (const id of first.order) {
+      const unit = byId.get(id)
+      if (!unit) continue
+      for (const word of wordsOf(unit)) {
+        if (placed.has(word)) continue
+        placed.add(word)
+        readingOrder.push(word)
+      }
+    }
+  }
+  const readingEdges: ReadingEdge[] = []
+  for (const reading of readings) {
+    const byId = new Map(reading.units.map((u) => [u.id, u]))
+    for (const edge of reading.edges) {
+      const a = byId.get(edge.from)
+      const b = byId.get(edge.to)
+      const from = a && wordsOf(a).at(-1)
+      const to = b && wordsOf(b)[0]
+      if (!from || !to || from === to) continue
+      const lifted = { from, to }
+      if (hasEdge(readingEdges, lifted) || wouldCycle(readingEdges, lifted)) continue
+      readingEdges.push(lifted)
+    }
+  }
+  return { readingOrder, readingEdges }
 }
 
 /**
@@ -514,6 +570,8 @@ export function defaultManifest(name: string, width: number, height: number): Ma
     width,
     height,
     ledgers: {},
+    readingOrder: [],
+    readingEdges: [],
     counters: emptyCounters(),
     layers: [],
   }
@@ -701,25 +759,50 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
   }
 
   let ledgers: Record<string, Ledger>
+  let reading: { readingOrder: string[]; readingEdges: ReadingEdge[] }
   if (legacy) {
     const units = parseLegacyUnits(data.translationUnits, 'manifest.json.translationUnits')
     if (data.schemaVersion === PLAIN_TEXT_VERSION)
       for (const unit of units)
         for (const candidate of unit.candidates)
           candidate.pieces = candidate.pieces.map((piece) => piece.map(escapeText))
-    ledgers = {
-      [legacyFace]: {
-        units: migrateLegacyUnits(layers, units, legacyFace),
-        readingOrder: parseIdList(data.readingOrder ?? [], 'manifest.json.readingOrder'),
-        readingEdges: parseReadingEdges(data.readingEdges, 'manifest.json.readingEdges'),
-      },
-    }
+    const migrated = migrateLegacyUnits(layers, units, legacyFace)
+    ledgers = { [legacyFace]: { units: migrated } }
+    reading = liftReading(
+      layers,
+      [
+        {
+          face: legacyFace,
+          units: migrated,
+          order: parseIdList(data.readingOrder ?? [], 'manifest.json.readingOrder'),
+          edges: parseReadingEdges(data.readingEdges, 'manifest.json.readingEdges'),
+        },
+      ],
+      legacyFace,
+    )
+  } else if ((data.schemaVersion as number) <= FACE_READING_VERSION) {
+    const readings: SentenceReading[] = []
+    ledgers = parseLedgers(data.ledgers, readings)
+    reading = liftReading(layers, readings, legacyFace)
   } else {
-    ledgers = parseLedgers(data.ledgers)
+    ledgers = parseLedgers(data.ledgers, null)
+    reading = {
+      readingOrder: parseIdList(data.readingOrder ?? [], 'manifest.json.readingOrder'),
+      readingEdges: parseReadingEdges(data.readingEdges, 'manifest.json.readingEdges'),
+    }
   }
 
   const counters = parseCounters(data.counters)
-  return { schemaVersion: MANIFEST_SCHEMA_VERSION, revision, name: data.name, ...size, ledgers, counters, layers }
+  return {
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    revision,
+    name: data.name,
+    ...size,
+    ledgers,
+    ...reading,
+    counters,
+    layers,
+  }
 }
 
 function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
@@ -770,12 +853,9 @@ function serializeLayerEntry(l: LayerEntry): Record<string, unknown> {
 }
 
 function serializeLedger(ledger: Ledger): Record<string, unknown> {
-  const out: Record<string, unknown> = {
+  return {
     units: ledger.units.map((u) => ({ id: u.id, ...(u.no === undefined ? {} : { no: u.no }), members: u.members })),
-    readingOrder: ledger.readingOrder,
   }
-  if (ledger.readingEdges.length > 0) out.readingEdges = normalizeEdges(ledger.readingEdges)
-  return out
 }
 
 function serializeBody(body: TextBody): Record<string, unknown> {
@@ -826,6 +906,8 @@ export function serializeManifest(m: ManifestJson): string {
     height: m.height,
   }
   out.ledgers = Object.fromEntries(Object.entries(m.ledgers).map(([face, l]) => [face, serializeLedger(l)]))
+  out.readingOrder = m.readingOrder
+  if (m.readingEdges.length > 0) out.readingEdges = normalizeEdges(m.readingEdges)
   out.counters = m.counters
   out.layers = m.layers.map(serializeLayerEntry)
   return `${JSON.stringify(out, null, 2)}\n`

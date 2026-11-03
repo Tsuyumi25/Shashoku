@@ -77,9 +77,10 @@ function openWith(
   project.projectMeta.faces = FACES
   const page: ManifestJson = defaultManifest('001.jpg', 1200, 1700)
   page.layers = blocks
-  for (const [face, units] of Object.entries(ledgers)) {
-    page.ledgers[face] = { units, readingOrder: units.map((u) => u.id), readingEdges: [] }
-  }
+  for (const [face, units] of Object.entries(ledgers)) page.ledgers[face] = { units }
+  const sources = new Set(blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  page.readingOrder =
+    Object.values(ledgers)[0]?.flatMap((u) => u.members.filter((id) => sources.has(id))) ?? []
   numberPage(page, [ZH, EN])
   project.allFiles = [
     { pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge },
@@ -360,7 +361,6 @@ describe('answer — the orchestration the bridge drives', () => {
     })
     page.layers = page.layers.filter((l) => l.id !== 't1')
     page.ledgers[ZH].units = page.ledgers[ZH].units.filter((u) => u.id !== 'u1')
-    page.ledgers[ZH].readingOrder = ['u2']
     numberPage(page, [ZH, EN])
 
     const result = await propose([

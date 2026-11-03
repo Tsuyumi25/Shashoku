@@ -56,6 +56,7 @@ import {
 } from '@shared/page/tree'
 import { linesOf, type TextSide } from '@shared/page/text'
 import { adoptSources } from '@shared/page/relink'
+import { readAfter, sourceEdgeFor, sourceEdgesUnder, sourceOrder, sourceOrderFor } from '@shared/page/reading'
 import {
   emptyLedger,
   facePage,
@@ -85,7 +86,7 @@ import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
 
 /** The part of a page that says which blocks make which sentence, in every face. */
-export type PageStructure = Pick<ManifestJson, 'ledgers' | 'layers'>
+export type PageStructure = Pick<ManifestJson, 'ledgers' | 'layers' | 'readingOrder' | 'readingEdges'>
 
 /** A new sentence's blocks and, for every face, the unit holding them. */
 export interface TranslationParts {
@@ -351,7 +352,8 @@ export const useProjectStore = defineStore('project', () => {
     if (!file) return undefined
     // A JSON round trip rather than structuredClone: arrays written back
     // through the reactive page hold proxies as elements, which it refuses.
-    return JSON.parse(JSON.stringify({ ledgers: file.page.ledgers, layers: file.page.layers })) as PageStructure
+    const { ledgers, layers, readingOrder, readingEdges } = file.page
+    return JSON.parse(JSON.stringify({ ledgers, layers, readingOrder, readingEdges })) as PageStructure
   }
 
   function removeBlock(page: ManifestJson, id: string): void {
@@ -393,11 +395,12 @@ export const useProjectStore = defineStore('project', () => {
           for (const id of unit.members) removeBlock(page, id)
           changed ||= unit.members.length > 0
           view.units = view.units.filter((u) => u !== unit)
-          view.readingOrder = view.readingOrder.filter((id) => id !== unit.id)
-          view.readingEdges = view.readingEdges.filter((e) => e.from !== unit.id && e.to !== unit.id)
         }
       }
     }
+    const words = new Set(textObjects(page.layers).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+    page.readingOrder = page.readingOrder.filter((id) => words.has(id))
+    page.readingEdges = page.readingEdges.filter((e) => words.has(e.from) && words.has(e.to))
     adoptSources(page, ids, generateId, projectMeta.value.seedStyle)
     numberPage(page, ids)
   }
@@ -774,11 +777,8 @@ export const useProjectStore = defineStore('project', () => {
     const file = pageById(pageId)
     if (!file) return
     file.page.layers.push(...label.blocks)
-    for (const [face, unit] of Object.entries(label.units)) {
-      const view = facePage(file.page, face)
-      view.units.push(unit)
-      view.readingOrder.push(unit.id)
-    }
+    file.page.readingOrder.push(...label.blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+    for (const [face, unit] of Object.entries(label.units)) facePage(file.page, face).units.push(unit)
     settleStructure(file.page)
     markPageDirty(pageId)
   }
@@ -792,8 +792,8 @@ export const useProjectStore = defineStore('project', () => {
     if (!file) return
     const view = facePage(file.page, activeFace.value)
     view.units.push(unit)
-    const at = after === undefined ? -1 : view.readingOrder.indexOf(after)
-    view.readingOrder.splice(at === -1 ? view.readingOrder.length : at + 1, 0, unit.id)
+    const behind = after === undefined ? undefined : view.units.find((u) => u.id === after)
+    if (behind) readAfter(file.page, unit.members, behind.members)
     settleStructure(file.page)
     markPageDirty(pageId)
   }
@@ -864,15 +864,16 @@ export const useProjectStore = defineStore('project', () => {
         carryCounter(from.page.counters.blocks, to.page.counters.blocks, u.id)
       }
       dst.units.push(...src.units.filter((u) => units.has(u.id)))
-      dst.readingOrder.push(...src.readingOrder.filter((id) => units.has(id)))
-      dst.readingEdges = normalizeEdges([
-        ...dst.readingEdges,
-        ...src.readingEdges.filter((e) => units.has(e.from) && units.has(e.to)),
-      ])
       src.units = src.units.filter((u) => !units.has(u.id))
-      src.readingOrder = src.readingOrder.filter((id) => !units.has(id))
-      src.readingEdges = src.readingEdges.filter((e) => !units.has(e.from) && !units.has(e.to))
     }
+    // The words read in the order they read where they were, after what the
+    // page they join already reads. A line between two of them travels; one
+    // with an end left behind stays, and the settle below drops it.
+    to.page.readingOrder = [...sourceOrder(to.page), ...sourceOrder(from.page).filter((id) => blocks.has(id))]
+    to.page.readingEdges = normalizeEdges([
+      ...to.page.readingEdges,
+      ...from.page.readingEdges.filter((e) => blocks.has(e.from) && blocks.has(e.to)),
+    ])
     settleStructure(from.page)
     settleStructure(to.page)
     markPageDirty(fromId)
@@ -1038,6 +1039,8 @@ export const useProjectStore = defineStore('project', () => {
     const file = pageById(pageId)
     if (!file) return
     const copy = JSON.parse(JSON.stringify(structure)) as PageStructure
+    file.page.readingOrder = copy.readingOrder
+    file.page.readingEdges = copy.readingEdges
     const live = new Map(
       allEntries(file.page.layers)
         .filter((e) => e.kind === 'raster')
@@ -1054,10 +1057,14 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
-  function setReadingOrder(pageId: string, order: string[]) {
+  /**
+   * The sentences of the face being worked on, put in this order — written onto
+   * the artwork's words, so every face reads the page in the new order too.
+   */
+  function setReadingOrder(pageId: string, order: readonly string[]) {
     const view = viewOf(pageId)
     if (!view) return
-    view.readingOrder = order
+    view.manifest.readingOrder = sourceOrderFor(view.manifest, view.units, order)
     markPageDirty(pageId)
   }
 
@@ -1066,39 +1073,56 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * Draws lines and answers with the ones it took, which is what undo has to
-   * rub out — a gesture that repeats a line already on the page must not take
-   * that line away when it is taken back.
+   * Draws lines between sentences of the face being worked on and answers with
+   * the lines of the artwork they became, which is what undo has to rub out — a
+   * gesture that repeats a line already there must not take it away when it is
+   * taken back.
    *
-   * Judged one at a time against what is held so far, so a gesture cannot close
-   * a ring against its own earlier link either. The canvas asks the same
-   * question while the pointer is still down and draws a target it would refuse
-   * as refused, so reaching this refusal means something got past that.
+   * Judged one at a time against what is held so far, in this face and on the
+   * artwork, so a gesture cannot close a ring against its own earlier link
+   * either. The canvas asks the same question while the pointer is still down,
+   * so reaching this refusal means something got past that.
    */
-  function addReadingEdges(
-    pageId: string,
-    edges: readonly ReadingEdge[],
-    face: string = activeFace.value,
-  ): ReadingEdge[] {
-    const view = viewOf(pageId, face)
+  function addReadingEdges(pageId: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
+    const view = viewOf(pageId)
     if (!view) return []
     const taken: ReadingEdge[] = []
     for (const edge of edges) {
       const held = view.readingEdges
       if (hasEdge(held, edge) || wouldCycle(held, edge)) continue
-      view.readingEdges = normalizeEdges([...held, edge])
-      taken.push(edge)
+      const lifted = sourceEdgeFor(view.manifest, view.units, edge)
+      if (lifted === null || hasEdge(view.manifest.readingEdges, lifted) || wouldCycle(view.manifest.readingEdges, lifted))
+        continue
+      view.manifest.readingEdges = normalizeEdges([...view.manifest.readingEdges, lifted])
+      taken.push(lifted)
     }
     if (taken.length > 0) markPageDirty(pageId)
     return taken
   }
 
-  function removeReadingEdges(pageId: string, edges: readonly ReadingEdge[], face: string = activeFace.value): void {
-    const view = viewOf(pageId, face)
-    if (!view || edges.length === 0) return
-    const left = withoutEdges(view.readingEdges, edges)
-    if (left.length === view.readingEdges.length) return
-    view.readingEdges = left
+  /** Rubs out lines between sentences of the face being worked on, answering with the artwork's lines it took. */
+  function removeReadingEdges(pageId: string, edges: readonly ReadingEdge[]): ReadingEdge[] {
+    const view = viewOf(pageId)
+    if (!view || edges.length === 0) return []
+    const going = edges.flatMap((e) => sourceEdgesUnder(view.manifest, view.units, e))
+    removeSourceEdges(pageId, going)
+    return going
+  }
+
+  /** Lines of the artwork put back exactly — what undo of a rub-out, or redo of a draw, writes. */
+  function addSourceEdges(pageId: string, edges: readonly ReadingEdge[]): void {
+    const file = pageById(pageId)
+    if (!file || edges.length === 0) return
+    file.page.readingEdges = normalizeEdges([...file.page.readingEdges, ...edges])
+    markPageDirty(pageId)
+  }
+
+  function removeSourceEdges(pageId: string, edges: readonly ReadingEdge[]): void {
+    const file = pageById(pageId)
+    if (!file || edges.length === 0) return
+    const left = withoutEdges(file.page.readingEdges, edges)
+    if (left.length === file.page.readingEdges.length) return
+    file.page.readingEdges = left
     markPageDirty(pageId)
   }
 
@@ -1759,6 +1783,8 @@ export const useProjectStore = defineStore('project', () => {
     readingEdgesOf,
     addReadingEdges,
     removeReadingEdges,
+    addSourceEdges,
+    removeSourceEdges,
     appendEntry,
     removeEntry,
     restoreEntry,

@@ -36,7 +36,7 @@ function file(
   const units = ids.map((id) => ({ id, members: [`${id}s`, id] }))
   const readingEdges = drawn.map((pair) => {
     const [from, to] = pair.split('>')
-    return { from, to }
+    return { from: `${from}s`, to: `${to}s` }
   })
   const page: ManifestJson = {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
@@ -44,7 +44,9 @@ function file(
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units, readingOrder, readingEdges } },
+    ledgers: { [FACE]: { units } },
+    readingOrder: readingOrder.map((id) => `${id}s`),
+    readingEdges,
     counters: emptyCounters(),
     layers,
   }
@@ -301,13 +303,9 @@ describe('buildLabelRows filtered', () => {
         name: 'p',
         width: 1200,
         height: 1700,
-        ledgers: {
-          [FACE]: {
-            units: ids.map((id) => ({ id, members: [`${id}s`, id] })),
-            readingOrder: ids,
-            readingEdges: [],
-          },
-        },
+        ledgers: { [FACE]: { units: ids.map((id) => ({ id, members: [`${id}s`, id] })) } },
+        readingOrder: ids.map((id) => `${id}s`),
+        readingEdges: [],
         counters: emptyCounters(),
         layers: ids.flatMap((id) => {
           const entry = text(id)
