@@ -254,7 +254,7 @@
                     :value="rowCode(element as Row)"
                     @input="onRowInput($event)"
                     @keydown="onInputKey($event)"
-                    @blur="onRowBlur($event)"
+                    @blur="onRowBlur(element as Row, $event)"
                   />
                   <!--
                     What the code's caret is doing while the keyboard is on the
@@ -570,7 +570,8 @@ function onRowInput(e: Event) {
  * unguarded, that blur would close the session just opened for the row being
  * moved to, and the caret would arrive with nothing to type into.
  */
-function onRowBlur(e: FocusEvent) {
+function onRowBlur(row: Row, e: FocusEvent) {
+  if (!isRowEditing(row)) return
   if (markup.keepsSession(e.relatedTarget)) return
   editor.commitTextEdit()
 }

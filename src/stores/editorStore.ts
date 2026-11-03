@@ -1009,13 +1009,22 @@ export const useEditorStore = defineStore('editor', () => {
    * the stack has to run in the order things happened, or undoing a delete
    * after the text change it swallowed replays them the wrong way round.
    *
+   * A command that names its pages and leaves out the one being typed on only
+   * banks what was typed, which keeps that order without ending the visit — a
+   * page read in the background is no reason to take the keyboard away.
+   *
    * Answers whether the command joined the stack. A command that is not
    * `alreadyApplied` runs its own `do()` right here, and a `false` back from
    * that means the write was refused — nothing is pushed, since there is
    * nothing yet to undo.
    */
-  function pushCommand(cmd: Command, opts?: { alreadyApplied?: boolean; book?: BookId }): boolean {
-    commitTextEdit()
+  function pushCommand(
+    cmd: Command,
+    opts?: { alreadyApplied?: boolean; book?: BookId; pages?: readonly string[] },
+  ): boolean {
+    const typing = pendingTextEdit.value
+    if (typing !== null && opts?.pages !== undefined && !opts.pages.includes(typing.pageId)) flushTextEdit()
+    else commitTextEdit()
     if (!opts?.alreadyApplied && cmd.do() === false) {
       useNoticeStore().say('這個操作沒有套用')
       return false
@@ -1410,7 +1419,7 @@ export const useEditorStore = defineStore('editor', () => {
       undo: () => {
         for (const [p, s] of before ?? []) project.setPageStructure(p, s)
       },
-    })
+    }, { pages: pageIds })
   }
 
   function cmdReshape(label: string, pageId: string, mutate: () => boolean | void): boolean {

@@ -970,6 +970,35 @@ describe('pending text edit', () => {
     expect(labelsOf(project)).toHaveLength(1)
     expect(editor.canRedo).toBe(false)
   })
+
+  /**
+   * ⭐ A run reading the rest of the chapter lands a step on another page every
+   * minute or so; ending the visit for it took the keyboard away mid-word.
+   */
+  it('keeps typing through a step that lands on another page, banking what was typed first', () => {
+    const { project, editor } = openOnePage([label('a', 'a0')])
+    project.allFiles = [...project.allFiles, pageOf('other.png', [label('z', 'z0')])]
+    editor.beginTextEdit(PAGE, 'a', 'a0')
+    project.updateLabelText(PAGE, 'a', 'a1')
+    editor.cmdReshape('elsewhere', 'other.png', () => project.updateLabelText('other.png', 'z', 'z1'))
+    expect(editor.pendingTextEdit?.labelId).toBe('a')
+
+    project.updateLabelText(PAGE, 'a', 'a2')
+    editor.commitTextEdit()
+    editor.undo()
+    expect(textsOf(project)[0]).toBe('a1')
+    editor.undo()
+    editor.undo()
+    expect(textsOf(project)[0]).toBe('a0')
+  })
+
+  it('still ends the visit for a step on the page being typed on', () => {
+    const { project, editor } = openOnePage([label('a', 'a0'), label('b', 'b0')])
+    editor.beginTextEdit(PAGE, 'a', 'a0')
+    project.updateLabelText(PAGE, 'a', 'a1')
+    editor.cmdReshape('here', PAGE, () => project.updateLabelText(PAGE, 'b', 'b1'))
+    expect(editor.pendingTextEdit).toBeNull()
+  })
 })
 
 describe('pending reading edit', () => {
