@@ -263,8 +263,8 @@ import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useChapterFontCounts } from '@/composables/useChapterFontCounts'
 import { DEFAULT_SAMPLE_TEXT, useSampleTyping } from '@/composables/useSampleTyping'
+import { useDrawableFaces } from '@/composables/useDrawableFaces'
 import { catalog, faceKey, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
-import { coverageFor } from '@/lib/fontSampleCache'
 import { sampleFit } from '@/lib/sampleFit'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
@@ -405,6 +405,7 @@ function onBoxSize(e: Event) {
 }
 
 const hidingUndrawable = computed(() => preferences.prefs.missingGlyphMode === 'hide')
+const drawable = useDrawableFaces(() => catalog.value, () => sampleText.value, () => hidingUndrawable.value)
 
 // The preference keeps its value while the control is disabled, so unhiding puts
 // the marks back the way they were rather than at a default.
@@ -499,11 +500,8 @@ const displayed = computed(() => {
   let list = catalog.value
   if (group.value === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
   if (group.value === 'used') list = list.filter((e) => usedCounts.value.has(e.family))
-  if (hidingUndrawable.value) {
-    // Checking the whole catalogue costs a few milliseconds now that coverage
-    // is a cmap read on a mapped file, so there is nothing to schedule.
-    list = list.filter((e) => coverageOf(e).length === 0)
-  }
+  const able = drawable.value
+  if (able) list = list.filter((e) => able.has(e))
   const q = appliedSearch.value.trim().toLowerCase()
   if (q) {
     list = list.filter(
@@ -560,16 +558,6 @@ function cycleFace(faces: FontEntry[], step: number) {
 /** What the weight row calls a face that names no style. */
 function styleLabel(face: FontEntry): string {
   return face.style || face.postscriptName || '—'
-}
-
-function coverageOf(entry: FontEntry): number[] {
-  try {
-    return coverageFor(entry, sampleText.value)
-  } catch {
-    // An unreadable face keeps its place in the list rather than vanishing for
-    // a reason the user cannot see.
-    return []
-  }
 }
 
 const familyCount = computed(() => new Set(catalog.value.map((e) => e.family)).size)

@@ -95,8 +95,8 @@ import FontGroupPicker from '@/components/fontLibrary/FontGroupPicker.vue'
 import { useChapterFontCounts } from '@/composables/useChapterFontCounts'
 import { useFontLibrary } from '@/composables/useFontLibrary'
 import { DEFAULT_SAMPLE_TEXT, useSampleTyping } from '@/composables/useSampleTyping'
+import { useDrawableFaces } from '@/composables/useDrawableFaces'
 import { catalog, loadFontCatalog, representativeOf } from '@/lib/fontCatalog'
-import { coverageFor } from '@/lib/fontSampleCache'
 import { sampleFit } from '@/lib/sampleFit'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
@@ -139,13 +139,7 @@ const appliedSearch = refDebounced(search, 200)
 const hidingUndrawable = computed(() => preferences.prefs.missingGlyphMode === 'hide')
 const markMissing = computed(() => preferences.prefs.markMissingGlyphs && !hidingUndrawable.value)
 
-function drawsSample(entry: FontEntry): boolean {
-  try {
-    return coverageFor(entry, sampleText.value).length === 0
-  } catch {
-    return true
-  }
-}
+const drawable = useDrawableFaces(() => catalog.value, () => sampleText.value, () => hidingUndrawable.value)
 
 /** Filters run on faces, as the picker's do: a family keeps its row while any face can draw the sample. */
 const shown = computed(() => {
@@ -157,7 +151,8 @@ const shown = computed(() => {
   if (at.kind === 'fav') list = list.filter((e) => preferences.favorites.has(e.family))
   if (at.kind === 'used') list = list.filter((e) => usedCounts.value.has(e.family))
   if (inGroup) list = list.filter((e) => inGroup.has(e.family))
-  if (hidingUndrawable.value) list = list.filter(drawsSample)
+  const able = drawable.value
+  if (able) list = list.filter((e) => able.has(e))
   const q = appliedSearch.value.trim().toLowerCase()
   if (q) list = list.filter((e) => e.displayName.toLowerCase().includes(q) || e.family.toLowerCase().includes(q))
 
