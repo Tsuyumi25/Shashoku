@@ -35,7 +35,7 @@ export function useRasterTarget() {
    * inherited through folders, as locking already was for dragging.
    */
   function refuse(pageId: string, entry: RasterLayerEntry): boolean {
-    const layers = project.pageById(pageId)?.page.layers ?? []
+    const layers = editor.workingTree(pageId)
     if (isLocked(layers, entry.id)) {
       notices.say(`「${entry.name}」鎖定中，改不了`)
       return true
@@ -44,7 +44,7 @@ export function useRasterTarget() {
   }
 
   function refuseHidden(pageId: string, entry: RasterLayerEntry): boolean {
-    const layers = project.pageById(pageId)?.page.layers ?? []
+    const layers = editor.workingTree(pageId)
     if (isHidden(layers, entry.id)) {
       notices.say(`「${entry.name}」是隱藏的，改不了`)
       return true

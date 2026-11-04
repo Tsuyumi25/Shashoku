@@ -177,7 +177,8 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
-import { allEntries, pathOf } from '@shared/page/tree'
+import { pathOf } from '@shared/page/tree'
+import { everyEntry } from '@shared/page/trees'
 import type { SidePanel } from '@shared/preferences/types'
 import { nextAutoName } from '@/lib/autoName'
 import { onWheelTabs } from '@/lib/wheelTabs'
@@ -215,7 +216,7 @@ function takenNames(kind: 'group' | 'raster'): Set<string> {
     ? project.pageById(editor.currentPageId)?.page
     : undefined
   return new Set(
-    (page ? allEntries(page.layers) : [])
+    (page ? everyEntry(page) : [])
       .filter((e) => e.kind === kind)
       .map((e) => (e as GroupLayerEntry | RasterLayerEntry).name),
   )
@@ -254,7 +255,7 @@ function onAddLayer() {
     alphaLocked: false,
   }
 
-  const path = editor.cursorId ? pathOf(file.page.layers, editor.cursorId) : null
+  const path = editor.cursorId ? pathOf(editor.workingTree(page), editor.cursorId) : null
   const at =
     path === null ? undefined : [...path.slice(0, -1), path[path.length - 1] + 1]
   editor.cmdAddRasterLayer(page, layer, at)

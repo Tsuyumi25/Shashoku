@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
-import { findEntry } from '@shared/page/tree'
 import { generateId } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -29,6 +28,7 @@ import type { Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
+import { entryOnPage } from '@shared/page/trees'
 
 /**
  * Moving, turning and scaling a raster layer, and writing the result down.
@@ -257,7 +257,7 @@ export function useLayerPlacement(
        * is reachable on screen well before that: the canvas hit-tests where the
        * pixels are, not where the entry says.
        */
-      const entry = findEntry(file.page.layers, target.id)
+      const entry = entryOnPage(file.page, target.id)
       if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) return
 
       const place = gesture.place

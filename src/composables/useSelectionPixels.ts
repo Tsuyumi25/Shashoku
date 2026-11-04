@@ -1,7 +1,7 @@
 import { computed } from 'vue'
-import type { RasterLayerEntry } from '@shared/page/types'
+import type { LayerEntry, RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
-import { allEntries } from '@shared/page/tree'
+
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { nextAutoName } from '@/lib/autoName'
@@ -14,6 +14,7 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore, type PageSnapshot } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
+import { everyEntry } from '@shared/page/trees'
 
 /**
  * The selection's two other exits: taking what is inside it out of the layer,
@@ -104,9 +105,14 @@ export function useSelectionPixels() {
     )
   }
 
+  function everyEntryOf(page: string): LayerEntry[] {
+    const file = project.pageById(page)
+    return file ? everyEntry(file.page) : []
+  }
+
   function nextLiftName(page: string): string {
     const taken = new Set(
-      allEntries(project.pageById(page)?.page.layers ?? [])
+      everyEntryOf(page)
         .filter((e) => e.kind === 'raster')
         .map((e) => e.name),
     )
@@ -162,10 +168,11 @@ export function useSelectionPixels() {
     }
 
     let removed: PageSnapshot | null = null
+    const home = editor.layerHome()
     editor.pushCommand({
       label: `lift-selection ${id}`,
       do: () => {
-        if (removed === null) project.addLayer(page, lifted)
+        if (removed === null) project.addLayer(page, home, lifted)
         else project.restoreEntry(removed)
       },
       undo: () => {

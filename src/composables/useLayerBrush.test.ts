@@ -23,6 +23,7 @@ const engine = createRequire(import.meta.url)('@shashoku/engine') as Window['eng
 
 const PAGE_ID = 'source-260809-1200'
 const PAGE = { page: PAGE_ID, w: 400, h: 300 }
+const FACE = 'f'
 
 /**
  * Enough of a canvas for the renderer's own mirror of a layer to exist, and for
@@ -137,16 +138,17 @@ function folder(id: string, children: RasterLayerEntry[] = []): GroupLayerEntry 
 function openWith(...layers: (RasterLayerEntry | GroupLayerEntry)[]) {
   const project = useProjectStore()
   project.rootPath = '/root'
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '中文' }]
   project.allFiles = [
     {
       pageId: PAGE_ID,
       pageDir: `/root/shashoku/pages/${PAGE_ID}`,
-      page: { ...defaultManifest('source', PAGE.w, PAGE.h), layers: [] },
+      page: defaultManifest('source', PAGE.w, PAGE.h),
       ocr: defaultOcr(PAGE.w, PAGE.h),
       badge: 'ok',
     },
   ]
-  for (const layer of layers) project.addLayer(PAGE_ID, layer)
+  for (const layer of layers) project.addLayer(PAGE_ID, FACE, layer)
   const editor = useEditorStore()
   editor.currentPageId = PAGE_ID
   Object.assign(editor.view, { scale: 1, tx: 0, ty: 0, rotate: 0 })

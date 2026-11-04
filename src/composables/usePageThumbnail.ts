@@ -54,7 +54,7 @@ export function usePageThumbnail(
   }
 
   async function artworkBytes(of: ProjectFile): Promise<Uint8Array | null> {
-    const entry = pageArtwork(of.page.layers)
+    const entry = pageArtwork(of.page.pageTree)
     if (entry === null) return null
     const dir = layersDirOf(of.pageDir)
     const key = await layerImageKey(dir, entry.file)

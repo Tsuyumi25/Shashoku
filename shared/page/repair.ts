@@ -1,10 +1,10 @@
-import type { LayerEntry, Ledger, ManifestJson, TextLayerEntry } from './types'
+import type { Ledger, ManifestJson, TextLayerEntry } from './types'
 import type { ReadingEdge } from './readingGraph'
 import type { PageDefect } from './validate'
 import type { TextSide } from './text'
 import { siftReadingEdges } from './validate'
 import { blankSourceBlock, blankTranslationBlock, generateId } from './schema'
-import { allEntries, textObjects } from './tree'
+import { addFaceEntry, addPageEntry, everyEntry, everyText, settleTrees } from './trees'
 import { emptyLedger } from './units'
 import { numberPage } from './numbers'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
@@ -46,12 +46,14 @@ export function repairPage(
   faces: readonly string[],
   newId: () => string = generateId,
 ): { manifest: ManifestJson; repaired: PageDefect[] } {
-  const layers: LayerEntry[] = structuredClone(manifest.layers) as LayerEntry[]
+  // Cloned together, so a page entry stays one object across the trees that hold it.
+  const trees = structuredClone({ pageTree: manifest.pageTree, faceTrees: manifest.faceTrees })
+  const draft = { ...manifest, ...trees }
   const repaired: PageDefect[] = []
 
   const takenIds = new Set<string>()
   const reportedIds = new Set<string>()
-  for (const entry of allEntries(layers)) {
+  for (const entry of everyEntry(draft)) {
     if (!takenIds.has(entry.id)) {
       takenIds.add(entry.id)
       continue
@@ -63,11 +65,12 @@ export function repairPage(
     entry.id = freshId(takenIds, newId)
   }
 
-  const blocks = new Map(textObjects(layers).map((t) => [t.id, t]))
+  const blocks = new Map(everyText(draft).map((t) => [t.id, t]))
   const add = (block: TextLayerEntry) => {
     takenIds.add(block.id)
     blocks.set(block.id, block)
-    layers.push(block)
+    if (block.side === 'source') addPageEntry(draft, block)
+    else addFaceEntry(draft, block.face, block)
   }
 
   const ledgers: Record<string, Ledger> = structuredClone(manifest.ledgers)
@@ -156,7 +159,8 @@ export function repairPage(
 
   const sources = new Set([...blocks.values()].flatMap((b) => (b.side === 'source' ? [b.id] : [])))
   const reading = repairReading(manifest.readingOrder, manifest.readingEdges, sources, repaired)
-  const out = { ...manifest, ...reading, counters: structuredClone(manifest.counters), ledgers, layers }
+  const out = { ...draft, ...reading, counters: structuredClone(manifest.counters), ledgers }
+  settleTrees(out, faces)
   numberPage(out, faces)
   return { manifest: out, repaired }
 }

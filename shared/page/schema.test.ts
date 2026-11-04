@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PageParseError,
+  RETOUCH_LAYER_NAME,
   blankSourceBlock,
   blankTranslationBlock,
   parseManifest,
@@ -8,8 +9,11 @@ import {
   serializeDrawnLayers,
   serializeManifest,
   serializeOcr,
+  treesFromOneTree,
 } from './schema'
 import type {
+  GroupLayerEntry,
+  LayerEntry,
   ManifestJson,
   OcrJson,
   RasterLayerEntry,
@@ -18,11 +22,12 @@ import type {
   TranslationTextLayerEntry,
   TranslationUnit,
 } from './types'
-import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from './types'
+import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { emptyCounters, letterOf } from './numbers'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { shownLinesOf } from './units'
 import { repairPage } from './repair'
+import { everyEntry, everyText, faceTree } from './trees'
 
 /** The face every page in this file is written for. */
 const FACE = 'face-1'
@@ -80,11 +85,16 @@ const PATCH = {
   alphaLocked: false,
 }
 
+/**
+ * A page holding one entry, in whichever tree the model gives it: the artwork's
+ * words are the page's own, everything else here is the face's.
+ */
 function raw(
   entry: Record<string, unknown>,
   units: TranslationUnit[] = [unitFor(String(entry.id ?? 'a'))],
   readingOrder: string[] = [],
 ): string {
+  const ownedByPage = entry.kind === 'text' && entry.side === 'source'
   return JSON.stringify({
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -93,31 +103,45 @@ function raw(
     height: 1700,
     ledgers: { [FACE]: { units } },
     readingOrder,
-    layers: [entry],
+    pageTree: ownedByPage ? [entry] : [],
+    faceTrees: { [FACE]: ownedByPage ? [{ kind: 'ref', id: entry.id }] : [entry] },
   })
 }
 
-function manifestWith(entry: TextLayerEntry, unit = unitFor(entry.id)): ManifestJson {
+/** A page of these entries, split the way the page and its faces own them. */
+function pageOf(
+  entries: LayerEntry[],
+  units: TranslationUnit[],
+  faces: readonly string[] = [FACE],
+): ManifestJson {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
     name: 'p',
     width: 1200,
     height: 1700,
-    ledgers: { [FACE]: { units: [unit] } },
+    ledgers: { [FACE]: { units } },
     readingOrder: [],
     readingEdges: [],
     counters: emptyCounters(),
-    layers: [entry],
+    ...treesFromOneTree(entries, faces, FACE),
   }
 }
 
-const firstText = (m: ManifestJson): TextLayerEntry => m.layers[0] as TextLayerEntry
+function manifestWith(entry: TextLayerEntry, unit = unitFor(entry.id)): ManifestJson {
+  return pageOf([entry], [unit])
+}
+
+/** The one entry a page of `raw` or `manifestWith` holds, as it is written out. */
+function written(m: ManifestJson) {
+  const out = JSON.parse(serializeManifest(m))
+  return out.pageTree[0] ?? out.faceTrees[FACE][0]
+}
+
+const firstText = (m: ManifestJson): TextLayerEntry => everyText(m)[0]!
 
 const lettering = (m: ManifestJson): TranslationTextLayerEntry[] =>
-  m.layers.filter(
-    (l): l is TranslationTextLayerEntry => l.kind === 'text' && l.side === 'translation',
-  )
+  everyText(m).filter((l): l is TranslationTextLayerEntry => l.side === 'translation')
 
 /** `UPRIGHT` as the parser hands it back, for the tests that write one out. */
 function textEntry(over: Partial<TranslationTextLayerEntry> = {}): TranslationTextLayerEntry {
@@ -194,9 +218,8 @@ describe('the translation candidates', () => {
   })
 
   it('writes neither key for a translation nobody has proposed anything for', () => {
-    const out = JSON.parse(serializeManifest(manifestWith(textEntry())))
-    expect(out.layers[0].body).not.toHaveProperty('candidates')
-    expect(out.layers[0].body).not.toHaveProperty('chosen')
+    expect(written(manifestWith(textEntry())).body).not.toHaveProperty('candidates')
+    expect(written(manifestWith(textEntry())).body).not.toHaveProperty('chosen')
   })
 
   it('opens a slot naming a candidate that is not there as empty', () => {
@@ -254,20 +277,18 @@ describe('the translation candidates', () => {
   /** ⭐ The artwork's own words move no pixel, so they leave no fingerprint. */
   it('leaves the source out of what a page looks like', () => {
     const only = manifestWith(textEntry())
-    const withArtwork: ManifestJson = {
-      ...only,
-      layers: [...only.layers, blankSourceBlock('s', DEFAULT_TEXT_STYLE)],
-    }
+    const withArtwork = pageOf([textEntry(), blankSourceBlock('s', DEFAULT_TEXT_STYLE)], [unitFor('a')])
     expect(serializeDrawnLayers(withArtwork, FACE)).toBe(serializeDrawnLayers(only, FACE))
   })
 
   /** ⭐ And neither does another face's lettering, which this face never draws. */
   it("leaves another face's lettering out of what this face looks like", () => {
     const mine = manifestWith(textEntry())
-    const both: ManifestJson = {
-      ...mine,
-      layers: [...mine.layers, blankTranslationBlock('b', OTHER, DEFAULT_TEXT_STYLE)],
-    }
+    const both = pageOf(
+      [textEntry(), blankTranslationBlock('b', OTHER, DEFAULT_TEXT_STYLE)],
+      [unitFor('a')],
+      [FACE, OTHER],
+    )
     expect(serializeDrawnLayers(both, FACE)).toBe(serializeDrawnLayers(mine, FACE))
     expect(serializeDrawnLayers(both, OTHER)).not.toBe(serializeDrawnLayers(both, FACE))
   })
@@ -277,7 +298,7 @@ describe('which face a block of lettering belongs to', () => {
   it('carries the face through and writes it back', () => {
     const block = firstText(parseManifest(raw(UPRIGHT), OTHER)) as TranslationTextLayerEntry
     expect(block.face).toBe(FACE)
-    expect(JSON.parse(serializeManifest(manifestWith(textEntry()))).layers[0].face).toBe(FACE)
+    expect(written(manifestWith(textEntry())).face).toBe(FACE)
   })
 
   /**
@@ -292,11 +313,8 @@ describe('which face a block of lettering belongs to', () => {
 
   /** The artwork's words belong to every face, so they name none. */
   it('writes no face on the artwork', () => {
-    const m: ManifestJson = {
-      ...manifestWith(textEntry()),
-      layers: [blankSourceBlock('s', DEFAULT_TEXT_STYLE)],
-    }
-    expect(JSON.parse(serializeManifest(m)).layers[0]).not.toHaveProperty('face')
+    const m = pageOf([blankSourceBlock('s', DEFAULT_TEXT_STYLE)], [unitFor('s')])
+    expect(written(m)).not.toHaveProperty('face')
   })
 })
 
@@ -336,7 +354,7 @@ describe("every face's reading of one page", () => {
       readingOrder: ['s2', 's1'],
       readingEdges: [{ from: 's2', to: 's1' }],
       counters: emptyCounters(),
-      layers: [s1, s2, t1, t2, t3],
+      ...treesFromOneTree([s1, s2, t1, t2, t3], [FACE, OTHER], FACE),
     }
   }
 
@@ -367,6 +385,97 @@ describe("every face's reading of one page", () => {
     const page = JSON.parse(serializeManifest(twoFaces()))
     page.ledgers[FACE].units.push({ id: 'u-a', members: [] })
     expect(() => parseManifest(JSON.stringify(page), FACE)).toThrow(PageParseError)
+  })
+})
+
+/**
+ * ⭐ The page's own materials stand once, in `pageTree`, and every face tree
+ * points at them. Writing a face's copy of a page entry instead would give each
+ * face a base map of its own, and moving the real one would move nothing.
+ */
+describe('the page tree and the trees the faces draw', () => {
+  const patch = (): RasterLayerEntry => ({
+    kind: 'raster',
+    id: 'r',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    effects: [],
+    name: '塗白',
+    file: 'r.png',
+    x: 10,
+    y: 20,
+    w: 30,
+    h: 40,
+    alphaLocked: false,
+  })
+
+  /** The page's words placed deep in one face's stack and on top of the other's. */
+  const shared = (): ManifestJson => {
+    const s1 = blankSourceBlock('s1', DEFAULT_TEXT_STYLE)
+    const t1 = blankTranslationBlock('t1', FACE, DEFAULT_TEXT_STYLE)
+    const t2 = blankTranslationBlock('t2', OTHER, DEFAULT_TEXT_STYLE)
+    const folder: GroupLayerEntry = {
+      kind: 'group',
+      id: 'g',
+      name: '對白',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
+      effects: [],
+      children: [s1, t2],
+    }
+    return {
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      revision: 2,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      ledgers: {
+        [FACE]: { units: [{ id: 'u-a', members: ['s1', 't1'] }] },
+        [OTHER]: { units: [{ id: 'u-b', members: ['s1', 't2'] }] },
+      },
+      readingOrder: ['s1'],
+      readingEdges: [],
+      counters: emptyCounters(),
+      pageTree: [s1],
+      faceTrees: { [FACE]: [s1, patch(), t1], [OTHER]: [folder] },
+    }
+  }
+
+  it('writes the page once and every face tree as a reference to it', () => {
+    const out = JSON.parse(serializeManifest(shared()))
+    expect(out).not.toHaveProperty('layers')
+    expect(out.pageTree.map((e: { id: string }) => e.id)).toEqual(['s1'])
+    expect(out.faceTrees[FACE][0]).toEqual({ kind: 'ref', id: 's1' })
+    expect(out.faceTrees[FACE].slice(1).map((e: { id: string }) => e.id)).toEqual(['r', 't1'])
+    expect(out.faceTrees[OTHER][0].children[0]).toEqual({ kind: 'ref', id: 's1' })
+  })
+
+  /** ⭐ Resolved to the page's own object, so writing it through one face reaches all. */
+  it("reads a reference back as the page's entry rather than a copy of it", () => {
+    const parsed = parseManifest(serializeManifest(shared()), FACE)
+    const own = parsed.pageTree[0]!
+    expect(parsed.faceTrees[FACE]![0]).toBe(own)
+    const folder = parsed.faceTrees[OTHER]![0] as GroupLayerEntry
+    expect(folder.children[0]).toBe(own)
+  })
+
+  it('round trips both trees whole', () => {
+    const m = shared()
+    expect(parseManifest(serializeManifest(m), FACE)).toEqual(m)
+  })
+
+  /** A face tree naming something the page no longer holds names nothing at all. */
+  it('drops a reference to an entry the page has lost', () => {
+    const page = JSON.parse(serializeManifest(shared()))
+    page.pageTree = []
+    const parsed = parseManifest(JSON.stringify(page), FACE)
+    expect(parsed.faceTrees[FACE]!.map((e) => e.id)).toEqual(['r', 't1'])
+    const folder = parsed.faceTrees[OTHER]![0] as GroupLayerEntry
+    expect(folder.children.map((e) => e.id)).toEqual(['t2'])
   })
 })
 
@@ -450,8 +559,8 @@ describe('a page from before faces', () => {
       ],
       [legacyText('s1', 'source'), legacyText('s2', 'source'), legacyText('t1', 'translation')],
     )
-    const sources = page.layers.filter(
-      (l): l is SourceTextLayerEntry => l.kind === 'text' && l.side === 'source',
+    const sources = everyText(page).filter(
+      (l): l is SourceTextLayerEntry => l.side === 'source',
     )
     expect(sources.map((s) => s.body.tags)).toEqual([
       ['心聲', '框内'],
@@ -509,13 +618,16 @@ describe('a page from before faces', () => {
   /** And writes it back out as a page of the current shape. */
   it('comes back out as a page of faces', () => {
     const page = opened([twoWay({ candidates: [{ id: 'c1', pieces: [['左'], ['右']] }] })], threeBlocks)
-    const written = JSON.parse(serializeManifest(page))
-    expect(written.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
-    expect(written).not.toHaveProperty('translationUnits')
-    expect(written.readingOrder).toEqual(['s1'])
-    expect(Object.keys(written.ledgers)).toEqual([LEGACY_FACE])
-    expect(written.layers[1].face).toBe(LEGACY_FACE)
-    expect(written.layers[1].body.candidates).toEqual([{ id: 'c1', lines: ['左'] }])
+    const out = JSON.parse(serializeManifest(page))
+    expect(out.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(out).not.toHaveProperty('translationUnits')
+    expect(out).not.toHaveProperty('layers')
+    expect(out.readingOrder).toEqual(['s1'])
+    expect(Object.keys(out.ledgers)).toEqual([LEGACY_FACE])
+    expect(out.pageTree.map((e: { id: string }) => e.id)).toEqual(['s1'])
+    expect(out.faceTrees[LEGACY_FACE][0]).toEqual({ kind: 'ref', id: 's1' })
+    expect(out.faceTrees[LEGACY_FACE][1].face).toBe(LEGACY_FACE)
+    expect(out.faceTrees[LEGACY_FACE][1].body.candidates).toEqual([{ id: 'c1', lines: ['左'] }])
   })
 })
 
@@ -633,6 +745,142 @@ describe('a page from before the reading belonged to the page', () => {
   })
 })
 
+/**
+ * ⭐ v18 is the last version that held one tree for every face. Opening one
+ * splits it: what the page owns — the base map, the retouch layer and the
+ * artwork's words — becomes `pageTree`, everything else drawn stays with the
+ * face the page is opened as, and each face keeps its own lettering.
+ */
+describe('a page from before each face had its own tree', () => {
+  const raster = (id: string, name: string) => ({
+    kind: 'raster',
+    id,
+    visible: true,
+    locked: false,
+    name,
+    file: `${id}.png`,
+    x: 0,
+    y: 0,
+    w: 1200,
+    h: 1700,
+    alphaLocked: false,
+  })
+
+  const letteringAt = (id: string, face: string) => ({
+    kind: 'text',
+    id,
+    visible: true,
+    locked: false,
+    side: 'translation',
+    face,
+    body: body(),
+  })
+
+  const oneTree = (): string =>
+    JSON.stringify({
+      schemaVersion: 18,
+      revision: 1,
+      name: 'p',
+      width: 1200,
+      height: 1700,
+      ledgers: {
+        [FACE]: { units: [{ id: 'u-a', members: ['s1', 't1', 't2'] }] },
+        [OTHER]: { units: [{ id: 'v-a', members: ['s1', 'g1'] }] },
+      },
+      readingOrder: ['s1'],
+      layers: [
+        raster('base', '底圖'),
+        raster('retouch', RETOUCH_LAYER_NAME),
+        raster('patch', '塗白'),
+        { ...withSource({}), id: 's1' },
+        {
+          kind: 'group',
+          id: 'g',
+          name: '對白',
+          visible: true,
+          locked: false,
+          children: [letteringAt('t1', FACE), letteringAt('g1', OTHER)],
+        },
+        letteringAt('t2', FACE),
+      ],
+    })
+
+  it("gives the page the base map, the retouch layer and the artwork's words", () => {
+    const page = parseManifest(oneTree(), FACE)
+    expect(page.pageTree.map((e) => e.id)).toEqual(['base', 'retouch', 's1'])
+  })
+
+  /** Every face draws the page's materials where the one tree had them. */
+  it('leaves every face holding the page, each with its own lettering', () => {
+    const page = parseManifest(oneTree(), FACE)
+    expect(faceTree(page, FACE).map((e) => e.id)).toEqual([
+      'base',
+      'retouch',
+      'patch',
+      's1',
+      'g',
+      't2',
+    ])
+    expect(faceTree(page, OTHER).map((e) => e.id)).toEqual(['base', 'retouch', 's1', 'g1'])
+  })
+
+  /**
+   * ⚠️ A raster nobody can say whose it is goes to the face the page is opened
+   * as. Copied into every face it would multiply, and dropped it would be lost.
+   */
+  it('keeps the rest of what was drawn in the tree of the face it is opened as', () => {
+    const asOther = parseManifest(oneTree(), OTHER)
+    expect(faceTree(asOther, OTHER).map((e) => e.id)).toEqual([
+      'base',
+      'retouch',
+      'patch',
+      's1',
+      'g',
+    ])
+    expect(faceTree(asOther, FACE).map((e) => e.id)).toEqual([
+      'base',
+      'retouch',
+      's1',
+      't1',
+      't2',
+    ])
+  })
+
+  /** A folder is the face's, so only the face that keeps it keeps the folder. */
+  it("holds what another face's folder had loose in that face's tree", () => {
+    const page = parseManifest(oneTree(), FACE)
+    const folder = faceTree(page, FACE).find((e) => e.id === 'g') as GroupLayerEntry
+    expect(folder.children.map((e) => e.id)).toEqual(['t1'])
+  })
+
+  it("makes every face's page entry the page's own object", () => {
+    const page = parseManifest(oneTree(), FACE)
+    for (const own of page.pageTree) {
+      expect(faceTree(page, FACE).find((e) => e.id === own.id)).toBe(own)
+      expect(faceTree(page, OTHER).find((e) => e.id === own.id)).toBe(own)
+    }
+  })
+
+  it('writes the split back out as a page of the current version', () => {
+    const out = JSON.parse(serializeManifest(parseManifest(oneTree(), FACE)))
+    expect(out.schemaVersion).toBe(MANIFEST_SCHEMA_VERSION)
+    expect(out).not.toHaveProperty('layers')
+    expect(out.faceTrees[OTHER].map((e: { kind: string; id: string }) => [e.kind, e.id])).toEqual([
+      ['ref', 'base'],
+      ['ref', 'retouch'],
+      ['ref', 's1'],
+      ['text', 'g1'],
+    ])
+  })
+
+  it('reads a raster kept in a folder as one layer, not two with the same file', () => {
+    const page = JSON.parse(oneTree())
+    page.layers.push({ kind: 'group', id: 'box', name: 'box', visible: true, locked: false, children: [raster('inner', 'x')] })
+    const parsed = parseManifest(JSON.stringify(page), FACE)
+    expect(faceTree(parsed, FACE).at(-1)).toMatchObject({ id: 'box', children: [{ id: 'inner' }] })
+  })
+})
+
 describe('text object rotation', () => {
   it('reads a page written before objects could be turned as upright', () => {
     expect(firstText(parseManifest(raw(UPRIGHT), FACE)).body.rotation).toBe(0)
@@ -653,8 +901,7 @@ describe('text object rotation', () => {
   })
 
   it('leaves upright objects out of the file rather than writing a zero on each', () => {
-    const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out).layers[0].body).not.toHaveProperty('rotation')
+    expect(written(manifestWith(textEntry())).body).not.toHaveProperty('rotation')
   })
 
   it('round trips a turned object', () => {
@@ -688,8 +935,7 @@ describe('a text object stands where it was put', () => {
   })
 
   it('writes no such field', () => {
-    const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out).layers[0]).not.toHaveProperty('anchor')
+    expect(written(manifestWith(textEntry()))).not.toHaveProperty('anchor')
   })
 })
 
@@ -747,7 +993,7 @@ describe("the page's name", () => {
 })
 
 describe('opacity and blend mode', () => {
-  const firstEntry = (m: ManifestJson) => m.layers[0]!
+  const firstEntry = (m: ManifestJson) => everyEntry(m)[0]!
 
   it('reads an entry that names neither as opaque and normal', () => {
     const parsed = firstEntry(parseManifest(raw(UPRIGHT), FACE))
@@ -784,9 +1030,8 @@ describe('opacity and blend mode', () => {
   })
 
   it('leaves both out of the file rather than writing a default on every entry', () => {
-    const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out).layers[0]).not.toHaveProperty('opacity')
-    expect(JSON.parse(out).layers[0]).not.toHaveProperty('blendMode')
+    expect(written(manifestWith(textEntry()))).not.toHaveProperty('opacity')
+    expect(written(manifestWith(textEntry()))).not.toHaveProperty('blendMode')
   })
 
   it('round trips a faded object', () => {
@@ -798,7 +1043,7 @@ describe('opacity and blend mode', () => {
 })
 
 describe('the effects a node carries', () => {
-  const firstEntry = (m: ManifestJson) => m.layers[0]!
+  const firstEntry = (m: ManifestJson) => everyEntry(m)[0]!
   const STROKE = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
 
   it('reads an entry that names none as carrying none', () => {
@@ -807,8 +1052,7 @@ describe('the effects a node carries', () => {
   })
 
   it('leaves an empty list out of the file rather than writing one on every entry', () => {
-    const out = serializeManifest(manifestWith(textEntry()))
-    expect(JSON.parse(out).layers[0]).not.toHaveProperty('effects')
+    expect(written(manifestWith(textEntry()))).not.toHaveProperty('effects')
   })
 
   /** Not a text object's own property any more: a layer wears one the same way. */
@@ -850,7 +1094,7 @@ describe('the effects a node carries', () => {
 })
 
 describe('a raster layer carries its own frame', () => {
-  const firstRaster = (m: ManifestJson) => m.layers[0] as RasterLayerEntry
+  const firstRaster = (m: ManifestJson) => everyEntry(m)[0] as RasterLayerEntry
 
   it('carries the frame through', () => {
     const parsed = firstRaster(parseManifest(raw(PATCH, []), FACE))
@@ -879,6 +1123,17 @@ describe('a raster layer carries its own frame', () => {
 
 describe('parseManifest', () => {
   it('round trips a page whole', () => {
+    const folder: GroupLayerEntry = {
+      kind: 'group',
+      id: 'g',
+      name: '對白',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: PASS_THROUGH,
+      effects: [],
+      children: [textEntry(), textEntry({ id: 'b' })],
+    }
     const source: ManifestJson = {
       schemaVersion: MANIFEST_SCHEMA_VERSION,
       revision: 7,
@@ -889,19 +1144,8 @@ describe('parseManifest', () => {
       readingOrder: [],
       readingEdges: [],
       counters: emptyCounters(),
-      layers: [
-        {
-          kind: 'group',
-          id: 'g',
-          name: '對白',
-          visible: true,
-          locked: false,
-          opacity: 1,
-          blendMode: 'pass-through',
-          effects: [],
-          children: [textEntry(), textEntry({ id: 'b' })],
-        },
-      ],
+      pageTree: [],
+      faceTrees: { [FACE]: [folder] },
     }
     expect(parseManifest(serializeManifest(source), FACE)).toEqual(source)
   })
@@ -1012,7 +1256,7 @@ describe('parseManifest', () => {
   const tagged = (tags: unknown) => raw(withSource({ tags }))
 
   it('opens a page carrying a tag no registry names', () => {
-    const block = parseManifest(tagged(['角色/ゆみ']), FACE).layers[0] as SourceTextLayerEntry
+    const block = parseManifest(tagged(['角色/ゆみ']), FACE).pageTree[0] as SourceTextLayerEntry
     expect(block.body.tags).toEqual(['角色/ゆみ'])
   })
 
@@ -1030,8 +1274,7 @@ describe('parseManifest', () => {
    */
   it('writes a tag set in one canonical order and reads it back the same', () => {
     const messy = tagged(['心聲', '框内', '心聲', ' 框内 '])
-    const written = JSON.parse(serializeManifest(parseManifest(messy, FACE)))
-    expect(written.layers[0].body.tags).toEqual(['心聲', '框内'])
+    expect(written(parseManifest(messy, FACE)).body.tags).toEqual(['心聲', '框内'])
 
     expect(serializeManifest(parseManifest(tagged(['框内', '心聲']), FACE))).toBe(
       serializeManifest(parseManifest(messy, FACE)),
@@ -1039,11 +1282,8 @@ describe('parseManifest', () => {
   })
 
   it('writes no tags key for artwork nobody has classified', () => {
-    const m: ManifestJson = {
-      ...manifestWith(textEntry()),
-      layers: [blankSourceBlock('s', DEFAULT_TEXT_STYLE)],
-    }
-    expect(JSON.parse(serializeManifest(m)).layers[0].body).not.toHaveProperty('tags')
+    const m = pageOf([blankSourceBlock('s', DEFAULT_TEXT_STYLE)], [unitFor('s')])
+    expect(written(m).body).not.toHaveProperty('tags')
   })
 
   it('round trips tagged artwork beside a block with a style of its own', () => {
@@ -1051,10 +1291,7 @@ describe('parseManifest', () => {
     marked.body.style = { ...DEFAULT_TEXT_STYLE, fontSizePx: 48 }
     const artwork = blankSourceBlock('s', DEFAULT_TEXT_STYLE)
     artwork.body.tags = ['心聲', '框内']
-    const m: ManifestJson = {
-      ...manifestWith(marked, unitFor('a', ['s', 'a'])),
-      layers: [marked, artwork],
-    }
+    const m = pageOf([marked, artwork], [unitFor('a', ['s', 'a'])])
     expect(parseManifest(serializeManifest(m), FACE)).toEqual(m)
   })
 
@@ -1083,7 +1320,15 @@ describe("the lines drawn between the artwork's words", () => {
       ledgers: { [FACE]: { units: [unitFor('a', ['s1', 'a']), unitFor('b', ['s2', 'b'])] } },
       readingOrder: ['s1', 's2'],
       readingEdges: edges,
-      layers: [UPRIGHT, { ...UPRIGHT, id: 'b' }, { ...withSource({}), id: 's1' }, { ...withSource({}), id: 's2' }],
+      pageTree: [{ ...withSource({}), id: 's1' }, { ...withSource({}), id: 's2' }],
+      faceTrees: {
+        [FACE]: [
+          { kind: 'ref', id: 's1' },
+          { kind: 'ref', id: 's2' },
+          UPRIGHT,
+          { ...UPRIGHT, id: 'b' },
+        ],
+      },
     })
   }
 
@@ -1254,7 +1499,7 @@ describe("a page's readings", () => {
 describe("a text object's source", () => {
   const pageWith = (source: Record<string, unknown>) => raw(withSource(source))
 
-  const only = (rawPage: string) => parseManifest(rawPage, FACE).layers[0] as SourceTextLayerEntry
+  const only = (rawPage: string) => parseManifest(rawPage, FACE).pageTree[0] as SourceTextLayerEntry
 
   /**
    * A source written by nobody is what a fresh object has. Starting it settled
@@ -1302,22 +1547,15 @@ describe("a text object's source", () => {
       by: 'human',
       from: 'abc123',
     }
-    const m: ManifestJson = {
-      ...manifestWith(letters, unitFor('a', ['s', 'a'])),
-      layers: [letters, artwork],
-    }
+    const m = pageOf([letters, artwork], [unitFor('a', ['s', 'a'])])
     expect(parseManifest(serializeManifest(m), FACE)).toEqual(m)
   })
 
   it('leaves an untouched hand and an absent certificate out of the file', () => {
     const artwork = blankSourceBlock('s', DEFAULT_TEXT_STYLE)
-    const m: ManifestJson = {
-      ...manifestWith(textEntry(), unitFor('a', ['s', 'a'])),
-      layers: [textEntry(), artwork],
-    }
-    const written = JSON.parse(serializeManifest(m))
-    expect(written.layers[1].body).not.toHaveProperty('by')
-    expect(written.layers[1].body).not.toHaveProperty('from')
+    const m = pageOf([textEntry(), artwork], [unitFor('a', ['s', 'a'])])
+    expect(written(m).body).not.toHaveProperty('by')
+    expect(written(m).body).not.toHaveProperty('from')
   })
 })
 
@@ -1343,7 +1581,7 @@ describe('the short numbers everything on a page wears', () => {
       readingOrder: ['s1'],
       readingEdges: [],
       counters: { source: 2, units: { [FACE]: 5 }, blocks: { 'u-a': 2 }, candidates: { t1: 4 } },
-      layers: [s1, t1],
+      ...treesFromOneTree([s1, t1], [FACE], FACE),
     }
   }
 
@@ -1360,7 +1598,7 @@ describe('the short numbers everything on a page wears', () => {
     const m = numbered()
     const drawn = serializeDrawnLayers(m, FACE)
     const moved = numbered()
-    const block = moved.layers[1] as TranslationTextLayerEntry
+    const block = moved.faceTrees[FACE]![1] as TranslationTextLayerEntry
     block.no = 9
     block.numberedIn = 'u-z'
     moved.counters.source = 40
@@ -1370,17 +1608,17 @@ describe('the short numbers everything on a page wears', () => {
 
   it('drops a number that is not one and lets repair hand out another', () => {
     const page = JSON.parse(serializeManifest(numbered()))
-    page.layers[0].no = 0
+    page.pageTree[0].no = 0
     page.ledgers[FACE].units[0].no = 'four'
-    page.layers[1].body.candidates[1].no = -2
+    page.faceTrees[FACE][1].body.candidates[1].no = -2
 
     const parsed = parseManifest(JSON.stringify(page), FACE)
-    expect((parsed.layers[0] as SourceTextLayerEntry).no).toBeUndefined()
+    expect((parsed.pageTree[0] as SourceTextLayerEntry).no).toBeUndefined()
     expect(parsed.ledgers[FACE].units[0].no).toBeUndefined()
 
     const { manifest } = repairPage(parsed, [FACE])
-    const block = manifest.layers[1] as TranslationTextLayerEntry
-    expect((manifest.layers[0] as SourceTextLayerEntry).no).toBe(2)
+    const block = manifest.faceTrees[FACE]![1] as TranslationTextLayerEntry
+    expect((manifest.pageTree[0] as SourceTextLayerEntry).no).toBe(2)
     expect(manifest.ledgers[FACE].units[0].no).toBe(5)
     expect(block.body.candidates.map((c) => c.no)).toEqual([1, 4])
   })
@@ -1388,16 +1626,19 @@ describe('the short numbers everything on a page wears', () => {
   /** A block whose sentence is written down nowhere has no number to keep. */
   it('forgets a number no sentence claims to have issued', () => {
     const page = JSON.parse(serializeManifest(numbered()))
-    delete page.layers[1].numberedIn
+    delete page.faceTrees[FACE][1].numberedIn
 
     const parsed = parseManifest(JSON.stringify(page), FACE)
-    expect((parsed.layers[1] as TranslationTextLayerEntry).no).toBeUndefined()
+    expect((parsed.faceTrees[FACE]![1] as TranslationTextLayerEntry).no).toBeUndefined()
   })
 
-  /** v16 is the last version written before anything on a page had a number. */
+  /** v16 is the last version written before anything on a page had a number, and held one tree. */
   it('reads a page from before the numbers and lets repair number it', () => {
     const page = JSON.parse(serializeManifest(numbered()))
     page.schemaVersion = 16
+    page.layers = [page.pageTree[0], page.faceTrees[FACE][1]]
+    delete page.pageTree
+    delete page.faceTrees
     delete page.counters
     delete page.layers[0].no
     delete page.layers[1].no
@@ -1410,8 +1651,8 @@ describe('the short numbers everything on a page wears', () => {
     expect(parsed.counters).toEqual(emptyCounters())
 
     const { manifest } = repairPage(parsed, [FACE])
-    const block = manifest.layers[1] as TranslationTextLayerEntry
-    expect((manifest.layers[0] as SourceTextLayerEntry).no).toBe(1)
+    const block = manifest.faceTrees[FACE]![1] as TranslationTextLayerEntry
+    expect((manifest.pageTree[0] as SourceTextLayerEntry).no).toBe(1)
     expect(manifest.ledgers[FACE].units[0].no).toBe(1)
     expect(block.no).toBe(1)
     expect(block.numberedIn).toBe('u-a')

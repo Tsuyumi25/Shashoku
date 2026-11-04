@@ -8,7 +8,7 @@ import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
 
 const PAGE = 'p001.png'
 const FACE = 'face-a'
@@ -36,7 +36,11 @@ function openPage(ids: string[]) {
         readingOrder: ids.map((id) => `${id}s`),
         readingEdges: [],
         counters: emptyCounters(),
-        layers: ids.flatMap((id) => [label(id), blankSourceBlock(`${id}s`, DEFAULT_TEXT_STYLE)]),
+        ...treesFromOneTree(
+          ids.flatMap((id) => [label(id), blankSourceBlock(`${id}s`, DEFAULT_TEXT_STYLE)]),
+          [FACE],
+          FACE,
+        ),
       },
       ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
       badge: 'ok',

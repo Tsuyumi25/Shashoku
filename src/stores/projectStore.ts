@@ -42,10 +42,7 @@ import { repairPage } from '@shared/page/repair'
 import { copyFace, dropFace } from '@shared/page/faces'
 import { numberPage } from '@shared/page/numbers'
 import {
-  allEntries,
   dissolveGroupAt,
-  findEntry,
-  findTextObject,
   insertAtPath,
   moveEntry,
   pathOf,
@@ -54,6 +51,23 @@ import {
   textObjects,
   type DropTarget,
 } from '@shared/page/tree'
+import {
+  addFaceEntry,
+  addPageEntry,
+  entryOnPage,
+  everyEntry,
+  everyText,
+  homeOf,
+  isPageEntry,
+  linkToPage,
+  ownTree,
+  removeFromPage,
+  resolveTrees,
+  snapshotTrees,
+  textOnPage,
+  unlinkToFace,
+  type TreesSnapshot,
+} from '@shared/page/trees'
 import { linesOf, type TextSide } from '@shared/page/text'
 import { adoptSources } from '@shared/page/relink'
 import { readAfter, sourceEdgeFor, sourceEdgesUnder, sourceOrder, sourceOrderFor } from '@shared/page/reading'
@@ -86,7 +100,7 @@ import { normalizeTagSet } from '@shared/tags/set'
 import { createAutosave } from '@/lib/autosave'
 
 /** The part of a page that says which blocks make which sentence, in every face. */
-export type PageStructure = Pick<ManifestJson, 'ledgers' | 'layers' | 'readingOrder' | 'readingEdges'>
+export type PageStructure = Pick<ManifestJson, 'ledgers' | 'readingOrder' | 'readingEdges'> & TreesSnapshot
 
 /** A new sentence's blocks and, for every face, the unit holding them. */
 export interface TranslationParts {
@@ -352,13 +366,17 @@ export const useProjectStore = defineStore('project', () => {
     if (!file) return undefined
     // A JSON round trip rather than structuredClone: arrays written back
     // through the reactive page hold proxies as elements, which it refuses.
-    const { ledgers, layers, readingOrder, readingEdges } = file.page
-    return JSON.parse(JSON.stringify({ ledgers, layers, readingOrder, readingEdges })) as PageStructure
+    const { ledgers, readingOrder, readingEdges } = file.page
+    return { ...JSON.parse(JSON.stringify({ ledgers, readingOrder, readingEdges })), ...snapshotTrees(file.page) }
   }
 
   function removeBlock(page: ManifestJson, id: string): void {
-    const path = pathOf(page.layers, id)
-    if (path !== null) removeAtPath(page.layers, path)
+    removeFromPage(page, id)
+  }
+
+  /** The tree an edit lands in: a face's, or the page's own (`null`), which is what the source side shows. */
+  function homeTree(page: ManifestJson, home: string | null): LayerEntry[] {
+    return home === null ? page.pageTree : ownTree(page, home)
   }
 
   /**
@@ -375,7 +393,7 @@ export const useProjectStore = defineStore('project', () => {
     const ids = faceIds.value
     for (let changed = true; changed; ) {
       changed = false
-      const present = new Map(textObjects(page.layers).map((t) => [t.id, t]))
+      const present = new Map(everyText(page).map((t) => [t.id, t]))
       for (const face of ids) {
         const view = facePage(page, face)
         for (const unit of view.units) unit.members = unit.members.filter((id) => present.has(id))
@@ -388,7 +406,7 @@ export const useProjectStore = defineStore('project', () => {
             const blank = blankTranslationBlock(generateId(), face, near.body.style)
             blank.body.x = near.body.x
             blank.body.y = near.body.y
-            page.layers.push(blank)
+            addFaceEntry(page, face, blank)
             unit.members.push(blank.id)
             continue
           }
@@ -398,7 +416,7 @@ export const useProjectStore = defineStore('project', () => {
         }
       }
     }
-    const words = new Set(textObjects(page.layers).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+    const words = new Set(textObjects(page.pageTree).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
     page.readingOrder = page.readingOrder.filter((id) => words.has(id))
     page.readingEdges = page.readingEdges.filter((e) => words.has(e.from) && words.has(e.to))
     adoptSources(page, ids, generateId, projectMeta.value.seedStyle)
@@ -749,7 +767,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function blockById(pageId: string, blockId: string): TextLayerEntry | undefined {
     const file = pageById(pageId)
-    return file ? findTextObject(file.page.layers, blockId) : undefined
+    return file ? textOnPage(file.page, blockId) : undefined
   }
 
   /** What the sentence a block belongs to in the face being worked on means. */
@@ -776,7 +794,10 @@ export const useProjectStore = defineStore('project', () => {
   function addLabel(pageId: string, label: TranslationParts) {
     const file = pageById(pageId)
     if (!file) return
-    file.page.layers.push(...label.blocks)
+    for (const block of label.blocks) {
+      if (block.side === 'source') addPageEntry(file.page, block)
+      else addFaceEntry(file.page, block.face, block)
+    }
     file.page.readingOrder.push(...label.blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
     for (const [face, unit] of Object.entries(label.units)) facePage(file.page, face).units.push(unit)
     settleStructure(file.page)
@@ -846,13 +867,14 @@ export const useProjectStore = defineStore('project', () => {
       }
     }
     for (const id of blocks) {
-      const path = pathOf(from.page.layers, id)
-      const entry = path === null ? null : removeAtPath(from.page.layers, path)
-      if (entry === null) continue
+      const entry = removeFromPage(from.page, id)
+      if (entry === null || entry.kind !== 'text') continue
       // Numbered by the page it left; the page it joins numbers it again. What
       // it numbers inside itself travels with it.
-      if (entry.kind === 'text' && entry.side === 'source') delete entry.no
-      to.page.layers.push(entry)
+      if (entry.side === 'source') {
+        delete entry.no
+        addPageEntry(to.page, entry)
+      } else addFaceEntry(to.page, entry.face, entry)
       carryCounter(from.page.counters.candidates, to.page.counters.candidates, id)
     }
     for (const [face, units] of moving) {
@@ -888,7 +910,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerVisible(pageId: string, layerId: string, visible: boolean) {
     const file = pageById(pageId)
     if (!file) return
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.visible === visible) return
     entry.visible = visible
     markPageDirty(pageId)
@@ -905,7 +927,7 @@ export const useProjectStore = defineStore('project', () => {
   function renameLayer(pageId: string, layerId: string, name: string): boolean {
     const file = pageById(pageId)
     if (!file) return false
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.kind === 'text' || entry.name === name) return false
     entry.name = name
     markPageDirty(pageId)
@@ -927,7 +949,7 @@ export const useProjectStore = defineStore('project', () => {
   ) {
     const file = pageById(pageId)
     if (!file) return
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.kind !== 'raster') return
     entry.file = at.file
     entry.x = Math.round(at.x)
@@ -940,7 +962,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerLocked(pageId: string, layerId: string, locked: boolean) {
     const file = pageById(pageId)
     if (!file) return
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.locked === locked) return
     entry.locked = locked
     markPageDirty(pageId)
@@ -955,7 +977,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerAlphaLocked(pageId: string, layerId: string, alphaLocked: boolean): boolean {
     const file = pageById(pageId)
     if (!file) return false
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.kind !== 'raster' || entry.alphaLocked === alphaLocked) return false
     entry.alphaLocked = alphaLocked
     markPageDirty(pageId)
@@ -966,7 +988,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerOpacity(pageId: string, layerId: string, opacity: number) {
     const file = pageById(pageId)
     if (!file) return
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.opacity === opacity) return
     entry.opacity = opacity
     markPageDirty(pageId)
@@ -980,7 +1002,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerBlendMode(pageId: string, layerId: string, blendMode: string): boolean {
     const file = pageById(pageId)
     if (!file) return false
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry || entry.blendMode === blendMode) return false
     if (blendMode === PASS_THROUGH && entry.kind !== 'group') return false
     entry.blendMode = blendMode
@@ -996,32 +1018,54 @@ export const useProjectStore = defineStore('project', () => {
    * Unlike `addLabel` this touches no reading order — a folder and a raster are
    * not things a reader meets.
    */
-  function addLayer(pageId: string, entry: LayerEntry, path?: number[]) {
+  function addLayer(pageId: string, home: string | null, entry: LayerEntry, path?: number[]) {
     const file = pageById(pageId)
     if (!file) return
-    const at = path ?? [file.page.layers.length]
-    if (!insertAtPath(file.page.layers, at, entry)) file.page.layers.push(entry)
+    // Words go where words belong whatever tree the edit is in: the artwork's to
+    // the page, lettering to its face. A path read in another tree means nothing there.
+    const at = entry.kind !== 'text' ? home : entry.side === 'source' ? null : entry.face
+    const where = at === home ? path : undefined
+    if (at === null) addPageEntry(file.page, entry, where)
+    else addFaceEntry(file.page, at, entry, where)
     markPageDirty(pageId)
+  }
+
+  /** See `linkToPage` and `unlinkToFace`; answers whether the layer changed hands. */
+  function setLayerLinked(pageId: string, face: string, layerId: string, linked: boolean): boolean {
+    const file = pageById(pageId)
+    if (!file) return false
+    const done = linked ? linkToPage(file.page, face, layerId) : unlinkToFace(file.page, face, layerId)
+    if (done) markPageDirty(pageId)
+    return done
+  }
+
+  /** Whether a layer is the page's, which every face shares. */
+  function isLinked(pageId: string, layerId: string): boolean {
+    const file = pageById(pageId)
+    return file ? isPageEntry(file.page, layerId) : false
   }
 
   function dissolveFolder(
     pageId: string,
     folderId: string,
-  ): { path: number[]; folder: GroupLayerEntry } | null {
+  ): { home: string; path: number[]; folder: GroupLayerEntry } | null {
     const file = pageById(pageId)
     if (!file) return null
-    const path = pathOf(file.page.layers, folderId)
+    const home = homeOf(file.page, folderId)
+    if (home === null || home === undefined) return null
+    const tree = homeTree(file.page, home)
+    const path = pathOf(tree, folderId)
     if (path === null) return null
-    const folder = dissolveGroupAt(file.page.layers, path)
+    const folder = dissolveGroupAt(tree, path)
     if (folder === null) return null
     markPageDirty(pageId)
-    return { path, folder }
+    return { home, path, folder }
   }
 
-  function restoreFolder(pageId: string, path: number[], folder: GroupLayerEntry) {
+  function restoreFolder(pageId: string, home: string, path: number[], folder: GroupLayerEntry) {
     const file = pageById(pageId)
     if (!file) return
-    if (!restoreGroupAt(file.page.layers, path, folder)) return
+    if (!restoreGroupAt(homeTree(file.page, home), path, folder)) return
     markPageDirty(pageId)
   }
 
@@ -1042,7 +1086,7 @@ export const useProjectStore = defineStore('project', () => {
     file.page.readingOrder = copy.readingOrder
     file.page.readingEdges = copy.readingEdges
     const live = new Map(
-      allEntries(file.page.layers)
+      everyEntry(file.page)
         .filter((e) => e.kind === 'raster')
         .map((e) => [e.id, e]),
     )
@@ -1053,7 +1097,12 @@ export const useProjectStore = defineStore('project', () => {
         return e
       })
     file.page.ledgers = copy.ledgers
-    file.page.layers = graft(copy.layers)
+    // The page's first, so every face tree's reference resolves to the one live object.
+    const pageTree = graft(copy.pageTree)
+    file.page.pageTree = pageTree
+    file.page.faceTrees = Object.fromEntries(
+      Object.entries(resolveTrees(pageTree, copy.faceTrees)).map(([face, tree]) => [face, graft(tree)]),
+    )
     markPageDirty(pageId)
   }
 
@@ -1127,17 +1176,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** On top of everything, which is where an object arriving on a page belongs. */
-  function appendEntry(pageId: string, entry: LayerEntry) {
-    const file = pageById(pageId)
-    if (!file) return
-    file.page.layers.push(entry)
-    markPageDirty(pageId)
+  function appendEntry(pageId: string, home: string | null, entry: LayerEntry) {
+    addLayer(pageId, home, entry)
   }
 
   /** Which page an entry is on, since the selection reaches across all of them. */
   function pageOfEntry(id: string): string | null {
     for (const file of files.value) {
-      if (findEntry(file.page.layers, id)) return file.pageId
+      if (entryOnPage(file.page, id)) return file.pageId
     }
     return null
   }
@@ -1145,7 +1191,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Anything on any page of the chapter — the selection reaches across them. */
   function entryById(id: string): LayerEntry | undefined {
     for (const file of files.value) {
-      const found = findEntry(file.page.layers, id)
+      const found = entryOnPage(file.page, id)
       if (found) return found
     }
     return undefined
@@ -1154,10 +1200,9 @@ export const useProjectStore = defineStore('project', () => {
   /** Any entry, folders taking what they hold; every face's sentences settle around what went. */
   function removeEntry(id: string): PageSnapshot | null {
     for (const file of files.value) {
-      const path = pathOf(file.page.layers, id)
-      if (path === null) continue
+      if (homeOf(file.page, id) === undefined) continue
       const before = structureOf(file.pageId)!
-      removeAtPath(file.page.layers, path)
+      removeFromPage(file.page, id)
       settleStructure(file.page)
       markPageDirty(file.pageId)
       return { pageId: file.pageId, before }
@@ -1170,10 +1215,10 @@ export const useProjectStore = defineStore('project', () => {
     setPageStructure(removed.pageId, removed.before)
   }
 
-  function moveLayer(pageId: string, fromPath: number[], target: DropTarget): boolean {
+  function moveLayer(pageId: string, home: string | null, fromPath: number[], target: DropTarget): boolean {
     const file = pageById(pageId)
     if (!file) return false
-    if (!moveEntry(file.page.layers, fromPath, target)) return false
+    if (!moveEntry(homeTree(file.page, home), fromPath, target)) return false
     markPageDirty(pageId)
     return true
   }
@@ -1183,14 +1228,15 @@ export const useProjectStore = defineStore('project', () => {
    * drop rules cannot express: their indices are read before the entry comes
    * out, and running them backwards lands one place off.
    */
-  function restoreLayerAt(pageId: string, layerId: string, path: number[]) {
+  function restoreLayerAt(pageId: string, home: string | null, layerId: string, path: number[]) {
     const file = pageById(pageId)
     if (!file) return
-    const current = pathOf(file.page.layers, layerId)
+    const tree = homeTree(file.page, home)
+    const current = pathOf(tree, layerId)
     if (current === null) return
-    const entry = removeAtPath(file.page.layers, current)
+    const entry = removeAtPath(tree, current)
     if (entry === null) return
-    insertAtPath(file.page.layers, path, entry)
+    insertAtPath(tree, path, entry)
     markPageDirty(pageId)
   }
 
@@ -1437,7 +1483,7 @@ export const useProjectStore = defineStore('project', () => {
     const file = pageById(pageId)
     if (!file) return
     file.ocr.candidates = []
-    for (const block of textObjects(file.page.layers)) {
+    for (const block of textObjects(file.page.pageTree)) {
       if (block.side !== 'source' || block.body.from === undefined) continue
       delete block.body.from
       block.body.by = 'auto'
@@ -1537,7 +1583,7 @@ export const useProjectStore = defineStore('project', () => {
   function setLayerEffects(pageId: string, layerId: string, effects: readonly LayerEffect[]) {
     const file = pageById(pageId)
     if (!file) return
-    const entry = findEntry(file.page.layers, layerId)
+    const entry = entryOnPage(file.page, layerId)
     if (!entry) return
     entry.effects = cloneEffects(effects)
     markPageDirty(pageId)
@@ -1547,7 +1593,7 @@ export const useProjectStore = defineStore('project', () => {
   function allTextObjects(): { pageId: string; label: TextLayerEntry }[] {
     const out: { pageId: string; label: TextLayerEntry }[] = []
     for (const file of files.value) {
-      for (const label of textObjects(file.page.layers)) out.push({ pageId: file.pageId, label })
+      for (const label of everyText(file.page)) out.push({ pageId: file.pageId, label })
     }
     return out
   }
@@ -1768,6 +1814,8 @@ export const useProjectStore = defineStore('project', () => {
     allTextObjects,
     setLayerVisible,
     setLayerLocked,
+    setLayerLinked,
+    isLinked,
     setLayerAlphaLocked,
     placeLayer,
     renameLayer,

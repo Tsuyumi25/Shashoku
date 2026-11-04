@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 18
+export const MANIFEST_SCHEMA_VERSION = 19
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -354,7 +354,21 @@ export interface ManifestJson {
    */
   counters: NumberCounters
 
-  layers: LayerEntry[]
+  /**
+   * The page's own materials: the base map and the retouch layer it was made
+   * with, layers a face promoted, and the artwork's words. What the source side
+   * shows, and nothing of any face's.
+   */
+  pageTree: LayerEntry[]
+
+  /**
+   * Each face's own document, keyed by face id: its layers, folders and
+   * lettering, with every entry of `pageTree` placed among them. A page entry
+   * is the same object here as there — a face decides where the page's
+   * materials stand in its stack and which of its folders hold them, and
+   * nothing else about them. See `trees.ts`.
+   */
+  faceTrees: Record<string, LayerEntry[]>
 }
 
 /**

@@ -5,7 +5,9 @@ import { validatePage } from './validate'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { emptyCounters } from './numbers'
-import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from './schema'
+import { addFaceEntry } from './trees'
+import { allEntries } from './tree'
 
 const FACE = 'fa'
 const OTHER = 'fb'
@@ -47,6 +49,10 @@ function page(
   readingEdges: ReadingEdge[] = [],
   extra: LayerEntry[] = [],
 ): ManifestJson {
+  const layers = [...said.flatMap((s) => s.blocks), ...extra]
+  const faces = allEntries(layers).flatMap((l) =>
+    l.kind === 'text' && l.side === 'translation' ? [l.face] : [],
+  )
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -57,7 +63,7 @@ function page(
     readingOrder,
     readingEdges,
     counters: emptyCounters(),
-    layers: [...said.flatMap((s) => s.blocks), ...extra],
+    ...treesFromOneTree(layers, [FACE, ...faces], FACE),
   }
 }
 
@@ -196,7 +202,7 @@ describe('what each face sees of the page', () => {
   it('names a block of artwork one face has left out of its ledger', () => {
     const m = page([said('a'), said('b')], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(theirs)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'ct'] }] }
     expect(validatePage(m, [FACE, OTHER])).toContainEqual({
       kind: 'unit-member-orphan',
@@ -209,7 +215,7 @@ describe('what each face sees of the page', () => {
   it("names a unit holding another face's lettering", () => {
     const m = page([said('a')], ['as'])
     const theirs = blankTranslationBlock('bt', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(theirs)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'at', 'bt'] }] }
     expect(validatePage(m, [FACE, OTHER])).toEqual([
       { kind: 'unit-member-foreign', id: 'at', unit: 'ub', face: OTHER },
@@ -219,7 +225,7 @@ describe('what each face sees of the page', () => {
   it('finds nothing wrong with two faces that each read the page their own way', () => {
     const m = page([said('a'), said('b')], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(theirs)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'bs', 'ct'] }] }
     expect(validatePage(m, [FACE, OTHER])).toEqual([])
   })

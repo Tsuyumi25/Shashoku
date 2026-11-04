@@ -152,7 +152,7 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     const reopened = await openProject(root);
 
     expect(reopened.pages.map((p) => p.badge)).toEqual(["ok"]);
-    expect((await manifestOf(reopened.pages[0].pageDir)).layers).toHaveLength(2);
+    expect((await manifestOf(reopened.pages[0].pageDir)).pageTree).toHaveLength(2);
   });
 
   /**
@@ -178,7 +178,7 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     await createPage(root, "001.png");
 
     const opened = await openProject(root);
-    const [base] = (await manifestOf(opened.pages[0].pageDir)).layers;
+    const [base] = (await manifestOf(opened.pages[0].pageDir)).pageTree;
 
     expect(base.kind).toBe("raster");
     if (base.kind !== "raster") return;
@@ -198,7 +198,7 @@ describe.skipIf(!haveEngine)("a page made from a source image", () => {
     await createPage(root, "001.png");
 
     const opened = await openProject(root);
-    const [base, retouch] = (await manifestOf(opened.pages[0].pageDir)).layers;
+    const [base, retouch] = (await manifestOf(opened.pages[0].pageDir)).pageTree;
 
     expect(retouch.kind).toBe("raster");
     if (base.kind !== "raster" || retouch.kind !== "raster") return;

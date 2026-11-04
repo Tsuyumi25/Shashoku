@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { toRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { TranslationTextLayerEntry } from '@shared/page/types'
 import { facePage, projectionOf, shownLinesOf } from '@shared/page/units'
 import { isLocked } from '@shared/page/tree'
+import { everyText, faceTree, ownTree } from '@shared/page/trees'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMergeLayers } from '@/composables/useMergeLayers'
@@ -39,7 +40,7 @@ function open(words: string[]) {
         readingOrder: ['s'],
         readingEdges: [],
         counters: emptyCounters(),
-        layers: [lettering, artwork],
+        ...treesFromOneTree([lettering, artwork], [FACE], FACE),
       },
     },
   ]
@@ -183,7 +184,7 @@ describe('copying a whole sentence', () => {
     await merge.duplicateLayer({ wholeUnit: true })
 
     const claimed = new Set(view(project).units.flatMap((u) => u.members))
-    for (const layer of page(project).layers) {
+    for (const layer of everyText(page(project))) {
       expect(claimed.has(layer.id)).toBe(true)
     }
   })
@@ -236,7 +237,8 @@ describe('copying a whole sentence', () => {
 
     expect(view(project).units.map((u) => u.id)).toEqual(['u'])
     expect(view(project).readingOrder).toEqual(['u'])
-    expect(page(project).layers.map((l) => l.id)).toEqual(['t', 's'])
+    expect(faceTree(page(project), FACE).map((l) => l.id)).toEqual(['t', 's'])
+    expect(page(project).pageTree.map((l) => l.id)).toEqual(['s'])
   })
 
   it('puts it back the same on redo', async () => {
@@ -297,7 +299,7 @@ describe('dragging one block of a sentence set in two', () => {
     const opened = open([first])
     const extra = blankTranslationBlock('t2', FACE, DEFAULT_TEXT_STYLE)
     extra.body.lines = [second]
-    page(opened.project).layers.unshift(extra)
+    ownTree(page(opened.project), FACE).unshift(extra)
     unit(opened.project).members = ['s', 't', 't2']
     return opened
   }
@@ -360,8 +362,8 @@ describe('copying a locked layer', () => {
   })
 
   function folded(locks: { folder: boolean; child: boolean }) {
-    const page = useProjectStore().pageById(PAGE)!.page
-    page.layers[0] = {
+    const tree = ownTree(useProjectStore().pageById(PAGE)!.page, FACE)
+    tree[0] = {
       kind: 'group',
       id: 'g',
       name: 'g',
@@ -370,9 +372,9 @@ describe('copying a locked layer', () => {
       opacity: 1,
       blendMode: 'normal',
       effects: [],
-      children: [{ ...toRaw(page.layers[0]), locked: locks.child }],
+      children: [{ ...toRaw(tree[0]!), locked: locks.child }],
     }
-    return page
+    return tree
   }
 
   it('keeps a locked folder locked in its copy, with everything inside it', async () => {
@@ -382,8 +384,8 @@ describe('copying a locked layer', () => {
 
     await merge.duplicateLayer()
 
-    expect(layers.layers[1].locked).toBe(true)
-    expect(isLocked(layers.layers, copyOfT(project))).toBe(true)
+    expect(layers[1]!.locked).toBe(true)
+    expect(isLocked(layers, copyOfT(project))).toBe(true)
   })
 
   it('keeps a locked layer locked when its unlocked folder is what gets copied', async () => {
@@ -404,6 +406,6 @@ describe('copying a locked layer', () => {
 
     const copy = copyOfT(project)
     expect(project.entryById(copy)?.locked).toBe(false)
-    expect(isLocked(layers.layers, copy)).toBe(true)
+    expect(isLocked(layers, copy)).toBe(true)
   })
 })

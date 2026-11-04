@@ -49,11 +49,12 @@ export function useMergeLayers() {
   const project = useProjectStore()
   const editor = useEditorStore()
 
-  function openPage(): { page: string; pageDir: string; layers: LayerEntry[] } | null {
+  /** The open page and the tree it is worked in, with where something new made there belongs. */
+  function openPage(): { page: string; pageDir: string; layers: readonly LayerEntry[]; home: string | null } | null {
     const page = editor.currentPageId
     if (page === null) return null
     const file = project.pageById(page)
-    return file ? { page, pageDir: file.pageDir, layers: file.page.layers } : null
+    return file ? { page, pageDir: file.pageDir, layers: editor.workingTree(page), home: editor.layerHome() } : null
   }
 
   /** The tree says what may be flattened; the editor says what may be touched. */
@@ -168,10 +169,9 @@ export function useMergeLayers() {
       for (const id of below) project.removeEntry(id)
       // Read after the others are gone, so it still says where the topmost
       // sits — which is where the result belongs.
-      const live = project.pageById(open.page)?.page.layers ?? []
-      const at = pathOf(live, top.id) ?? undefined
+      const at = pathOf(editor.workingTree(open.page), top.id) ?? undefined
       project.removeEntry(top.id)
-      project.addLayer(open.page, merged, at)
+      project.addLayer(open.page, open.home, merged, at)
     })
     editor.selectOnly(merged.id)
   }
@@ -329,15 +329,14 @@ export function useMergeLayers() {
     const originals = new Map(clone.texts.map(([was, now]) => [now, was]))
 
     editor.cmdReshape(`duplicate-layer ${copy.id}`, open.page, () => {
-      project.addLayer(open.page, copy, at)
+      project.addLayer(open.page, open.home, copy, at)
       if (!opts.wholeUnit) {
         for (const [was, now] of clone.texts) project.addMemberAfter(open.page, was, now)
       }
       // The sentence's other twins, each above the block it copies.
       for (const block of extra) {
-        const live = project.pageById(open.page)?.page.layers ?? []
-        const near = pathOf(live, originals.get(block.id) ?? '')
-        project.addLayer(open.page, block, near === null ? undefined : [...near.slice(0, -1), near[near.length - 1] + 1])
+        const near = pathOf(editor.workingTree(open.page), originals.get(block.id) ?? '')
+        project.addLayer(open.page, open.home, block, near === null ? undefined : [...near.slice(0, -1), near[near.length - 1] + 1])
       }
       for (const { of, unit } of units) project.insertUnit(open.page, unit, of)
     })

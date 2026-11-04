@@ -1,5 +1,5 @@
 import type { ManifestJson, NumberCounters, TextLayerEntry, TranslationUnit } from './types'
-import { textObjects } from './tree'
+import { everyText } from './trees'
 import { facePage, unitsInReadingOrder } from './units'
 
 export function emptyCounters(): NumberCounters {
@@ -22,7 +22,7 @@ export function emptyCounters(): NumberCounters {
  */
 export function numberPage(manifest: ManifestJson, faces: readonly string[]): void {
   const counters = (manifest.counters ??= emptyCounters())
-  const blocks = textObjects(manifest.layers)
+  const blocks = everyText(manifest)
 
   const sides = new Map(blocks.map((b) => [b.id, b.side]))
   const byId = new Map(blocks.map((b) => [b.id, b]))

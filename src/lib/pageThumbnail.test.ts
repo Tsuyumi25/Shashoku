@@ -5,7 +5,8 @@ import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { thumbnailKey } from '@/lib/pageThumbnail'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
+import { addFaceEntry, textOnPage } from '@shared/page/trees'
 
 const FACE = 'f'
 
@@ -25,17 +26,18 @@ function page(): ProjectFile {
       readingOrder: ['s'],
       readingEdges: [],
       counters: emptyCounters(),
-      layers: [
-        blankTranslationBlock('a', FACE, DEFAULT_TEXT_STYLE),
-        blankSourceBlock('s', DEFAULT_TEXT_STYLE),
-      ],
+      ...treesFromOneTree(
+        [blankTranslationBlock('a', FACE, DEFAULT_TEXT_STYLE), blankSourceBlock('s', DEFAULT_TEXT_STYLE)],
+        [FACE],
+        FACE,
+      ),
     },
   }
 }
 
-const textOn = (file: ProjectFile) => file.page.layers[0] as TranslationTextLayerEntry
+const textOn = (file: ProjectFile) => textOnPage(file.page, 'a') as TranslationTextLayerEntry
 
-const sourceOn = (file: ProjectFile) => file.page.layers[1] as SourceTextLayerEntry
+const sourceOn = (file: ProjectFile) => textOnPage(file.page, 's') as SourceTextLayerEntry
 
 /** What a thumbnail is a picture of, and nothing else, decides its key. */
 describe('thumbnailKey', () => {
@@ -91,7 +93,7 @@ describe('thumbnailKey', () => {
   /** ⚠️ Another face's lettering moves no pixel of this one's page. */
   it('is unchanged by a second face being lettered', async () => {
     const twoFaced = page()
-    twoFaced.page.layers.push(blankTranslationBlock('b', 'other', DEFAULT_TEXT_STYLE))
+    addFaceEntry(twoFaced.page, 'other', blankTranslationBlock('b', 'other', DEFAULT_TEXT_STYLE))
 
     expect(await thumbnailKey(twoFaced, FACE)).toBe(await thumbnailKey(page(), FACE))
   })

@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useProjectStore } from '@/stores/projectStore'
-import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr } from '@shared/page/schema'
+import {
+  blankSourceBlock,
+  blankTranslationBlock,
+  defaultManifest,
+  defaultOcr,
+  treesFromOneTree,
+} from '@shared/page/schema'
+import { removeFromPage } from '@shared/page/trees'
 import { numberPage } from '@shared/page/numbers'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type {
@@ -76,7 +83,7 @@ function openWith(
   project.rootPath = '/root'
   project.projectMeta.faces = FACES
   const page: ManifestJson = defaultManifest('001.jpg', 1200, 1700)
-  page.layers = blocks
+  Object.assign(page, treesFromOneTree(blocks, [ZH, EN], ZH))
   for (const [face, units] of Object.entries(ledgers)) page.ledgers[face] = { units }
   const sources = new Set(blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
   page.readingOrder =
@@ -391,7 +398,7 @@ describe('answer — the orchestration the bridge drives', () => {
         { id: 'u2', members: ['s2', 't2'] },
       ],
     })
-    page.layers = page.layers.filter((l) => l.id !== 't1')
+    removeFromPage(page, 't1')
     page.ledgers[ZH].units = page.ledgers[ZH].units.filter((u) => u.id !== 'u1')
     numberPage(page, [ZH, EN])
 

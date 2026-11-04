@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { createPinia, setActivePinia } from 'pinia'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { GroupLayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import { everyEntry } from '@shared/page/trees'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { rasterizeRect } from '@/lib/selection/raster'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
@@ -60,7 +61,7 @@ function openWith(...layers: (RasterLayerEntry | TextLayerEntry | GroupLayerEntr
       badge: 'ok',
     },
   ]
-  for (const layer of layers) project.addLayer(PAGE_ID, layer)
+  for (const layer of layers) project.addLayer(PAGE_ID, null, layer)
   const editor = useEditorStore()
   editor.currentPageId = PAGE_ID
   return { project, editor }
@@ -185,6 +186,7 @@ describe('lifting what is inside the selection', () => {
 
     await useSelectionPixels().liftSelection()
 
-    expect(project.pageById(PAGE_ID)?.page.layers).toHaveLength(1)
+    const page = project.pageById(PAGE_ID)?.page
+    expect(page && everyEntry(page)).toHaveLength(1)
   })
 })

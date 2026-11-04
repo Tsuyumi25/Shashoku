@@ -22,7 +22,9 @@ import { hasEdge, normalizeEdges, wouldCycle, type ReadingEdge } from './reading
 import { linesOf } from './text'
 import { BLOCK_JOINER, shownCodeOf } from './units'
 import { escapeText } from './markup'
-import { textObjects } from './tree'
+import { allEntries, textObjects } from './tree'
+import { bottomRaster } from './stack'
+import { faceTree, placedTree, resolveTrees, type PlacedEntry } from './trees'
 import { emptyCounters } from './numbers'
 import { parseEffects, serializeEffects } from '../effects/schema'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
@@ -63,13 +65,16 @@ const PLAIN_TEXT_VERSION = 13
  * style parser already does with a key that is not there — a character scale
  * absent means the face's own proportions — except for the escaping below.
  */
-const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, 17, MANIFEST_SCHEMA_VERSION]
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, 17, 18, MANIFEST_SCHEMA_VERSION]
 
 /** The last version that held one ledger for the page, with candidates on the unit. */
 const ONE_LEDGER_VERSION = 15
 
 /** The last version whose ledgers each held their own reading, between sentences. */
 const FACE_READING_VERSION = 17
+
+/** The last version with one layer tree for every face. */
+const ONE_TREE_VERSION = 18
 
 
 export class PageParseError extends Error {}
@@ -550,11 +555,62 @@ function parseLayerEntry(v: unknown, at: string, legacyFace: string | null): Lay
 }
 
 
-function collectRasterFiles(entries: readonly LayerEntry[], out: string[]): void {
-  for (const e of entries) {
-    if (e.kind === 'raster') out.push(e.file)
-    else if (e.kind === 'group') collectRasterFiles(e.children, out)
+/** A face tree's entry: a page entry by reference, or one of the face's own. */
+function parsePlacedEntry(v: unknown, at: string): PlacedEntry {
+  if (!isRecord(v)) fail(`${at} 必須是物件`)
+  if (v.kind === 'ref') {
+    if (typeof v.id !== 'string' || v.id.length === 0) fail(`${at}.id 必須是非空字串`)
+    return { kind: 'ref', id: v.id }
   }
+  if (v.kind === 'group') {
+    const { children, ...rest } = v
+    if (!Array.isArray(children)) fail(`${at}.children 必須是陣列`)
+    const shell = parseGroupEntry({ ...rest, children: [] }, at, null)
+    return { ...shell, children: children.map((c, i) => parsePlacedEntry(c, `${at}.children[${i}]`)) }
+  }
+  return parseLayerEntry(v, at, null)
+}
+
+function serializePlacedEntry(e: PlacedEntry): Record<string, unknown> {
+  if (e.kind === 'ref') return { kind: 'ref', id: e.id }
+  if (e.kind === 'group') {
+    return { ...serializeLayerEntry({ ...e, children: [] } as LayerEntry), children: e.children.map(serializePlacedEntry) }
+  }
+  return serializeLayerEntry(e as LayerEntry)
+}
+
+/**
+ * One tree for every face, split the way the page and its faces now own things:
+ * the base map, the retouch layer and the artwork's words are the page's;
+ * everything else that was drawn is `primary`'s, and each face keeps its own
+ * lettering. Every face places the page's entries where the one tree had them,
+ * so no face's page draws differently for the split.
+ */
+export function treesFromOneTree(
+  layers: LayerEntry[],
+  faces: readonly string[],
+  primary: string,
+): { pageTree: LayerEntry[]; faceTrees: Record<string, LayerEntry[]> } {
+  const base = bottomRaster(layers)
+  const isPage = (e: LayerEntry): boolean =>
+    e === base ||
+    (e.kind === 'raster' && e.name === RETOUCH_LAYER_NAME) ||
+    (e.kind === 'text' && e.side === 'source')
+  const pageTree = allEntries(layers).filter((e) => e.kind !== 'group' && isPage(e))
+  const faceTrees: Record<string, LayerEntry[]> = {}
+  for (const face of new Set([primary, ...faces])) {
+    const own = (entries: readonly LayerEntry[]): LayerEntry[] =>
+      entries.flatMap((e): LayerEntry[] => {
+        if (isPage(e)) return [e]
+        if (e.kind === 'text') return e.side === 'translation' && e.face === face ? [e] : []
+        if (e.kind === 'raster') return face === primary ? [e] : []
+        const children = own(e.children)
+        // The primary face keeps the folder; another holds what it kept of it loose.
+        return face === primary ? [{ ...e, children }] : children
+      })
+    faceTrees[face] = own(layers)
+  }
+  return { pageTree, faceTrees }
 }
 
 /**
@@ -573,7 +629,8 @@ export function defaultManifest(name: string, width: number, height: number): Ma
     readingOrder: [],
     readingEdges: [],
     counters: emptyCounters(),
-    layers: [],
+    pageTree: [],
+    faceTrees: {},
   }
 }
 
@@ -746,13 +803,30 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
 
   const size = parsePageSize(data)
 
-  const layersRaw = data.layers
-  if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
-  const layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`, legacy ? legacyFace : null))
+  let layers: LayerEntry[] = []
+  let trees: { pageTree: LayerEntry[]; faceTrees: Record<string, LayerEntry[]> } | null = null
+  if ((data.schemaVersion as number) <= ONE_TREE_VERSION) {
+    const layersRaw = data.layers
+    if (!Array.isArray(layersRaw)) fail('manifest.json.layers 必須是陣列')
+    layers = layersRaw.map((l, i) => parseLayerEntry(l, `layers[${i}]`, legacy ? legacyFace : null))
+  } else {
+    const pageRaw = data.pageTree
+    if (!Array.isArray(pageRaw)) fail('manifest.json.pageTree 必須是陣列')
+    const pageTree = pageRaw.map((l, i) => parseLayerEntry(l, `pageTree[${i}]`, null))
+    const facesRaw = data.faceTrees ?? {}
+    if (!isRecord(facesRaw)) fail('manifest.json.faceTrees 必須是物件')
+    const placed: Record<string, PlacedEntry[]> = {}
+    for (const [face, tree] of Object.entries(facesRaw)) {
+      if (!Array.isArray(tree)) fail(`manifest.json.faceTrees.${face} 必須是陣列`)
+      placed[face] = tree.map((e, i) => parsePlacedEntry(e, `faceTrees.${face}[${i}]`))
+    }
+    trees = { pageTree, faceTrees: resolveTrees(pageTree, placed) }
+    layers = [...pageTree, ...Object.values(trees.faceTrees).flat()]
+  }
 
-  const files: string[] = []
-  collectRasterFiles(layers, files)
-  if (new Set(files).size !== files.length) fail('manifest.json.layers[].file 不可重複')
+  // Each entry once: a page entry stands in several trees, and is still one layer.
+  const files = [...new Set(allEntries(layers))].flatMap((e) => (e.kind === 'raster' ? [e.file] : []))
+  if (new Set(files).size !== files.length) fail('manifest.json 的點陣圖層 file 不可重複')
 
   if (data.schemaVersion === PLAIN_TEXT_VERSION) {
     for (const block of textObjects(layers)) block.body.lines = block.body.lines.map(escapeText)
@@ -793,6 +867,7 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
   }
 
   const counters = parseCounters(data.counters)
+  trees ??= treesFromOneTree(layers, Object.keys(ledgers), legacyFace)
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision,
@@ -801,7 +876,7 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
     ledgers,
     ...reading,
     counters,
-    layers,
+    ...trees,
   }
 }
 
@@ -894,7 +969,7 @@ export function serializeDrawnLayers(m: ManifestJson, face: string): string {
     delete body.chosen
     return out
   }
-  return JSON.stringify(m.layers.map(drawn).filter((l) => l !== null))
+  return JSON.stringify(faceTree(m, face).map(drawn).filter((l) => l !== null))
 }
 
 export function serializeManifest(m: ManifestJson): string {
@@ -909,7 +984,10 @@ export function serializeManifest(m: ManifestJson): string {
   out.readingOrder = m.readingOrder
   if (m.readingEdges.length > 0) out.readingEdges = normalizeEdges(m.readingEdges)
   out.counters = m.counters
-  out.layers = m.layers.map(serializeLayerEntry)
+  out.pageTree = m.pageTree.map(serializeLayerEntry)
+  out.faceTrees = Object.fromEntries(
+    Object.entries(m.faceTrees).map(([face, tree]) => [face, placedTree(m, tree).map(serializePlacedEntry)]),
+  )
   return `${JSON.stringify(out, null, 2)}\n`
 }
 

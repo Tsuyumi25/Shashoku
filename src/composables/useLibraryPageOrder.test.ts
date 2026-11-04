@@ -59,7 +59,8 @@ function pageOf(pageId: string): ProjectFile {
       readingOrder: [],
       readingEdges: [],
       counters: emptyCounters(),
-      layers: [],
+      pageTree: [],
+      faceTrees: {},
     },
     badge: 'ok',
   }

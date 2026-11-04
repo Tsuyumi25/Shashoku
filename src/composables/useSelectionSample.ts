@@ -5,6 +5,7 @@ import { blocksOnSide, shownLinesOf } from '@shared/page/units'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { faceTree } from '@shared/page/trees'
 
 export interface SelectionSample {
   /** The text objects a value or a look would be given to. */
@@ -34,7 +35,12 @@ export function useSelectionSample(): SelectionSample {
       ? { pageId: lead.pageId, entry: lead.entry }
       : project.files
           .filter((f) => f.badge === 'ok')
-          .flatMap((f) => blocksOnSide(f.page.layers, 'translation', project.activeFace).map((entry) => ({ pageId: f.pageId, entry })))
+          .flatMap((f) =>
+            blocksOnSide(faceTree(f.page, project.activeFace), 'translation', project.activeFace).map((entry) => ({
+              pageId: f.pageId,
+              entry,
+            })),
+          )
           .find((p) => p.entry.body.style.fontFamily)
     if (!pick) return null
     const page = project.pageById(pick.pageId)?.page

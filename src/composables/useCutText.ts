@@ -78,7 +78,7 @@ export function useCutText() {
     const file = project.pageById(pageId)
     const block = project.blockById(pageId, blockId)
     const place = project.placeOf(pageId, blockId)
-    const path = file ? pathOf(file.page.layers, blockId) : null
+    const path = file ? pathOf(editor.workingTree(pageId), blockId) : null
     if (!file || !block || !place || path === null) return
 
     const code = shownCodeOf(block)
@@ -111,9 +111,10 @@ export function useCutText() {
     // Each piece directly above the one before it, as a copy lands.
     const above = (i: number) => [...path.slice(0, -1), path[path.length - 1]! + 1 + i]
 
+    const home = editor.layerHome()
     editor.cmdReshape(`cut-text ${blockId}`, pageId, () => {
       copies.forEach((copy, i) => {
-        project.addLayer(pageId, copy, above(i))
+        project.addLayer(pageId, home, copy, above(i))
         project.addMemberAfter(pageId, i === 0 ? blockId : copies[i - 1]!.id, copy.id)
       })
       project.updateLabelText(pageId, blockId, codePieces[0]!)

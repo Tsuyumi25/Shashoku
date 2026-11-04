@@ -98,6 +98,7 @@
 </template>
 
 <script setup lang="ts">
+import { faceTree } from '@shared/page/trees'
 import { computed, ref, watchEffect, watchPostEffect } from 'vue'
 import type { Box } from '@shared/ocr/places'
 import type { TextLayerEntry } from '@shared/page/types'
@@ -169,7 +170,8 @@ function pinKey(objectId: string): string {
 /** Which objects are drawn at all, so a card never stands for a hidden one. */
 const shown = computed(() => {
   const out = new Set<string>()
-  for (const { entry } of stackedTextNodes(pageStack(file.value?.page.layers ?? [], 'translation', project.activeFace))) {
+  const tree = file.value ? faceTree(file.value.page, project.activeFace) : []
+  for (const { entry } of stackedTextNodes(pageStack(tree, 'translation', project.activeFace))) {
     out.add(entry.id)
   }
   return out
@@ -221,7 +223,7 @@ const listed = computed<Listed[]>(() => {
   const page = file.value?.page
   if (page === undefined) return out
   // One card per block: every block keeps a pool of its own.
-  for (const entry of blocksOnSide(page.layers, 'translation', project.activeFace)) {
+  for (const entry of blocksOnSide(faceTree(page, project.activeFace), 'translation', project.activeFace)) {
     if (entry.side !== 'translation' || !shown.value.has(entry.id)) continue
     const rows = rowsOf(entry)
     if (!offersAChoice(rows)) continue

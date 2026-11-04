@@ -7,7 +7,7 @@ import { laneOffset, railMarks, railWidth } from '@/lib/readingRail'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
 
 const FACE = 'f'
 
@@ -44,7 +44,7 @@ function page(ids: string, drawn: string[] = []): LabelRow[] {
         return { from: `${from}s`, to: `${to}s` }
       }),
       counters: emptyCounters(),
-      layers,
+      ...treesFromOneTree(layers, [FACE], FACE),
     },
   }
   return buildLabelRows([file], 'translation', FACE).filter(

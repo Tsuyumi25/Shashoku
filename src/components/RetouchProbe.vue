@@ -241,12 +241,12 @@
 </template>
 
 <script setup lang="ts">
+import { everyEntry } from '@shared/page/trees'
 import { computed, ref } from 'vue'
 import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import { useInpaintSelection } from '@/composables/useInpaintSelection'
 import { isEmptyRect } from '@/lib/selection/rect'
-import { allEntries } from '@shared/page/tree'
 import { useEditorStore } from '@/stores/editorStore'
 import { useOcrStore } from '@/stores/ocrStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
@@ -273,7 +273,7 @@ const reading = computed(() => (pageId.value ? ocr.busy(pageId.value) : false))
 function readPage() {
   const file = currentFile.value
   if (!file) return
-  void ocr.readPage(file.pageId, file.pageDir, file.page.layers)
+  void ocr.readPage(file.pageId, file.pageDir, file.page.pageTree)
 }
 
 const hasSelection = computed(
@@ -302,7 +302,7 @@ const retouchAt = computed(() => {
   if (!file) return null
   const names = new Set(project.retouchLayerNames)
   const values = new Set(
-    allEntries(file.page.layers)
+    everyEntry(file.page)
       .filter((e) => e.kind === 'raster' && names.has(e.name))
       .map((e) => e.opacity),
   )

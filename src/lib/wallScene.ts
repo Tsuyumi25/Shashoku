@@ -1,4 +1,5 @@
 import { blocksOnSide, facePage, shownCodeOf, tagsOfBlock } from '@shared/page/units'
+import { faceTree } from '@shared/page/trees'
 import type { TagRegistry } from '@shared/tags/types'
 import type { WallEntry, WallScene } from '@shared/wall/scene'
 import type { ProjectFile } from '@/types/project'
@@ -19,8 +20,8 @@ export function wallSceneOf(
     if (file.badge !== 'ok') return
     const page = facePage(file.page, face)
     for (const block of [
-      ...blocksOnSide(file.page.layers, 'translation', face),
-      ...blocksOnSide(file.page.layers, 'source', face),
+      ...blocksOnSide(faceTree(file.page, face), 'translation', face),
+      ...blocksOnSide(file.page.pageTree, 'source', face),
     ]) {
       entries.push({
         id: block.id,

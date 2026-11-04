@@ -19,6 +19,7 @@ const engine = createRequire(import.meta.url)('@shashoku/engine') as Window['eng
 
 const PAGE_ID = 'source-260809-1200'
 const PAGE = { page: PAGE_ID, w: 1200, h: 1700 }
+const FACE = 'f'
 
 function raster(id: string, extra: Partial<RasterLayerEntry> = {}): RasterLayerEntry {
   return {
@@ -65,6 +66,7 @@ function folder(id: string, children: RasterLayerEntry[], extra: Partial<GroupLa
 function openWith(...layers: (RasterLayerEntry | GroupLayerEntry)[]) {
   const project = useProjectStore()
   project.rootPath = '/root'
+  project.projectMeta.faces = [{ id: FACE, no: 1, name: '中文' }]
   project.allFiles = [
     {
       pageId: PAGE_ID,
@@ -74,7 +76,7 @@ function openWith(...layers: (RasterLayerEntry | GroupLayerEntry)[]) {
       badge: 'ok',
     },
   ]
-  for (const layer of layers) project.addLayer(PAGE_ID, layer)
+  for (const layer of layers) project.addLayer(PAGE_ID, FACE, layer)
   const editor = useEditorStore()
   editor.currentPageId = PAGE_ID
   return { project, editor }

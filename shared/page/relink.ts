@@ -3,7 +3,8 @@ import type { ManifestJson, TextLayerEntry, TranslationUnit } from './types'
 import type { TextSide } from './text'
 import { readAfter, sourceOrder } from './reading'
 import { blankSourceBlock, blankTranslationBlock } from './schema'
-import { findTextObject, insertAtPath, pathOf, removeAtPath, textObjects } from './tree'
+import { findTextObject, pathOf, textObjects } from './tree'
+import { addFaceEntry, addPageEntry, removeFromPage } from './trees'
 import { facePage, placeOfBlock, shownCodeOf, type FacePage } from './units'
 
 /**
@@ -62,9 +63,9 @@ function sideOfBlock(page: FacePage, id: string): TextSide | undefined {
   return findTextObject(page.layers, id)?.side
 }
 
+/** A source block is the page's, so it leaves every face; lettering leaves this face's tree. */
 function dropBlock(page: FacePage, id: string) {
-  const path = pathOf(page.layers, id)
-  if (path) removeAtPath(page.layers, path)
+  removeFromPage(page.manifest, id)
 }
 
 function moveBlock(page: FacePage, id: string, to: TranslationUnit) {
@@ -104,9 +105,11 @@ function tidy(page: FacePage, unitIds: Iterable<string>, newId: () => string, se
           blank.body.x = near.body.x
           blank.body.y = near.body.y
         }
-        const path = near ? pathOf(page.layers, near.id) : null
-        if (!path || !insertAtPath(page.layers, [...path.slice(0, -1), path[path.length - 1]! + 1], blank))
-          page.layers.push(blank)
+        const tree = side === 'source' ? page.manifest.pageTree : page.layers
+        const path = near ? pathOf(tree, near.id) : null
+        const above = path ? [...path.slice(0, -1), path[path.length - 1]! + 1] : undefined
+        if (side === 'source') addPageEntry(page.manifest, blank, above)
+        else addFaceEntry(page.manifest, page.face, blank, above)
         if (side === 'source') unit.members.unshift(blank.id)
         else unit.members.push(blank.id)
       }
@@ -215,7 +218,7 @@ export function detach(
  * blank of the face's own lettering, read last.
  */
 export function adoptSources(manifest: ManifestJson, faces: readonly string[], newId: () => string, seed: TextStyle): void {
-  const sources = textObjects(manifest.layers).filter((t) => t.side === 'source')
+  const sources = textObjects(manifest.pageTree).filter((t) => t.side === 'source')
   for (const face of faces) {
     const page = facePage(manifest, face)
     const held = new Set(page.units.flatMap((u) => u.members))
@@ -224,7 +227,7 @@ export function adoptSources(manifest: ManifestJson, faces: readonly string[], n
       const lettering = blankTranslationBlock(newId(), face, seed)
       lettering.body.x = source.body.x
       lettering.body.y = source.body.y
-      manifest.layers.push(lettering)
+      addFaceEntry(manifest, face, lettering)
       const unit = { id: newId(), members: [source.id, lettering.id] }
       page.units.push(unit)
     }

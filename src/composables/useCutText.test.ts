@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION } from '@shared/page/types'
 import type { TranslationCandidate, TranslationTextLayerEntry } from '@shared/page/types'
@@ -48,7 +48,7 @@ function open(words: string[], candidates: TranslationCandidate[] = [], chosen: 
         readingOrder: ['s'],
         readingEdges: [],
         counters: emptyCounters(),
-        layers: [lettering, artwork],
+        ...treesFromOneTree([lettering, artwork], [FACE], FACE),
       },
     },
   ]

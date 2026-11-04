@@ -10,7 +10,13 @@ import type {
   TranslationUnit,
 } from '@shared/page/types'
 import type { TranslationFace } from '@shared/project/types'
-import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr } from '@shared/page/schema'
+import {
+  blankSourceBlock,
+  blankTranslationBlock,
+  defaultManifest,
+  defaultOcr,
+  treesFromOneTree,
+} from '@shared/page/schema'
 import { numberPage } from '@shared/page/numbers'
 import type { ProjectFile } from '@/types/project'
 import type { FaceTexts, PageTexts, SentenceTexts } from '@shared/mcp/types'
@@ -64,7 +70,8 @@ function pageOf(
   name = '001.jpg',
 ): ManifestJson {
   const page = defaultManifest(name, 1200, 1700)
-  page.layers = blocks
+  const faces = Object.keys(ledgers)
+  Object.assign(page, treesFromOneTree(blocks, faces, faces[0] ?? ZH))
   for (const [face, units] of Object.entries(ledgers)) page.ledgers[face] = { units }
   const sources = new Set(blocks.flatMap((b) => (b.side === 'source' ? [b.id] : [])))
   page.readingOrder =

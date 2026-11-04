@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useProjectStore } from '@/stores/projectStore'
-import { blankSourceBlock, blankTranslationBlock, defaultManifest, defaultOcr } from '@shared/page/schema'
+import {
+  blankSourceBlock,
+  blankTranslationBlock,
+  defaultManifest,
+  defaultOcr,
+  treesFromOneTree,
+} from '@shared/page/schema'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import type { TranslationBody, TranslationTextLayerEntry } from '@shared/page/types'
 import { planProposal } from './propose'
@@ -23,7 +29,7 @@ function openWith(project: Project, words: string[] = [], over: Partial<Translat
   const lettering = blankTranslationBlock(BLOCK, FACE, DEFAULT_TEXT_STYLE)
   lettering.body = { ...lettering.body, lines: words, ...over }
   const page = defaultManifest('p', 1200, 1700)
-  page.layers = [artwork, lettering]
+  Object.assign(page, treesFromOneTree([artwork, lettering], [FACE], FACE))
   page.ledgers[FACE] = { units: [{ id: 'u-obj', members: [artwork.id, lettering.id] }] }
   page.readingOrder = [artwork.id]
   project.allFiles = [{ pageId: PAGE_ID, pageDir: '/root/p1', page, ocr: defaultOcr(1200, 1700), badge: 'ok' }]

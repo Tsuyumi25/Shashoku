@@ -9,7 +9,7 @@ import type {
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { emptyCounters } from './numbers'
-import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from './schema'
 import {
   blocksOnSide,
   chosenCandidateOf,
@@ -48,6 +48,7 @@ function unit(id: string, members: string[]): TranslationUnit {
 }
 
 function manifestOf(layers: LayerEntry[], units: TranslationUnit[], face = FACE): ManifestJson {
+  const faces = layers.flatMap((l) => (l.kind === 'text' && l.side === 'translation' ? [l.face] : []))
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -58,7 +59,7 @@ function manifestOf(layers: LayerEntry[], units: TranslationUnit[], face = FACE)
     readingOrder: [],
     readingEdges: [],
     counters: emptyCounters(),
-    layers,
+    ...treesFromOneTree(layers, [face, ...faces], face),
   }
 }
 

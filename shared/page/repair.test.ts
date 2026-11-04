@@ -3,12 +3,12 @@ import type { GroupLayerEntry, LayerEntry, ManifestJson, TextLayerEntry, Transla
 import { MANIFEST_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { repairPage } from './repair'
 import { validatePage } from './validate'
-import { textObjects } from './tree'
+import { addFaceEntry, everyEntry, textOnPage } from './trees'
 import { facePage } from './units'
 import type { ReadingEdge } from './readingGraph'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { emptyCounters } from './numbers'
-import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from './schema'
 
 const FACE = 'fa'
 const OTHER = 'fb'
@@ -60,7 +60,7 @@ function page(
     readingOrder,
     readingEdges,
     counters: emptyCounters(),
-    layers: [...units.flatMap((s) => s.blocks), ...extra],
+    ...treesFromOneTree([...units.flatMap((s) => s.blocks), ...extra], [FACE], FACE),
   }
 }
 
@@ -113,7 +113,7 @@ describe('repairPage', () => {
     const m = page([a], ['as'], [], [group('as', [])])
     const { manifest, repaired } = repairPage(m, [FACE], counter())
     expect(repaired.map((d) => d.kind)).toContain('duplicate-id')
-    const ids = textObjects(manifest.layers).map((t) => t.id)
+    const ids = everyEntry(manifest).map((e) => e.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
@@ -169,7 +169,7 @@ describe('repairing what a unit says it is made of', () => {
     expect(repaired).toEqual([{ kind: 'unit-side-empty', id: 'a', side: 'translation', face: FACE }])
     const unit = manifest.ledgers[FACE].units[0]
     expect(unit.members).toHaveLength(2)
-    const mate = textObjects(manifest.layers).find((t) => t.id === unit.members[1])
+    const mate = textOnPage(manifest, unit.members[1])
     expect(mate).toMatchObject({ side: 'translation', face: FACE })
     expect(mate?.body).toMatchObject({ x: 40, y: 90, lines: [''] })
   })
@@ -182,7 +182,7 @@ describe('repairing what a unit says it is made of', () => {
     expect(repaired).toEqual([{ kind: 'unit-side-empty', id: 'a', side: 'source', face: FACE }])
     const unit = manifest.ledgers[FACE].units[0]
     expect(unit.members[1]).toBe('at')
-    expect(textObjects(manifest.layers).find((t) => t.id === unit.members[0])?.side).toBe('source')
+    expect(textOnPage(manifest, unit.members[0])?.side).toBe('source')
     expect(validatePage(manifest, [FACE])).toEqual([])
   })
 
@@ -195,7 +195,7 @@ describe('repairing what a unit says it is made of', () => {
     expect(ledger.units).toHaveLength(2)
     const own = ledger.units.find((u) => u.members.includes('stray'))
     expect(own?.members).toHaveLength(2)
-    expect(textObjects(manifest.layers).find((t) => t.id === own?.members[0])?.side).toBe('source')
+    expect(textOnPage(manifest, own!.members[0])?.side).toBe('source')
     expect(facePage(manifest, FACE).readingOrder).toContain(own?.id)
     expect(validatePage(manifest, [FACE])).toEqual([])
   })
@@ -220,7 +220,7 @@ describe('repairing a page more than one face reads', () => {
     b.blocks[0].body.x = 70
     const m = page([a, b], ['as', 'bs'])
     const theirs = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(theirs)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'ct'] }] }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
     expect(repaired).toEqual([{ kind: 'unit-member-orphan', id: 'bs', face: OTHER }])
@@ -228,7 +228,7 @@ describe('repairing a page more than one face reads', () => {
     expect(ledger.units).toHaveLength(2)
     const own = ledger.units.find((u) => u.members.includes('bs'))!
     expect(own.members).toHaveLength(2)
-    const mate = textObjects(manifest.layers).find((t) => t.id === own.members[1])
+    const mate = textOnPage(manifest, own.members[1])
     expect(mate).toMatchObject({ side: 'translation', face: OTHER })
     expect(mate?.body).toMatchObject({ x: 70, lines: [''] })
     expect(manifest.ledgers[FACE].units).toHaveLength(2)
@@ -238,7 +238,7 @@ describe('repairing a page more than one face reads', () => {
   it("takes another face's lettering out of a unit and leaves its own alone", () => {
     const m = page([said('a')], ['as'])
     const theirs = blankTranslationBlock('bt', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(theirs)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = { units: [{ id: 'ub', members: ['as', 'at', 'bt'] }] }
     const { manifest, repaired } = repairPage(m, [FACE, OTHER], counter())
     expect(repaired).toEqual([
@@ -256,7 +256,8 @@ describe('repairing a page more than one face reads', () => {
     const m = page([a, b], ['as', 'bs'])
     const mine = blankTranslationBlock('ct', OTHER, DEFAULT_TEXT_STYLE)
     const theirs = blankTranslationBlock('dt', OTHER, DEFAULT_TEXT_STYLE)
-    m.layers.push(mine, theirs)
+    addFaceEntry(m, OTHER, mine)
+    addFaceEntry(m, OTHER, theirs)
     m.ledgers[OTHER] = {
       units: [
         { id: 'uc', members: ['as', 'bs', 'ct'] },

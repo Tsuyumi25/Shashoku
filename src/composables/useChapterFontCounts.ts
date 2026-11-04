@@ -1,6 +1,7 @@
 import { computed } from 'vue'
 import { blocksOnSide } from '@shared/page/units'
 import { useProjectStore } from '@/stores/projectStore'
+import { faceTree } from '@shared/page/trees'
 
 /**
  * How many translations in the open chapter each family sets — the faces this
@@ -13,7 +14,7 @@ export function useChapterFontCounts() {
     const out = new Map<string, number>()
     for (const file of project.files) {
       if (file.badge !== 'ok') continue
-      for (const block of blocksOnSide(file.page.layers, 'translation', project.activeFace)) {
+      for (const block of blocksOnSide(faceTree(file.page, project.activeFace), 'translation', project.activeFace)) {
         const family = block.body.style.fontFamily
         if (family) out.set(family, (out.get(family) ?? 0) + 1)
       }

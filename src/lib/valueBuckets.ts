@@ -4,6 +4,7 @@ import type { TextStyle } from '@shared/text-style/types'
 import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
 import type { TextSide } from '@shared/page/text'
 import { blocksOnSide, facePage, tagsOfBlock } from '@shared/page/units'
+import { treeOf } from '@shared/page/trees'
 
 /** One block of lettering, flattened to what a bucket needs to know about it. */
 export interface BucketObject {
@@ -44,7 +45,7 @@ export function bucketObjectsOf(
   // so a sound set in two blocks votes twice for one meaning — which is right:
   // the panel is about how many pieces of lettering agree, not how many
   // sentences do.
-  return blocksOnSide(manifest.layers, side, face).map((block) => ({
+  return blocksOnSide(treeOf(manifest, side, face), side, face).map((block) => ({
     id: block.id,
     pageId,
     tags: tagsOfBlock(page, block.id),

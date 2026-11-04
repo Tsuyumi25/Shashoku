@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import { treeOf } from '@shared/page/trees'
 import { computed } from 'vue'
 import { Eye, EyeOff, Lock, LockOpen } from '@lucide/vue'
 import type { GroupLayerEntry, RasterLayerEntry } from '@shared/page/types'
@@ -58,7 +59,12 @@ const pinned = computed<NamedRow[]>(() => {
   const names = new Set(project.pinnedLayerNames)
   const file = project.pageById(props.pageId)
   if (!file || names.size === 0) return []
-  return flattenLayerRows(file.page.layers, new Set(), editor.textSide, project.activeFace).filter(
+  return flattenLayerRows(
+    treeOf(file.page, editor.textSide, project.activeFace),
+    new Set(),
+    editor.textSide,
+    project.activeFace,
+  ).filter(
     (row): row is NamedRow => row.entry.kind !== 'text' && names.has(row.entry.name),
   )
 })

@@ -9,7 +9,8 @@ import type {
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { emptyCounters, letterOf, noOfLetter, numberPage } from './numbers'
-import { blankSourceBlock, blankTranslationBlock, serializeManifest } from './schema'
+import { blankSourceBlock, blankTranslationBlock, serializeManifest, treesFromOneTree } from './schema'
+import { addFaceEntry, addPageEntry, removeFromPage, resolveTrees, snapshotTrees, textOnPage } from './trees'
 
 const FACE = 'f'
 const OTHER = 'g'
@@ -31,6 +32,7 @@ function page(
   ledgers: Record<string, { units: TranslationUnit[] }>,
   readingOrder: string[] = [],
 ): ManifestJson {
+  const faces = Object.keys(ledgers)
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -41,18 +43,17 @@ function page(
     readingOrder,
     readingEdges: [],
     counters: emptyCounters(),
-    layers,
+    ...treesFromOneTree(layers, faces, faces[0]),
   }
 }
 
-const noOf = (m: ManifestJson, id: string): number | undefined =>
-  (m.layers.find((l) => l.id === id) as TranslationTextLayerEntry | undefined)?.no
+const noOf = (m: ManifestJson, id: string): number | undefined => textOnPage(m, id)?.no
 
 const unitNo = (m: ManifestJson, face: string, id: string): number | undefined =>
   m.ledgers[face].units.find((u) => u.id === id)?.no
 
 const letteringOf = (m: ManifestJson, id: string): TranslationTextLayerEntry =>
-  m.layers.find((l) => l.id === id) as TranslationTextLayerEntry
+  textOnPage(m, id) as TranslationTextLayerEntry
 
 describe('numbering a page that has none', () => {
   it('numbers sentences in the order they are read, not the order they are stored', () => {
@@ -124,9 +125,11 @@ describe('a number its holder has lost', () => {
     const m = twoSentences()
 
     m.ledgers[FACE].units = m.ledgers[FACE].units.filter((u) => u.id !== 'u2')
-    m.layers = m.layers.filter((l) => l.id !== 's2' && l.id !== 't2')
+    removeFromPage(m, 's2')
+    removeFromPage(m, 't2')
     numberPage(m, [FACE])
-    m.layers.push(src('s3'), tr('t3'))
+    addPageEntry(m, src('s3'))
+    addFaceEntry(m, FACE, tr('t3'))
     m.ledgers[FACE].units.push(unit('u3', ['s3', 't3']))
     numberPage(m, [FACE])
 
@@ -142,21 +145,25 @@ describe('a number its holder has lost', () => {
   it('is still spent after undo puts the sentence that wore it back', () => {
     const m = twoSentences()
     const ledgers = structuredClone(m.ledgers)
-    const layers = structuredClone(m.layers)
+    const trees = snapshotTrees(m)
 
     m.ledgers[FACE].units = m.ledgers[FACE].units.filter((u) => u.id !== 'u2')
-    m.layers = m.layers.filter((l) => l.id !== 's2' && l.id !== 't2')
-    m.layers.push(src('s3'), tr('t3'))
+    removeFromPage(m, 's2')
+    removeFromPage(m, 't2')
+    addPageEntry(m, src('s3'))
+    addFaceEntry(m, FACE, tr('t3'))
     m.ledgers[FACE].units.push(unit('u3', ['s3', 't3']))
     numberPage(m, [FACE])
     expect(unitNo(m, FACE, 'u3')).toBe(3)
 
     m.ledgers = ledgers
-    m.layers = layers
+    m.pageTree = structuredClone(trees.pageTree)
+    m.faceTrees = resolveTrees(m.pageTree, structuredClone(trees.faceTrees))
     numberPage(m, [FACE])
     expect(unitNo(m, FACE, 'u2')).toBe(2)
 
-    m.layers.push(src('s4'), tr('t4'))
+    addPageEntry(m, src('s4'))
+    addFaceEntry(m, FACE, tr('t4'))
     m.ledgers[FACE].units.push(unit('u4', ['s4', 't4']))
     numberPage(m, [FACE])
 
@@ -174,7 +181,7 @@ describe('a number two things wear at once', () => {
     const copy = tr('t3')
     copy.no = noOf(m, 't1')
     copy.numberedIn = 'u1'
-    m.layers.push(copy)
+    addFaceEntry(m, FACE, copy)
     m.ledgers[FACE].units[0].members.push('t3')
 
     numberPage(m, [FACE])

@@ -88,12 +88,12 @@ function open(entry: RasterLayerEntry) {
     {
       pageId: PAGE_ID,
       pageDir: `/root/shashoku/pages/${PAGE_ID}`,
-      page: { ...defaultManifest('source', PAGE.w, PAGE.h), layers: [] },
+      page: defaultManifest('source', PAGE.w, PAGE.h),
       ocr: defaultOcr(PAGE.w, PAGE.h),
       badge: 'ok',
     },
   ]
-  project.addLayer(PAGE_ID, entry)
+  project.addLayer(PAGE_ID, null, entry)
   const editor = useEditorStore()
   editor.currentPageId = PAGE_ID
   return { project, editor }

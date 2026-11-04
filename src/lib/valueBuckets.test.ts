@@ -4,7 +4,7 @@ import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import type { ManifestJson } from '@shared/page/types'
 import { MANIFEST_SCHEMA_VERSION } from '@shared/page/types'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
 import type { TextSide } from '@shared/page/text'
 import { bucketObjectsOf, groupByValue, type BucketObject } from './valueBuckets'
 
@@ -142,7 +142,11 @@ describe('which body the statistics count', () => {
     readingOrder: said.map((s) => s.unit.members[0]),
     readingEdges: [],
     counters: emptyCounters(),
-    layers: said.flatMap((s) => s.blocks),
+    ...treesFromOneTree(
+      said.flatMap((s) => s.blocks),
+      [FACE],
+      FACE,
+    ),
   }
 
   it('reads the side it was asked about and not the other one', () => {

@@ -37,11 +37,17 @@ import {
   translationBlocksOf,
 } from '@shared/page/units'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
-import { findEntry } from '@shared/page/tree'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { emptyCounters } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock, parseManifest, serializeManifest } from '@shared/page/schema'
+import {
+  blankSourceBlock,
+  blankTranslationBlock,
+  parseManifest,
+  serializeManifest,
+  treesFromOneTree,
+} from '@shared/page/schema'
 import { repairPage } from '@shared/page/repair'
+import { addPageEntry, entryOnPage, everyText, faceTree, treeOf } from '@shared/page/trees'
 import { offeredReadings } from '@shared/ocr/offer'
 import { defaultProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { AppearanceTarget } from '@/lib/appearance'
@@ -94,9 +100,13 @@ function readingFor(
   }
 }
 
+/** The one tree a fixture names, split the way the page and its faces own things. */
+const treesOf = (layers: readonly LayerEntry[], faces: readonly string[] = [FACE]) =>
+  treesFromOneTree([...layers], faces, faces[0]!)
+
 /** The blocks of both sides for a run of lettering, plus the ledger and reading over them. */
 const spread = (labels: readonly TextLayerEntry[]) => ({
-  layers: labels.flatMap((l) => [l, sourceFor(l.id)]),
+  ...treesOf(labels.flatMap((l) => [l, sourceFor(l.id)])),
   counters: emptyCounters(),
   ledgers: ledgersFor(labels.map((l) => unitFor(l.id))),
   ...readingFor(labels.map((l) => l.id)),
@@ -1344,7 +1354,7 @@ describe('layer tree edits', () => {
           ledgers: ledgersFor(readingOrder.map(unitFor)),
           ...readingFor(readingOrder),
           counters: emptyCounters(),
-          layers: [...layers, ...readingOrder.map(sourceFor)],
+          ...treesOf([...layers, ...readingOrder.map(sourceFor)]),
         },
         badge: 'ok',
       },
@@ -1357,7 +1367,7 @@ describe('layer tree edits', () => {
   /** ⚠️ The lettering only: the artwork's own blocks sit alongside it and are
    * not what a restack is about. */
   const stackOf = (project: ReturnType<typeof useProjectStore>): string[] =>
-    (project.pageById(PAGE)?.page.layers ?? [])
+    faceTree(project.pageById(PAGE)!.page, FACE)
       .filter((e) => !(e.kind === 'text' && e.side === 'source'))
       .map((e) => e.id)
 
@@ -1385,6 +1395,23 @@ describe('layer tree edits', () => {
     editor.undo()
 
     expect(stackOf(project)).toEqual(['a', 'b', 'c'])
+  })
+
+  /** ⚠️ Undo writes trees back from plain data; a linked layer must come back as one object every face holds. */
+  it('shares a linked layer with every face through undo and redo, as one layer', () => {
+    const { project, editor } = openTree([raster('base'), raster('boom'), label('a')], ['a'])
+    const page = () => project.pageById(PAGE)!.page
+    page().faceTrees.other = [...page().pageTree]
+    const boomIn = (face: string) => faceTree(page(), face).find((e) => e.id === 'boom')
+
+    editor.cmdSetLayerLinked(PAGE, 'boom', true)
+    editor.undo()
+    expect(boomIn('other')).toBeUndefined()
+    editor.redo()
+
+    project.setLayerOpacity(PAGE, 'boom', 0.5)
+    expect(boomIn('other')?.opacity).toBe(0.5)
+    expect(boomIn(FACE)).toBe(boomIn('other'))
   })
 
   it('keeps a refused drop out of the history', () => {
@@ -1430,7 +1457,7 @@ describe('layer tree edits', () => {
   })
 
   const alphaLockOf = (project: ReturnType<typeof useProjectStore>, id: string): boolean => {
-    const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
+    const entry = entryOnPage(project.pageById(PAGE)!.page, id)
     return entry?.kind === 'raster' && entry.alphaLocked
   }
 
@@ -1600,7 +1627,7 @@ describe('layer tree edits', () => {
 
   describe('renaming', () => {
     const nameOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
-      const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
+      const entry = entryOnPage(project.pageById(PAGE)!.page, id)
       return entry !== undefined && entry.kind !== 'text' ? entry.name : undefined
     }
 
@@ -1633,10 +1660,10 @@ describe('layer tree edits', () => {
 
   describe('blending', () => {
     const opacityOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.opacity
+      entryOnPage(project.pageById(PAGE)!.page, id)?.opacity
 
     const blendOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.blendMode
+      entryOnPage(project.pageById(PAGE)!.page, id)?.blendMode
 
     it('fades everything selected in one step of history', () => {
       const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
@@ -1730,7 +1757,7 @@ describe('layer tree edits', () => {
           ledgers: ledgersFor([]),
           ...readingFor([]),
           counters: emptyCounters(),
-          layers: [label('z')],
+          ...treesOf([label('z')]),
         },
         ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
         badge: 'ok',
@@ -1752,7 +1779,7 @@ describe('layer tree edits', () => {
       for (const { pageId, id } of before) project.setLayerOpacity(pageId, id, 0.5)
       editor.cmdSetOpacity(before, 0.5)
 
-      const away = () => findEntry(project.pageById('p002.png')?.page.layers ?? [], 'z')?.opacity
+      const away = () => entryOnPage(project.pageById('p002.png')!.page, 'z')?.opacity
       expect([opacityOf(project, 'a'), away()]).toEqual([0.5, 0.5])
 
       editor.undo()
@@ -1792,13 +1819,17 @@ describe('layer tree edits', () => {
 
       it('follows the names the project lists, and only the pages it is handed', () => {
         const { project, editor } = openTree([retouch('r'), raster('patch')], [])
-        project.allFiles.push({ ...project.allFiles[0], pageId: 'p002.png', page: { ...project.allFiles[0].page, layers: [retouch('far')] } })
+        project.allFiles.push({
+          ...project.allFiles[0],
+          pageId: 'p002.png',
+          page: { ...project.allFiles[0].page, ...treesOf([retouch('far')]) },
+        })
         project.toggleRetouchLayerName('修圖')
         project.toggleRetouchLayerName('patch')
 
         editor.cmdSetRetouchOpacity([PAGE], 0.4, { undoable: true })
 
-        const far = findEntry(project.pageById('p002.png')?.page.layers ?? [], 'far')?.opacity
+        const far = entryOnPage(project.pageById('p002.png')!.page, 'far')?.opacity
         expect([opacityOf(project, 'r'), opacityOf(project, 'patch'), far]).toEqual([1, 0.4, 1])
       })
     })
@@ -1871,7 +1902,7 @@ describe('layer tree edits', () => {
   describe('effects on the batch', () => {
     const STROKE = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
     const effectsOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      findEntry(project.pageById(PAGE)?.page.layers ?? [], id)?.effects
+      entryOnPage(project.pageById(PAGE)!.page, id)?.effects
 
     /** The point of the whole batch: a layer wears one exactly as an object does. */
     it('puts a stroke on layers and objects alike, in one step', () => {
@@ -1936,7 +1967,7 @@ describe('layer tree edits', () => {
     const STROKE = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
     const LOOK = { fontFamily: 'HanyiSentyRubber', color: '#ffffff', weightPx: 0.5 }
     const entryOf = (project: ReturnType<typeof useProjectStore>, id: string) => {
-      const entry = findEntry(project.pageById(PAGE)?.page.layers ?? [], id)
+      const entry = entryOnPage(project.pageById(PAGE)!.page, id)
       return entry?.kind === 'text' ? entry : undefined
     }
     const textTargets = (editor: ReturnType<typeof useEditorStore>) =>
@@ -1993,7 +2024,7 @@ describe('layer tree edits', () => {
 
   describe('style on the batch', () => {
     const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
-      (findEntry(project.pageById(PAGE)?.page.layers ?? [], id) as TextLayerEntry).body.style
+      (entryOnPage(project.pageById(PAGE)!.page, id) as TextLayerEntry).body.style
 
     /** Each object keeps its own other fields through the preview; one undo puts them all back. */
     it('previews a colour across objects of different sizes and undoes it in one step', () => {
@@ -2064,7 +2095,7 @@ describe('deleteSelection', () => {
         ledgers: ledgersFor(p.order.map(unitFor)),
         ...readingFor(p.order),
         counters: emptyCounters(),
-        layers: [...p.layers, ...p.order.map(sourceFor)],
+        ...treesOf([...p.layers, ...p.order.map(sourceFor)]),
       },
       badge: 'ok' as const,
     }))
@@ -2077,7 +2108,7 @@ describe('deleteSelection', () => {
     project.viewOf(name)?.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.pageById(name)?.page.layers ?? [])
+    faceTree(project.pageById(name)!.page, FACE)
       .filter((e) => !(e.kind === 'text' && e.side === 'source'))
       .map((e) => e.id)
 
@@ -2314,7 +2345,7 @@ describe('selectLayerBy', () => {
           ledgers: ledgersFor([]),
           ...readingFor(order),
           counters: emptyCounters(),
-          layers,
+          ...treesOf(layers),
         },
         badge: 'ok' as const,
       },
@@ -2431,7 +2462,7 @@ describe('moveObjectsTo', () => {
         ledgers: ledgersFor(p.order.map(unitFor)),
         ...readingFor(p.order, p.drawn ?? []),
         counters: emptyCounters(),
-        layers: [...p.layers, ...p.order.map(sourceFor)],
+        ...treesOf([...p.layers, ...p.order.map(sourceFor)]),
       },
       badge: 'ok' as const,
     }))
@@ -2444,7 +2475,7 @@ describe('moveObjectsTo', () => {
     project.viewOf(name)?.readingOrder ?? []
 
   const stackOf = (project: ReturnType<typeof useProjectStore>, name: string): string[] =>
-    (project.pageById(name)?.page.layers ?? [])
+    faceTree(project.pageById(name)!.page, FACE)
       .filter((e) => !(e.kind === 'text' && e.side === 'source'))
       .map((e) => e.id)
 
@@ -3071,21 +3102,24 @@ describe('drawing lines between text objects', () => {
     const { project, editor } = openOnePage([])
     const file = project.pageById(PAGE)
     if (!file) throw new Error('page missing')
-    file.page.layers = [
-      {
-        kind: 'group',
-        id: 'g',
-        name: '對白',
-        visible: true,
-        locked: false,
-        opacity: 1,
-        blendMode: PASS_THROUGH,
-        effects: [],
-        children: [a, b],
-      },
-      sourceFor('a'),
-      sourceFor('b'),
-    ]
+    Object.assign(
+      file.page,
+      treesOf([
+        {
+          kind: 'group',
+          id: 'g',
+          name: '對白',
+          visible: true,
+          locked: false,
+          opacity: 1,
+          blendMode: PASS_THROUGH,
+          effects: [],
+          children: [a, b],
+        },
+        sourceFor('a'),
+        sourceFor('b'),
+      ]),
+    )
     file.page.ledgers = ledgersFor([unitFor('a'), unitFor('b')])
     Object.assign(file.page, readingFor(['a', 'b']))
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
@@ -3379,7 +3413,7 @@ describe('a reading dropped on an object that already had one', () => {
   ): string[] =>
     offeredReadings(
       pool,
-      blocksOnSide(project.pageById(PAGE)!.page.layers, 'source', FACE).map((b) => ({
+      blocksOnSide(project.pageById(PAGE)!.page.pageTree, 'source', FACE).map((b) => ({
         source: { from: (b as SourceTextLayerEntry).body.from },
       })),
     ).map((r) => r.hash)
@@ -3732,7 +3766,7 @@ describe('a measured leading out of the range a page can be set in', () => {
 
 describe('a material put down on the page', () => {
   const blocks = (project: ReturnType<typeof useProjectStore>, side: 'source' | 'translation') =>
-    blocksOnSide(project.pageById(PAGE)!.page.layers, side, FACE)
+    blocksOnSide(treeOf(project.pageById(PAGE)!.page, side, FACE), side, FACE)
   const STROKE = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
 
   it('becomes a sentence of its own, giving only what is ticked, on the side the canvas shows', () => {
@@ -3865,14 +3899,14 @@ describe('a sentence set in two blocks of lettering', () => {
     second.body.chosen = 'cb'
     const { project, editor } = openOnePage()
     const file = project.pageById(PAGE)!
-    file.page.layers = [sourceFor('a'), first, second]
+    Object.assign(file.page, treesOf([sourceFor('a'), first, second]))
     file.page.ledgers = ledgersFor([{ id: 'u', members: [SOURCE_OF('a'), 'a', 'b'] }])
     file.page.readingOrder = [SOURCE_OF('a')]
     return { project, editor }
   }
 
   const idsOf = (project: ReturnType<typeof useProjectStore>) =>
-    project.pageById(PAGE)!.page.layers.map((e) => e.id)
+    faceTree(project.pageById(PAGE)!.page, FACE).map((e) => e.id)
 
   it('keeps what the block left reads as through a write to disk and a read back', () => {
     const { project, editor } = openPair()
@@ -3938,7 +3972,8 @@ describe('the faces a book is lettered in', () => {
     editor.undo()
     expect(project.faceIds).toEqual([FACE])
     expect(project.activeFace).toBe(FACE)
-    expect(blocksOnSide(project.pageById(PAGE)!.page.layers, 'translation', added)).toEqual([])
+    const left = everyText(project.pageById(PAGE)!.page)
+    expect(left.filter((b) => b.side === 'translation' && b.face === added)).toEqual([])
     expect(textsOf(project)).toEqual(['甲', '乙'])
   })
 
@@ -4006,7 +4041,7 @@ describe('the meaning of a sentence holding two blocks of the artwork', () => {
   function openTwoSources() {
     const { project, editor } = openOnePage([label('a', '甲')])
     const file = project.pageById(PAGE)!
-    file.page.layers.push(sourceFor('b'))
+    addPageEntry(file.page, sourceFor('b'))
     file.page.ledgers[FACE]!.units[0]!.members.push(SOURCE_OF('b'))
     project.setSourceTags(PAGE, SOURCE_OF('a'), ['框内'])
     project.setSourceTags(PAGE, SOURCE_OF('b'), ['心聲'])
@@ -4080,7 +4115,7 @@ describe('the reading every face shares', () => {
     editor.cmdDrawReadingEdges(PAGE, [{ from: 'a', to: 'b' }])
 
     editor.setActiveFace(other)
-    const theirs = blocksOnSide(project.pageById(PAGE)!.page.layers, 'translation', other)
+    const theirs = blocksOnSide(faceTree(project.pageById(PAGE)!.page, other), 'translation', other)
     editor.selectOnly(theirs[0]!.id)
     editor.toggleSelected(theirs[1]!.id)
     editor.cmdLinkSelection()
@@ -4141,5 +4176,119 @@ describe('the reading every face shares', () => {
       sentenceOver(project, other, 'b'),
       sentenceOver(project, other, 'c'),
     ])
+  })
+})
+
+/**
+ * Pages written in the current shape directly, rather than split from one tree:
+ * two faces that each place one page material — the base map — their own way.
+ */
+describe('a page material two faces place differently', () => {
+  const OTHER = 'face-b'
+
+  function raster(id: string): RasterLayerEntry {
+    return {
+      kind: 'raster',
+      id,
+      name: id,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      file: `${id}.png`,
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      alphaLocked: false,
+    }
+  }
+
+  function box(id: string, children: LayerEntry[]): GroupLayerEntry {
+    return { kind: 'group', id, name: id, visible: true, locked: false, opacity: 1, blendMode: PASS_THROUGH, effects: [], children }
+  }
+
+  /** The base map: inside face-a's folder under its own BOOM, and loose on top in face-b. */
+  function open() {
+    const project = useProjectStore()
+    project.projectMeta.faces = [
+      { id: FACE, no: 1, name: '譯文' },
+      { id: OTHER, no: 2, name: 'English' },
+    ]
+    project.projectMeta.activeFace = FACE
+    const base = raster('base')
+    project.allFiles = [
+      {
+        pageId: PAGE,
+        pageDir: `/x/${PAGE}`,
+        ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
+        page: {
+          schemaVersion: MANIFEST_SCHEMA_VERSION,
+          revision: 0,
+          name: 'p',
+          width: 1200,
+          height: 1700,
+          ledgers: { [FACE]: { units: [] }, [OTHER]: { units: [] } },
+          readingOrder: [],
+          readingEdges: [],
+          counters: emptyCounters(),
+          pageTree: [base],
+          faceTrees: { [FACE]: [box('sfx', [base, raster('boom')])], [OTHER]: [raster('bang'), base] },
+        },
+        badge: 'ok',
+      },
+    ]
+    const editor = useEditorStore()
+    editor.currentPageId = PAGE
+    return { project, editor, page: () => project.pageById(PAGE)!.page }
+  }
+
+  const shape = (tree: readonly LayerEntry[]): unknown[] =>
+    tree.map((e) => (e.kind === 'group' ? { [e.id]: shape(e.children) } : e.id))
+
+  it('restacks it in the face being worked on alone', () => {
+    const { editor, page } = open()
+    editor.cmdMoveLayer(PAGE, 'base', [0, 0], { parentPath: [0], index: 2 })
+    expect(shape(faceTree(page(), FACE))).toEqual([{ sfx: ['boom', 'base'] }])
+    expect(shape(faceTree(page(), OTHER))).toEqual(['bang', 'base'])
+  })
+
+  it('hides it in every face, since showing it is the page’s', () => {
+    const { editor, page } = open()
+    editor.cmdSetLayerVisible(PAGE, 'base', false)
+    expect(faceTree(page(), OTHER).find((e) => e.id === 'base')?.visible).toBe(false)
+  })
+
+  /** A face's folder is the face's: locking it holds the material still in that face, not in another. */
+  it('is held still by a locked face folder only in that face', () => {
+    const { project, editor } = open()
+    editor.cmdSetLayerLocked(PAGE, 'sfx', true)
+    expect(editor.isLayerLocked('base')).toBe(true)
+    project.projectMeta.activeFace = OTHER
+    expect(editor.isLayerLocked('base')).toBe(false)
+  })
+
+  /** ⭐ Deleting a face's own folder takes the face's own things; the material stays, and goes back inside on undo. */
+  it('stays on the page when the face folder holding it is deleted', () => {
+    const { editor, page } = open()
+    editor.selectOnly('sfx')
+    editor.deleteSelection()
+    expect(shape(faceTree(page(), FACE))).toEqual(['base'])
+    expect(shape(faceTree(page(), OTHER))).toEqual(['bang', 'base'])
+    expect(page().pageTree.map((e) => e.id)).toEqual(['base'])
+
+    editor.undo()
+    expect(shape(faceTree(page(), FACE))).toEqual([{ sfx: ['base', 'boom'] }])
+    const folder = faceTree(page(), FACE)[0] as GroupLayerEntry
+    expect(folder.children[0]).toBe(faceTree(page(), OTHER)[1])
+  })
+
+  it('goes from every face when it is the thing deleted', () => {
+    const { editor, page } = open()
+    editor.selectOnly('base')
+    editor.deleteSelection()
+    expect(shape(faceTree(page(), FACE))).toEqual([{ sfx: ['boom'] }])
+    expect(shape(faceTree(page(), OTHER))).toEqual(['bang'])
   })
 })

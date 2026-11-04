@@ -6,7 +6,8 @@ import { buildLabelRows, chapterStops, dropAt, type ChapterRow, type LabelRow } 
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
 import { OCR_SCHEMA_VERSION } from '@shared/page/types'
 import { emptyCounters, numberPage } from '@shared/page/numbers'
-import { blankSourceBlock, blankTranslationBlock } from '@shared/page/schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from '@shared/page/schema'
+import { textOnPage } from '@shared/page/trees'
 
 const FACE = 'f'
 
@@ -48,7 +49,7 @@ function file(
     readingOrder: readingOrder.map((id) => `${id}s`),
     readingEdges,
     counters: emptyCounters(),
-    layers,
+    ...treesFromOneTree(layers, [FACE], FACE),
   }
   numberPage(page, [FACE])
   return {
@@ -211,7 +212,7 @@ describe('a sentence set in more than one block', () => {
     const page = file('001.png', ['u'], ['u'])
     const unit = page.page.ledgers[FACE].units[0]
     unit.members = ['us', ...ids]
-    page.page.layers = [...ids.map((id) => text(id)), sourceText('u')]
+    Object.assign(page.page, treesFromOneTree([...ids.map((id) => text(id)), sourceText('u')], [FACE], FACE))
     page.page.counters = emptyCounters()
     numberPage(page.page, [FACE])
     return page
@@ -247,7 +248,7 @@ describe('a sentence set in more than one block', () => {
   it("names a block of the artwork's words for the page", () => {
     const page = file('001.png', ['u'], ['u'])
     page.page.ledgers[FACE].units[0].members = ['xs', 'ys', 'ut']
-    page.page.layers = [sourceText('x'), sourceText('y'), text('ut')]
+    Object.assign(page.page, treesFromOneTree([sourceText('x'), sourceText('y'), text('ut')], [FACE], FACE))
     page.page.counters = emptyCounters()
     numberPage(page.page, [FACE])
 
@@ -292,6 +293,11 @@ describe('buildLabelRows filtered', () => {
 
   function withText(name: string, lines: Record<string, string[]>): ProjectFile {
     const ids = Object.keys(lines)
+    const layers = ids.flatMap((id) => {
+      const entry = text(id)
+      entry.body.lines = lines[id]
+      return [entry, sourceText(id)]
+    })
     return {
       pageId: name,
       pageDir: `/p/${name}`,
@@ -307,11 +313,7 @@ describe('buildLabelRows filtered', () => {
         readingOrder: ids.map((id) => `${id}s`),
         readingEdges: [],
         counters: emptyCounters(),
-        layers: ids.flatMap((id) => {
-          const entry = text(id)
-          entry.body.lines = lines[id]
-          return [entry, sourceText(id)]
-        }),
+        ...treesFromOneTree(layers, [FACE], FACE),
       },
     }
   }
@@ -383,7 +385,7 @@ describe('buildLabelRows filtered', () => {
    */
   it('finds a translation through the candidate it is reading', () => {
     const page = withText('001.png', { a: [''] })
-    const block = page.page.layers[0] as TranslationTextLayerEntry
+    const block = textOnPage(page.page, 'a') as TranslationTextLayerEntry
     block.body.candidates = [{ id: 'c1', lines: ['そうだね'] }]
     block.body.chosen = 'c1'
     expect(

@@ -399,6 +399,7 @@ import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
+import { faceTree, treeOf } from '@shared/page/trees'
 import type { ReadingEdge } from '@shared/page/readingGraph'
 import { blocksOf, blocksOnSide, facePage, placeOfBlock, shownCodeOf, shownLinesOf, tagsOfBlock } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
@@ -470,10 +471,15 @@ const currentFile = computed(() =>
  * What this page draws and in what order — the same answer the export reads,
  * less the text while the view is set to leave it out.
  */
+/** The tree being worked in: the page's own on the source side, the face's on the translation side. */
+const tree = computed(() =>
+  currentFile.value ? treeOf(currentFile.value.page, editor.textSide, project.activeFace) : [],
+)
+
 const stack = computed(() => {
   if (!currentFile.value) return []
-  if (editor.showingOriginal) return originalStack(currentFile.value.page.layers)
-  const nodes = pageStack(currentFile.value.page.layers, editor.textSide, project.activeFace)
+  if (editor.showingOriginal) return originalStack(currentFile.value.page.pageTree)
+  const nodes = pageStack(tree.value, editor.textSide, project.activeFace)
   return editor.textsHidden ? withoutText(nodes) : nodes
 })
 
@@ -563,7 +569,7 @@ const objects = computed(() => {
   // hidden object would have nowhere to land and would go undrawn, which is the
   // one thing this tool must not do.
   const entries = connecting.value
-    ? blocksOnSide(file.page.layers, editor.textSide, project.activeFace)
+    ? blocksOnSide(tree.value, editor.textSide, project.activeFace)
     : stackedTextNodes(stack.value).map((node) => node.entry)
   // Every source drawn the same way, over a halo — a reference treatment for
   // reading them against un-lettered artwork, and the canvas's alone.
@@ -577,7 +583,7 @@ const objects = computed(() => {
       : { style: previewedStyle(body.style, editor.isReached(label.id)), effects: label.effects }
     return {
     id: label.id,
-    locked: isLocked(file.page.layers, label.id),
+    locked: isLocked(tree.value, label.id),
     code: shownCodeOf(label),
     x: body.x,
     y: body.y,
@@ -620,7 +626,7 @@ const frameOf = raster.frameOf
 const rasterFrames = computed(() => {
   const file = currentFile.value
   if (!file) return []
-  return framedLayers(stack.value, (id) => isLocked(file.page.layers, id), frameOf)
+  return framedLayers(stack.value, (id) => isLocked(tree.value, id), frameOf)
 })
 
 /**
@@ -666,7 +672,7 @@ function layerHitAt(p: Anchor): string | null {
   return layerAt(
     stack.value,
     p,
-    (id) => isLocked(file.page.layers, id),
+    (id) => isLocked(tree.value, id),
     layerAlpha.alphaAt,
     frameOf,
   )
@@ -1580,7 +1586,7 @@ function liveLayer(id: string) {
 const artworkKey = computed(() => {
   const file = currentFile.value
   if (!file) return null
-  return artworkSignature(pageStack(file.page.layers, 'translation', project.activeFace), (id) =>
+  return artworkSignature(pageStack(faceTree(file.page, project.activeFace), 'translation', project.activeFace), (id) =>
     raster.holds(id) ? `${id}@${raster.writesTo(id)}` : null,
   )
 })

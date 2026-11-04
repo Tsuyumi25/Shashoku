@@ -9,10 +9,11 @@ import type {
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { emptyCounters } from './numbers'
-import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from './schema'
 import { adoptSources, detach, planRelink, relink } from './relink'
 import { blocksOf, facePage, shownCodeOf, translationBlocksOf, unitsInReadingOrder, type FacePage } from './units'
 import { findTextObject } from './tree'
+import { everyEntry, textOnPage } from './trees'
 import { validatePage } from './validate'
 
 const FACE = 'f'
@@ -35,6 +36,7 @@ function unit(id: string, members: string[]): TranslationUnit {
 }
 
 function manifestOf(layers: LayerEntry[], ledgers: Record<string, TranslationUnit[]>): ManifestJson {
+  const faces = Object.keys(ledgers)
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -45,7 +47,7 @@ function manifestOf(layers: LayerEntry[], ledgers: Record<string, TranslationUni
     readingOrder: [],
     readingEdges: [],
     counters: emptyCounters(),
-    layers,
+    ...treesFromOneTree(layers, faces, faces[0]),
   }
 }
 
@@ -101,7 +103,7 @@ describe('Ctrl+L', () => {
     relink(page, ['t4', 's3'], newId, DEFAULT_TEXT_STYLE)
     // The material's sentence had nothing else real, so it is gone.
     expect(read(page)).toEqual(['はぁ | 哈', 'はっ | 哈', 'れろ | 舔、嗯'])
-    expect(findTextObject(m.layers, 's4')).toBeUndefined()
+    expect(textOnPage(m, 's4')).toBeUndefined()
     expect(validatePage(m, [FACE])).toEqual([])
   })
 
@@ -123,7 +125,7 @@ describe('Ctrl+L', () => {
   it('keeps a block that reads only through its chosen candidate, losing no word', () => {
     const m = gasps()
     const page = facePage(m, FACE)
-    const block = findTextObject(m.layers, 't1') as TranslationTextLayerEntry
+    const block = textOnPage(m, 't1') as TranslationTextLayerEntry
     block.body.lines = ['']
     block.body.candidates = [{ id: 'c', lines: ['哈啊'] }]
     block.body.chosen = 'c'
@@ -196,7 +198,7 @@ describe('a page more than one face reads', () => {
     relink(page, ['t4', 's3'], newId, DEFAULT_TEXT_STYLE, true)
 
     expect(read(page)).toEqual(['はぁ | 哈', 'はっ | 哈', 'れろ | 舔、嗯', '□ | □'])
-    expect(findTextObject(m.layers, 's4')).toBeDefined()
+    expect(textOnPage(m, 's4')).toBeDefined()
     expect(read(facePage(m, OTHER))).toEqual(['はぁ | ハ', 'はっ | ハ', 'れろ | ペロ', '□ | ん'])
     expect(validatePage(m, [FACE, OTHER])).toEqual([])
   })
@@ -218,14 +220,14 @@ describe('a page more than one face reads', () => {
     relink(page, ['t3', 't4'], newId, DEFAULT_TEXT_STYLE)
 
     expect(read(page)).toEqual(['はぁ | 哈', 'はっ | 哈', 'れろ | 舔、嗯'])
-    expect(findTextObject(m.layers, 's4')).toBeUndefined()
+    expect(textOnPage(m, 's4')).toBeUndefined()
   })
 })
 
 describe('adoptSources', () => {
   it('gives a face that has read nothing a sentence for every source block, each with its own lettering', () => {
     const m = gasps()
-    const s1 = findTextObject(m.layers, 's1') as SourceTextLayerEntry
+    const s1 = textOnPage(m, 's1') as SourceTextLayerEntry
     s1.body.x = 40
     s1.body.y = 50
 
@@ -261,11 +263,11 @@ describe('adoptSources', () => {
     const m = gasps([FACE, OTHER])
     adoptSources(m, [FACE, OTHER], newId, DEFAULT_TEXT_STYLE)
     const before = m.ledgers[OTHER]!.units.length
-    const layers = m.layers.length
+    const entries = everyEntry(m).length
 
     adoptSources(m, [FACE, OTHER], newId, DEFAULT_TEXT_STYLE)
 
     expect(m.ledgers[OTHER]!.units.length).toBe(before)
-    expect(m.layers.length).toBe(layers)
+    expect(everyEntry(m).length).toBe(entries)
   })
 })

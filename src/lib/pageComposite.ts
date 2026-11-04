@@ -6,6 +6,7 @@ import {
   type TextStackNode,
 } from '@shared/page/stack'
 import { shownCodeOf } from '@shared/page/units'
+import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { layerWithEffects } from '@/lib/layerEffects'
@@ -328,7 +329,7 @@ async function compositeWith(
   drawText: StackPaint['drawText'],
 ): Promise<OffscreenCanvas> {
   const size = { w: input.page.width, h: input.page.height }
-  const stack = pageStack(input.page.layers, 'translation', input.face)
+  const stack = pageStack(faceTree(input.page, input.face), 'translation', input.face)
   const rasters = await decodeLayerBitmaps(stack, input.loadLayer)
   try {
     const canvas = new OffscreenCanvas(size.w, size.h)

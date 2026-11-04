@@ -14,6 +14,7 @@ import { linesOf } from './text'
 import { plainOf } from './markup'
 import { normalizeTagSet } from '../tags/set'
 import { textObjects } from './tree'
+import { faceTree } from './trees'
 import { projectedEdges, projectedOrder } from './reading'
 
 /**
@@ -39,7 +40,8 @@ export function emptyLedger(): Ledger {
 export interface FacePage {
   readonly face: string
   readonly manifest: ManifestJson
-  layers: LayerEntry[]
+  /** This face's tree, the page's materials among its own. Read-only: writes go through `trees.ts`. */
+  readonly layers: readonly LayerEntry[]
   units: TranslationUnit[]
   readonly readingOrder: string[]
   readonly readingEdges: ReadingEdge[]
@@ -51,10 +53,7 @@ export function facePage(manifest: ManifestJson, face: string): FacePage {
     face,
     manifest,
     get layers() {
-      return manifest.layers
-    },
-    set layers(v) {
-      manifest.layers = v
+      return faceTree(manifest, face)
     },
     get units() {
       return ledger().units

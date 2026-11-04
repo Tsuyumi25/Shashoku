@@ -39,7 +39,7 @@ export function useCanvasTextEdit() {
    * after.
    */
   function refuse(pageId: string, label: TextLayerEntry): boolean {
-    const layers = project.pageById(pageId)?.page.layers ?? []
+    const layers = editor.workingTree(pageId)
     if (isLocked(layers, label.id)) {
       notices.say('這個物件鎖定中，改不了')
       return true

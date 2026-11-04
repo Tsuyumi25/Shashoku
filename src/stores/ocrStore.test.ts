@@ -29,9 +29,9 @@ beforeEach(() => {
 
 const artwork = (pageId: string) => ({ kind: 'raster', id: `r-${pageId}`, name: 'art', file: `${pageId}.png` }) as RasterLayerEntry
 
-function chapter(pages: { id: string; layers: LayerEntry[] }[]) {
+function chapter(pages: { id: string; pageTree: LayerEntry[] }[]) {
   const project = useProjectStore()
-  project.allFiles = pages.map(({ id, layers }) => ({
+  project.allFiles = pages.map(({ id, pageTree }) => ({
     pageId: id,
     pageDir: `/b/${id}`,
     ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 10, height: 10, candidates: [] },
@@ -46,7 +46,8 @@ function chapter(pages: { id: string; layers: LayerEntry[] }[]) {
       readingOrder: [],
       readingEdges: [],
       counters: emptyCounters(),
-      layers,
+      pageTree,
+      faceTrees: {},
     },
   }))
   return useOcrStore()
@@ -62,9 +63,9 @@ describe('reading the whole chapter', () => {
   /** ⭐ One trip at a time: two pages at once would hold two models' weights. */
   it('reads the pages with artwork in order, each after the last has finished', async () => {
     const ocr = chapter([
-      { id: 'p1', layers: [artwork('p1')] },
-      { id: 'p2', layers: [] },
-      { id: 'p3', layers: [artwork('p3')] },
+      { id: 'p1', pageTree: [artwork('p1')] },
+      { id: 'p2', pageTree: [] },
+      { id: 'p3', pageTree: [artwork('p3')] },
     ])
     const run = ocr.readChapter()
     await flush()
@@ -80,8 +81,8 @@ describe('reading the whole chapter', () => {
 
   it('stops after the page in hand when asked, never inside it', async () => {
     const ocr = chapter([
-      { id: 'p1', layers: [artwork('p1')] },
-      { id: 'p2', layers: [artwork('p2')] },
+      { id: 'p1', pageTree: [artwork('p1')] },
+      { id: 'p2', pageTree: [artwork('p2')] },
     ])
     const run = ocr.readChapter()
     await flush()
@@ -96,8 +97,8 @@ describe('reading the whole chapter', () => {
   /** ⚠️ A sidecar that cannot read one page cannot read the next either. */
   it('stops at the first page that fails and says why', async () => {
     const ocr = chapter([
-      { id: 'p1', layers: [artwork('p1')] },
-      { id: 'p2', layers: [artwork('p2')] },
+      { id: 'p1', pageTree: [artwork('p1')] },
+      { id: 'p2', pageTree: [artwork('p2')] },
     ])
     const run = ocr.readChapter()
     await flush()

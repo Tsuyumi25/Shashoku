@@ -250,7 +250,7 @@ export const useOcrStore = defineStore('ocr', () => {
   async function readChapter() {
     if (chapter.value !== null || running.value.size > 0) return
     const project = useProjectStore()
-    const pages = project.files.filter((f) => f.badge === 'ok' && bottomRaster(f.page.layers) !== null)
+    const pages = project.files.filter((f) => f.badge === 'ok' && bottomRaster(f.page.pageTree) !== null)
     stopping.value = false
     problem.value = null
     try {
@@ -259,7 +259,7 @@ export const useOcrStore = defineStore('ocr', () => {
         const live = project.pageById(file.pageId)
         if (!live) continue
         chapter.value = { at: at + 1, of: pages.length, pageId: file.pageId }
-        if (!(await readPage(live.pageId, live.pageDir, live.page.layers))) break
+        if (!(await readPage(live.pageId, live.pageDir, live.page.pageTree))) break
       }
     } finally {
       chapter.value = null
@@ -281,7 +281,7 @@ export const useOcrStore = defineStore('ocr', () => {
    */
   function sourceBlocksOfPage(pageId: string): SourceTextLayerEntry[] {
     const page = useProjectStore().pageById(pageId)?.page
-    return page ? (blocksOnSide(page.layers, 'source', useProjectStore().activeFace) as SourceTextLayerEntry[]) : []
+    return page ? (blocksOnSide(page.pageTree, 'source', useProjectStore().activeFace) as SourceTextLayerEntry[]) : []
   }
 
   function settle(pageId: string) {

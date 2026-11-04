@@ -74,6 +74,24 @@
         </button>
 
         <!--
+          Rasters only: the artwork's words are the page's and lettering is its
+          face's, by what they are. On the source side every raster is the page's
+          and there is no face to take one into, so the column stands empty there.
+        -->
+        <button
+          v-if="row.entry.kind === 'raster' && editor.textSide === 'translation'"
+          type="button"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+          :class="!isLinked(row.entry) && 'opacity-0 group-hover/row:opacity-100'"
+          :title="isLinked(row.entry) ? '共用素材：每個翻譯面都有它。點一下只留在這一面' : '只屬於這一面。點一下變成每個翻譯面共用的素材'"
+          @click.stop="onToggleLinked(row.entry)"
+        >
+          <Link2 v-if="isLinked(row.entry)" :size="12" />
+          <Link2Off v-else :size="12" />
+        </button>
+        <span v-else class="w-5 shrink-0" />
+
+        <!--
           A checkerboard, which is what transparency looks like everywhere: the
           switch says the empty squares are spoken for. Only a raster has any,
           and the column is held open on the rows without one so the names below
@@ -181,6 +199,7 @@
 </template>
 
 <script setup lang="ts">
+import { entryOnPage, treeOf } from '@shared/page/trees'
 import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import {
   ChevronDown,
@@ -191,6 +210,8 @@ import {
   Grid2x2,
   Grid2x2Check,
   Image,
+  Link2,
+  Link2Off,
   Lock,
   LockOpen,
   Pin,
@@ -205,7 +226,6 @@ import type {
   RasterLayerEntry,
   TextLayerEntry,
 } from '@shared/page/types'
-import { findEntry } from '@shared/page/tree'
 import { shownLinesOf } from '@shared/page/units'
 import { plainOf } from '@shared/page/markup'
 import { layersDirOf } from '@shared/ssk/constants'
@@ -245,7 +265,12 @@ function missingFamilyOf(entry: LayerEntry): string | null {
 
 const rows = computed(() =>
   (currentFile.value
-    ? flattenLayerRows(currentFile.value.page.layers, collapsed.value, editor.textSide, project.activeFace)
+    ? flattenLayerRows(
+        treeOf(currentFile.value.page, editor.textSide, project.activeFace),
+        collapsed.value,
+        editor.textSide,
+        project.activeFace,
+      )
     : []
   ).map((row) => ({ ...row, missingFamily: missingFamilyOf(row.entry) })),
 )
@@ -294,6 +319,15 @@ function lockTitle(row: LayerTreeRow): string {
 function onToggleLocked(entry: LayerEntry) {
   if (!editor.currentPageId) return
   editor.cmdSetLayerLocked(editor.currentPageId, entry.id, !entry.locked)
+}
+
+function isLinked(entry: LayerEntry): boolean {
+  return editor.currentPageId !== null && project.isLinked(editor.currentPageId, entry.id)
+}
+
+function onToggleLinked(entry: LayerEntry) {
+  if (!editor.currentPageId) return
+  editor.cmdSetLayerLinked(editor.currentPageId, entry.id, !isLinked(entry))
 }
 
 function alphaLockTitle(row: LayerTreeRow): string {
@@ -389,7 +423,7 @@ function commitRename() {
   renaming.value = null
   if (editing === null || !editor.currentPageId) return
   const entry = currentFile.value
-    ? findEntry(currentFile.value.page.layers, editing.id)
+    ? entryOnPage(currentFile.value.page, editing.id)
     : undefined
   if (entry === undefined || !canRename(entry)) return
   const name = editing.draft.trim()

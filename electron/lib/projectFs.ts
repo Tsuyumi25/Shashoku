@@ -48,6 +48,7 @@ import {
   serializeManifest,
 } from "@shared/page/schema";
 import { pageArtwork } from "@shared/page/tree";
+import { everyEntry } from "@shared/page/trees";
 import { DIR_EXPORT } from "@shared/export/types";
 import { writeFileAtomic } from "./atomicFile";
 import { importBaseMap } from "./engine";
@@ -163,7 +164,7 @@ async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
     let layers;
     try {
       const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
-      layers = parseManifest(raw, LAYERS_ONLY).layers;
+      layers = parseManifest(raw, LAYERS_ONLY).pageTree;
     } catch {
       continue;
     }
@@ -273,7 +274,7 @@ async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {
       try {
         const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
         const manifest = parseManifest(raw, LAYERS_ONLY);
-        const bottom = pageArtwork(manifest.layers);
+        const bottom = pageArtwork(manifest.pageTree);
         return {
           id: pageId,
           name: manifest.name,
@@ -421,7 +422,7 @@ async function makePage(
     const retouchFile = `${generateId()}.${extension}`;
     await copyFile(join(layersDir, file), join(layersDir, retouchFile));
     const manifest = defaultManifest(sourceName, width, height);
-    manifest.layers = [
+    manifest.pageTree = [
       baseMapLayer(file, width, height),
       { ...baseMapLayer(retouchFile, width, height), name: RETOUCH_LAYER_NAME, locked: false },
     ];
@@ -502,14 +503,8 @@ async function gcOrphanLayers(pageDir: string): Promise<void> {
     const manifestRaw = await readFile(join(pageDir, PAGE_MANIFEST_FILENAME), "utf8");
     
     
-    const files: string[] = [];
-    const collect = (entries: import("@shared/page/types").LayerEntry[]): void => {
-      for (const e of entries) {
-        if (e.kind === "raster") files.push(e.file);
-        else if (e.kind === "group") collect(e.children);
-      }
-    };
-    collect(parseManifest(manifestRaw, LAYERS_ONLY).layers);
+    // Every tree's: a face's own layers name files no other tree does.
+    const files = everyEntry(parseManifest(manifestRaw, LAYERS_ONLY)).flatMap((e) => (e.kind === "raster" ? [e.file] : []));
     referenced = new Set(files);
   } catch {
     

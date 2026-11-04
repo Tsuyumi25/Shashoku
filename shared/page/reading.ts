@@ -12,14 +12,14 @@ import { textObjects } from './tree'
 
 /** Which sentence of these holds each block of the artwork's words. */
 function sentenceOfSource(manifest: ManifestJson, units: readonly TranslationUnit[]): Map<string, string> {
-  const sources = new Set(textObjects(manifest.layers).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  const sources = new Set(textObjects(manifest.pageTree).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
   const out = new Map<string, string>()
   for (const u of units) for (const id of u.members) if (sources.has(id) && !out.has(id)) out.set(id, u.id)
   return out
 }
 
 function sourcesOf(manifest: ManifestJson, unit: TranslationUnit): string[] {
-  const sources = new Set(textObjects(manifest.layers).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
+  const sources = new Set(textObjects(manifest.pageTree).flatMap((b) => (b.side === 'source' ? [b.id] : [])))
   return unit.members.filter((id) => sources.has(id))
 }
 
@@ -28,7 +28,7 @@ function sourcesOf(manifest: ManifestJson, unit: TranslationUnit): string[] {
  * first, then any it does not name in the order the tree holds them.
  */
 export function sourceOrder(manifest: ManifestJson): string[] {
-  const sources = textObjects(manifest.layers).flatMap((b) => (b.side === 'source' ? [b.id] : []))
+  const sources = textObjects(manifest.pageTree).flatMap((b) => (b.side === 'source' ? [b.id] : []))
   const present = new Set(sources)
   const listed = manifest.readingOrder.filter((id) => present.has(id))
   const seen = new Set(listed)

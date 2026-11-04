@@ -33,8 +33,9 @@ import {
   type FacePage,
 } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
-import type { ManifestJson, TranslationTextLayerEntry } from '@shared/page/types'
-import { allEntries, findTextObject, folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import type { TranslationTextLayerEntry } from '@shared/page/types'
+import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { draftOf, everyEntry, snapshotTrees, textOnPage, treeOf } from '@shared/page/trees'
 import { adoptSources, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { numberPage } from '@shared/page/numbers'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
@@ -834,7 +835,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!currentPageId.value) return
     const file = project.pageById(currentPageId.value)
     if (!file) return
-    const rows = flattenLayerRows(file.page.layers, collapsedLayerIds.value, textSide.value, project.activeFace)
+    const rows = flattenLayerRows(treeOf(file.page, textSide.value, project.activeFace), collapsedLayerIds.value, textSide.value, project.activeFace)
     if (rows.length === 0) return
     const index = rows.findIndex((r) => r.entry.id === cursorId.value)
     if (index === -1) {
@@ -1658,7 +1659,7 @@ export const useEditorStore = defineStore('editor', () => {
     const pageId = currentPageId.value
     const page = pageId === null ? undefined : useProjectStore().pageById(pageId)?.page
     if (!page || pageId === null) return null
-    const ids = [...selectedIds.value].filter((id) => findTextObject(page.layers, id))
+    const ids = [...selectedIds.value].filter((id) => textOnPage(page, id))
     if (!ids.length || ids.some(isLayerLocked)) return null
     return { pageId, ids }
   }
@@ -1675,9 +1676,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const live = project.pageById(at.pageId)?.page
     if (!live) return
-    // A JSON round trip rather than structuredClone, which refuses the proxies
-    // a live page holds.
-    const draft = JSON.parse(JSON.stringify(live)) as ManifestJson
+    const draft = draftOf(live)
     const before = project.structureOf(at.pageId)!
     if (!change(facePage(draft, project.activeFace))) return
     adoptSources(draft, project.faceIds, generateLabelId, project.header.seedStyle)
@@ -1685,9 +1684,9 @@ export const useEditorStore = defineStore('editor', () => {
     project.raiseCounters(at.pageId, draft.counters)
     const after: PageStructure = {
       ledgers: draft.ledgers,
-      layers: draft.layers,
       readingOrder: draft.readingOrder,
       readingEdges: draft.readingEdges,
+      ...snapshotTrees(draft),
     }
     pushCommand({
       label: `${label} ${at.ids.length}`,
@@ -1695,7 +1694,7 @@ export const useEditorStore = defineStore('editor', () => {
       do: () => project.setPageStructure(at.pageId, after),
       undo: () => project.setPageStructure(at.pageId, before),
     })
-    selectedIds.value = new Set([...selectedIds.value].filter((id) => findTextObject(after.layers, id)))
+    selectedIds.value = new Set([...selectedIds.value].filter((id) => textOnPage(draft, id)))
   }
 
   /**
@@ -2109,12 +2108,17 @@ export const useEditorStore = defineStore('editor', () => {
    */
   function cmdAddRasterLayer(pageId: string, layer: RasterLayerEntry, path?: number[]) {
     const project = useProjectStore()
-    cmdReshape(`add-layer ${layer.id}`, pageId, () => project.addLayer(pageId, layer, path))
+    cmdReshape(`add-layer ${layer.id}`, pageId, () => project.addLayer(pageId, layerHome(), layer, path))
     selectOnly(layer.id)
   }
 
   function cmdAddFolder(pageId: string, name: string) {
     const project = useProjectStore()
+    const home = layerHome()
+    if (home === null) {
+      useNoticeStore().say('原文模式就是 page 本身，page 不放資料夾')
+      return
+    }
     const folder: GroupLayerEntry = {
       kind: 'group',
       id: generateLabelId(),
@@ -2129,7 +2133,7 @@ export const useEditorStore = defineStore('editor', () => {
     let path: number[] | undefined
     pushCommand({
       label: `add-folder ${folder.id}`,
-      do: () => project.addLayer(pageId, folder, path),
+      do: () => project.addLayer(pageId, home, folder, path),
       undo: () => {
         const removed = project.dissolveFolder(pageId, folder.id)
         path = removed?.path
@@ -2153,7 +2157,7 @@ export const useEditorStore = defineStore('editor', () => {
         do: () => {
           project.dissolveFolder(pageId, folderId)
         },
-        undo: () => project.restoreFolder(pageId, removed.path, removed.folder),
+        undo: () => project.restoreFolder(pageId, removed.home, removed.path, removed.folder),
       },
       { alreadyApplied: true },
     )
@@ -2175,14 +2179,15 @@ export const useEditorStore = defineStore('editor', () => {
     // a change to it — and moving out of a locked folder is already refused
     // above, since the entry inherits that lock.
     const file = project.pageById(pageId)
-    const into = file ? folderAtPath(file.page.layers, target.parentPath) : null
+    const home = layerHome()
+    const into = file ? folderAtPath(treeOf(file.page, textSide.value, project.activeFace), target.parentPath) : null
     if (into !== null && isLayerLocked(into.id)) return
-    if (!project.moveLayer(pageId, fromPath, target)) return
+    if (!project.moveLayer(pageId, home, fromPath, target)) return
     pushCommand(
       {
         label: `move-layer ${layerId}`,
-        do: () => project.moveLayer(pageId, fromPath, target),
-        undo: () => project.restoreLayerAt(pageId, layerId, fromPath),
+        do: () => project.moveLayer(pageId, home, fromPath, target),
+        undo: () => project.restoreLayerAt(pageId, home, layerId, fromPath),
       },
       { alreadyApplied: true },
     )
@@ -2205,7 +2210,39 @@ export const useEditorStore = defineStore('editor', () => {
     const page = project.pageOfEntry(id)
     if (page === null) return false
     const file = project.pageById(page)
-    return file ? isLocked(file.page.layers, id) : false
+    return file ? isLocked(treeOf(file.page, textSide.value, project.activeFace), id) : false
+  }
+
+  /**
+   * A raster put on every face or taken back into the one being worked on: the
+   * page's to give and the page's to take, and from the source side there is no
+   * face to take it into.
+   */
+  function cmdSetLayerLinked(pageId: string, layerId: string, linked: boolean) {
+    const project = useProjectStore()
+    const face = layerHome()
+    if (face === null) {
+      useNoticeStore().say('原文模式就是 page 本身，沒有可以拿回去的 face')
+      return
+    }
+    cmdReshape(`${linked ? 'link' : 'unlink'}-layer ${layerId}`, pageId, () =>
+      project.setLayerLinked(pageId, face, layerId, linked),
+    )
+  }
+
+  /**
+   * Which tree something new lands in: the face being worked on, or the page's
+   * own (`null`) on the source side, which is the page.
+   */
+  function layerHome(): string | null {
+    return textSide.value === 'source' ? null : useProjectStore().activeFace
+  }
+
+  /** The tree a page is worked in now: the page's own on the source side, the face's on the translation side. */
+  function workingTree(pageId: string): readonly LayerEntry[] {
+    const project = useProjectStore()
+    const file = project.pageById(pageId)
+    return file ? treeOf(file.page, textSide.value, project.activeFace) : []
   }
 
   /**
@@ -2279,7 +2316,7 @@ export const useEditorStore = defineStore('editor', () => {
     for (const pageId of pageIds) {
       const file = project.pageById(pageId)
       if (!file) continue
-      for (const entry of allEntries(file.page.layers)) {
+      for (const entry of everyEntry(file.page)) {
         if (entry.kind !== 'raster' || !names.has(entry.name) || entry.opacity === opacity) continue
         moved.push({ pageId, id: entry.id, opacity: entry.opacity })
       }
@@ -3269,6 +3306,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetLayerLocked,
     cmdSetLayerAlphaLocked,
     isLayerLocked,
+    layerHome,
+    cmdSetLayerLinked,
+    workingTree,
     isUnitLocked,
     cmdRenameLayer,
     cmdSetOpacity,

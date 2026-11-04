@@ -3,7 +3,7 @@ import type { LayerEntry, ManifestJson, TranslationUnit } from './types'
 import { MANIFEST_SCHEMA_VERSION } from './types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { emptyCounters } from './numbers'
-import { blankSourceBlock, blankTranslationBlock } from './schema'
+import { blankSourceBlock, blankTranslationBlock, treesFromOneTree } from './schema'
 import {
   projectedEdges,
   projectedOrder,
@@ -37,6 +37,7 @@ function pageOf(
     for (const u of units)
       for (const id of u.members)
         if (!sources.includes(id)) layers.push(blankTranslationBlock(id, face, DEFAULT_TEXT_STYLE))
+  const faces = Object.keys(ledgers)
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision: 0,
@@ -47,7 +48,7 @@ function pageOf(
     readingOrder,
     readingEdges,
     counters: emptyCounters(),
-    layers,
+    ...treesFromOneTree(layers, faces, faces[0] ?? FACE),
   }
 }
 
