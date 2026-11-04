@@ -1,6 +1,5 @@
 import type { LayerEffect, StrokePosition } from '@shared/effects/types'
 import { strokeOf, withStroke } from '@shared/effects/stroke'
-import { sampleSource } from '@/lib/fontSampleCache'
 import type { DrawnLabel } from '@/lib/labelRaster'
 
 /**
@@ -45,61 +44,89 @@ function cornerOf(label: DrawnLabel): { x: number; y: number; w: number; h: numb
  *
  * `under` is the objects as drawn, band and all.
  */
+export function joinedPixels(
+  own: DrawnLabel,
+  ownLetters: DrawnLabel,
+  position: StrokePosition,
+  under: readonly DrawnLabel[],
+): ImageData | null {
+  // An inside band never leaves its own letters, so there is nothing to keep off.
+  if (position === 'inside') return null
+  const at = cornerOf(own)
+  const self = cornerOf(ownLetters)
+  if (at === null || self === null || !own.sample || !ownLetters.sample) return null
+
+  const { w, h } = at
+  const solid = new Uint8Array(w * h)
+  let any = false
+  for (const label of under) {
+    const r = cornerOf(label)
+    if (r === null || !label.sample) continue
+    const dx = Math.round(r.x - at.x)
+    const dy = Math.round(r.y - at.y)
+    const x0 = Math.max(0, dx)
+    const y0 = Math.max(0, dy)
+    const x1 = Math.min(w, dx + r.w)
+    const y1 = Math.min(h, dy + r.h)
+    const px = label.sample.image.data
+    for (let y = y0; y < y1; y++) {
+      const from = (y - dy) * r.w - dx
+      for (let x = x0; x < x1; x++) {
+        if (px[(from + x) * 4 + 3]! < SOLID) continue
+        solid[y * w + x] = 1
+        any = true
+      }
+    }
+  }
+  if (!any) return null
+
+  // Inside its letters, an outside band is not there at all and a centred one
+  // is: the letters alone are the first, the bitmap cut to the letters the
+  // second.
+  const src = own.sample.image.data
+  const letters = ownLetters.sample.image.data
+  const lw = self.w
+  const lx = Math.round(self.x - at.x)
+  const ly = Math.round(self.y - at.y)
+  const out = new ImageData(new Uint8ClampedArray(src), w, h)
+  const dst = out.data
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (solid[i] === 0) continue
+      const sx = x - lx
+      const sy = y - ly
+      const j = sx >= 0 && sx < lw && sy >= 0 && sy < self.h ? (sy * lw + sx) * 4 : -1
+      const a = j < 0 ? 0 : letters[j + 3]!
+      const o = i * 4
+      if (position === 'outside') {
+        dst[o] = j < 0 ? 0 : letters[j]!
+        dst[o + 1] = j < 0 ? 0 : letters[j + 1]!
+        dst[o + 2] = j < 0 ? 0 : letters[j + 2]!
+        dst[o + 3] = a
+      } else {
+        dst[o + 3] = Math.round((src[o + 3]! * a) / 255)
+      }
+    }
+  }
+  return out
+}
+
+/** `joinedPixels` on a canvas, ready to draw. */
 export function withJoinedBands(
   own: DrawnLabel,
   ownLetters: DrawnLabel,
   position: StrokePosition,
   under: readonly DrawnLabel[],
 ): OffscreenCanvas | null {
-  // An inside band never leaves its own letters, so there is nothing to keep off.
-  if (position === 'inside') return null
-  const at = cornerOf(own)
-  const self = cornerOf(ownLetters)
-  if (at === null || self === null || !own.sample || !ownLetters.sample) return null
-  const reaching = under.filter((label) => {
-    const r = cornerOf(label)
-    return r !== null && r.x < at.x + at.w && at.x < r.x + r.w && r.y < at.y + at.h && at.y < r.y + r.h
-  })
-  if (reaching.length === 0) return null
-
-  const solid = context2d(at.w, at.h)
-  for (const label of reaching) {
-    const r = cornerOf(label)
-    if (r && label.sample) solid.drawImage(sampleSource(label.sample), r.x - at.x, r.y - at.y)
-  }
-  const coverage = solid.getImageData(0, 0, at.w, at.h)
-  const px = coverage.data
-  for (let i = 3; i < px.length; i += 4) px[i] = px[i]! >= SOLID ? 255 : 0
-  solid.putImageData(coverage, 0, 0)
-
-  // Inside its letters, an outside band is not there at all and a centred one
-  // is: the letters alone are the first, the bitmap cut to the letters the
-  // second.
-  const inLetters = context2d(at.w, at.h)
-  if (position === 'outside') {
-    inLetters.drawImage(sampleSource(ownLetters.sample), self.x - at.x, self.y - at.y)
-  } else {
-    inLetters.drawImage(sampleSource(own.sample), 0, 0)
-    inLetters.globalCompositeOperation = 'destination-in'
-    inLetters.drawImage(sampleSource(ownLetters.sample), self.x - at.x, self.y - at.y)
-  }
-  inLetters.globalCompositeOperation = 'destination-in'
-  inLetters.drawImage(solid.canvas, 0, 0)
-
-  const out = context2d(at.w, at.h)
-  out.drawImage(sampleSource(own.sample), 0, 0)
-  out.globalCompositeOperation = 'destination-out'
-  out.drawImage(solid.canvas, 0, 0)
-  out.globalCompositeOperation = 'source-over'
-  out.drawImage(inLetters.canvas, 0, 0)
-  return out.canvas
+  const pixels = joinedPixels(own, ownLetters, position, under)
+  if (pixels === null) return null
+  const canvas = new OffscreenCanvas(pixels.width, pixels.height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
+  ctx.putImageData(pixels, 0, 0)
+  return canvas
 }
 
 /** The alpha a sample reaches only where it is fully covered, edge rounding allowed for. */
 const SOLID = 254
-
-function context2d(w: number, h: number): OffscreenCanvasRenderingContext2D {
-  const ctx = new OffscreenCanvas(w, h).getContext('2d')
-  if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
-  return ctx
-}

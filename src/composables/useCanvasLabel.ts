@@ -60,18 +60,28 @@ export function useCanvasLabel(): CanvasLabels {
     return drawnLabel(codeShown(entry), style, used, { x: body.x, y: body.y }, body.rotation)
   }
 
+  /**
+   * Keyed on the object's own bitmap, and good for as long as the bitmaps and
+   * places of the objects under it are the ones it was made from — so a drag
+   * redoes the object moving and the ones joined to it, and none of the rest.
+   */
+  const joinedCache = new WeakMap<object, { from: readonly unknown[]; canvas: OffscreenCanvas | null }>()
+
   return {
     effectsOf: (entry) => lookOf(entry).effects,
     labelOf: (entry) => drawn(entry, false),
     joinedOf: (entry, under) => {
       const position = strokeOf(lookOf(entry).effects)?.position
       if (!position) return null
-      return withJoinedBands(
-        drawn(entry, false),
-        drawn(entry, true),
-        position,
-        under.map((other) => drawn(other, false)),
-      )
+      const own = drawn(entry, false)
+      if (!own.sample) return null
+      const others = under.map((other) => drawn(other, false))
+      const from = [position, own.center.x, own.center.y, ...others.flatMap((o) => [o.sample, o.center.x, o.center.y])]
+      const held = joinedCache.get(own.sample)
+      if (held && held.from.length === from.length && held.from.every((v, i) => v === from[i])) return held.canvas
+      const canvas = withJoinedBands(own, drawn(entry, true), position, others)
+      joinedCache.set(own.sample, { from, canvas })
+      return canvas
     },
   }
 }
