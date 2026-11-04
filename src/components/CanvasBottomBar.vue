@@ -14,15 +14,12 @@
     </button>
 
     <!--
-      The project's name, centred on the bar rather than flexed between its
-      neighbours, so it does not wander when the page select grows. The dot is
-      the unsaved marker the title bar used to carry.
+      Centred on the bar rather than flexed between its neighbours, so it does
+      not wander when the page select grows.
     -->
-    <span
-      class="pointer-events-none absolute left-1/2 max-w-[40%] -translate-x-1/2 truncate text-xs text-muted-foreground"
-    >
-      {{ title }}
-    </span>
+    <div class="absolute left-1/2 flex max-w-[40%] -translate-x-1/2 justify-center">
+      <FaceSwitch />
+    </div>
 
     <div class="flex-1" />
 
@@ -55,6 +52,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from '@lucide/vue'
+import FaceSwitch from '@/components/FaceSwitch.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -66,12 +64,6 @@ const percentFormat = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 0,
 })
 const scalePercent = computed(() => percentFormat.format(editor.view.scale))
-
-const title = computed(() => {
-  if (!project.isOpen) return ''
-  const dir = project.folderPath?.split('/').pop() ?? ''
-  return `${project.dirty ? '● ' : ''}${dir}`
-})
 
 /** The same act as the arrows beside it, so it leaves the selection alone too. */
 function onSelect(e: Event) {
