@@ -1,7 +1,8 @@
 <template>
   <span
     ref="cellRef"
-    class="relative block w-1/2 shrink-0 overflow-hidden rounded-xs bg-muted/40"
+    class="relative block shrink-0 overflow-hidden rounded-xs bg-muted/40"
+    :class="fill ? 'w-full' : 'w-1/2'"
     :style="{ aspectRatio: `${file.page.width} / ${file.page.height}` }"
   >
     <img
@@ -25,7 +26,11 @@ import { ImageOff } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import { usePageThumbnail } from '@/composables/usePageThumbnail'
 
-const props = defineProps<{ file: ProjectFile }>()
+const props = defineProps<{
+  file: ProjectFile
+  /** The whole width it is given, rather than the half a list row leaves it. */
+  fill?: boolean
+}>()
 
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
 const { src, problem } = usePageThumbnail(cellRef, () => props.file, 'artwork')

@@ -85,30 +85,62 @@ function labelText(code: string): string {
     .replaceAll(">", "#gt;");
 }
 
-function nodeOf(sentence: SentenceTexts): string {
-  const source = sentence.sources.filter((b) => b.text !== "").map((b) => labelText(b.text));
-  const parts = [
-    `${sentence.no} 譯：${sentence.translation === "" ? "（未翻）" : labelText(sentence.translation)}`,
-    `原：${source.length === 0 ? "（無）" : source.join(" / ")}`,
-  ];
-  if (sentence.tags.length > 0) parts.push(`標記：${sentence.tags.map(labelText).join("、")}`);
-  return `n${sentence.no}["${parts.join("<br/>")}"]`;
+/** What a node says besides its number. An agent is given all three. */
+export interface MermaidParts {
+  translation: boolean;
+  source: boolean;
+  tags: boolean;
+}
+
+const EVERY_PART: MermaidParts = { translation: true, source: true, tags: true };
+
+function nodeOf(sentence: SentenceTexts, parts: MermaidParts): string {
+  const said: string[] = [];
+  if (parts.translation) {
+    said.push(`譯：${sentence.translation === "" ? "（未翻）" : labelText(sentence.translation)}`);
+  }
+  if (parts.source) {
+    const source = sentence.sources.filter((b) => b.text !== "").map((b) => labelText(b.text));
+    said.push(`原：${source.length === 0 ? "（無）" : source.join(" / ")}`);
+  }
+  if (parts.tags && sentence.tags.length > 0) said.push(`標記：${sentence.tags.map(labelText).join("、")}`);
+  const label = said.length === 0 ? `${sentence.no}` : `${sentence.no} ${said.join("<br/>")}`;
+  return `n${sentence.no}["${label}"]`;
 }
 
 /** Lines drawn as the graph; what no line touches stays apart, in list order, and is not read into it. */
-function renderMermaid(face: FaceTexts): string {
+export function mermaidOf(face: FaceTexts, parts: MermaidParts = EVERY_PART): string {
   const touched = new Set(face.edges.flatMap((e) => [e.from, e.to]));
-  const out = ["```mermaid", "flowchart TD"];
-  for (const s of face.sentences) if (touched.has(s.no)) out.push(`  ${nodeOf(s)}`);
+  const out = ["flowchart TD"];
+  for (const s of face.sentences) if (touched.has(s.no)) out.push(`  ${nodeOf(s, parts)}`);
   for (const e of face.edges) out.push(`  n${e.from} --> n${e.to}`);
   const loose = face.sentences.filter((s) => !touched.has(s.no));
   if (loose.length > 0) {
     out.push('  subgraph unlinked["未維護"]');
-    for (const s of loose) out.push(`    ${nodeOf(s)}`);
+    for (const s of loose) out.push(`    ${nodeOf(s, parts)}`);
     out.push("  end");
   }
-  out.push("```");
   return out.join("\n");
+}
+
+/**
+ * Flowcharts as a document a person can paste: a heading and one fenced chart
+ * for every page and face that has sentences, headed the way get_texts heads
+ * its sections.
+ */
+export function mermaidDocument(pages: readonly PageTexts[], parts: MermaidParts = EVERY_PART): string {
+  const out: string[] = [];
+  for (const page of pages) {
+    for (const face of page.faces) {
+      if (face.sentences.length === 0) continue;
+      out.push(`## ${headOf(page)} · f${face.faceNo} ${face.name}`, "", "```mermaid", mermaidOf(face, parts), "```", "");
+    }
+  }
+  return out.join("\n");
+}
+
+function renderMermaid(face: FaceTexts): string {
+  return ["```mermaid", mermaidOf(face), "```"].join("\n");
 }
 
 function renderFace(

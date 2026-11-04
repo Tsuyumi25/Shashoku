@@ -19,6 +19,8 @@ import { facePage } from '@shared/page/units'
 import { addressOf, collectTexts, resolveRef } from './collect'
 import { planWithdraw } from './withdraw'
 import {
+  mermaidDocument,
+  mermaidOf,
   noteRefs,
   noteSeen,
   renderProposeResult,
@@ -369,6 +371,23 @@ describe('renderTexts', () => {
         '```',
       ].join('\n'),
     )
+  })
+
+  /** ⚠️ What a person leaves out of the view must not leave a dangling separator in the label. */
+  it('leaves out of each node what the person turned off, and heads each chart for pasting', () => {
+    const a = balloon('a', ['あ'], ['one'])
+    ;(a.blocks[0] as SourceTextLayerEntry).body.tags = ['框内']
+    const [page] = collectTexts([file('p1', pageOf(a.blocks, { [ZH]: [a.unit] }))], ZH_ONLY)
+    const face = page.faces[0]
+    const node = (parts: Parameters<typeof mermaidOf>[1]) => mermaidOf(face, parts).split('\n')[2]
+    expect(node({ translation: false, source: true, tags: false })).toBe('    n1["1 原：あ"]')
+    expect(node({ translation: true, source: false, tags: true })).toBe('    n1["1 譯：one<br/>標記：框内"]')
+    expect(node({ translation: false, source: false, tags: false })).toBe('    n1["1"]')
+    expect(mermaidDocument([page]).split('\n').slice(0, 3)).toEqual([
+      '## 第 1 頁 · p1 · 001.jpg · f1 譯文',
+      '',
+      '```mermaid',
+    ])
   })
 
   /** ⚠️ An agent that only ever reads changes must still be shown the lines, once and whenever they move. */

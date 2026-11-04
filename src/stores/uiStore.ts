@@ -7,7 +7,7 @@ import { defineStore } from "pinia";
  * where the first double-click happens, not because the library is above the
  * others.
  */
-export type AppView = "library" | "fonts" | "editor" | "export";
+export type AppView = "library" | "fonts" | "editor" | "export" | "topology";
 
 export const useUiStore = defineStore("ui", () => {
   const view = ref<AppView>("library");
@@ -17,7 +17,7 @@ export const useUiStore = defineStore("ui", () => {
   }
 
   /**
-   * A floating panel over whatever view is up, not a fifth view: the views
+   * A floating panel over whatever view is up, not one more view: the views
    * are places to work, and settings is a form filled out and left. Where you
    * were stays under it, untouched.
    */

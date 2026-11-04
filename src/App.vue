@@ -3,7 +3,11 @@
     <TitleBar />
 
     <div class="flex min-h-0 flex-1">
-      <SplitterGroup direction="horizontal" class="min-w-0 flex-1">
+      <!--
+        Kept mounted under the topology view, which takes the whole width for
+        its charts and its strip of pages: the editor is to be found as it was.
+      -->
+      <SplitterGroup v-show="ui.view !== 'topology'" direction="horizontal" class="min-w-0 flex-1">
         <SplitterPanel
           :order="1"
           :default-size="20"
@@ -66,6 +70,9 @@
           </div>
         </SplitterPanel>
       </SplitterGroup>
+      <div v-if="ui.view === 'topology'" class="min-w-0 flex-1">
+        <TopologyMode />
+      </div>
     </div>
 
     <SettingsPopup />
@@ -100,6 +107,7 @@ import { isTypingSurface, ownsKeyboard } from '@/lib/typingSurface'
 import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
+import TopologyMode from '@/modes/TopologyMode.vue'
 import { useWallPublisher } from '@/composables/useWallPublisher'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'

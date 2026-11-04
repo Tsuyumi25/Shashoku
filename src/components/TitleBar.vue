@@ -104,6 +104,16 @@
           <LayoutGrid :size="14" />
           <span>全覽</span>
         </button>
+        <!-- A view of this window, unlike the wall beside it. -->
+        <button
+          class="tb-lib no-drag ml-1"
+          :class="ui.view === 'topology' && 'tb-lib-on'"
+          title="切換到拓樸：每一頁的閱讀線，跟 agent 拿到的 mermaid 一樣"
+          @click="ui.setView('topology')"
+        >
+          <Workflow :size="14" />
+          <span>拓樸</span>
+        </button>
       </div>
     </div>
 
@@ -122,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { LayoutGrid, LibraryBig, Menu, Save, Settings, Type } from '@lucide/vue'
+import { LayoutGrid, LibraryBig, Menu, Save, Settings, Type, Workflow } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
