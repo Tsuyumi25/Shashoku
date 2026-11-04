@@ -65,6 +65,8 @@ const props = defineProps<{
    * against the overlay as it stands now rather than as it stood then.
    */
   overlay?: StrokeOverlay
+  /** For each text object, the ones under it its stroke stays off. See `joinedBelow`. */
+  joined: ReadonlyMap<string, readonly TextLayerEntry[]>
 }>()
 
 // Live, not read once: the interface's zoom changes it under a mounted run, and
@@ -73,7 +75,7 @@ const { pixelRatio } = useDevicePixelRatio()
 
 const raster = useRasterStore()
 const stroke = useStrokeOverlayStore()
-const labelOf = useCanvasLabel()
+const labels = useCanvasLabel()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
@@ -155,7 +157,19 @@ const effectedRasters = computed(() => {
 const drawnTexts = computed(() => {
   const out = new Map<string, DrawnLabel>()
   for (const node of props.nodes) {
-    if (node.kind === 'text') out.set(node.entry.id, labelOf(node.entry))
+    if (node.kind === 'text') out.set(node.entry.id, labels.labelOf(node.entry))
+  }
+  return out
+})
+
+/** The bitmaps whose band has been kept off the letters under them, cached as the rest are. */
+const joinedTexts = computed(() => {
+  const out = new Map<string, OffscreenCanvas>()
+  for (const node of props.nodes) {
+    if (node.kind !== 'text') continue
+    const under = props.joined.get(node.entry.id)
+    const joined = under ? labels.joinedOf(node.entry, under) : null
+    if (joined) out.set(node.entry.id, joined)
   }
   return out
 })
@@ -230,7 +244,7 @@ function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
   const { width, height } = drawn.sample.image
   ctx.save()
   ctx.translate(drawn.center.x, drawn.center.y)
-  ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
+  ctx.drawImage(joinedTexts.value.get(entry.id) ?? sampleSource(drawn.sample), -width / 2, -height / 2)
   ctx.restore()
 }
 
@@ -264,7 +278,7 @@ watch(
 )
 
 /** Typeset text already tracks its own inputs; this is only the repaint. */
-watch(drawnTexts, schedulePaint)
+watch([drawnTexts, joinedTexts], schedulePaint)
 
 /** And the same for a layer's own effects, which track theirs. */
 watch(effectedRasters, schedulePaint)

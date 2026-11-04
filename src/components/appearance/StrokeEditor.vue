@@ -9,7 +9,17 @@
       @input="onColorInput"
       @update:model-value="onColor"
       @clear="commit(null)"
-    />
+    >
+      <label v-if="joinable" class="join-toggle">
+        <input
+          type="checkbox"
+          :checked="shown.joins !== false"
+          :indeterminate="mixed"
+          @change="onJoins(($event.target as HTMLInputElement).checked)"
+        />
+        同色描邊不壓到彼此的字
+      </label>
+    </ColorField>
     <NumberStepper
       :model-value="mixed ? null : (stroke?.width ?? 0)"
       label="描邊寬度"
@@ -67,6 +77,8 @@ const props = defineProps<{
   effects: readonly LayerEffect[]
   /** Whether the selection disagrees about them. */
   mixed?: boolean
+  /** Whether the selection is text, which is the only kind whose stroke joins others of its colour. */
+  joinable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +117,11 @@ function onPosition(v: unknown) {
   if (!props.mixed && v === stroke.value?.position) return
   commit({ ...shown.value, position: v as StrokePosition })
 }
+
+function onJoins(joins: boolean) {
+  const { joins: _was, ...rest } = shown.value
+  commit(joins ? rest : { ...rest, joins: false })
+}
 </script>
 
 <style scoped>
@@ -112,5 +129,11 @@ function onPosition(v: unknown) {
 .sub-key {
   padding-left: 0.75rem;
   color: var(--muted-foreground);
+}
+.join-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
 }
 </style>

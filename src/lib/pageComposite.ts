@@ -1,6 +1,9 @@
-import type { ManifestJson, RasterLayerEntry } from '@shared/page/types'
+import type { ManifestJson, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { LayerEffect } from '@shared/effects/types'
+import { joinedBelow } from '@shared/effects/stroke'
 import {
   pageStack,
+  stackedTextNodes,
   type RasterStackNode,
   type StackNode,
   type TextStackNode,
@@ -9,6 +12,7 @@ import { shownCodeOf } from '@shared/page/units'
 import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
+import { lettersOnly, withJoinedBands } from '@/lib/joinedStroke'
 import { layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { StrokeOverlay } from '@/stores/strokeOverlayStore'
@@ -119,18 +123,32 @@ export async function decodeLayerBitmaps(
   return decoded
 }
 
-function drawTextWith(): StackPaint['drawText'] {
+function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
+  const labelOf = (entry: TextLayerEntry, effects: readonly LayerEffect[]) =>
+    drawnLabel(shownCodeOf(entry), entry.body.style, effects, { x: entry.body.x, y: entry.body.y }, entry.body.rotation)
+  const joined = joinedBelow(
+    stackedTextNodes(stack).map((node) => node.entry),
+    (entry) => entry.effects,
+  )
   return (ctx, node) => {
     const label = node.entry
-    const code = shownCodeOf(label)
-    if (code.length === 0) return
-    const body = label.body
-    const drawn = drawnLabel(code, body.style, label.effects, { x: body.x, y: body.y }, body.rotation)
+    if (shownCodeOf(label).length === 0) return
+    const drawn = labelOf(label, label.effects)
     // A family this machine lacks draws notdef boxes rather than nothing, so the
     // only way to arrive here without a bitmap is a catalogue that never
     // answered. Exporting the page short one label silently would be worse than
     // stopping, since the file would look finished.
     if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${drawn.plain}」`)
+
+    const under = joined.get(label.id)
+    const picture =
+      (under &&
+        withJoinedBands(
+          drawn,
+          labelOf(label, lettersOnly(label.effects)),
+          under.map((entry) => labelOf(entry, lettersOnly(entry.effects))),
+        )) ??
+      sampleSource(drawn.sample)
 
     // The engine already turned the outline, so there is nothing left to rotate
     // here and nothing to resample: the bitmap lands one pixel per pixel.
@@ -138,7 +156,7 @@ function drawTextWith(): StackPaint['drawText'] {
     ctx.translate(drawn.center.x, drawn.center.y)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = smoothingQualityFor(1)
-    ctx.drawImage(sampleSource(drawn.sample), -width / 2, -height / 2)
+    ctx.drawImage(picture, -width / 2, -height / 2)
   }
 }
 
@@ -273,7 +291,7 @@ export function drawStack(
  * set of rules for where text lands at another scale.
  */
 export async function compositePage(input: CompositeInput): Promise<OffscreenCanvas> {
-  return await compositeWith(input, drawTextWith())
+  return await compositeWith(input, drawTextWith)
 }
 
 /**
@@ -291,7 +309,7 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
  * point on the page" always does.
  */
 export async function compositeArtwork(input: CompositeInput): Promise<OffscreenCanvas> {
-  return await compositeWith(input, () => {})
+  return await compositeWith(input, () => () => {})
 }
 
 /**
@@ -376,7 +394,7 @@ export function artworkSignature(
 
 async function compositeWith(
   input: CompositeInput,
-  drawText: StackPaint['drawText'],
+  drawTextFor: (stack: readonly StackNode[]) => StackPaint['drawText'],
 ): Promise<OffscreenCanvas> {
   const size = { w: input.page.width, h: input.page.height }
   const stack = pageStack(faceTree(input.page, input.face), 'translation', input.face)
@@ -387,7 +405,7 @@ async function compositeWith(
       page: size,
       rasters,
       liveLayer: input.liveLayer,
-      drawText,
+      drawText: drawTextFor(stack),
     })
     return canvas
   } finally {

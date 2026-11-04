@@ -1,13 +1,26 @@
+import type { LayerEffect } from '@shared/effects/types'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownCodeOf } from '@shared/page/units'
 import { previewedStyle } from '@/composables/useFontPicker'
+import { lettersOnly, withJoinedBands } from '@/lib/joinedStroke'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { sourceLook } from '@/lib/sourceLook'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
+export interface CanvasLabels {
+  /** The effects the canvas draws an object with, which on the source side are the reference halo. */
+  effectsOf(entry: TextLayerEntry): readonly LayerEffect[]
+  labelOf(entry: TextLayerEntry): DrawnLabel
+  /**
+   * The object's bitmap with its band kept off the letters of `under`, or null
+   * when it draws as it is. See `withJoinedBands`.
+   */
+  joinedOf(entry: TextLayerEntry, under: readonly TextLayerEntry[]): OffscreenCanvas | null
+}
+
 /**
- * A text object typeset the way the canvas shows it.
+ * Text objects typeset the way the canvas shows them.
  *
  * ⚠️ Which body is painted, and how, are the interface's questions rather than
  * the page's — the compositor answers both differently. It always draws the
@@ -15,9 +28,9 @@ import { useProjectStore } from '@/stores/projectStore'
  * builds is the page as delivered. A reference treatment for reading a source
  * against un-lettered artwork belongs on screen and nowhere else.
  *
- * Reads reactive state, so call it inside whatever is meant to follow it.
+ * Reads reactive state, so call these inside whatever is meant to follow it.
  */
-export function useCanvasLabel(): (entry: TextLayerEntry) => DrawnLabel {
+export function useCanvasLabel(): CanvasLabels {
   const editor = useEditorStore()
   const project = useProjectStore()
 
@@ -31,13 +44,29 @@ export function useCanvasLabel(): (entry: TextLayerEntry) => DrawnLabel {
     return page === undefined ? entry.body.lines.join('\n') : shownCodeOf(entry)
   }
 
-  return (entry) => {
+  // ⚠️ The same treatment the frames are measured with, and it has to be: a
+  // halo grows the bitmap, so a frame that counted one around text drawn
+  // without it is a frame that does not sit on its own letters.
+  function lookOf(entry: TextLayerEntry) {
+    const style = previewedStyle(entry.body.style, editor.isReached(entry.id))
+    return editor.textSide === 'source' ? sourceLook(style) : { style, effects: entry.effects }
+  }
+
+  function drawn(entry: TextLayerEntry, lettersAlone: boolean): DrawnLabel {
+    const { style, effects } = lookOf(entry)
     const body = entry.body
-    // ⚠️ The same treatment the frames are measured with, and it has to be: a
-    // halo grows the bitmap, so a frame that counted one around text drawn
-    // without it is a frame that does not sit on its own letters.
-    const style = previewedStyle(body.style, editor.isReached(entry.id))
-    const look = editor.textSide === 'source' ? sourceLook(style) : { style, effects: entry.effects }
-    return drawnLabel(codeShown(entry), look.style, look.effects, { x: body.x, y: body.y }, body.rotation)
+    const used = lettersAlone ? lettersOnly(effects) : effects
+    return drawnLabel(codeShown(entry), style, used, { x: body.x, y: body.y }, body.rotation)
+  }
+
+  return {
+    effectsOf: (entry) => lookOf(entry).effects,
+    labelOf: (entry) => drawn(entry, false),
+    joinedOf: (entry, under) =>
+      withJoinedBands(
+        drawn(entry, false),
+        drawn(entry, true),
+        under.map((other) => drawn(other, true)),
+      ),
   }
 }

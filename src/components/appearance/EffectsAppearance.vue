@@ -3,6 +3,7 @@
   <StrokeEditor
     :effects="representativeEffects"
     :mixed="effectsMixed"
+    :joinable="joinable"
     @preview="(effects) => editor.previewEffects(targets, effects)"
     @patch="onEffects"
   />
@@ -31,6 +32,9 @@ const representativeEffects = computed<readonly LayerEffect[]>(
 const effectsMixed = computed(
   () => sharedValue(props.targets.map((t) => t.entry), 'effects').kind === 'many',
 )
+
+/** Only text objects join; a raster's or a folder's stroke draws where the tree puts it. */
+const joinable = computed(() => props.targets.length > 0 && props.targets.every((t) => t.entry.kind === 'text'))
 
 function onEffects(effects: LayerEffect[]) {
   editor.cmdApplyEffects(props.targets, effects)

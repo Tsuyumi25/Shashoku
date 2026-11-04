@@ -12,18 +12,21 @@ function parseStrokePosition(v: unknown, at: string, fail: Fail): StrokePosition
 }
 
 function parseStrokeEffect(v: Record<string, unknown>, at: string, fail: Fail): StrokeEffect {
-  const { width, color, position } = v
+  const { width, color, position, joins } = v
   // Zero is a stroke turned down to nothing, kept for its colour and position.
   if (typeof width !== 'number' || !Number.isFinite(width) || width < 0)
     fail(`${at}.width 必須是非負數`)
   if (typeof color !== 'string' || color.length === 0)
     fail(`${at}.color 必須是非空字串`)
-  return {
+  if (joins !== undefined && joins !== false) fail(`${at}.joins 只能是 false 或不寫`)
+  const stroke: StrokeEffect = {
     kind: 'stroke',
     width,
     color,
     position: parseStrokePosition(position, `${at}.position`, fail),
   }
+  if (joins === false) stroke.joins = false
+  return stroke
 }
 
 function parseLayerEffect(v: unknown, at: string, fail: Fail): LayerEffect {
@@ -42,7 +45,9 @@ export function parseEffects(v: unknown, at: string, fail: Fail): LayerEffect[] 
 
 function serializeLayerEffect(e: LayerEffect): Record<string, unknown> {
   if (e.kind === 'stroke') {
-    return { kind: 'stroke', width: e.width, color: e.color, position: e.position }
+    const out: Record<string, unknown> = { kind: 'stroke', width: e.width, color: e.color, position: e.position }
+    if (e.joins === false) out.joins = false
+    return out
   }
   throw new Error(`unknown layer effect kind: ${(e as { kind: string }).kind}`)
 }

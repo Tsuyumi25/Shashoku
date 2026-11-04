@@ -23,6 +23,16 @@ export interface StrokeEffect {
   color: string
 
   position: StrokePosition
+
+  /**
+   * Absent: this text object's stroke is not drawn over the letters of the
+   * text objects under it that carry a stroke of the same colour, and theirs
+   * stays off its letters too. Two bands of one colour overlapping cannot be
+   * told apart, so a band crossing a letter is the only way the two can be
+   * seen to fight. `false` lets them, for the depth an overlap is sometimes
+   * meant to show.
+   */
+  joins?: false
 }
 
 

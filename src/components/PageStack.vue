@@ -8,6 +8,7 @@
       :view="view"
       :place="placeFor(segment)"
       :overlay="overlayFor(segment)"
+      :joined="joined"
     />
     <StackPicture
       v-else-if="segment.kind === 'picture'"
@@ -17,6 +18,7 @@
       :view="view"
       :page="page"
       :held="held"
+      :joined="joined"
     />
     <PageStack
       v-else
@@ -26,6 +28,7 @@
       :view="view"
       :page="page"
       :held="held"
+      :joined="joined"
     />
   </div>
 </template>
@@ -33,6 +36,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
+import type { TextLayerEntry } from '@shared/page/types'
 import type { StackNode } from '@shared/page/stack'
 import StackRun from '@/components/StackRun.vue'
 import StackPicture from '@/components/StackPicture.vue'
@@ -67,6 +71,12 @@ const props = defineProps<{
    * the moment the gesture is let go.
    */
   held?: { id: string; place: LayerPlacement } | null
+  /**
+   * For each text object on the page, the ones under it its stroke stays off.
+   * Worked out over the whole page, because the two need not share a folder
+   * or a canvas. See `joinedBelow`.
+   */
+  joined: ReadonlyMap<string, readonly TextLayerEntry[]>
 }>()
 
 const stroke = useStrokeOverlayStore()

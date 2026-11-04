@@ -35,6 +35,7 @@
           :view="view"
           :page="pageSize"
           :held="heldLayer"
+          :joined="joined"
         />
       </div>
 
@@ -396,6 +397,8 @@ import { plainEditSurface } from '@/composables/useTextEditSurface'
 import { useCutText } from '@/composables/useCutText'
 import { provideViewportOrigin, stageStyleFor } from '@/composables/useCanvasStage'
 import { previewedStyle } from '@/composables/useFontPicker'
+import { useCanvasLabel } from '@/composables/useCanvasLabel'
+import { joinedBelow } from '@shared/effects/stroke'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
@@ -523,6 +526,14 @@ watch(
     if (layerBitmaps.heldDir.value === dir) shownStack.value = stack.value
   },
   { immediate: true },
+)
+
+const canvasLabels = useCanvasLabel()
+const joined = computed(() =>
+  joinedBelow(
+    stackedTextNodes(shownStack.value).map((node) => node.entry),
+    canvasLabels.effectsOf,
+  ),
 )
 
 /**

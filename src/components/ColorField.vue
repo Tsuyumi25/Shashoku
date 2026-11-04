@@ -45,6 +45,7 @@
           <button v-if="clearable" type="button" class="color-clear" @click="clear">
             <X :size="12" /> 清除
           </button>
+          <slot />
         </PopoverContent>
       </PopoverPortal>
     </PopoverRoot>

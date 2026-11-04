@@ -6,6 +6,7 @@
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { useDevicePixelRatio } from '@vueuse/core'
 import { stackedRasterNodes, type BufferStackNode } from '@shared/page/stack'
+import type { TextLayerEntry } from '@shared/page/types'
 import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
@@ -34,12 +35,14 @@ const props = defineProps<{
   /** The page's own size, which a folder's buffer is. */
   page: { w: number; h: number }
   held?: { id: string; place: LayerPlacement } | null
+  /** For each text object, the ones under it its stroke stays off. See `joinedBelow`. */
+  joined: ReadonlyMap<string, readonly TextLayerEntry[]>
 }>()
 
 const { pixelRatio } = useDevicePixelRatio()
 const raster = useRasterStore()
 const stroke = useStrokeOverlayStore()
-const labelOf = useCanvasLabel()
+const labels = useCanvasLabel()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
@@ -69,14 +72,12 @@ const picture = computed<EffectedLayer>(() => {
     place: (id) => (held?.id === id ? held.place : undefined),
     overlay: (id) => (drawing ? stroke.overlayFor(id) : null),
     drawText: (ctx, node) => {
-      const drawn = labelOf(node.entry)
+      const drawn = labels.labelOf(node.entry)
       if (!drawn.sample) return
+      const under = props.joined.get(node.entry.id)
+      const picture = (under && labels.joinedOf(node.entry, under)) ?? sampleSource(drawn.sample)
       const { width, height } = drawn.sample.image
-      ctx.drawImage(
-        sampleSource(drawn.sample),
-        drawn.center.x - width / 2,
-        drawn.center.y - height / 2,
-      )
+      ctx.drawImage(picture, drawn.center.x - width / 2, drawn.center.y - height / 2)
     },
   })
   return pictureWithEffects(buffer, props.node.entry.effects) ?? { canvas: buffer, frame: { x: 0, y: 0, w, h } }

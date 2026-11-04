@@ -1082,6 +1082,24 @@ describe('the effects a node carries', () => {
     )
   })
 
+  it('round trips a stroke that lets go of joining others of its colour', () => {
+    const apart = { ...STROKE, joins: false } as const
+    const read = firstEntry(parseManifest(raw({ ...UPRIGHT, effects: [apart] }), FACE))
+    expect(read.effects).toEqual([apart])
+    expect(serializeDrawnLayers(manifestWith(textEntry({ effects: [apart] })), FACE)).toContain('"joins":false')
+  })
+
+  /** Joining is what every stroke written before the field existed already means. */
+  it('writes nothing for a stroke that joins, so older files read the same', () => {
+    expect(serializeDrawnLayers(manifestWith(textEntry({ effects: [STROKE] })), FACE)).not.toContain('joins')
+  })
+
+  it('refuses a joins that is anything but false', () => {
+    expect(() =>
+      parseManifest(raw({ ...UPRIGHT, effects: [{ ...STROKE, joins: true }] }), FACE),
+    ).toThrow(PageParseError)
+  })
+
   /**
    * A stroke moves pixels, so a page that grew one is a different picture and
    * every thumbnail of it has to be redrawn.
