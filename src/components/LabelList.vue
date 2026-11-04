@@ -348,6 +348,8 @@ import { useMarkupSession } from '@/composables/useMarkupSession'
 import { textareaCaret, textareaSelection } from '@/lib/textareaMirror'
 import { isCollapsed, spanOf } from '@/lib/textSelection'
 import { shownCodeOf, tagsOfUnit } from '@shared/page/units'
+import { lockedEntries } from '@shared/page/tree'
+import { treeOf } from '@shared/page/trees'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -449,11 +451,23 @@ function branchIndent(row: LabelRow): Record<string, string> | undefined {
   return row.lane !== undefined && row.lane > 0 ? { paddingLeft: '1.5rem' } : undefined
 }
 
+/**
+ * Every locked block in the chapter, worked out once per tree rather than once
+ * per row: a change of selection redraws every row in the list.
+ */
+const lockedIds = computed(() => {
+  const out = new Set<string>()
+  for (const file of project.files) {
+    for (const id of lockedEntries(treeOf(file.page, editor.textSide, project.activeFace))) out.add(id)
+  }
+  return out
+})
+
 /** Its own lock or a folder's above it, which this list has no way to tell apart. */
 function isRowLocked(row: LabelRow | BlockRow): boolean {
   return row.kind === 'block'
-    ? editor.isLayerLocked(row.block.id)
-    : row.blocks.some((block) => editor.isLayerLocked(block.id))
+    ? lockedIds.value.has(row.block.id)
+    : row.blocks.some((block) => lockedIds.value.has(block.id))
 }
 
 /**

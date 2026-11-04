@@ -67,18 +67,21 @@ export function findTextObject(
  * asking about something this tree cannot speak for.
  */
 export function isLocked(layers: readonly LayerEntry[], id: string): boolean {
-  const walk = (entries: readonly LayerEntry[], inherited: boolean): boolean | null => {
+  return lockedEntries(layers).has(id)
+}
+
+/** Every entry `isLocked` would refuse, in one walk — for asking about many at once. */
+export function lockedEntries(layers: readonly LayerEntry[]): Set<string> {
+  const out = new Set<string>()
+  const walk = (entries: readonly LayerEntry[], inherited: boolean): void => {
     for (const entry of entries) {
       const locked = inherited || entry.locked
-      if (entry.id === id) return locked
-      if (entry.kind === 'group') {
-        const found = walk(entry.children, locked)
-        if (found !== null) return found
-      }
+      if (locked) out.add(entry.id)
+      if (entry.kind === 'group') walk(entry.children, locked)
     }
-    return null
   }
-  return walk(layers, false) ?? false
+  walk(layers, false)
+  return out
 }
 
 
