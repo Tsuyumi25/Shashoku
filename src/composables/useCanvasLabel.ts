@@ -1,4 +1,5 @@
 import type { LayerEffect } from '@shared/effects/types'
+import { strokeOf } from '@shared/effects/stroke'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownCodeOf } from '@shared/page/units'
 import { previewedStyle } from '@/composables/useFontPicker'
@@ -62,11 +63,15 @@ export function useCanvasLabel(): CanvasLabels {
   return {
     effectsOf: (entry) => lookOf(entry).effects,
     labelOf: (entry) => drawn(entry, false),
-    joinedOf: (entry, under) =>
-      withJoinedBands(
+    joinedOf: (entry, under) => {
+      const position = strokeOf(lookOf(entry).effects)?.position
+      if (!position) return null
+      return withJoinedBands(
         drawn(entry, false),
         drawn(entry, true),
-        under.map((other) => drawn(other, true)),
-      ),
+        position,
+        under.map((other) => drawn(other, false)),
+      )
+    },
   }
 }

@@ -1,6 +1,6 @@
 import type { ManifestJson, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { LayerEffect } from '@shared/effects/types'
-import { joinedBelow } from '@shared/effects/stroke'
+import { joinedBelow, strokeOf } from '@shared/effects/stroke'
 import {
   pageStack,
   stackedTextNodes,
@@ -141,12 +141,15 @@ function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
     if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${drawn.plain}」`)
 
     const under = joined.get(label.id)
+    const position = strokeOf(label.effects)?.position
     const picture =
       (under &&
+        position &&
         withJoinedBands(
           drawn,
           labelOf(label, lettersOnly(label.effects)),
-          under.map((entry) => labelOf(entry, lettersOnly(entry.effects))),
+          position,
+          under.map((entry) => labelOf(entry, entry.effects)),
         )) ??
       sampleSource(drawn.sample)
 
