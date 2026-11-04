@@ -152,6 +152,16 @@ describe('a folder only becomes a buffer when it has to', () => {
     expect(node.blendMode).toBe('multiply')
   })
 
+  // The outline is grown from the members as one picture, which is what keeps
+  // two members that touch from each drawing theirs across the other.
+  it('buffers a folder that carries a stroke, even passing through at full opacity', () => {
+    const stroke = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
+    const [node] = pageStack([folder('g', [text('a'), text('b')], { effects: [stroke] })], 'translation', FACE)
+    expect(node.kind).toBe('buffer')
+    expect(node.blendMode).toBe('normal')
+    expect(node.kind === 'buffer' && idsOf(node.children)).toEqual(['a', 'b'])
+  })
+
   /**
    * Pass-through means "no buffer of my own", so once one is forced the mode has
    * nothing left to say and the buffer meets the page the ordinary way. No

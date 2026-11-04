@@ -33,6 +33,7 @@
           :bitmaps="layerBitmaps"
           :container="editor.viewContainerSize"
           :view="view"
+          :page="pageSize"
           :held="heldLayer"
         />
       </div>
@@ -500,6 +501,12 @@ const layerBitmaps = useLayerBitmaps(
     ),
   ],
 )
+
+/** One object per size rather than per render, so a folder's picture is not rebuilt on every pan. */
+const pageSize = computed(() => ({
+  w: currentFile.value?.page.width ?? 0,
+  h: currentFile.value?.page.height ?? 0,
+}))
 
 const placement = useLayerPlacement(layerBitmaps)
 

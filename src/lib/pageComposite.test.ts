@@ -96,6 +96,17 @@ describe('what the artwork composite would read', () => {
     )
   })
 
+  it('changes when a folder alone grows a stroke', () => {
+    const inside = [raster('a')]
+    expect(sign([folder('g', inside)])).not.toBe(
+      sign([
+        folder('g', inside, {
+          effects: [{ kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }],
+        }),
+      ]),
+    )
+  })
+
   // Typing is the most frequent edit there is, and the composite leaves text
   // out — so it must not throw away a sample that is still good.
   it('holds still while text is added, moved and edited', () => {

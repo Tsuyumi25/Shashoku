@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LayerEffect } from '@shared/effects/types'
-import { effectMargin, effectedFrame, layerWithEffects } from './layerEffects'
+import { alphaBounds, effectMargin, effectedFrame, layerWithEffects } from './layerEffects'
 
 class StubImageData {
   constructor(
@@ -141,5 +141,31 @@ describe('effectedFrame', () => {
   it('leaves a layer with no frame where it is rather than inventing one', () => {
     const empty = { x: 5, y: 5, w: 0, h: 0 }
     expect(effectedFrame(empty, [stroke(3)])).toEqual(empty)
+  })
+})
+
+describe('alphaBounds', () => {
+  function picture(width: number, height: number, covered: [number, number, number][]) {
+    const rgba = new Uint8ClampedArray(width * height * 4)
+    for (const [x, y, a] of covered) rgba[(y * width + x) * 4 + 3] = a
+    return rgba
+  }
+
+  it('has nothing to bound on a picture with no alpha anywhere', () => {
+    expect(alphaBounds(picture(8, 6, []), 8, 6)).toBeNull()
+  })
+
+  /** A faint edge pixel is content too, and the band grown from it would be clipped. */
+  it('reaches the faintest covered pixel on every side', () => {
+    const rgba = picture(10, 8, [
+      [2, 5, 255],
+      [7, 1, 1],
+      [4, 6, 1],
+    ])
+    expect(alphaBounds(rgba, 10, 8)).toEqual({ x: 2, y: 1, w: 6, h: 6 })
+  })
+
+  it('bounds a single pixel as one pixel', () => {
+    expect(alphaBounds(picture(4, 4, [[3, 3, 9]]), 4, 4)).toEqual({ x: 3, y: 3, w: 1, h: 1 })
   })
 })

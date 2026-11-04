@@ -20,10 +20,10 @@
       </div>
 
       <div
-        v-else-if="kind === 'raster'"
+        v-else-if="kind === 'raster' || kind === 'group'"
         class="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 border-t border-border pt-2 text-xs"
       >
-        <EffectsAppearance :targets="rasterTargets" />
+        <EffectsAppearance :targets="kind === 'raster' ? rasterTargets : targets" />
       </div>
     </template>
 
@@ -50,10 +50,9 @@ import { useEditorStore } from '@/stores/editorStore'
  * the whole reason the split is here rather than a `v-if` per field inside one
  * long panel.
  *
- * A folder falls through to the shared section alone, and so does a mixture,
- * for different reasons: one is a kind with nothing of its own to adjust yet,
- * the other is a selection that disagrees about what it holds. Only the second
- * is worth saying out loud.
+ * A mixture falls through to the shared section alone: a selection that
+ * disagrees about what it holds has nothing of its own to adjust, and that is
+ * worth saying out loud.
  *
  * ⚠️ No `key` anywhere below. A consumer is remounted when the kind changes and
  * left alone when it does not — so extending the selection while a number is

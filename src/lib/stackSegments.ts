@@ -4,6 +4,7 @@ import type {
   StackNode,
   TextStackNode,
 } from '@shared/page/stack'
+import { engineStrokesFor } from '@shared/effects/stroke'
 
 /** Anything that draws as a bitmap at a place on the page. */
 export type RunStackNode = RasterStackNode | TextStackNode
@@ -16,6 +17,7 @@ export type RunStackNode = RasterStackNode | TextStackNode
 export type StackSegment =
   | { kind: 'run'; key: string; blendMode: string; nodes: RunStackNode[] }
   | { kind: 'buffer'; key: string; blendMode: string; node: BufferStackNode }
+  | { kind: 'picture'; key: string; blendMode: string; node: BufferStackNode }
 
 /**
  * The stack cut into the elements that will draw it.
@@ -52,7 +54,11 @@ export function stackSegments(
   const out: StackSegment[] = []
   for (const node of nodes) {
     if (node.kind === 'buffer') {
-      out.push({ kind: 'buffer', key: node.entry.id, blendMode: node.blendMode, node })
+      // A box the browser isolates can blend and fade its contents as one, but
+      // it has no outline to grow from them: a folder with a stroke needs its
+      // contents as pixels.
+      const kind = engineStrokesFor(node.entry.effects).length > 0 ? 'picture' : 'buffer'
+      out.push({ kind, key: node.entry.id, blendMode: node.blendMode, node })
       continue
     }
     const last = out[out.length - 1]

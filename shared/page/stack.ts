@@ -7,6 +7,7 @@ import type {
 import { PASS_THROUGH } from './types'
 import type { TextSide } from './text'
 import { isOnView } from './units'
+import { engineStrokesFor } from '../effects/stroke'
 
 /**
  * How a page stacks, answered once.
@@ -48,12 +49,18 @@ export interface BufferStackNode extends StackNodeBase {
 export type StackNode = RasterStackNode | TextStackNode | BufferStackNode
 
 /**
- * Whether a folder costs a buffer. Pass-through at full opacity is the one case
- * that does not, which is why it is the default a new folder gets: an ordinary
- * folder is pure containment and should cost nothing to draw.
+ * Whether a folder costs a buffer. Pass-through at full opacity with nothing
+ * grown from its edge is the one case that does not, which is why it is the
+ * default a new folder gets: an ordinary folder is pure containment and should
+ * cost nothing to draw. A stroke is grown from the contents as one picture, so
+ * it needs that picture as much as an opacity does.
  */
 function needsBuffer(folder: GroupLayerEntry): boolean {
-  return folder.blendMode !== PASS_THROUGH || folder.opacity !== 1
+  return (
+    folder.blendMode !== PASS_THROUGH ||
+    folder.opacity !== 1 ||
+    engineStrokesFor(folder.effects).length > 0
+  )
 }
 
 /**

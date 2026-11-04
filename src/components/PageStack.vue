@@ -9,12 +9,22 @@
       :place="placeFor(segment)"
       :overlay="overlayFor(segment)"
     />
+    <StackPicture
+      v-else-if="segment.kind === 'picture'"
+      :node="segment.node"
+      :bitmaps="bitmaps"
+      :container="container"
+      :view="view"
+      :page="page"
+      :held="held"
+    />
     <PageStack
       v-else
       :nodes="segment.node.children"
       :bitmaps="bitmaps"
       :container="container"
       :view="view"
+      :page="page"
       :held="held"
     />
   </div>
@@ -25,6 +35,7 @@ import { computed } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { StackNode } from '@shared/page/stack'
 import StackRun from '@/components/StackRun.vue'
+import StackPicture from '@/components/StackPicture.vue'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { stackSegments, type StackSegment } from '@/lib/stackSegments'
 import type { ViewTransform } from '@/lib/coords'
@@ -48,6 +59,8 @@ const props = defineProps<{
   /** The viewport, which is what a raster canvas is sized to. */
   container: { w: number; h: number }
   view: ViewTransform
+  /** The page's own size, which a folder drawn as one picture is buffered at. */
+  page: { w: number; h: number }
   /**
    * The layer a gesture is on and where that gesture has taken it. It is held
    * out of its run so the transform reaches it alone, and it goes back into one

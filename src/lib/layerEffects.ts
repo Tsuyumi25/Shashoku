@@ -84,6 +84,52 @@ export function layerWithEffects(
   }
 }
 
+/** The smallest rectangle holding every pixel with any alpha, or null when none has. */
+export function alphaBounds(rgba: Uint8ClampedArray, width: number, height: number): Frame | null {
+  let left = width
+  let right = -1
+  let top = height
+  let bottom = -1
+  for (let y = 0; y < height; y++) {
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      if (rgba[(row + x) * 4 + 3] === 0) continue
+      if (x < left) left = x
+      if (x > right) right = x
+      if (y < top) top = y
+      bottom = y
+    }
+  }
+  if (right < 0) return null
+  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 }
+}
+
+/**
+ * A folder's contents, already one picture in page coordinates, with the
+ * folder's effects composed onto them — or null when there is nothing for them
+ * to do.
+ *
+ * Cut down to what the contents cover before the band is grown: a distance
+ * field costs the whole area it is taken over, and a folder of a few balloons
+ * covers a small corner of the page its buffer is sized to.
+ */
+export function pictureWithEffects(
+  picture: OffscreenCanvas,
+  effects: readonly LayerEffect[],
+): EffectedLayer | null {
+  if (engineStrokesFor(effects).length === 0) return null
+  const ctx = picture.getContext('2d')
+  if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
+  const { width, height } = picture
+  const bounds = alphaBounds(ctx.getImageData(0, 0, width, height).data, width, height)
+  if (bounds === null) return null
+  const content = new OffscreenCanvas(bounds.w, bounds.h)
+  const cut = content.getContext('2d')
+  if (!cut) throw new Error('OffscreenCanvas 2d context unavailable')
+  cut.drawImage(picture, -bounds.x, -bounds.y)
+  return layerWithEffects(content, bounds, effects)
+}
+
 /** The rectangle a layer occupies once its effects are on. */
 export function effectedFrame(frame: Frame, effects: readonly LayerEffect[]): Frame {
   const margin = effectMargin(engineStrokesFor(effects))

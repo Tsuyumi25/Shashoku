@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
+import type { GroupLayerEntry, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { StackNode } from '@shared/page/stack'
 import { stackSegments } from '@/lib/stackSegments'
 import { DEFAULT_TEXT_STYLE } from '@shared/text-style/types'
@@ -31,6 +31,22 @@ function text(id: string, blendMode = 'normal', opacity = 1): StackNode {
   entry.blendMode = blendMode
   entry.body.lines = [id]
   return { kind: 'text', entry, opacity, blendMode }
+}
+
+function buffer(id: string, children: StackNode[], over: Partial<GroupLayerEntry> = {}): StackNode {
+  const entry: GroupLayerEntry = {
+    kind: 'group',
+    id,
+    name: id,
+    visible: true,
+    locked: false,
+    opacity: 0.5,
+    blendMode: 'normal',
+    effects: [],
+    children: [],
+    ...over,
+  }
+  return { kind: 'buffer', entry, children, opacity: entry.opacity, blendMode: 'normal' }
 }
 
 describe('stackSegments', () => {
@@ -109,6 +125,17 @@ describe('stackSegments', () => {
   it('names each segment by its first entry, so the panel can key on it', () => {
     const segments = stackSegments([raster('a'), raster('b'), text('t', 'multiply')])
     expect(segments.map((s) => s.key)).toEqual(['a', 't'])
+  })
+
+  it('leaves a folder that only fades or blends to the browser to isolate', () => {
+    const segments = stackSegments([buffer('g', [raster('a')])])
+    expect(segments.map((s) => s.kind)).toEqual(['buffer'])
+  })
+
+  it('draws a folder with a stroke as one picture, since its outline is grown from pixels', () => {
+    const stroke = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' } as const
+    const segments = stackSegments([raster('a'), buffer('g', [raster('b')], { effects: [stroke] }), raster('c')])
+    expect(segments.map((s) => s.kind)).toEqual(['run', 'picture', 'run'])
   })
 
   describe('with layers held aside', () => {

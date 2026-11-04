@@ -6,19 +6,15 @@
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { useDevicePixelRatio } from '@vueuse/core'
 import type { TextLayerEntry } from '@shared/page/types'
-import { shownCodeOf } from '@shared/page/units'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
-import { previewedStyle } from '@/composables/useFontPicker'
+import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
-import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
-import { sourceLook } from '@/lib/sourceLook'
+import type { DrawnLabel } from '@/lib/labelRaster'
 import { layerWithEffects, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
-import { useEditorStore } from '@/stores/editorStore'
-import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
@@ -76,16 +72,8 @@ const props = defineProps<{
 const { pixelRatio } = useDevicePixelRatio()
 
 const raster = useRasterStore()
-/**
- * ⚠️ Which body is painted, and how, are the interface's questions rather than
- * the page's — the compositor answers both differently. It always draws the
- * translation, and it draws it in the style the object carries, because what it
- * builds is the page as delivered. A reference treatment for reading a source
- * against un-lettered artwork belongs on screen and nowhere else.
- */
-const editor = useEditorStore()
-const project = useProjectStore()
 const stroke = useStrokeOverlayStore()
+const labelOf = useCanvasLabel()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 
@@ -164,39 +152,10 @@ const effectedRasters = computed(() => {
  * function nothing would track it, and the page would stay blank until some
  * unrelated change happened to repaint it after the catalogue finished loading.
  */
-/**
- * ⚠️ Goes up to the page, because a chosen candidate is the translation's answer
- * rather than the block's. A block drawn from its own words alone would keep
- * showing what somebody typed after they picked something else.
- */
-function codeShown(entry: TextLayerEntry): string {
-  const page = project.pageById(editor.currentPageId ?? '')?.page
-  return page === undefined ? entry.body.lines.join('\n') : shownCodeOf(entry)
-}
-
 const drawnTexts = computed(() => {
   const out = new Map<string, DrawnLabel>()
-  // ⚠️ The same treatment the frames are measured with, and it has to be: a
-  // halo grows the bitmap, so a frame that counted one around text drawn
-  // without it is a frame that does not sit on its own letters.
-  const reference = editor.textSide === 'source'
   for (const node of props.nodes) {
-    if (node.kind !== 'text') continue
-    const entry = node.entry
-    const body = entry.body
-    const look = reference
-      ? sourceLook(previewedStyle(body.style, editor.isReached(entry.id)))
-      : { style: previewedStyle(body.style, editor.isReached(entry.id)), effects: entry.effects }
-    out.set(
-      entry.id,
-      drawnLabel(
-        codeShown(entry),
-        look.style,
-        look.effects,
-        { x: body.x, y: body.y },
-        body.rotation,
-      ),
-    )
+    if (node.kind === 'text') out.set(node.entry.id, labelOf(node.entry))
   }
   return out
 })

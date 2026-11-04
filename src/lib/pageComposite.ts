@@ -9,7 +9,9 @@ import { shownCodeOf } from '@shared/page/units'
 import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
-import { layerWithEffects } from '@/lib/layerEffects'
+import { layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
+import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
+import type { StrokeOverlay } from '@/stores/strokeOverlayStore'
 import { sampleSource } from '@/lib/fontSampleCache'
 
 /**
@@ -153,11 +155,68 @@ export interface StackPaint {
    * that everything inside it stays in page coordinates.
    */
   page: Size
-  rasters: ReadonlyMap<string, ImageBitmap>
+  rasters: { get(file: string): ImageBitmap | undefined }
   /** A layer's live pixels, when the caller has any. See `CompositeInput`. */
   liveLayer?(id: string): { canvas: OffscreenCanvas; frame: Frame } | null
+  /** Where a gesture in progress has taken a layer, which only the canvas has. */
+  place?(id: string): LayerPlacement | undefined
+  /** The stroke being drawn on a layer, which only the canvas has. */
+  overlay?(id: string): StrokeOverlay | null
   /** How a text object is drawn. Merge never has one and refuses instead. */
   drawText(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void
+}
+
+/**
+ * One raster with its effects, where a gesture has taken it, and with the
+ * stroke being drawn on it.
+ *
+ * A layer under a stroke is drawn on a canvas of its own first: an eraser takes
+ * alpha out of whatever it lands on, and landing on the shared one would punch
+ * through the neighbours too.
+ */
+function drawRaster(
+  ctx: OffscreenCanvasRenderingContext2D,
+  node: RasterStackNode,
+  paint: StackPaint,
+): void {
+  // The live pixels win where there are any, and they carry their own frame:
+  // a write that grew the layer moved it, and the manifest is not told until
+  // the file naming the new frame is on disk.
+  const live = paint.liveLayer?.(node.entry.id) ?? null
+  const source = live?.canvas ?? paint.rasters.get(node.entry.file)
+  const overlay = paint.overlay?.(node.entry.id) ?? null
+  const target = overlay === null ? ctx : context2d(new OffscreenCanvas(ctx.canvas.width, ctx.canvas.height))
+  if (target !== ctx) target.setTransform(ctx.getTransform())
+
+  const frame = live?.frame ?? node.entry
+  if (source && frame.w > 0 && frame.h > 0) {
+    const { x, y, w, h } = frame
+    // A band reaches past the layer, so what gets drawn is the bigger picture at
+    // the bigger rectangle — clipping it back to the layer's own frame is
+    // exactly the edge the margin exists to hold.
+    const effected = layerWithEffects(source, { x, y, w, h }, node.entry.effects)
+    const place = paint.place?.(node.entry.id)
+    if (place) {
+      target.save()
+      applyPlacement(target, node.entry, place, { x: 0, y: 0 })
+      const offset = effected ? effected.frame.x - x : 0
+      target.drawImage(effected?.canvas ?? source, offset, offset, effected?.frame.w ?? w, effected?.frame.h ?? h)
+      target.restore()
+    } else if (effected) {
+      target.drawImage(effected.canvas, effected.frame.x, effected.frame.y)
+    } else {
+      target.drawImage(source, x, y, w, h)
+    }
+  }
+
+  if (overlay === null) return
+  const { canvas, region, op } = overlay
+  target.globalCompositeOperation = op
+  target.drawImage(canvas, region.x, region.y, region.w, region.h)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.drawImage(target.canvas, 0, 0)
+  ctx.restore()
 }
 
 /**
@@ -174,32 +233,23 @@ export function drawStack(
     ctx.globalAlpha = node.opacity
     ctx.globalCompositeOperation = canvasBlend(node.blendMode)
     if (node.kind === 'raster') {
-      // The live pixels win where there are any, and they carry their own frame:
-      // a write that grew the layer moved it, and the manifest is not told until
-      // the file naming the new frame is on disk.
-      const live = paint.liveLayer?.(node.entry.id) ?? null
-      const source = live?.canvas ?? paint.rasters.get(node.entry.file)
-      if (source) {
-        const { x, y, w, h } = live?.frame ?? node.entry
-        // A band reaches past the layer, so what gets drawn is the bigger
-        // picture at the bigger rectangle — clipping it back to the layer's own
-        // frame is exactly the edge the margin exists to hold.
-        const effected = layerWithEffects(source, { x, y, w, h }, node.entry.effects)
-        if (effected) ctx.drawImage(effected.canvas, effected.frame.x, effected.frame.y)
-        else ctx.drawImage(source, x, y, w, h)
-      }
+      drawRaster(ctx, node, paint)
     } else if (node.kind === 'text') {
       paint.drawText(ctx, node)
     } else {
       // A folder with blending of its own has to become one picture before that
       // blending can apply, which is the buffer the pass-through default avoids.
+      // Its effects are grown from that picture too, so members that touch
+      // share one outline rather than each drawing theirs across the other.
       //
       // Always page-sized and drawn in page coordinates, so whatever offset this
       // context carries is applied once — when the finished buffer lands — and
       // never again inside it.
       const buffer = new OffscreenCanvas(paint.page.w, paint.page.h)
       drawStack(context2d(buffer), node.children, paint)
-      ctx.drawImage(buffer, 0, 0)
+      const effected = pictureWithEffects(buffer, node.entry.effects)
+      if (effected) ctx.drawImage(effected.canvas, effected.frame.x, effected.frame.y)
+      else ctx.drawImage(buffer, 0, 0)
     }
     ctx.restore()
   }
