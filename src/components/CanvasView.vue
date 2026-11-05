@@ -37,6 +37,22 @@
           :held="heldLayers"
           :joined="joined"
         />
+        <!--
+          "看原圖" lays the base artwork over the page rather than swapping the
+          stack out: the page underneath never changes, so coming back has
+          nothing to decode or redraw. Mounted only while asked for, or every
+          pan would draw the base map a second time to a hidden canvas.
+        -->
+        <PageStack
+          v-if="editor.showingOriginal"
+          :nodes="shownOriginal"
+          :bitmaps="layerBitmaps"
+          :container="editor.viewContainerSize"
+          :view="view"
+          :page="pageSize"
+          :held="heldLayers"
+          :joined="joined"
+        />
       </div>
 
       <!--
@@ -484,23 +500,25 @@ const tree = computed(() =>
 
 const stack = computed(() => {
   if (!currentFile.value) return []
-  if (editor.showingOriginal) return originalStack(currentFile.value.page.pageTree)
   const nodes = pageStack(tree.value, editor.textSide, project.activeFace)
   return editor.textsHidden ? withoutText(nodes) : nodes
 })
+
+const originalNodes = computed(() => (currentFile.value ? originalStack(currentFile.value.page.pageTree) : []))
 
 /**
  * Every layer the page draws, decoded once and kept until the page turns.
  *
  * Above the stack rather than inside it: the elements the stack is cut into
  * come and go with a gesture, and pixels that came and went with them would be
- * read back from disk each time.
+ * read back from disk each time. The base artwork is asked for too, since a
+ * hidden one is not in the stack and "看原圖" still has to draw it.
  */
 const layerBitmaps = useLayerBitmaps(
   () => (currentFile.value ? layersDirOf(currentFile.value.pageDir) : null),
   () => [
     ...new Set(
-      stackedRasterNodes(stack.value)
+      [...stackedRasterNodes(stack.value), ...stackedRasterNodes(originalNodes.value)]
         .filter((node) => node.entry.w > 0 && node.entry.h > 0)
         .map((node) => node.entry.file),
     ),
@@ -521,11 +539,14 @@ const placement = useLayerPlacement(layerBitmaps)
  * and then text, base map and patches change over together.
  */
 const shownStack = shallowRef(stack.value)
+const shownOriginal = shallowRef(originalNodes.value)
 watch(
-  [stack, layerBitmaps.heldDir],
+  [stack, originalNodes, layerBitmaps.heldDir],
   () => {
     const dir = currentFile.value ? layersDirOf(currentFile.value.pageDir) : null
-    if (layerBitmaps.heldDir.value === dir) shownStack.value = stack.value
+    if (layerBitmaps.heldDir.value !== dir) return
+    shownStack.value = stack.value
+    shownOriginal.value = originalNodes.value
   },
   { immediate: true },
 )
