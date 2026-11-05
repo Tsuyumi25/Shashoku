@@ -28,6 +28,7 @@
           :data-key="file.pageId"
           :file="file"
           :selected="exportSelection.isSelected(file.pageId)"
+          @dblclick="openInEditor(file.pageId)"
         />
       </div>
 
@@ -336,6 +337,19 @@ function onPointerUp(e: PointerEvent) {
   if (e.shiftKey) exportSelection.extendTo(p.pageId)
   else if (e.ctrlKey || e.metaKey) exportSelection.toggle(p.pageId)
   else exportSelection.only(p.pageId)
+}
+
+/**
+ * The page as the grid drew it: the export config's face, lettered side up.
+ * Through `showPage`, like every other way to a page, so the editor's selection
+ * stays as it was.
+ */
+function openInEditor(pageId: string) {
+  const face = exportSelection.delivery?.face
+  if (face) editor.setActiveFace(face)
+  editor.setTextSide('translation')
+  editor.showPage(pageId)
+  ui.setView('editor')
 }
 
 function cards(): HTMLElement[] {
