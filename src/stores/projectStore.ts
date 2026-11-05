@@ -91,8 +91,7 @@ import {
 } from '@shared/page/readingGraph'
 import { parentFolder } from '@shared/project/library'
 import { applyPageOrderSnapshot } from '@shared/project/pages'
-import { assertDistinctFolders } from '@shared/export/profile'
-import type { ExportProfile } from '@shared/export/types'
+import type { ExportMenuEntry, ExportProfile } from '@shared/export/types'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { SHASHOKU_DIR, layersDirOf } from '@shared/ssk/constants'
 import type { TextStyle } from '@shared/text-style/types'
@@ -509,6 +508,14 @@ export const useProjectStore = defineStore('project', () => {
     if (!sameOrder(meta.pages, loaded) || seeded) markMetaDirty()
     if (meta.pinnedLayerNames === undefined) {
       meta.pinnedLayerNames = [...usePreferencesStore().prefs.pinnedLayerSeed]
+      markMetaDirty()
+    }
+    if (meta.exportMenu === undefined) {
+      meta.exportMenu = usePreferencesStore().prefs.exportMenuSeed.map((profile) => ({
+        id: generateId(),
+        profile: JSON.parse(JSON.stringify(profile)) as ExportProfile,
+        exportedAt: null,
+      }))
       markMetaDirty()
     }
     // Opening a project is also how its neighbours get found: the folder it
@@ -1696,42 +1703,45 @@ export const useProjectStore = defineStore('project', () => {
     markMetaDirty()
   }
 
-  const exportProfiles = computed(() => projectMeta.value.exportProfiles)
+  const exportMenu = computed<readonly ExportMenuEntry[]>(() => projectMeta.value.exportMenu ?? [])
+
+  function setExportMenu(next: ExportMenuEntry[]): void {
+    projectMeta.value.exportMenu = next
+    markMetaDirty()
+  }
+
+  /** A new line at the bottom of the menu; its id. */
+  function addExportEntry(profile: ExportProfile): string {
+    const id = generateId()
+    setExportMenu([...exportMenu.value, { id, profile, exportedAt: null }])
+    return id
+  }
+
+  function updateExportEntry(id: string, profile: ExportProfile): void {
+    setExportMenu(exportMenu.value.map((e) => (e.id === id ? { ...e, profile } : e)))
+  }
+
+  function removeExportEntry(id: string): void {
+    setExportMenu(exportMenu.value.filter((e) => e.id !== id))
+  }
 
   /**
-   * Both writers refuse rather than repair: a profile that would deliver into
-   * a folder another one already owns has to be changed by whoever asked for
-   * it, since silently nudging it would put the files somewhere they did not
-   * choose.
+   * A delivery made with this line, now, to this face. A line that had no face
+   * of its own, or one the book no longer has, keeps the one it went to, so it
+   * goes on naming the same folder after the face being worked on changes.
    */
-  function addExportProfile(profile: ExportProfile): void {
-    const next = [...projectMeta.value.exportProfiles, profile]
-    assertDistinctFolders(next)
-    projectMeta.value.exportProfiles = next
-    markMetaDirty()
-  }
-
-  function updateExportProfile(index: number, profile: ExportProfile): void {
-    const profiles = projectMeta.value.exportProfiles
-    if (index < 0 || index >= profiles.length) return
-    const next = profiles.map((p, i) => (i === index ? profile : p))
-    assertDistinctFolders(next)
-    projectMeta.value.exportProfiles = next
-    markMetaDirty()
-  }
-
-  function removeExportProfile(index: number): void {
-    const profiles = projectMeta.value.exportProfiles
-    if (index < 0 || index >= profiles.length) return
-    projectMeta.value.exportProfiles = profiles.filter((_, i) => i !== index)
-    markMetaDirty()
+  function markExported(id: string, face: string, at: number): void {
+    setExportMenu(
+      exportMenu.value.map((e) => (e.id === id ? { ...e, profile: { ...e.profile, face }, exportedAt: at } : e)),
+    )
   }
 
   return {
-    exportProfiles,
-    addExportProfile,
-    updateExportProfile,
-    removeExportProfile,
+    exportMenu,
+    addExportEntry,
+    updateExportEntry,
+    removeExportEntry,
+    markExported,
 
     rootPath,
     projectMeta,

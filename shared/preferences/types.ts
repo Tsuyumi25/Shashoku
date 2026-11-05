@@ -1,3 +1,4 @@
+import { defaultExportProfile, type ExportProfile } from "../export/types";
 import { defaultMaterialGroups, defaultRecipes, type MaterialGroup, type MaterialRecipe } from "./materials";
 
 export const MIN_FONT_PICKER_BOX_PX = 60;
@@ -115,6 +116,11 @@ export interface Preferences {
    */
   pinnedLayerSeed: string[];
   /**
+   * The export recipes a project starts out with. A seed, like the one above:
+   * a project copies it once and keeps its own menu after that.
+   */
+  exportMenuSeed: ExportProfile[];
+  /**
    * Folders scanned on top of the platform's own font directories. Files are
    * read where they lie and never copied, so a folder that moves takes its
    * families out of the catalogue with it.
@@ -220,6 +226,7 @@ export function defaultPreferences(): Preferences {
     fontFavorites: [],
     fontGroups: [],
     pinnedLayerSeed: ["修圖", "底圖"],
+    exportMenuSeed: [defaultExportProfile()],
     fontFolders: [],
     defaultFontFamily: "",
     fontPickerBoxPx: 120,

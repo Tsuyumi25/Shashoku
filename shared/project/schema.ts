@@ -6,7 +6,8 @@ import type { TagDefinition } from '../tags/types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
 import { parseTextStyle, serializeTextStyle } from '../text-style/schema'
 import { CATEGORY_COLORS, DEFAULT_TAGS, RESERVED_TAG_NAMES } from '../ssk/constants'
-import { parseExportProfiles, serializeExportProfiles } from '../export/schema'
+import { parseExportMenu, serializeExportMenu } from '../export/schema'
+import { generateId } from '../page/schema'
 
 export class ProjectParseError extends Error {}
 
@@ -138,7 +139,6 @@ export function defaultProjectJson(): ProjectJson {
     tags: DEFAULT_TAGS.map((name, i) => ({ name, color: defaultColorForTagIndex(i) })),
     seedStyle: { ...DEFAULT_TEXT_STYLE },
     comment: '',
-    exportProfiles: [],
   }
 }
 
@@ -184,7 +184,7 @@ export function parseProjectJson(raw: string): ProjectJson {
     faces,
     nextFace: parseNextFace(data.nextFace, faces),
     activeFace: typeof data.activeFace === 'string' && data.activeFace.length > 0 ? data.activeFace : undefined,
-    exportProfiles: parseExportProfiles(data.exportProfiles),
+    exportMenu: parseExportMenu(data.exportProfiles, generateId),
   }
 }
 
@@ -204,6 +204,6 @@ export function serializeProjectJson(project: ProjectJson): string {
   if (project.faces !== undefined) out.faces = project.faces
   if (project.activeFace !== undefined) out.activeFace = project.activeFace
   if (project.nextFace !== undefined) out.nextFace = project.nextFace
-  out.exportProfiles = serializeExportProfiles(project.exportProfiles)
+  if (project.exportMenu !== undefined) out.exportProfiles = serializeExportMenu(project.exportMenu)
   return `${JSON.stringify(out, null, 2)}\n`
 }

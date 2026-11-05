@@ -1,14 +1,6 @@
 <template>
   <div class="flex flex-col gap-2 p-2">
     <label class="field">
-      <span>譯文面</span>
-      <select :value="profile.face ?? ''" @change="onFace">
-        <option value="">目前的譯文面（{{ activeName }}）</option>
-        <option v-for="f in project.faces" :key="f.id" :value="f.id">{{ f.name }}</option>
-      </select>
-    </label>
-
-    <label class="field">
       <span>編碼格式</span>
       <select :value="profile.format" @change="onFormat">
         <option v-for="f in FORMATS" :key="f.value" :value="f.value">{{ f.label }}</option>
@@ -70,10 +62,6 @@
         <input type="number" min="0" :value="profile.naming.start" @change="onStart" />
       </label>
     </template>
-
-    <p class="text-xs text-muted-foreground">
-      輸出到 <code>export/{{ folder }}/</code>,例如 <code>{{ sampleName }}</code>
-    </p>
   </div>
 </template>
 
@@ -86,11 +74,7 @@ import {
   type ExportFormat,
   type ExportProfile,
 } from '@shared/export/types'
-import { outputFilename, profileFolderName, withFormat } from '@shared/export/profile'
-import { useProjectStore } from '@/stores/projectStore'
-
-const project = useProjectStore()
-const activeName = computed(() => project.faces.find((f) => f.id === project.activeFace)?.name ?? '')
+import { withFormat } from '@shared/export/profile'
 
 const props = defineProps<{ profile: ExportProfile }>()
 const emit = defineEmits<{ change: [ExportProfile] }>()
@@ -115,13 +99,10 @@ const COLOR_LABEL: Record<ColorMode, string> = {
 
 const availableColorModes = computed(() => COLOR_MODES_FOR[props.profile.format])
 const chasesCap = computed(() => CHASES_SIZE_CAP[props.profile.format])
-const folder = computed(() => profileFolderName(props.profile))
-const sampleName = computed(() => outputFilename(props.profile, '001.png', 0))
 
 /**
- * Every edit goes out as a whole profile rather than a patch, so the parent
- * gets one thing to accept or refuse — and refusing is real here, since two
- * profiles are not allowed to deliver into one folder.
+ * Every edit goes out as a whole recipe rather than a patch, so the parent
+ * holds one value and nothing has to merge.
  */
 function push(next: ExportProfile) {
   emit('change', next)
@@ -133,12 +114,6 @@ function valueOf(e: Event): string {
 
 function onFormat(e: Event) {
   push(withFormat(props.profile, valueOf(e) as ExportFormat))
-}
-
-function onFace(e: Event) {
-  const face = valueOf(e)
-  const { face: _, ...rest } = props.profile
-  push(face === '' ? rest : { ...rest, face })
 }
 
 function onColorMode(e: Event) {

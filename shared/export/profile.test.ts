@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   colorModeFor,
+  deliveryFolderName,
+  faceFolderSegments,
   outputFilename,
   profileFolderName,
   targetSize,
@@ -159,25 +161,6 @@ describe("profileFolderName", () => {
     expect(a).not.toBe(b);
   });
 
-  /**
-   * ⚠️ Two faces delivered through one profile would have the second overwrite
-   * the first page for page, so the folder has to say which face it holds.
-   */
-  it("tells two profiles apart by the face they are pinned to", () => {
-    const a = profileFolderName(profile({ face: "a1b2c3d4e5" }));
-    const b = profileFolderName(profile({ face: "f6e5d4c3b2" }));
-    expect(a).not.toBe(b);
-    expect(a).not.toBe(profileFolderName(profile()));
-  });
-
-  /**
-   * A piece of the id rather than the name: a delivery folder that moved when a
-   * face was renamed would split one face's pages across two.
-   */
-  it("keeps a face's folder a file system name, whatever the id is made of", () => {
-    expect(profileFolderName(profile({ face: "AB-CD_ef/gh.ij" }))).toBe("png@original-fabcdefgh");
-  });
-
   it("gives every distinct set of settings a name of its own", () => {
     const names = new Set<string>();
     let count = 0;
@@ -209,5 +192,39 @@ describe("profileFolderName", () => {
         expect(name).not.toMatch(/[ .]$/);
       }
     }
+  });
+});
+
+describe("delivery folders", () => {
+  const face = (id: string, no: number, name: string) => ({ id, no, name });
+
+  /** Two faces through one recipe would otherwise write over each other page for page. */
+  it("puts the face first, so each face of one recipe has a folder of its own", () => {
+    const segments = faceFolderSegments([face("a", 1, "繁體中文"), face("b", 2, "英文")]);
+    expect(deliveryFolderName(segments.get("a")!, profile())).toBe("繁體中文-png@original");
+    expect(deliveryFolderName(segments.get("b")!, profile())).toBe("英文-png@original");
+  });
+
+  it("replaces what a path cannot hold rather than letting a name choose the folder", () => {
+    expect(faceFolderSegments([face("a", 1, "EN/JP: v2?")]).get("a")).toBe("EN_JP_ v2_");
+  });
+
+  it("falls back to the face number for a name that leaves nothing or is a device name", () => {
+    const segments = faceFolderSegments([face("a", 1, "  ... "), face("b", 2, "CON"), face("c", 3, "com1.txt")]);
+    expect(segments.get("a")).toBe("f1");
+    expect(segments.get("b")).toBe("f2");
+    expect(segments.get("c")).toBe("f3");
+  });
+
+  it("tells apart faces whose names come out alike", () => {
+    const segments = faceFolderSegments([face("a", 1, "英文"), face("b", 2, "英文"), face("c", 3, "日文")]);
+    expect(segments.get("a")).toBe("f1-英文");
+    expect(segments.get("b")).toBe("f2-英文");
+    expect(segments.get("c")).toBe("日文");
+  });
+
+  /** A name is the menu's label; the folder says what is in it. */
+  it("leaves the folder alone when a recipe is named", () => {
+    expect(deliveryFolderName("英文", profile({ name: "嵌字稿" }))).toBe("英文-png@original");
   });
 });

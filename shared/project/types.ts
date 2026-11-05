@@ -9,7 +9,7 @@
 
 
 
-import type { ExportProfile } from '../export/types'
+import type { ExportMenuEntry } from '../export/types'
 import type { TagDefinition } from '../tags/types'
 import type { TextStyle } from '../text-style/types'
 
@@ -96,9 +96,13 @@ export interface ProjectJson {
    */
   retouchLayerNames?: string[]
   /**
-   * How this project gets delivered. Kept here rather than in preferences and
-   * inheriting from nothing: a project handed to someone else has to arrive
-   * knowing how it is meant to come out.
+   * How this project gets delivered: the recipes it was given when it was made
+   * and the ones it has delivered with since. Kept here rather than in
+   * preferences: a project handed to someone else has to arrive knowing how it
+   * is meant to come out.
+   *
+   * Undefined for a project that has never had one, which copies the global
+   * menu in when it is opened — the same seed `pinnedLayerNames` takes.
    */
-  exportProfiles: ExportProfile[]
+  exportMenu?: ExportMenuEntry[]
 }

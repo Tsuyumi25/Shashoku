@@ -1,5 +1,6 @@
 import { freeGroupName } from "./fontGroups";
 import { parseMaterialGroups, parseRecipes } from "./materials";
+import { parseProfileList, serializeProfile } from "../export/schema";
 import {
   MAX_FONT_PICKER_BOX_PX,
   MAX_UI_ZOOM_LEVEL,
@@ -59,6 +60,7 @@ export function parsePreferences(raw: string): Preferences {
     fontFavorites,
     fontGroups,
     pinnedLayerSeed,
+    exportMenuSeed,
     fontFolders,
     defaultFontFamily,
     fontPickerBoxPx,
@@ -107,6 +109,15 @@ export function parsePreferences(raw: string): Preferences {
     prefs.pinnedLayerSeed = [
       ...new Set(pinnedLayerSeed.filter((n): n is string => typeof n === "string" && n.length > 0)),
     ];
+  }
+  // A seed this build cannot read leaves the default rather than nothing: a
+  // new project with an empty menu has no recipe to start from.
+  if (exportMenuSeed !== undefined) {
+    try {
+      prefs.exportMenuSeed = parseProfileList(exportMenuSeed, "exportMenuSeed");
+    } catch {
+      // Kept at the default.
+    }
   }
   if (Array.isArray(fontFolders)) {
     prefs.fontFolders = fontFolders.filter(
@@ -218,6 +229,7 @@ export function serializePreferences(prefs: Preferences): string {
       fontFavorites: prefs.fontFavorites,
       fontGroups: prefs.fontGroups,
       pinnedLayerSeed: prefs.pinnedLayerSeed,
+      exportMenuSeed: prefs.exportMenuSeed.map(serializeProfile),
       fontFolders: prefs.fontFolders,
       defaultFontFamily: prefs.defaultFontFamily,
       fontPickerBoxPx: prefs.fontPickerBoxPx,

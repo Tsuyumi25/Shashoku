@@ -66,10 +66,28 @@ export interface ExportProfile {
   maxBytes: number | null;
   naming: NamingRule;
   /**
-   * Which face's lettering this delivers. Absent, or naming a face the book no
-   * longer has, means the one being worked on when the export runs.
+   * The one face this recipe delivers. Absent, or naming a face the book no
+   * longer has, means the face being worked on when the export runs — which is
+   * what a recipe copied in from the global menu says, since face ids belong
+   * to one book.
    */
   face?: string;
+  /**
+   * What the menu calls this recipe. A label only: the folder is always
+   * named after what is delivered, so a name never moves a delivery.
+   */
+  name?: string;
+}
+
+/**
+ * One line of a project's export menu: a recipe, and when this project last
+ * delivered with it. Null for a line copied in from the global menu that has
+ * not been used here yet.
+ */
+export interface ExportMenuEntry {
+  id: string;
+  profile: ExportProfile;
+  exportedAt: number | null;
 }
 
 export function defaultNamingRule(): NamingRule {

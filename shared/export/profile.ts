@@ -90,27 +90,20 @@ function sizeSlug(size: ImageSize): string {
 }
 
 /**
- * The folder one profile delivers into: `jpg@original`, `jpg@w1280`,
+ * What a recipe produces, as a folder-name part: `jpg@original`, `jpg@w1280`,
  * `png8-gray@e2048-max2048k`. What the file is on the left of the @, how big it
  * comes out on the right — the two questions someone reading a delivery folder
  * is actually asking.
  *
- * Derived from the settings rather than typed, so two profiles producing
+ * Derived from the settings rather than typed, so two recipes producing
  * different files cannot land on top of each other. The default colour mode is
  * left unsaid, which keeps the common name short without costing uniqueness:
  * the format slugs carry no hyphen, so a name either has a colour after one or
  * it is the ordinary colour.
  *
  * Held to a lowercase slug plus `@`, which every platform's file system
- * accepts — Windows reserves `< > : " / \ | ? *` and nothing here is among
- * them. A name assembled from settings has no business carrying a separator.
- *
- * Two profiles that differ only in naming rule derive the same folder, which
- * is why the profile list refuses to hold both — see assertDistinctFolders.
- *
- * A profile pinned to a face carries a piece of the face's id rather than its
- * name: a name may hold anything and may change, and a delivery folder that
- * moved when a face was renamed would split one face's pages across two.
+ * accepts. Two recipes that differ only in naming rule derive the same part,
+ * and deliver into the same folder.
  */
 export function profileFolderName(profile: ExportProfile): string {
   const kind =
@@ -118,25 +111,49 @@ export function profileFolderName(profile: ExportProfile): string {
       ? FORMAT_SLUG[profile.format]
       : `${FORMAT_SLUG[profile.format]}-${COLOR_SLUG[profile.colorMode]}`;
   const cap = profile.maxBytes === null ? "" : `-max${Math.ceil(profile.maxBytes / 1024)}k`;
-  const face =
-    profile.face === undefined ? "" : `-f${profile.face.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8)}`;
-  return `${kind}@${sizeSlug(profile.size)}${cap}${face}`;
+  return `${kind}@${sizeSlug(profile.size)}${cap}`;
 }
 
-export class DuplicateProfileError extends Error {}
+/** The folder a recipe delivers its face into: `英文-png@original`. */
+export function deliveryFolderName(faceSegment: string, profile: ExportProfile): string {
+  return `${faceSegment}-${profileFolderName(profile)}`;
+}
 
 /**
- * Two profiles writing into one folder would have the second overwrite the
- * first page for page, and the only sign would be a delivery that came out
- * looking like the other profile.
+ * A face name as one level of a path, or null where nothing usable is left.
+ * Whatever Windows refuses in a path is replaced, and its reserved device names
+ * are refused whole.
  */
-export function assertDistinctFolders(profiles: readonly ExportProfile[]): void {
-  const seen = new Set<string>();
-  for (const profile of profiles) {
-    const folder = profileFolderName(profile);
-    if (seen.has(folder)) {
-      throw new DuplicateProfileError(`已經有一組設定會輸出到 ${folder}/，請改動其中一組`);
-    }
-    seen.add(folder);
-  }
+function folderSegment(text: string): string | null {
+  const name = text
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .trim()
+    .replace(/[. ]+$/, "");
+  return name.length > 0 && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name) ? name : null;
+}
+
+export interface FaceLabel {
+  id: string;
+  no: number;
+  name: string;
+}
+
+/**
+ * The part of a delivery folder that names each face, keyed by face id.
+ *
+ * The face's own name, since a folder is read by people, or the face number
+ * where the name leaves nothing usable. Faces whose
+ * names come out alike are told apart by number, or the second would write
+ * over the first page for page.
+ */
+export function faceFolderSegments(faces: readonly FaceLabel[]): Map<string, string> {
+  const cleaned = faces.map((face) => ({ face, name: folderSegment(face.name) ?? `f${face.no}` }));
+  const counts = new Map<string, number>();
+  for (const { name } of cleaned) counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) ?? 0) + 1);
+  return new Map(
+    cleaned.map(({ face, name }) => [
+      face.id,
+      (counts.get(name.toLowerCase()) ?? 0) > 1 ? `f${face.no}-${name}` : name,
+    ]),
+  );
 }

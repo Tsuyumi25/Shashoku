@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { outputFilename, profileFolderName } from '@shared/export/profile'
-import type { ExportProfile } from '@shared/export/types'
+import { deliveryFolderName, faceFolderSegments, outputFilename } from '@shared/export/profile'
+import { defaultExportProfile, type ExportProfile } from '@shared/export/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { compositePage } from '@/lib/pageComposite'
 import { encodePage } from '@/lib/pageEncode'
@@ -20,13 +20,69 @@ export const useExportStore = defineStore('export', () => {
   /** Where a shift-click measures its run from. */
   const anchor = ref<string | null>(null)
 
-  /**
-   * The profile being looked at, which is also the one an export delivers.
-   * One at a time: a project keeps a handful, each producing a whole delivery,
-   * and pressing export is a decision about which delivery to make rather than
-   * how many at once.
-   */
-  const activeProfile = ref(0)
+  /** The menu line the panel is editing. */
+  const currentId = ref<string | null>(null)
+  const current = computed(() => project.exportMenu.find((e) => e.id === currentId.value) ?? null)
+
+  /** The line a project opens on: the one it last delivered with, or the first it was given. */
+  function openingId(): string | null {
+    let latest = project.exportMenu[0] ?? null
+    for (const entry of project.exportMenu)
+      if (entry.exportedAt !== null && (latest!.exportedAt === null || entry.exportedAt > latest!.exportedAt))
+        latest = entry
+    return latest?.id ?? null
+  }
+
+  watch(
+    () => project.rootPath,
+    () => {
+      currentId.value = openingId()
+    },
+    { immediate: true },
+  )
+
+  function select(id: string) {
+    currentId.value = id
+  }
+
+  function edit(profile: ExportProfile) {
+    if (currentId.value !== null) project.updateExportEntry(currentId.value, profile)
+  }
+
+  /** A copy of the line being edited, or of the defaults on an empty menu, and that copy selected. */
+  function add() {
+    const from = current.value?.profile ?? defaultExportProfile()
+    const { name: _name, ...copy } = JSON.parse(JSON.stringify(from)) as ExportProfile
+    currentId.value = project.addExportEntry(copy)
+  }
+
+  /** The line and, where it was the one being edited, the panel moved to its neighbour. */
+  function remove(id: string) {
+    const menu = project.exportMenu
+    const at = menu.findIndex((e) => e.id === id)
+    if (at === -1) return
+    project.removeExportEntry(id)
+    if (currentId.value === id) currentId.value = (menu[at + 1] ?? menu[at - 1])?.id ?? null
+  }
+
+  /** The face a recipe delivers in this book: its own, or the one being worked on. */
+  function faceOf(profile: ExportProfile): string | null {
+    if (profile.face !== undefined && project.faceIds.includes(profile.face)) return profile.face
+    return project.activeFace ?? null
+  }
+
+  /** Where a recipe delivers in this book, or null for a book with no face to deliver. */
+  function deliveryOf(profile: ExportProfile): { face: string; folder: string } | null {
+    const face = faceOf(profile)
+    const at = project.faces.find((f) => f.id === face)
+    if (!at) return null
+    return {
+      face: at.id,
+      folder: deliveryFolderName(faceFolderSegments(project.faces).get(at.id) ?? `f${at.no}`, profile),
+    }
+  }
+
+  const delivery = computed(() => (current.value ? deliveryOf(current.value.profile) : null))
 
   const selectedSet = computed(() => new Set(selected.value))
   /**
@@ -74,15 +130,6 @@ export const useExportStore = defineStore('export', () => {
     { immediate: true },
   )
 
-  // A profile removed from under the cursor leaves the index pointing past the
-  // end, which would read as no profile at all.
-  watch(
-    () => project.exportProfiles.length,
-    (count) => {
-      activeProfile.value = Math.max(0, Math.min(activeProfile.value, count - 1))
-    },
-  )
-
   function isSelected(pageId: string): boolean {
     return selectedSet.value.has(pageId)
   }
@@ -119,6 +166,9 @@ export const useExportStore = defineStore('export', () => {
     anchor.value = ordered[0] ?? null
   }
 
+  /** The line a run is out for, so that line can show it. */
+  const runningId = ref<string | null>(null)
+
   /** Nothing while idle; the running total while a run is out. */
   const progress = ref<{ done: number; total: number } | null>(null)
   const outcome = ref<
@@ -126,12 +176,8 @@ export const useExportStore = defineStore('export', () => {
   >(null)
   let abandoned = false
 
-  const running = computed(() => progress.value !== null)
+  const running = computed(() => runningId.value !== null)
 
-  const profilesToRun = computed(() => {
-    const profile = project.exportProfiles[activeProfile.value]
-    return profile === undefined ? [] : [profile]
-  })
   const pagesToRun = selectedPages
 
   function cancel() {
@@ -139,84 +185,70 @@ export const useExportStore = defineStore('export', () => {
   }
 
   /**
-   * Every selected page through every selected profile.
-   *
-   * The page loop is outer so one composite serves all the profiles that want
-   * it, and so a failure stops with whole pages behind it rather than a page
-   * delivered to some profiles and not others.
+   * Every selected page into one line's folder.
    *
    * A failure stops the run and leaves what has already been written where it
    * is. Half a delivery that says so beats a folder tidied up behind your back,
    * and re-running writes the same names over the top.
    */
-  async function run(): Promise<void> {
+  async function run(id: string): Promise<void> {
     const root = project.rootPath
-    const profiles = profilesToRun.value
+    const entry = project.exportMenu.find((e) => e.id === id)
+    const target = entry ? deliveryOf(entry.profile) : null
     const pages = pagesToRun.value
-    if (root === null || running.value || profiles.length === 0 || pages.length === 0) return
-
-    /*
-     * Everything owed to `layers/` goes down first, and this waits for it.
-     * Export reads the folder for full-resolution pixels, and the newest paint
-     * may only be in memory — delivering a chapter short of the last thirty
-     * seconds of retouching, silently, is what deferred writing costs if nobody
-     * settles it.
-     */
-    await project.flush()
-
+    if (root === null || running.value || !entry || target === null || pages.length === 0) return
+    const profile = JSON.parse(JSON.stringify(entry.profile)) as ExportProfile
+    const { face, folder } = target
+    // Claimed before the first await, or a second click lands while this one waits.
+    runningId.value = id
     abandoned = false
     outcome.value = null
-    progress.value = { done: 0, total: pages.length * profiles.length }
+    const total = pages.length
+    progress.value = { done: 0, total }
     let written = 0
 
     try {
+      /*
+       * Everything owed to `layers/` goes down first, and this waits for it.
+       * Export reads the folder for full-resolution pixels, and the newest paint
+       * may only be in memory — delivering a chapter short of the last thirty
+       * seconds of retouching, silently, is what deferred writing costs if nobody
+       * settles it.
+       */
+      await project.flush()
+
       for (const [index, file] of pages.entries()) {
         if (abandoned) return stop(written, '已取消')
         if (file.badge !== 'ok') return stop(written, `${file.page.name}:頁面無法讀取`)
 
-        const faceOf = (profile: ExportProfile) =>
-          profile.face !== undefined && project.faceIds.includes(profile.face) ? profile.face : project.activeFace
-        const composites = new Map<string, OffscreenCanvas>()
+        let page: OffscreenCanvas
         try {
-          for (const face of new Set(profiles.map(faceOf))) {
-            composites.set(
-              face,
-              await compositePage({
-                page: file.page,
-                face,
-                loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
-              }),
-            )
-          }
+          page = await compositePage({
+            page: file.page,
+            face,
+            loadLayer: (name) => window.api.readImage(layersDirOf(file.pageDir), name),
+          })
         } catch (err) {
           return stop(written, `${file.page.name}:${messageOf(err)}`)
         }
-
-        for (const profile of profiles) {
-          const page = composites.get(faceOf(profile))!
-          if (abandoned) return stop(written, '已取消')
-          const folder = profileFolderName(profile)
-          try {
-            const bytes = encodePage(page, profile)
-            await window.api.writeExport(
-              root,
-              folder,
-              outputFilename(profile, file.page.name, index),
-              bytes,
-            )
-          } catch (err) {
-            return stop(written, `${file.page.name} → ${folder}/:${messageOf(err)}`)
-          }
-          written++
-          progress.value = { done: written, total: pages.length * profiles.length }
-          // The encoder runs on this thread, so without a turn of the loop the
-          // count above would only ever be painted once, at the end.
-          await new Promise((resolve) => setTimeout(resolve, 0))
+        try {
+          const bytes = encodePage(page, profile)
+          await window.api.writeExport(root, folder, outputFilename(profile, file.page.name, index), bytes)
+        } catch (err) {
+          return stop(written, `${file.page.name} → ${folder}/:${messageOf(err)}`)
         }
+        written++
+        progress.value = { done: written, total }
+        // The encoder runs on this thread, so without a turn of the loop the
+        // count above would only ever be painted once, at the end.
+        await new Promise((resolve) => setTimeout(resolve, 0))
       }
       outcome.value = { kind: 'done', written }
     } finally {
       progress.value = null
+      runningId.value = null
+      // The files went to `root`; another project opened meanwhile did not deliver anything.
+      if (written > 0 && project.rootPath === root) project.markExported(id, face, Date.now())
     }
   }
 
@@ -240,12 +272,18 @@ export const useExportStore = defineStore('export', () => {
     progress,
     running,
     outcome,
-    profilesToRun,
+    current,
+    runningId,
+    select,
+    edit,
+    add,
+    remove,
+    delivery,
+    deliveryOf,
     pagesToRun,
     run,
     cancel,
     clearOutcome,
-    activeProfile,
     isSelected,
     selectAll,
     toggleAll,

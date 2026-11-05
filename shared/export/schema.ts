@@ -4,11 +4,11 @@ import {
   defaultNamingRule,
   type ColorMode,
   type ExportFormat,
+  type ExportMenuEntry,
   type ExportProfile,
   type ImageSize,
   type NamingRule,
 } from "./types";
-import { assertDistinctFolders } from "./profile";
 
 export class ExportProfileParseError extends Error {}
 
@@ -57,8 +57,7 @@ function parseNaming(v: unknown, at: string): NamingRule {
   return { kind: "sequence", prefix, suffix, padding, start };
 }
 
-function parseProfile(v: unknown, i: number): ExportProfile {
-  const at = `exportProfiles[${i}]`;
+function parseProfile(v: unknown, at: string): ExportProfile {
   if (!isRecord(v)) fail(`${at} 必須是物件`);
 
   const format = v.format;
@@ -87,28 +86,57 @@ function parseProfile(v: unknown, i: number): ExportProfile {
     maxBytes,
     naming: parseNaming(v.naming, `${at}.naming`),
     ...(typeof v.face === "string" && v.face.length > 0 ? { face: v.face } : {}),
+    ...(typeof v.name === "string" && v.name.trim().length > 0 ? { name: v.name } : {}),
   };
 }
 
 /**
- * Absent means a project that predates output profiles, which is an empty list
- * rather than an error: nothing has been exported from it yet.
+ * A project's export menu, or undefined for a project that has never had one —
+ * which is told apart from an empty menu because it is the one that gets the
+ * global menu copied in on open.
  */
-export function parseExportProfiles(v: unknown): ExportProfile[] {
-  if (v === undefined || v === null) return [];
+export function parseExportMenu(v: unknown, newId: () => string): ExportMenuEntry[] | undefined {
+  if (v === undefined || v === null) return undefined;
   if (!Array.isArray(v)) fail("exportProfiles 必須是陣列");
-  const profiles = v.map(parseProfile);
-  assertDistinctFolders(profiles);
-  return profiles;
+  const ids = new Set<string>();
+  return v.map((raw, i) => {
+    const at = `exportProfiles[${i}]`;
+    const profile = parseProfile(raw, at);
+    const stamp = isRecord(raw) ? raw.exportedAt : undefined;
+    if (stamp !== undefined && stamp !== null && (typeof stamp !== "number" || !Number.isFinite(stamp)))
+      fail(`${at}.exportedAt 必須是數字`);
+    const given = isRecord(raw) && typeof raw.id === "string" && raw.id.length > 0 ? raw.id : null;
+    const id = given !== null && !ids.has(given) ? given : newId();
+    ids.add(id);
+    return { id, profile, exportedAt: typeof stamp === "number" ? stamp : null };
+  });
 }
 
-export function serializeExportProfiles(profiles: readonly ExportProfile[]): unknown[] {
-  return profiles.map((p) => ({
+export function serializeExportMenu(menu: readonly ExportMenuEntry[]): unknown[] {
+  return menu.map(({ id, profile, exportedAt }) => ({
+    id,
+    ...serializeProfile(profile),
+    ...(exportedAt === null ? {} : { exportedAt }),
+  }));
+}
+
+/** The global menu: recipes without a face, since face ids belong to one book. */
+export function parseProfileList(v: unknown, at: string): ExportProfile[] {
+  if (!Array.isArray(v)) fail(`${at} 必須是陣列`);
+  return v.map((raw, i) => {
+    const { face: _face, ...profile } = parseProfile(raw, `${at}[${i}]`);
+    return profile;
+  });
+}
+
+export function serializeProfile(p: ExportProfile): Record<string, unknown> {
+  return {
     format: p.format,
     colorMode: p.colorMode,
     size: p.size,
     maxBytes: p.maxBytes,
     naming: p.naming,
     ...(p.face === undefined ? {} : { face: p.face }),
-  }));
+    ...(p.name === undefined ? {} : { name: p.name }),
+  };
 }

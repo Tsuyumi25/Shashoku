@@ -34,6 +34,7 @@ import { computed, useTemplateRef } from 'vue'
 import { ImageOff, Loader } from '@lucide/vue'
 import type { ProjectFile } from '@/types/project'
 import { usePageThumbnail } from '@/composables/usePageThumbnail'
+import { useExportStore } from '@/stores/exportStore'
 
 /**
  * One finished page. This grid is the last stop before delivery, so the cell is
@@ -42,7 +43,9 @@ import { usePageThumbnail } from '@/composables/usePageThumbnail'
 const props = defineProps<{ file: ProjectFile; selected: boolean }>()
 
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
-const { src, problem } = usePageThumbnail(cellRef, () => props.file)
+const exportRun = useExportStore()
+// The face the delivery is about to be made of, which is what this grid is checked against.
+const { src, problem } = usePageThumbnail(cellRef, () => props.file, 'composite', () => exportRun.delivery?.face)
 
 const badgeText = computed(() => {
   switch (props.file.badge) {

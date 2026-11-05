@@ -18,8 +18,11 @@ export function usePageThumbnail(
   cell: Ref<HTMLElement | null>,
   file: () => ProjectFile,
   subject: PageThumbnailSubject = 'composite',
+  /** Whose lettering a composite shows; the face being worked on unless asked otherwise. */
+  face?: () => string | undefined,
 ): { src: Ref<string | null>; problem: Ref<string | null> } {
   const project = useProjectStore()
+  const faceShown = () => face?.() ?? project.activeFace
 
   const src = ref<string | null>(null)
   const problem = ref<string | null>(null)
@@ -41,12 +44,13 @@ export function usePageThumbnail(
   }
 
   async function compositeBytes(of: ProjectFile): Promise<Uint8Array> {
-    const key = await thumbnailKey(of, project.activeFace)
+    const shown = faceShown()
+    const key = await thumbnailKey(of, shown)
     const cached = await window.api.readThumbnail(key)
     if (cached) return cached
 
     return inRenderSlot(async () => {
-      const png = await renderThumbnail(of, project.activeFace)
+      const png = await renderThumbnail(of, shown)
       // Failing to cache costs the next draw, not this one.
       void window.api.writeThumbnail(key, png).catch(() => {})
       return png
@@ -101,7 +105,7 @@ export function usePageThumbnail(
     }
   }
 
-  watch(() => [seen.value, file().pageDir, project.rootPath, project.activeFace] as const, () => void load(), {
+  watch(() => [seen.value, file().pageDir, project.rootPath, faceShown()] as const, () => void load(), {
     immediate: true,
   })
 
