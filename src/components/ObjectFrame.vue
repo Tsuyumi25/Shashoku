@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import {
   screenToContentPx,
   travelSinceGrab,
@@ -624,6 +624,34 @@ function onDown(e: PointerEvent) {
   emit('dragStart')
 }
 
+/**
+ * A gesture's report, held to the next frame. A mouse polled at a kilohertz
+ * reports a dozen moves a frame and every report writes the object, so the
+ * picture only ever shows the last of them; the rest are a frame's worth of
+ * writes nobody sees. Each report reads where the pointer is now, so the one
+ * that runs is the one that matters.
+ */
+let pendingReport: (() => void) | null = null
+let reportFrame: number | null = null
+
+function nextFrame(report: () => void): void {
+  pendingReport = report
+  reportFrame ??= requestAnimationFrame(flushFrame)
+}
+
+/** The held report, run now: a release has to land where the pointer was let go. */
+function flushFrame(): void {
+  if (reportFrame !== null) cancelAnimationFrame(reportFrame)
+  reportFrame = null
+  const report = pendingReport
+  pendingReport = null
+  report?.()
+}
+
+onBeforeUnmount(() => {
+  if (reportFrame !== null) cancelAnimationFrame(reportFrame)
+})
+
 function reportDrag() {
   drag.latest = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, stageOrigin(), props.view)
   emit('drag', drag.latest)
@@ -642,11 +670,12 @@ function onMove(e: PointerEvent) {
     dragEngaged = true
   }
   drag.client = { x: e.clientX, y: e.clientY }
-  reportDrag()
+  nextFrame(reportDrag)
 }
 
 function onUp(e: PointerEvent) {
   if (!dragging.value) return
+  flushFrame()
   release(e)
   dragging.value = false
   // A cancel arrives here too. Keeping where the object was left beats snapping
@@ -740,11 +769,12 @@ function onScaleMove(e: PointerEvent) {
   }
   scale.client = { x: e.clientX, y: e.clientY }
   scale.perAxis = props.perAxis === true && e.shiftKey
-  reportScale()
+  nextFrame(reportScale)
 }
 
 function onScaleUp(e: PointerEvent) {
   if (!scaling) return
+  flushFrame()
   release(e)
   scaling = false
   if (scaleEngaged) emit('scaleEnd')
@@ -811,11 +841,12 @@ function onRotateMove(e: PointerEvent) {
   }
   spin.client = { x: e.clientX, y: e.clientY }
   spin.snapping = e.shiftKey
-  reportSpin()
+  nextFrame(reportSpin)
 }
 
 function onRotateUp(e: PointerEvent) {
   if (!spinning) return
+  flushFrame()
   release(e)
   spinning = false
   if (spinEngaged) emit('rotateEnd', spin.start, spin.applied)

@@ -2107,8 +2107,14 @@ function trackLayerDrag(e: PointerEvent): void {
     drag.engaged = true
   }
   drag.client = { x: e.clientX, y: e.clientY }
-  reportLayerDrag()
+  layerDragFrame ??= requestAnimationFrame(() => {
+    layerDragFrame = null
+    reportLayerDrag()
+  })
 }
+
+/** One report a frame, as a frame's own gestures do — see `ObjectFrame`'s `nextFrame`. */
+let layerDragFrame: number | null = null
 
 // The frames answer a view change themselves; a layer is dragged by its body,
 // which has no frame taking the pointer, so this is where it is answered for.
@@ -2123,6 +2129,11 @@ watch(
  * system interrupts.
  */
 function endLayerDrag(): void {
+  if (layerDragFrame !== null) {
+    cancelAnimationFrame(layerDragFrame)
+    layerDragFrame = null
+    reportLayerDrag()
+  }
   const drag = layerDrag.value
   layerDrag.value = null
   if (drag === null || !drag.engaged) return
