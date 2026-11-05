@@ -65,3 +65,26 @@ describe('what an export would cover', () => {
     expect(exportSelection.allSelected).toBe(true)
   })
 })
+
+describe('walking the export grid with Shift held', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  /** Stepping back past where the run reached gives those pages up again. */
+  it('keeps exactly the run between the anchor and the cursor', async () => {
+    const project = useProjectStore()
+    const exportSelection = useExportStore()
+    project.allFiles = [page('a'), page('b'), page('c'), page('d')]
+    await nextTick()
+
+    exportSelection.only('b')
+    exportSelection.rangeTo('d')
+    exportSelection.rangeTo('c')
+    expect(exportSelection.selected).toEqual(['b', 'c'])
+
+    exportSelection.rangeTo('a')
+    expect(exportSelection.selected).toEqual(['a', 'b'])
+    expect(exportSelection.cursor).toBe('a')
+  })
+})

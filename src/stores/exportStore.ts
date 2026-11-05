@@ -19,6 +19,8 @@ export const useExportStore = defineStore('export', () => {
   const selected = ref<string[]>([])
   /** Where a shift-click measures its run from. */
   const anchor = ref<string | null>(null)
+  /** The page the arrow keys move from. */
+  const cursor = ref<string | null>(null)
 
   /** The menu line the panel is editing. */
   const currentId = ref<string | null>(null)
@@ -126,6 +128,7 @@ export const useExportStore = defineStore('export', () => {
       if (anchor.value === null || !answeredFor.has(anchor.value)) {
         anchor.value = ids[0] ?? null
       }
+      if (cursor.value !== null && !answeredFor.has(cursor.value)) cursor.value = null
     },
     { immediate: true },
   )
@@ -137,6 +140,7 @@ export const useExportStore = defineStore('export', () => {
   function only(pageId: string) {
     selected.value = [pageId]
     anchor.value = pageId
+    cursor.value = pageId
   }
 
   function toggle(pageId: string) {
@@ -144,6 +148,7 @@ export const useExportStore = defineStore('export', () => {
     if (at === -1) selected.value.push(pageId)
     else selected.value.splice(at, 1)
     anchor.value = pageId
+    cursor.value = pageId
   }
 
   /** Everything between the anchor and here, added to what is already picked. */
@@ -155,6 +160,22 @@ export const useExportStore = defineStore('export', () => {
     const [lo, hi] = from <= to ? [from, to] : [to, from]
     const run = names.slice(lo, hi + 1)
     selected.value = [...new Set([...selected.value, ...run])]
+    cursor.value = pageId
+  }
+
+  /**
+   * Exactly the pages between the anchor and here. Shift with an arrow walks
+   * the far end of one run, so stepping back has to give pages up again, which
+   * the additive shift-click above never does.
+   */
+  function rangeTo(pageId: string) {
+    const names = project.files.map((f) => f.pageId)
+    const from = anchor.value === null ? -1 : names.indexOf(anchor.value)
+    const to = names.indexOf(pageId)
+    if (from === -1 || to === -1) return only(pageId)
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    selected.value = names.slice(lo, hi + 1)
+    cursor.value = pageId
   }
 
   function frameSelect(pageIds: readonly string[]) {
@@ -164,6 +185,7 @@ export const useExportStore = defineStore('export', () => {
       ordered.length === selected.value.length && ordered.every((id, at) => id === selected.value[at])
     if (!same) selected.value = ordered
     anchor.value = ordered[0] ?? null
+    cursor.value = anchor.value
   }
 
   /** The line a run is out for, so that line can show it. */
@@ -266,6 +288,7 @@ export const useExportStore = defineStore('export', () => {
 
   return {
     selected,
+    cursor,
     selectedSet,
     allSelected,
     selectedPages,
@@ -290,6 +313,7 @@ export const useExportStore = defineStore('export', () => {
     only,
     toggle,
     extendTo,
+    rangeTo,
     frameSelect,
   }
 })

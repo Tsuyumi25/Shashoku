@@ -71,6 +71,8 @@ import { useEventListener } from '@vueuse/core'
 import { Check } from '@lucide/vue'
 import { reorderPages } from '@shared/project/pages'
 import PageThumb from '@/components/PageThumb.vue'
+import { gridStep } from '@/lib/selection/gridStep'
+import { ownsKeyboard } from '@/lib/typingSurface'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import { marqueeRect } from '@/lib/selection/marquee'
 import type { Point, Rect } from '@/lib/selection/rect'
@@ -93,11 +95,20 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useExportStore } from '@/stores/exportStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const editor = useEditorStore()
+const ui = useUiStore()
+
+const ARROWS: Record<string, { across: number; down: number }> = {
+  ArrowLeft: { across: -1, down: 0 },
+  ArrowRight: { across: 1, down: 0 },
+  ArrowUp: { across: 0, down: -1 },
+  ArrowDown: { across: 0, down: 1 },
+}
 
 // Nothing composites without the catalogue, and this view can be the first one
 // a session ever reaches.
@@ -326,6 +337,28 @@ function onPointerUp(e: PointerEvent) {
   else if (e.ctrlKey || e.metaKey) exportSelection.toggle(p.pageId)
   else exportSelection.only(p.pageId)
 }
+
+function cards(): HTMLElement[] {
+  const root = scroller.value
+  return root ? [...root.querySelectorAll<HTMLElement>('.export-card')] : []
+}
+
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+  if (ui.settingsOpen || ui.view !== 'export' || e.defaultPrevented) return
+  if (e.ctrlKey || e.metaKey || e.altKey || ownsKeyboard(document.activeElement)) return
+  const arrow = ARROWS[e.key]
+  if (!arrow) return
+  const key = gridStep(cards(), exportSelection.cursor, arrow.across, arrow.down)
+  if (key === null) return
+  e.preventDefault()
+  if (e.shiftKey) exportSelection.rangeTo(key)
+  else exportSelection.only(key)
+  // Instant: an arrow has already moved the selection, and a smooth scroll
+  // shows the wrong card for as long as it runs.
+  cards()
+    .find((el) => el.dataset.key === key)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+})
 
 function onPointerCancel(e: PointerEvent) {
   if (framing !== null && e.pointerId === framing.pointerId) return endFraming()

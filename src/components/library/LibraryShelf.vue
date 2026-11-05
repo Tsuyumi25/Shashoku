@@ -185,6 +185,7 @@ import { useLibraryPageOrder } from '@/composables/useLibraryPageOrder'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { marqueeRect } from '@/lib/selection/marquee'
 import type { Point, Rect } from '@/lib/selection/rect'
+import { gridStep } from '@/lib/selection/gridStep'
 import { routeShelfKey } from '@/lib/selection/shelfKeys'
 import { insertionIndexAt } from '@/lib/selection/shelfDrop'
 import {
@@ -749,38 +750,8 @@ useEventListener(window, 'pointermove', onShelfPointerMove)
 useEventListener(window, 'pointerup', onShelfPointerUp)
 useEventListener(window, 'pointercancel', onShelfPointerCancel)
 
-/**
- * Where an arrow lands, read off the boxes on screen rather than off the list.
- * The grid wraps at whatever width the panel happens to be and its rows are
- * broken by the band headings, so the row above is a question only the layout
- * can answer.
- */
-function step(across: number, down: number): string | null {
-  const els = cards()
-  if (els.length === 0) return null
-  const at = els.findIndex((el) => el.dataset.key === library.cursor)
-  if (at === -1) return els[0].dataset.key ?? null
-  if (across !== 0) return (els[at + across] ?? els[at]).dataset.key ?? null
-
-  const from = els[at].getBoundingClientRect()
-  const middle = from.left + from.width / 2
-  let best: HTMLElement | null = null
-  let nearest = Infinity
-  for (const el of els) {
-    const box = el.getBoundingClientRect()
-    const away = down > 0 ? box.top - from.top : from.top - box.top
-    if (away <= 1) continue
-    const reach = away * 10000 + Math.abs(box.left + box.width / 2 - middle)
-    if (reach < nearest) {
-      nearest = reach
-      best = el
-    }
-  }
-  return best?.dataset.key ?? library.cursor
-}
-
 function walk(across: number, down: number, extend: boolean) {
-  const key = step(across, down)
+  const key = gridStep(cards(), library.cursor, across, down)
   if (key === null) return
   const region = library.regionOf(key)
   if (region === null) return
