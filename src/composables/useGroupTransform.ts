@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { clamp, positionHolding } from '@/lib/coords'
-import { carried, groupBox, groupPoint, type MemberFrame } from '@/lib/groupTransform'
+import { carried, groupBox, groupPoint, stretched, type MemberFrame } from '@/lib/groupTransform'
+import { MAX_SCALE_PERCENT, MIN_SCALE_PERCENT } from '@shared/text-style/types'
 import {
   frameCenter,
   layoutOrigin,
@@ -13,6 +14,9 @@ import { type PlacedLabel, useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 const MIDDLE: Point = { x: 0.5, y: 0.5 }
+
+/** A side dragged past the one across from it stops here rather than turning the set inside out. */
+const MIN_RATIO = 0.01
 
 /**
  * A multiple selection on the page as one thing to move, scale and turn — the
@@ -134,6 +138,27 @@ export function useGroupTransform(options: {
     }
   }
 
+  /**
+   * A side of the box, or Shift on a corner: the set stretches along the box's
+   * own axes, and each member's stretch lands in its own horizontal and vertical
+   * scale — the fields a single object's side handles write.
+   */
+  function scaleAxesTo(ratio: Point): void {
+    const page = options.pageId()
+    if (!from || page === null) return
+    const r = { x: Math.max(ratio.x, MIN_RATIO), y: Math.max(ratio.y, MIN_RATIO) }
+    for (const [id, was] of from) {
+      if (editor.isLayerLocked(id)) continue
+      const s = stretched(was.center, was.state.rotation, pivot, turn.value, r)
+      const style = {
+        ...was.state.style,
+        scaleXPercent: clamp(Math.round(was.state.style.scaleXPercent * s.scaleX), MIN_SCALE_PERCENT, MAX_SCALE_PERCENT),
+        scaleYPercent: clamp(Math.round(was.state.style.scaleYPercent * s.scaleY), MIN_SCALE_PERCENT, MAX_SCALE_PERCENT),
+      }
+      put(page, id, { ...was.state, style, rotation: s.rotation }, s.center)
+    }
+  }
+
   /** The angle the frame reports is the set's whole turn; what moves the members is the change. */
   function rotateTo(radians: number): void {
     const page = options.pageId()
@@ -182,5 +207,5 @@ export function useGroupTransform(options: {
     editor.cmdPlaceLabels(page, before, after)
   }
 
-  return { box, turn, begin, scaleTo, rotateTo, moveWith, end }
+  return { box, turn, begin, scaleTo, scaleAxesTo, rotateTo, moveWith, end }
 }

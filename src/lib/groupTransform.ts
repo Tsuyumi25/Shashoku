@@ -1,5 +1,5 @@
 import { turnedAround } from '@/lib/coords'
-import type { Point } from '@/lib/labelBox'
+import { angleDelta, type Point } from '@/lib/labelBox'
 
 /** One member of a multiple selection, as the frame around it stands on the page. */
 export interface MemberFrame {
@@ -77,4 +77,49 @@ export function carried(center: Point, pivot: Point, turn: number, scale: number
     y: pivot.y + (center.y - pivot.y) * scale,
   }
   return turnedAround(pivot, reached, turn)
+}
+
+/** Where one member ends up when the group is stretched along its own two axes. */
+export interface Stretched {
+  center: Point
+  /** The member's turn, changed only when it lies across the group's axes. */
+  rotation: number
+  /** How much longer each of the member's own axes came out. */
+  scaleX: number
+  scaleY: number
+}
+
+/**
+ * A member carried by the group stretching `ratio` along the box's axes about
+ * `pivot`. The box lies at `turn`; the member at `rotation`.
+ *
+ * A member lying along the box's axes, or across them at a right angle, comes
+ * out exactly. One lying at any other angle would be sheared, which a text
+ * object has no field for: it keeps the turn and the length its own axes come
+ * out at, and the shear is what is lost.
+ */
+export function stretched(
+  center: Point,
+  rotation: number,
+  pivot: Point,
+  turn: number,
+  ratio: Point,
+): Stretched {
+  const laid = turnedAround(pivot, center, -turn)
+  const reached = turnedAround(
+    pivot,
+    { x: pivot.x + (laid.x - pivot.x) * ratio.x, y: pivot.y + (laid.y - pivot.y) * ratio.y },
+    turn,
+  )
+  const rel = rotation - turn
+  const ux = ratio.x * Math.cos(rel)
+  const uy = ratio.y * Math.sin(rel)
+  const vx = -ratio.x * Math.sin(rel)
+  const vy = ratio.y * Math.cos(rel)
+  return {
+    center: reached,
+    rotation: rotation + angleDelta(rel, Math.atan2(uy, ux)),
+    scaleX: Math.hypot(ux, uy),
+    scaleY: Math.hypot(vx, vy),
+  }
 }

@@ -251,10 +251,12 @@
             in-selection
             :locked="false"
             handles
+            per-axis
             standing
             :pointer="framesTakePointer ? 'handles' : 'none'"
             @scale-start="beginGroup"
             @scale="scaleGroupTo"
+            @scale-axes="scaleGroupAxesTo"
             @scale-end="endGroup"
             @rotate-start="beginGroup"
             @rotate="rotateGroupTo"
@@ -1253,6 +1255,7 @@ const {
   rotateTo: rotateGroupTo,
   moveWith: moveGroupWith,
   end: endGroup,
+  scaleAxesTo: scaleGroupAxesTo,
 } = useGroupTransform({
   pageId: () => editor.currentPageId,
   ids: () => groupIds.value,
