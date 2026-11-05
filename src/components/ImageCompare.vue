@@ -36,7 +36,7 @@ import { ChevronsLeftRight } from '@lucide/vue'
 /** Two pictures of the same size, one over the other, divided where the slider says. */
 const props = defineProps<{ width: number; height: number; beforeLabel: string; afterLabel: string }>()
 
-const at = ref(50)
+const at = ref(0)
 
 function follow(e: PointerEvent) {
   const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
