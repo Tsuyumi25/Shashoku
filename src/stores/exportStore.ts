@@ -202,6 +202,19 @@ export const useExportStore = defineStore('export', () => {
 
   const pagesToRun = selectedPages
 
+  /**
+   * What each page is called on delivery, by page id: counted by its place in
+   * the book, not in the selection, so delivering page 7 alone still writes
+   * the file a full run would have written for it.
+   */
+  const outputNames = computed(() => {
+    const profile = current.value?.profile
+    const names = new Map<string, string>()
+    if (!profile) return names
+    project.files.forEach((file, index) => names.set(file.pageId, outputFilename(profile, file.page.name, index)))
+    return names
+  })
+
   function cancel() {
     abandoned = true
   }
@@ -239,7 +252,8 @@ export const useExportStore = defineStore('export', () => {
        */
       await project.flush()
 
-      for (const [index, file] of pages.entries()) {
+      const placeOf = new Map(project.files.map((f, index) => [f.pageId, index]))
+      for (const file of pages) {
         if (abandoned) return stop(written, '已取消')
         if (file.badge !== 'ok') return stop(written, `${file.page.name}:頁面無法讀取`)
 
@@ -255,7 +269,7 @@ export const useExportStore = defineStore('export', () => {
         }
         try {
           const bytes = encodePage(page, profile)
-          await window.api.writeExport(root, folder, outputFilename(profile, file.page.name, index), bytes)
+          await window.api.writeExport(root, folder, outputFilename(profile, file.page.name, placeOf.get(file.pageId) ?? 0), bytes)
         } catch (err) {
           return stop(written, `${file.page.name} → ${folder}/:${messageOf(err)}`)
         }
@@ -304,6 +318,7 @@ export const useExportStore = defineStore('export', () => {
     delivery,
     deliveryOf,
     pagesToRun,
+    outputNames,
     run,
     cancel,
     clearOutcome,

@@ -103,16 +103,7 @@
           </div>
 
           <ExportProfileEditor :profile="current.profile" @change="exportRun.edit($event)" />
-
-          <div class="dest">
-            <template v-if="exportRun.delivery">
-              <div class="break-all">export/{{ exportRun.delivery.folder }}/</div>
-              <div class="mt-0.5 text-muted-foreground">例如 {{ sampleName }}</div>
-            </template>
-            <span v-else>沒有選譯文面</span>
-          </div>
         </div>
-
       </template>
     </SplitterPanel>
   </SplitterGroup>
@@ -132,7 +123,7 @@ import {
   SplitterPanel,
 } from 'reka-ui'
 import { useToast } from 'vue-toastification'
-import { outputFilename, profileFolderName } from '@shared/export/profile'
+import { profileFolderName } from '@shared/export/profile'
 import type { ExportMenuEntry, ExportProfile } from '@shared/export/types'
 import ExportProfileEditor from '@/components/ExportProfileEditor.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
@@ -158,10 +149,6 @@ function onName(e: Event) {
   const name = (e.target as HTMLInputElement).value
   exportRun.edit(name.trim().length > 0 ? { ...unnamed, name } : unnamed)
 }
-
-const sampleName = computed(() =>
-  current.value ? outputFilename(current.value.profile, project.files[0]?.page.name ?? '001.png', 0) : '',
-)
 
 const percent = computed(() => {
   const p = exportRun.progress
@@ -234,15 +221,6 @@ watch(
   border-color: var(--primary);
   background: color-mix(in oklab, var(--primary) 12%, transparent);
   color: var(--foreground);
-}
-.dest {
-  margin: 0 0.5rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.3rem;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.6875rem;
-  line-height: 1.5;
 }
 .name {
   width: 100%;

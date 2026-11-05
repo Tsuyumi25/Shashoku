@@ -50,7 +50,7 @@ function stemOf(filename: string): string {
   return at <= 0 ? filename : filename.slice(0, at);
 }
 
-/** What one page is called on delivery. `index` counts the pages being exported. */
+/** What one page is called on delivery. `index` is the page's place in the book. */
 export function outputFilename(
   profile: ExportProfile,
   sourceFilename: string,

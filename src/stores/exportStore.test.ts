@@ -3,6 +3,7 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useExportStore } from './exportStore'
 import { useProjectStore } from './projectStore'
+import { defaultExportProfile } from '@shared/export/types'
 import { defaultManifest, defaultOcr } from '@shared/page/schema'
 import type { ProjectFile } from '@/types/project'
 
@@ -86,5 +87,23 @@ describe('walking the export grid with Shift held', () => {
     exportSelection.rangeTo('a')
     expect(exportSelection.selected).toEqual(['a', 'b'])
     expect(exportSelection.cursor).toBe('a')
+  })
+})
+
+describe('what a delivered page is called', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  /** Delivering one page alone writes the file a full run would have written for it. */
+  it('numbers a page by its place in the book, whatever else is picked', async () => {
+    const project = useProjectStore()
+    const exportSelection = useExportStore()
+    project.allFiles = [page('a'), page('b'), page('c')]
+    await nextTick()
+    exportSelection.select(project.addExportEntry(defaultExportProfile()))
+
+    exportSelection.only('c')
+    expect(exportSelection.outputNames.get('c')).toBe('003.png')
   })
 })

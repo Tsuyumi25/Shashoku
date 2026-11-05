@@ -3,7 +3,6 @@
     ref="cellRef"
     class="flex cursor-default flex-col gap-1 rounded-[5px] p-1 select-none"
     :class="selected ? 'bg-primary/20' : 'hover:bg-secondary'"
-    :title="file.page.name"
   >
     <div class="relative aspect-[3/4] w-full overflow-hidden">
       <!-- Dragging a page picks a run of them; a native image drag would take
@@ -23,8 +22,12 @@
       </span>
     </div>
 
-    <span class="min-w-0 truncate text-xs" :class="selected ? '' : 'text-muted-foreground'">
-      {{ file.page.name }}
+    <span
+      class="min-w-0 truncate font-mono text-xs"
+      :class="selected ? '' : 'text-muted-foreground'"
+      :title="outputName"
+    >
+      {{ outputName }}
     </span>
   </div>
 </template>
@@ -44,6 +47,7 @@ const props = defineProps<{ file: ProjectFile; selected: boolean }>()
 
 const cellRef = useTemplateRef<HTMLElement>('cellRef')
 const exportRun = useExportStore()
+const outputName = computed(() => exportRun.outputNames.get(props.file.pageId) ?? '')
 // The face the delivery is about to be made of, which is what this grid is checked against.
 const { src, problem } = usePageThumbnail(cellRef, () => props.file, 'composite', () => exportRun.delivery?.face)
 
