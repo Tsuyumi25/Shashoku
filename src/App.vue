@@ -65,7 +65,20 @@
               <FontLibraryList />
             </div>
             <div v-if="ui.view === 'export'" class="absolute inset-0">
-              <ProjectManagerMode />
+              <SplitterGroup
+                direction="horizontal"
+                class="h-full"
+                auto-save-id="export:columns:v1"
+                :storage="preferences.panelStorage"
+              >
+                <SplitterPanel :order="1" :default-size="70" :min-size="40" class="flex min-w-0 flex-col">
+                  <ProjectManagerMode />
+                </SplitterPanel>
+                <ResizeHandle />
+                <SplitterPanel :order="2" :default-size="30" :min-size="15" class="flex min-w-0 flex-col">
+                  <ExportPreview />
+                </SplitterPanel>
+              </SplitterGroup>
             </div>
           </div>
         </SplitterPanel>
@@ -84,6 +97,7 @@ import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
+import ExportPreview from '@/components/ExportPreview.vue'
 import LibraryTabs from '@/components/materials/LibraryTabs.vue'
 import MaterialShelf from '@/components/materials/MaterialShelf.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
