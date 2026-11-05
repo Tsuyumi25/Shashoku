@@ -11,7 +11,7 @@ import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { sampleSource } from '@/lib/fontSampleCache'
 import type { DrawnLabel } from '@/lib/labelRaster'
-import { layerWithEffects, type EffectedLayer } from '@/lib/layerEffects'
+import { layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
@@ -121,13 +121,15 @@ function drawRaster(ctx: CanvasRenderingContext2D, node: RasterStackNode): void 
 /**
  * Every raster in this run that carries effects, composed.
  *
- * A computed for the same reason `drawnTexts` is one: it is the cache. Nothing
- * here is cheap — a band costs a distance field over the layer's whole frame —
- * and a repaint happens on every pan, zoom and neighbouring stroke.
+ * Nothing here is cheap — a band costs a distance field over the layer's whole
+ * frame — and this recomputes whenever the stack does, which is every frame of
+ * a drag on anything on the page. So each layer's band is kept against its
+ * source and what it was grown from, and grown again only when one of those
+ * moved: its pixels, its frame or its effects.
  *
- * ⚠️ What it is keyed on is what makes it correct, and painting on a layer that
- * carries a stroke moves that key on every segment of the brush. That case
- * recomputes the field per segment; there is no incremental band yet.
+ * ⚠️ Painting on a layer that carries a stroke moves its pixels on every
+ * segment of the brush, so that case still recomputes the field per segment;
+ * there is no incremental band yet.
  */
 const effectedRasters = computed(() => {
   // Read so the recompute follows a layer's pixels, whether they arrived from a
@@ -140,7 +142,8 @@ const effectedRasters = computed(() => {
     const live = raster.liveLayer(node.entry.id)
     const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
     if (!source) continue
-    const effected = layerWithEffects(source, live?.frame ?? node.entry, node.entry.effects)
+    const frame = live?.frame ?? node.entry
+    const effected = layerWithEffectsHeld(source, frame, node.entry.effects, raster.writesTo(node.entry.id))
     if (effected) out.set(node.entry.id, effected)
   }
   return out

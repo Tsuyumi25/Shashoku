@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LayerEffect } from '@shared/effects/types'
-import { alphaBounds, effectMargin, effectedFrame, layerWithEffects } from './layerEffects'
+import { alphaBounds, effectMargin, effectedFrame, layerWithEffects, layerWithEffectsHeld } from './layerEffects'
 
 class StubImageData {
   constructor(
@@ -167,5 +167,24 @@ describe('alphaBounds', () => {
 
   it('bounds a single pixel as one pixel', () => {
     expect(alphaBounds(picture(4, 4, [[3, 3, 9]]), 4, 4)).toEqual({ x: 3, y: 3, w: 1, h: 1 })
+  })
+})
+
+describe('layerWithEffectsHeld', () => {
+  /** A drag anywhere on the page recomputes the stack, and growing a band again each frame was the stall. */
+  it('grows the band once for a layer whose pixels, frame and effects have not moved', () => {
+    const source = {} as unknown as CanvasImageSource
+    layerWithEffectsHeld(source, FRAME, [stroke(3)], 1)
+    layerWithEffectsHeld(source, { ...FRAME }, [stroke(3)], 1)
+    expect(handed).toHaveLength(1)
+  })
+
+  it('grows it again when the pixels, the frame or the effects move', () => {
+    const source = {} as unknown as CanvasImageSource
+    layerWithEffectsHeld(source, FRAME, [stroke(3)], 1)
+    layerWithEffectsHeld(source, FRAME, [stroke(3)], 2)
+    layerWithEffectsHeld(source, { ...FRAME, x: 41 }, [stroke(3)], 2)
+    layerWithEffectsHeld(source, { ...FRAME, x: 41 }, [stroke(4)], 2)
+    expect(handed).toHaveLength(4)
   })
 })

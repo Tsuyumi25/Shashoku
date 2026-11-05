@@ -84,6 +84,27 @@ export function layerWithEffects(
   }
 }
 
+/**
+ * `layerWithEffects`, kept against the source it was grown from until the
+ * frame, the effects or `version` changes. A canvas written in place keeps its
+ * identity, so `version` is what says its pixels moved.
+ */
+export function layerWithEffectsHeld(
+  source: CanvasImageSource,
+  frame: Frame,
+  effects: readonly LayerEffect[],
+  version: number,
+): EffectedLayer | null {
+  const key = `${frame.x},${frame.y},${frame.w},${frame.h}|${version}|${JSON.stringify(effects)}`
+  const held = effectedBySource.get(source)
+  if (held?.key === key) return held.effected
+  const effected = layerWithEffects(source, frame, effects)
+  effectedBySource.set(source, { key, effected })
+  return effected
+}
+
+const effectedBySource = new WeakMap<CanvasImageSource, { key: string; effected: EffectedLayer | null }>()
+
 /** The smallest rectangle holding every pixel with any alpha, or null when none has. */
 export function alphaBounds(rgba: Uint8ClampedArray, width: number, height: number): Frame | null {
   let left = width
