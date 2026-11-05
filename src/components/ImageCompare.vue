@@ -2,7 +2,9 @@
   <div ref="stage" class="flex h-full w-full items-center justify-center">
     <!--
       Pointer only, and nothing in here takes focus: the arrow keys belong to
-      the page grid beside it, whichever was touched last.
+      the page grid beside it, whichever was touched last. A mouse moves the
+      divider by hovering, since holding a button down to compare a whole page
+      tires the hand; touch and pen, which have no hover, drag it.
     -->
     <div
       class="relative cursor-ew-resize shadow select-none touch-none"
@@ -48,7 +50,7 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
-  if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) follow(e)
+  if (e.pointerType === 'mouse' || (e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) follow(e)
 }
 
 const stage = useTemplateRef<HTMLElement>('stage')
