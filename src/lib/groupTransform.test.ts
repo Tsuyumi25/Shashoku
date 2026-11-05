@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carried, groupBox, groupPoint, stretched, type MemberFrame } from './groupTransform'
+import { carried, frameCorners, groupBox, groupPoint, stretched, type MemberFrame } from './groupTransform'
 
 const upright = (x: number, y: number, w: number, h: number): MemberFrame => ({
   center: { x, y },
@@ -10,7 +10,7 @@ const upright = (x: number, y: number, w: number, h: number): MemberFrame => ({
 
 describe('groupBox', () => {
   it('is the plain union of upright members at no turn', () => {
-    const box = groupBox([upright(10, 10, 4, 4), upright(30, 20, 10, 2)], 0)
+    const box = groupBox([upright(10, 10, 4, 4), upright(30, 20, 10, 2)].map(frameCorners), 0)
     expect(box).toEqual({ centerX: 21.5, centerY: 14.5, width: 27, height: 13 })
   })
 
@@ -23,7 +23,7 @@ describe('groupBox', () => {
       center: carried(m.center, { x: 10, y: 0 }, turn, 1),
       rotation: turn,
     }))
-    const box = groupBox(turned, turn)!
+    const box = groupBox(turned.map(frameCorners), turn)!
     expect(box.width).toBeCloseTo(30)
     expect(box.height).toBeCloseTo(4)
     expect(box.centerX).toBeCloseTo(10)

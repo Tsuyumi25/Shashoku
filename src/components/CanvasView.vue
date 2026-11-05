@@ -34,7 +34,7 @@
           :container="editor.viewContainerSize"
           :view="view"
           :page="pageSize"
-          :held="heldLayer"
+          :held="heldLayers"
           :joined="joined"
         />
       </div>
@@ -178,8 +178,8 @@
               :key="layer.id"
               :frame="frameOf(layer)"
               :view="view"
-              :selected="layer.id === editor.cursorId"
-              :in-selection="editor.isSelected(layer.id)"
+              :selected="layer.id === editor.cursorId && !inGroup(layer.id)"
+              :in-selection="editor.isSelected(layer.id) && !inGroup(layer.id)"
               :pointed="layer.id === pointedLayerId"
               :pointer="framesTakePointer ? 'handles' : 'none'"
               :place="placement.placementOf(layer.id)"
@@ -257,10 +257,10 @@
             @scale-start="beginGroup"
             @scale="scaleGroupTo"
             @scale-axes="scaleGroupAxesTo"
-            @scale-end="endGroup"
+            @scale-end="finishGroup"
             @rotate-start="beginGroup"
             @rotate="rotateGroupTo"
-            @rotate-end="endGroup"
+            @rotate-end="finishGroup"
           />
         </div>
 
@@ -650,14 +650,14 @@ const rasterFrames = computed(() => {
 })
 
 /**
- * Which layer the stack keeps on a canvas of its own, and where a gesture has
- * taken it.
+ * Which layers the stack keeps on canvases of their own, and where a gesture
+ * has taken each.
  *
- * The layer actually being handled, so selecting one costs the page nothing:
+ * The layers actually being handled, so selecting one costs the page nothing:
  * the cut is what a gesture needs, and a page cut on selection is a page re-cut
  * every time the cursor moves down the tree.
  */
-const heldLayer = computed(() => placement.held.value)
+const heldLayers = computed(() => placement.held.value)
 
 /**
  * The pixels of every layer a press could reach, kept ready.
@@ -731,7 +731,7 @@ function moveLabelTo(labelId: string, to: Anchor) {
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId) return
   if (groupIds.value.includes(labelId)) {
-    endGroup()
+    finishGroup()
     return
   }
   editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
@@ -1226,15 +1226,15 @@ const connecting = computed(() => editor.tool === 'connect')
 const painting = computed(() => editor.tool === 'tag-paint')
 
 /**
- * The text objects on this page that move, scale and turn as one: two or more
- * selected, none locked. A raster layer in the selection leaves the set
- * without a box for now — its pixels are placed through a gesture that holds
- * one layer at a time, so a box would carry the text and leave it behind.
+ * The objects on this page that move, scale and turn as one: two or more
+ * selected, none locked, text and raster layers alike.
  */
 const groupIds = computed<string[]>(() => {
   if (connecting.value || painting.value) return []
-  if (rasterFrames.value.some((layer) => editor.isSelected(layer.id))) return []
-  const ids = objects.value.filter((o) => editor.isSelected(o.id) && !o.locked).map((o) => o.id)
+  const ids = [
+    ...rasterFrames.value.filter((layer) => editor.isSelected(layer.id)).map((layer) => layer.id),
+    ...objects.value.filter((o) => editor.isSelected(o.id) && !o.locked).map((o) => o.id),
+  ]
   return ids.length >= 2 ? ids : []
 })
 
@@ -1253,6 +1253,7 @@ const {
   begin: beginGroup,
   scaleTo: scaleGroupTo,
   rotateTo: rotateGroupTo,
+  moveBy: moveGroupBy,
   moveWith: moveGroupWith,
   end: endGroup,
   scaleAxesTo: scaleGroupAxesTo,
@@ -1260,7 +1261,18 @@ const {
   pageId: () => editor.currentPageId,
   ids: () => groupIds.value,
   codeOf: (id) => objects.value.find((o) => o.id === id)?.code ?? null,
+  rasterFrame: (id) => {
+    const layer = rasterFrames.value.find((l) => l.id === id)
+    return layer ? frameOf(layer) : null
+  },
+  placement,
 })
+
+/** The set's gesture written down, waited on by an Alt copy as a layer's own is. */
+function finishGroup(): void {
+  const landed = endGroup().catch((err: unknown) => console.error('place selection failed', err))
+  altRun?.waits.push(landed)
+}
 
 /**
  * The objects one gesture has already crossed. Held so that sweeping back over
@@ -2080,7 +2092,9 @@ function reportLayerDrag(): void {
   const drag = layerDrag.value
   if (drag === null || !drag.engaged || containerRef.value === null) return
   const rect = containerRef.value.getBoundingClientRect()
-  placement.moveBy(drag.id, travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, view))
+  const d = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, view)
+  if (groupIds.value.includes(drag.id)) moveGroupBy(d.dx, d.dy)
+  else placement.moveBy(drag.id, d)
 }
 
 function trackLayerDrag(e: PointerEvent): void {
@@ -2113,7 +2127,8 @@ function endLayerDrag(): void {
   layerDrag.value = null
   if (drag === null || !drag.engaged) return
   const entry = project.entryById(drag.id)
-  if (entry?.kind === 'raster') onLayerCommit(entry)
+  if (groupIds.value.includes(drag.id)) finishGroup()
+  else if (entry?.kind === 'raster') onLayerCommit(entry)
 }
 
 const ROTATE_SNAP = Math.PI / 12

@@ -16,24 +16,40 @@ export interface GroupBox {
   height: number
 }
 
+/** Where a member's four corners stand on the page. */
+export function frameCorners(m: MemberFrame): Point[] {
+  return CORNER_SIGNS.map(([sx, sy]) =>
+    turnedAround(m.center, { x: m.center.x + (sx * m.w) / 2, y: m.center.y + (sy * m.h) / 2 }, m.rotation),
+  )
+}
+
+const CORNER_SIGNS = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+] as const
+
 /**
- * The smallest box around every member, lying at `turn`.
+ * The smallest box around every member's corners, lying at `turn`.
  *
  * A multiple selection has no geometry of its own to remember, only how far it
  * has been turned since it was made — so the box is found by laying the
  * members back by that much, taking the upright box around them, and standing
  * it up again. At a turn of zero it is the plain upright union.
+ *
+ * Corners rather than frames, because a raster layer mid-gesture may be
+ * sheared and has no centre, size and turn to describe it.
  */
-export function groupBox(members: readonly MemberFrame[], turn: number): GroupBox | null {
+export function groupBox(members: readonly (readonly Point[])[], turn: number): GroupBox | null {
   if (members.length === 0) return null
   const origin = { x: 0, y: 0 }
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (const m of members) {
-    for (const [sx, sy] of CORNER_SIGNS) {
-      const corner = turnedAround(m.center, { x: m.center.x + (sx * m.w) / 2, y: m.center.y + (sy * m.h) / 2 }, m.rotation)
+  for (const corners of members) {
+    for (const corner of corners) {
       const laid = turnedAround(origin, corner, -turn)
       minX = Math.min(minX, laid.x)
       minY = Math.min(minY, laid.y)
@@ -44,13 +60,6 @@ export function groupBox(members: readonly MemberFrame[], turn: number): GroupBo
   const middle = turnedAround(origin, { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, turn)
   return { centerX: middle.x, centerY: middle.y, width: maxX - minX, height: maxY - minY }
 }
-
-const CORNER_SIGNS = [
-  [-1, -1],
-  [1, -1],
-  [1, 1],
-  [-1, 1],
-] as const
 
 /**
  * Where a fractional point of the group's box lands on the page — the pivot a

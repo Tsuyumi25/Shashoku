@@ -133,13 +133,13 @@ describe('letting go of a moved layer', () => {
     const placement = useLayerPlacement(bitmaps)
     const entry = { ...raster() }
     settlesTo({ file: 'r.9f3c1a.png', w: 60, h: 60 })
-    const placed = vi.spyOn(editor, 'cmdPlaceLayer')
+    const placed = vi.spyOn(editor, 'cmdPlaceObjects')
 
     placement.moveBy('r', { dx: 25, dy: 0 })
     await placement.commit(entry)
 
     expect(placed).toHaveBeenCalledTimes(1)
-    const [, , from, to] = placed.mock.calls[0]
+    const [{ from, to }] = placed.mock.calls[0]![1].layers!
     expect(from.file).toBe('r.9f3c1a.png')
     expect(from.w).toBe(60)
     expect(to.file).toBe('r.9f3c1a.png')
@@ -157,13 +157,13 @@ describe('letting go of a moved layer', () => {
     const placement = useLayerPlacement(bitmaps)
     const entry = { ...raster({ x: 0, y: 0, w: 0, h: 0 }) }
     settlesTo({ file: 'r.9f3c1a.png', x: 10, y: 10, w: 40, h: 40 })
-    const placed = vi.spyOn(editor, 'cmdPlaceLayer')
+    const placed = vi.spyOn(editor, 'cmdPlaceObjects')
 
     placement.moveBy('r', { dx: 25, dy: 0 })
     await placement.commit(entry)
 
     expect(placed).toHaveBeenCalledTimes(1)
-    expect(placed.mock.calls[0][3].x).toBe(35)
+    expect(placed.mock.calls[0]![1].layers![0]!.to.x).toBe(35)
   })
 
   /** Nothing anywhere has pixels for it, which is a different thing. */
@@ -171,13 +171,13 @@ describe('letting go of a moved layer', () => {
     const { editor } = open(raster({ w: 0, h: 0 }))
     const placement = useLayerPlacement(bitmaps)
     settlesTo({ w: 0, h: 0 })
-    const placed = vi.spyOn(editor, 'cmdPlaceLayer')
+    const placed = vi.spyOn(editor, 'cmdPlaceObjects')
 
     placement.moveBy('r', { dx: 25, dy: 0 })
     await placement.commit(raster({ w: 0, h: 0 }))
 
     expect(placed).not.toHaveBeenCalled()
-    expect(placement.held.value).toBeNull()
+    expect(placement.held.value.size).toBe(0)
   })
 
   /**
@@ -207,6 +207,29 @@ describe('letting go of a moved layer', () => {
 
     expect(forgotten).toEqual(['j1'])
   })
+
+  /**
+   * The write awaits, and a hand quick enough takes hold of the layer again in
+   * that window. The first release must write what it was let go at and leave
+   * the second gesture's preview where the second hand put it.
+   */
+  it('writes what was let go and leaves a gesture taken during the write alone', async () => {
+    const { editor } = open(raster())
+    const placement = useLayerPlacement(bitmaps)
+    const entry = { ...raster() }
+    let landWrite: () => void = () => {}
+    vi.spyOn(useRasterStore(), 'flush').mockImplementation(() => new Promise<void>((resolve) => (landWrite = resolve)))
+    const placed = vi.spyOn(editor, 'cmdPlaceObjects')
+
+    placement.moveBy('r', { dx: 25, dy: 0 })
+    const first = placement.commit(entry)
+    placement.moveBy('r', { dx: 40, dy: 0 })
+    landWrite()
+    await first
+
+    expect(placed.mock.calls[0]![1].layers![0]!.to.x).toBe(35)
+    expect(placement.placementOf('r').dx).toBe(40)
+  })
 })
 
 describe('a gesture in progress', () => {
@@ -225,7 +248,7 @@ describe('a gesture in progress', () => {
     // up to a floor of 1/40 and come out as a different picture entirely.
     placement.scaleTo('r', 0.5, { x: 0, y: 0 })
 
-    expect(placement.placementOf('r').scale).toBe(0.5)
+    expect(placement.placementOf('r').a).toBe(0.5)
     // Pinned at the top-left corner, so the middle walks in by a quarter of the
     // frame that is really there — 20, not 10.
     expect(placement.placementOf('r').dx).toBe(-20)

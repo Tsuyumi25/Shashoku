@@ -1980,30 +1980,6 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A raster layer's new placement, which arrives whole rather than written
-   * through: the gesture previewed itself and left the entry alone, so this is
-   * the first and only write.
-   *
-   * A turn or a scale hands over a new file as well as a new frame, and undo
-   * puts the old name back — the old file is still on disk until orphans are
-   * swept, which is what makes going back cost nothing.
-   */
-  function cmdPlaceLayer(
-    pageId: string,
-    layerId: string,
-    from: LayerPlace,
-    to: LayerPlace,
-  ) {
-    if (isLayerLocked(layerId)) return
-    const project = useProjectStore()
-    pushCommand({
-      label: `place-layer ${layerId}`,
-      do: () => project.placeLayer(pageId, layerId, to),
-      undo: () => project.placeLayer(pageId, layerId, from),
-    })
-  }
-
-  /**
    * The angle and the position travel together, because a turn around anything
    * but the object's own middle swings it across the page as well as spinning
    * it — putting the angle back alone would leave it lying right and standing
@@ -2066,39 +2042,50 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * One gesture on a multiple selection, as one step however many members it
-   * carried. Both sides are snapshots taken by the gesture, which has already
-   * written the after; a drag that came back to where it began leaves nothing.
-   * A member locked since is stepped over rather than taking the rest down.
+   * One gesture, as one step however many objects it carried: the text a
+   * multiple selection moved and the raster layers it moved with them.
+   *
+   * The labels' after is already written — the gesture drew with it — and
+   * writing it again is harmless; a raster layer's arrives here whole, a new
+   * frame and often a new file, and undo puts the old name back, which is still
+   * on disk until orphans are swept. A label that came back to where it began
+   * leaves nothing, and a member locked since is stepped over rather than
+   * taking the rest down.
    */
-  function cmdPlaceLabels(
+  function cmdPlaceObjects(
     pageId: string,
-    from: ReadonlyMap<string, PlacedLabel>,
-    to: ReadonlyMap<string, PlacedLabel>,
+    moves: {
+      labels?: { from: ReadonlyMap<string, PlacedLabel>; to: ReadonlyMap<string, PlacedLabel> }
+      layers?: readonly { id: string; from: LayerPlace; to: LayerPlace }[]
+    },
   ) {
-    const ids = [...to.keys()].filter(
-      (id) => from.has(id) && JSON.stringify(from.get(id)) !== JSON.stringify(to.get(id)),
-    )
-    if (ids.length === 0) return
+    const labels = moves.labels
+    const labelIds = labels
+      ? [...labels.to.keys()].filter(
+          (id) => labels.from.has(id) && JSON.stringify(labels.from.get(id)) !== JSON.stringify(labels.to.get(id)),
+        )
+      : []
+    const layers = (moves.layers ?? []).filter((m) => !isLayerLocked(m.id))
+    if (labelIds.length === 0 && layers.length === 0) return
     const project = useProjectStore()
-    const apply = (states: ReadonlyMap<string, PlacedLabel>) => {
-      for (const id of ids) {
+    const apply = (side: 'from' | 'to') => {
+      for (const id of labelIds) {
         if (isLayerLocked(id)) continue
-        const state = states.get(id)
+        const state = labels?.[side].get(id)
         if (!state) continue
         project.setLabelStyle(pageId, id, state.style)
         project.rotateLabel(pageId, id, state.rotation)
         project.moveLabel(pageId, id, state.x, state.y)
       }
+      for (const move of layers) {
+        if (!isLayerLocked(move.id)) project.placeLayer(pageId, move.id, move[side])
+      }
     }
-    pushCommand(
-      {
-        label: `place-labels ${ids.length}`,
-        do: () => apply(to),
-        undo: () => apply(from),
-      },
-      { alreadyApplied: true },
-    )
+    pushCommand({
+      label: `place ${labelIds.length + layers.length}`,
+      do: () => apply('to'),
+      undo: () => apply('from'),
+    })
   }
 
   /**
@@ -3293,9 +3280,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdReplaceLabelSource,
     cmdMoveCard,
     cmdMoveLabel,
-    cmdPlaceLabels,
+    cmdPlaceObjects,
     cmdNudge,
-    cmdPlaceLayer,
     cmdRotateLabel,
     cmdScaleLabel,
     cmdAddRasterLayer,

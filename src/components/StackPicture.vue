@@ -34,7 +34,7 @@ const props = defineProps<{
   view: ViewTransform
   /** The page's own size, which a folder's buffer is. */
   page: { w: number; h: number }
-  held?: { id: string; place: LayerPlacement } | null
+  held: ReadonlyMap<string, LayerPlacement>
   /** For each text object, the ones under it its stroke stays off. See `joinedBelow`. */
   joined: ReadonlyMap<string, readonly TextLayerEntry[]>
 }>()
@@ -61,7 +61,7 @@ const picture = computed<EffectedLayer>(() => {
   }
   const drawing = stroke.layerId !== null && members.value.has(stroke.layerId)
   if (drawing) void stroke.revision
-  const held = props.held && members.value.has(props.held.id) ? props.held : null
+  const held = new Map([...props.held].filter(([id]) => members.value.has(id)))
 
   const { w, h } = props.page
   const buffer = new OffscreenCanvas(w, h)
@@ -69,7 +69,7 @@ const picture = computed<EffectedLayer>(() => {
     page: props.page,
     rasters: props.bitmaps,
     liveLayer: (id) => raster.liveLayer(id),
-    place: (id) => (held?.id === id ? held.place : undefined),
+    place: (id) => held.get(id),
     overlay: (id) => (drawing ? stroke.overlayFor(id) : null),
     drawText: (ctx, node) => {
       const drawn = labels.labelOf(node.entry)

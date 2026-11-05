@@ -66,11 +66,11 @@ const props = defineProps<{
   /** The page's own size, which a folder drawn as one picture is buffered at. */
   page: { w: number; h: number }
   /**
-   * The layer a gesture is on and where that gesture has taken it. It is held
-   * out of its run so the transform reaches it alone, and it goes back into one
-   * the moment the gesture is let go.
+   * The layers a gesture is on and where it has taken each. They are held out
+   * of their runs so the transform reaches each alone, and go back into one the
+   * moment the gesture is let go.
    */
-  held?: { id: string; place: LayerPlacement } | null
+  held: ReadonlyMap<string, LayerPlacement>
   /**
    * For each text object on the page, the ones under it its stroke stays off.
    * Worked out over the whole page, because the two need not share a folder
@@ -89,14 +89,14 @@ const stroke = useStrokeOverlayStore()
  */
 const segments = computed(() => {
   const alone = new Set<string>()
-  if (props.held) alone.add(props.held.id)
+  for (const id of props.held.keys()) alone.add(id)
   if (stroke.layerId !== null) alone.add(stroke.layerId)
   return stackSegments(props.nodes, alone)
 })
 
 function placeFor(segment: StackSegment): LayerPlacement | undefined {
-  if (!props.held || segment.kind !== 'run') return undefined
-  return segment.nodes[0].entry.id === props.held.id ? props.held.place : undefined
+  if (segment.kind !== 'run' || segment.nodes.length !== 1) return undefined
+  return props.held.get(segment.nodes[0].entry.id)
 }
 
 /**

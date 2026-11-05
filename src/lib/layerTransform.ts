@@ -6,16 +6,40 @@ import type { Rect } from '@/lib/selection/rect'
  * previews with and what the bake is finally handed.
  */
 export interface LayerPlacement {
-  /** Travel, in page pixels. */
+  /** Travel of the frame's middle, in page pixels. */
   dx: number
   dy: number
-  /** Uniform, because one corner cannot mean two things — see decision 6. */
-  scale: number
-  /** Clockwise, in radians. */
-  rotation: number
+  /**
+   * Where the frame's own axes land, about its middle, as canvas's
+   * `transform(a, b, c, d)` takes them: its horizontal goes to (a, b) and its
+   * vertical to (c, d). A turn and a uniform scale are the one layer's own
+   * gestures; a multiple selection stretched along its box can shear a layer
+   * lying across it, and pixels can hold that.
+   */
+  a: number
+  b: number
+  c: number
+  d: number
 }
 
-export const NO_PLACEMENT: LayerPlacement = { dx: 0, dy: 0, scale: 1, rotation: 0 }
+export const NO_PLACEMENT: LayerPlacement = { dx: 0, dy: 0, a: 1, b: 0, c: 0, d: 1 }
+
+/** A placement that turns by `rotation` and scales by `scale` about the frame's middle. */
+export function similarity(scale: number, rotation: number, dx = 0, dy = 0): LayerPlacement {
+  const cos = Math.cos(rotation) * scale
+  const sin = Math.sin(rotation) * scale
+  return { dx, dy, a: cos, b: sin, c: -sin, d: cos }
+}
+
+/** How far the frame's own horizontal has been turned, which is how its frame is drawn. */
+export function placementTurn(place: LayerPlacement): number {
+  return Math.atan2(place.b, place.a)
+}
+
+/** Whether a placement only moves the layer, which costs the pixels nothing. */
+export function isTranslation(place: LayerPlacement): boolean {
+  return place.a === 1 && place.b === 0 && place.c === 0 && place.d === 1
+}
 
 /**
  * Where a raster layer's pixels are and which file holds them. The two travel
@@ -27,7 +51,25 @@ export interface LayerPlace extends Rect {
 }
 
 export function isMoved(place: LayerPlacement): boolean {
-  return place.dx !== 0 || place.dy !== 0 || place.scale !== 1 || place.rotation !== 0
+  return place.dx !== 0 || place.dy !== 0 || !isTranslation(place)
+}
+
+/** Where the frame's four corners land under a placement. */
+export function placedCorners(frame: Rect, place: LayerPlacement): { x: number; y: number }[] {
+  const center = frameCenter(frame)
+  return [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ].map(([sx, sy]) => {
+    const x = (sx! * frame.w) / 2
+    const y = (sy! * frame.h) / 2
+    return {
+      x: center.x + place.dx + place.a * x + place.c * y,
+      y: center.y + place.dy + place.b * x + place.d * y,
+    }
+  })
 }
 
 /** The point a placement turns and scales around: the frame's own middle. */
@@ -58,12 +100,8 @@ function ceilPixels(span: number): number {
  */
 export function placedFrame(frame: Rect, place: LayerPlacement): Rect {
   const center = frameCenter(frame)
-  const cos = Math.abs(Math.cos(place.rotation))
-  const sin = Math.abs(Math.sin(place.rotation))
-  const w = frame.w * place.scale
-  const h = frame.h * place.scale
-  const spanW = ceilPixels(w * cos + h * sin)
-  const spanH = ceilPixels(w * sin + h * cos)
+  const spanW = ceilPixels(Math.abs(place.a) * frame.w + Math.abs(place.c) * frame.h)
+  const spanH = ceilPixels(Math.abs(place.b) * frame.w + Math.abs(place.d) * frame.h)
   return {
     x: Math.round(center.x + place.dx - spanW / 2),
     y: Math.round(center.y + place.dy - spanH / 2),
@@ -160,7 +198,6 @@ export function applyPlacement(
 ): void {
   const center = frameCenter(frame)
   ctx.translate(center.x + place.dx - into.x, center.y + place.dy - into.y)
-  ctx.rotate(place.rotation)
-  ctx.scale(place.scale, place.scale)
+  ctx.transform(place.a, place.b, place.c, place.d, 0, 0)
   ctx.translate(-frame.w / 2, -frame.h / 2)
 }

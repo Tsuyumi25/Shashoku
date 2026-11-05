@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { generateId } from '@shared/page/schema'
 import { layersDirOf } from '@shared/ssk/constants'
@@ -16,7 +16,10 @@ import {
   contentBounds,
   frameCenter,
   isMoved,
+  isTranslation,
   placedFrame,
+  placementTurn,
+  similarity,
   type LayerPlace,
   type LayerPlacement,
 } from '@/lib/layerTransform'
@@ -55,11 +58,14 @@ export function useLayerPlacement(
   const project = useProjectStore()
   const editor = useEditorStore()
 
-  /** The gesture in progress. Nobody's data until it is let go. */
-  const held = ref<{ id: string; place: LayerPlacement } | null>(null)
+  /**
+   * The gestures in progress, by layer. Nobody's data until they are let go.
+   * More than one only while a multiple selection carries several layers.
+   */
+  const held = shallowRef<ReadonlyMap<string, LayerPlacement>>(new Map())
 
   function placementOf(id: string): LayerPlacement {
-    return held.value?.id === id ? held.value.place : NO_PLACEMENT
+    return held.value.get(id) ?? NO_PLACEMENT
   }
 
   /**
@@ -76,13 +82,20 @@ export function useLayerPlacement(
     return frame.w > 0 && frame.h > 0 ? { ...frame } : null
   }
 
-  function set(id: string, part: Partial<LayerPlacement>): void {
+  function set(id: string, place: LayerPlacement): void {
     if (editor.isLayerLocked(id)) return
-    held.value = { id, place: { ...placementOf(id), ...part } }
+    held.value = new Map([...held.value, [id, place]])
+  }
+
+  /** Every member of a multiple selection's gesture at once, so the page redraws once. */
+  function hold(places: ReadonlyMap<string, LayerPlacement>): void {
+    const next = new Map(held.value)
+    for (const [id, place] of places) if (!editor.isLayerLocked(id)) next.set(id, place)
+    held.value = next
   }
 
   function moveBy(id: string, d: Displacement): void {
-    set(id, { dx: d.dx, dy: d.dy })
+    set(id, { ...placementOf(id), dx: d.dx, dy: d.dy })
   }
 
   /**
@@ -109,11 +122,11 @@ export function useLayerPlacement(
     const scale = clamp(ratio, floor, ceiling)
 
     const was = { w: box.w, h: box.h }
-    const rotation = placementOf(id).rotation
+    const rotation = placementTurn(placementOf(id))
     const center = frameCenter(box)
     const held = framePoint(center, was, MIDDLE, pin, rotation)
     const moved = positionHolding(held, { w: was.w * scale, h: was.h * scale }, MIDDLE, pin, rotation)
-    set(id, { scale, dx: moved.x - center.x, dy: moved.y - center.y })
+    set(id, similarity(scale, rotation, moved.x - center.x, moved.y - center.y))
   }
 
   /**
@@ -126,16 +139,29 @@ export function useLayerPlacement(
     const center = frameCenter(box)
     const around = framePoint(center, { w: box.w, h: box.h }, MIDDLE, pivot)
     const moved = turnedAround(around, center, rotation)
-    set(id, { rotation, dx: moved.x - center.x, dy: moved.y - center.y })
+    set(id, similarity(1, rotation, moved.x - center.x, moved.y - center.y))
+  }
+
+  /**
+   * The placements a release is about to write down, taken before anything is
+   * awaited: a new gesture may take hold of the same layer while the write is
+   * under way, and its placement is not this one's to bake.
+   */
+  function take(ids: readonly string[]): ReadonlyMap<string, LayerPlacement> {
+    return new Map(ids.flatMap((id) => (held.value.has(id) ? [[id, placementOf(id)] as const] : [])))
   }
 
   /**
    * Dropped only once the entry has caught up. Clearing it the moment the
    * pointer is let go would snap the layer back to where it started for as
-   * long as the resample and the write take.
+   * long as the resample and the write take. A layer a newer gesture has taken
+   * hold of since is left with it.
    */
-  function release(gesture: { id: string } | null): void {
-    if (gesture !== null && held.value?.id === gesture.id) held.value = null
+  function release(taken: ReadonlyMap<string, LayerPlacement>): void {
+    if (![...taken].some(([id, place]) => held.value.get(id) === place)) return
+    const next = new Map(held.value)
+    for (const [id, place] of taken) if (next.get(id) === place) next.delete(id)
+    held.value = next
   }
 
   /**
@@ -209,42 +235,37 @@ export function useLayerPlacement(
   }
 
   /**
+   * Each held layer's pixels put down where its gesture took it, and the moves
+   * that would say so — nothing pushed and nothing released, so a multiple
+   * selection can make one step of its layers and its text together.
+   *
    * Nothing is written before the pixels it names. The manifest is saved after
    * the layer file, so a crash between the two leaves the old manifest pointing
    * at the old file, which is still there — and a name nothing has ever held is
    * what keeps that true. Whatever no manifest names is swept at the next open.
    */
-  async function commit(target: RasterLayerEntry): Promise<void> {
-    const gesture = held.value
-    const page = editor.currentPageId
-    const file = page === null ? undefined : project.pageById(page)
-    if (
-      gesture === null ||
-      gesture.id !== target.id ||
-      page === null ||
-      file === undefined ||
-      !isMoved(gesture.place) ||
-      editor.isLayerLocked(target.id)
-    ) {
-      release(gesture)
-      return
-    }
+  async function settle(pageId: string, taken: ReadonlyMap<string, LayerPlacement>): Promise<LayerMove[]> {
+    const file = project.pageById(pageId)
+    if (file === undefined) return []
+    const moving = [...taken].filter(([id, place]) => isMoved(place) && !editor.isLayerLocked(id))
+    if (moving.length === 0) return []
 
-    try {
-      /*
-       * Whatever the engine is holding for this layer speaks in coordinates
-       * measured from the frame it was handed over at, and this moves that
-       * frame. Letting it go here is what makes the next edit hand over the
-       * layer as it now stands, rather than paint into a grid that is one
-       * gesture behind.
-       *
-       * Settled first, and not only so nothing is lost: baking reads the layer's
-       * file, so an unwritten edit would be resampled out of existence.
-       */
-      const raster = useRasterStore()
-      await raster.flush()
-      editor.forgetJournals(raster.release(target.id))
+    /*
+     * Whatever the engine is holding for these layers speaks in coordinates
+     * measured from the frame it was handed over at, and this moves that
+     * frame. Letting it go here is what makes the next edit hand over the
+     * layer as it now stands, rather than paint into a grid that is one
+     * gesture behind.
+     *
+     * Settled first, and not only so nothing is lost: baking reads the layer's
+     * file, so an unwritten edit would be resampled out of existence.
+     */
+    const raster = useRasterStore()
+    await raster.flush()
+    for (const [id] of moving) editor.forgetJournals(raster.release(id))
 
+    const moves: LayerMove[] = []
+    for (const [id, place] of moving) {
       /*
        * Read again, because settling is what changed it. The write puts the
        * layer down under a name nothing has held before and tells the manifest
@@ -257,17 +278,16 @@ export function useLayerPlacement(
        * is reachable on screen well before that: the canvas hit-tests where the
        * pixels are, not where the entry says.
        */
-      const entry = entryOnPage(file.page, target.id)
-      if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) return
+      const entry = entryOnPage(file.page, id)
+      if (entry === undefined || entry.kind !== 'raster' || entry.w <= 0 || entry.h <= 0) continue
 
-      const place = gesture.place
       const frame = placedFrame(entry, place)
       const from: LayerPlace = { file: entry.file, x: entry.x, y: entry.y, w: entry.w, h: entry.h }
       // A pure translation moves the frame and leaves the pixels alone, which
       // is the one gesture that costs nothing — a copy rather than an average.
-      if (place.scale === 1 && place.rotation === 0) {
-        editor.cmdPlaceLayer(page, entry.id, from, { ...from, x: frame.x, y: frame.y })
-        return
+      if (isTranslation(place)) {
+        moves.push({ id, from, to: { ...from, x: frame.x, y: frame.y } })
+        continue
       }
       const baked = await bake(entry, place, frame, file.pageDir)
       const to: LayerPlace = {
@@ -280,11 +300,30 @@ export function useLayerPlacement(
       // between the two: the entry pointing at a file the page has no pixels for
       // is a hole in the artwork for as long as a read of it would take.
       bitmaps.adopt(layersDirOf(file.pageDir), to.file, drawn)
-      editor.cmdPlaceLayer(page, entry.id, from, to)
+      moves.push({ id, from, to })
+    }
+    return moves
+  }
+
+  /** One layer's gesture written down as one step. */
+  async function commit(target: RasterLayerEntry): Promise<void> {
+    const page = editor.currentPageId
+    const taken = take([target.id])
+    try {
+      if (page === null) return
+      const layers = await settle(page, taken)
+      if (layers.length > 0) editor.cmdPlaceObjects(page, { layers })
     } finally {
-      release(gesture)
+      release(taken)
     }
   }
 
-  return { held, placementOf, moveBy, scaleTo, rotateTo, commit }
+  return { held, placementOf, moveBy, scaleTo, rotateTo, hold, take, settle, release, commit }
+}
+
+/** One raster layer's frame and file before and after a gesture. */
+export interface LayerMove {
+  id: string
+  from: LayerPlace
+  to: LayerPlace
 }

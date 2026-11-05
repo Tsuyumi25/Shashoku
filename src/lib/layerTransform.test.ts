@@ -6,6 +6,7 @@ import {
   hugContent,
   isMoved,
   placedFrame,
+  similarity,
   type LayerPlacement,
 } from '@/lib/layerTransform'
 
@@ -20,10 +21,10 @@ describe('isMoved', () => {
     expect(isMoved(NO_PLACEMENT)).toBe(false)
   })
 
-  it('notices each of the three on its own', () => {
+  it('notices a move, a scale and a turn each on its own', () => {
     expect(isMoved(place({ dx: 1 }))).toBe(true)
-    expect(isMoved(place({ scale: 1.5 }))).toBe(true)
-    expect(isMoved(place({ rotation: 0.01 }))).toBe(true)
+    expect(isMoved(similarity(1.5, 0))).toBe(true)
+    expect(isMoved(similarity(1, 0.01))).toBe(true)
   })
 })
 
@@ -38,18 +39,18 @@ describe('placedFrame', () => {
 
   /** Scaling is about the middle, so both edges move and the centre does not. */
   it('grows around the centre', () => {
-    expect(placedFrame(frame, place({ scale: 2 }))).toEqual({ x: -10, y: 10, w: 80, h: 40 })
+    expect(placedFrame(frame, similarity(2, 0))).toEqual({ x: -10, y: 10, w: 80, h: 40 })
   })
 
   it('swaps the sides at a quarter turn', () => {
-    const turned = placedFrame(frame, place({ rotation: Math.PI / 2 }))
+    const turned = placedFrame(frame, similarity(1, Math.PI / 2))
     expect([turned.w, turned.h]).toEqual([20, 40])
     // The middle is what a turn is about, so it is what stays put.
     expect([turned.x + turned.w / 2, turned.y + turned.h / 2]).toEqual([30, 30])
   })
 
   it('comes back to itself after half a turn', () => {
-    expect(placedFrame(frame, place({ rotation: Math.PI }))).toEqual(frame)
+    expect(placedFrame(frame, similarity(1, Math.PI))).toEqual(frame)
   })
 
   /**
@@ -57,19 +58,26 @@ describe('placedFrame', () => {
    * without gaining transparent corners, and turning back does not give them up.
    */
   it('grows on a turn that is not a quarter of one', () => {
-    const turned = placedFrame(frame, place({ rotation: Math.PI / 4 }))
+    const turned = placedFrame(frame, similarity(1, Math.PI / 4))
     expect(turned.w).toBeGreaterThan(frame.w)
     expect(turned.h).toBeGreaterThan(frame.h)
   })
 
   it("rounds the size up, so the content cannot fall outside the box written for it", () => {
-    const turned = placedFrame({ x: 0, y: 0, w: 10, h: 10 }, place({ scale: 1.05 }))
+    const turned = placedFrame({ x: 0, y: 0, w: 10, h: 10 }, similarity(1.05, 0))
     expect(turned.w).toBe(11)
     expect(turned.h).toBe(11)
   })
 
+  /** A layer lying across a stretched selection is sheared, and its box holds all four corners. */
+  it('holds a sheared frame', () => {
+    const sheared = placedFrame(frame, place({ c: 0.5 }))
+    expect(sheared.w).toBe(50)
+    expect(sheared.h).toBe(20)
+  })
+
   it('lands on whole pixels however fractional the gesture was', () => {
-    const turned = placedFrame(frame, place({ dx: 0.4, dy: -0.6, scale: 1.3, rotation: 0.3 }))
+    const turned = placedFrame(frame, similarity(1.3, 0.3, 0.4, -0.6))
     for (const n of [turned.x, turned.y, turned.w, turned.h]) expect(Number.isInteger(n)).toBe(true)
   })
 })

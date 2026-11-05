@@ -2,7 +2,7 @@
   <ObjectFrame
     :box="box"
     :view="view"
-    :rotation="place.rotation"
+    :rotation="placementTurn(place)"
     :selected="selected"
     :in-selection="inSelection"
     :locked="false"
@@ -23,7 +23,7 @@
 import { computed } from 'vue'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import type { ViewTransform } from '@/lib/coords'
-import { frameCenter, type LayerPlacement } from '@/lib/layerTransform'
+import { frameCenter, placementTurn, type LayerPlacement } from '@/lib/layerTransform'
 
 /**
  * A raster layer's frame: the shared one, over the arithmetic that is paint's own.
@@ -102,12 +102,12 @@ function onRotate(radians: number) {
  */
 const box = computed(() => {
   const center = frameCenter(props.frame)
-  const { scale, dx, dy } = props.place
+  const { a, b, c, d, dx, dy } = props.place
   return {
     centerX: center.x + dx,
     centerY: center.y + dy,
-    width: props.frame.w * scale,
-    height: props.frame.h * scale,
+    width: props.frame.w * Math.hypot(a, b),
+    height: props.frame.h * Math.hypot(c, d),
   }
 })
 </script>
