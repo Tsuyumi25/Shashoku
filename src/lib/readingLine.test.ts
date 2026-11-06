@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  bowOf,
   chainsOf,
-  distanceToBow,
+  distanceToRoute,
   distanceToSegment,
   edgeAnchors,
   nearestAnchor,
-  pointOnBow,
-  readingLineBetween,
+  routeBetween,
   type FrameBox,
 } from './readingLine'
 
@@ -57,37 +55,12 @@ describe('nearestAnchor', () => {
   })
 })
 
-describe('readingLineBetween', () => {
-  it('runs edge to edge rather than centre to centre', () => {
-    const line = readingLineBetween(box(0, 0, 100, 40), box(400, 0, 100, 40))
-    near(line.a, 50, 0)
-    near(line.b, 350, 0)
-  })
-
-  it('leaves from the bottom and arrives at the top for an object below', () => {
-    const line = readingLineBetween(box(0, 0, 100, 40), box(0, 300, 100, 40))
-    near(line.a, 0, 20)
-    near(line.b, 0, 280)
-  })
-
-  /**
-   * ⚠️ Two frames that overlap still get a line. It reads oddly — the ends are
-   * on the inward-facing edges, so it runs against the way the objects lie —
-   * but a line the file holds and the canvas declines to draw is worse than one
-   * that looks wrong: the first cannot be found, and the second says out loud
-   * that two objects are sitting on top of each other.
-   */
-  it('still draws between two frames that overlap', () => {
-    const line = readingLineBetween(box(0, 0, 100, 40), box(20, 0, 100, 40))
-    expect(line).not.toBeNull()
-    expect(Number.isFinite(line.a.x)).toBe(true)
-    expect(Number.isFinite(line.b.x)).toBe(true)
-  })
-
-  it('still answers for two objects standing in the same place', () => {
-    const line = readingLineBetween(box(7, 9), box(7, 9))
-    expect(Number.isFinite(line.a.x)).toBe(true)
-    expect(Number.isFinite(line.b.y)).toBe(true)
+describe('a line between frames that overlap', () => {
+  it('is still drawn, for frames overlapping or standing in the same place', () => {
+    for (const [from, to] of [[box(0, 0), box(20, 0)], [box(7, 9), box(7, 9)]] as const) {
+      const route = routeBetween(from, to, 10)
+      expect([route.a.x, route.a.y, route.b.x, route.b.y].every(Number.isFinite)).toBe(true)
+    }
   })
 })
 
@@ -105,14 +78,65 @@ describe('distanceToSegment', () => {
   })
 })
 
-describe('a bowed line', () => {
-  /** A click on the curve as drawn lands on it; one on the straight chord beneath does not. */
-  it('is hit along the curve rather than along its chord', () => {
-    const line = { a: { x: 0, y: 0 }, b: { x: 1000, y: 0 } }
-    const control = bowOf(line)
-    const apex = pointOnBow(line, control, 0.5)
-    expect(distanceToBow(apex, line, control)).toBeLessThan(1)
-    expect(distanceToBow({ x: 500, y: 0 }, line, control)).toBeGreaterThan(50)
+describe('routing a line', () => {
+  const heading = (from: { x: number; y: number }, to: { x: number; y: number }) =>
+    Math.atan2(to.y - from.y, to.x - from.x)
+  const outward = (frame: FrameBox, at: { x: number; y: number }) => heading(frame.center, at)
+
+  /** It leaves straight out of its edge and arrives straight into the other's. */
+  it('launches out of one edge and into the other', () => {
+    const from = box(0, 0)
+    const to = box(600, 600)
+    const route = routeBetween(from, to, 10)
+    expect(heading(route.points[0]!, route.points[1]!)).toBeCloseTo(outward(from, route.a), 6)
+    expect(Math.atan2(-route.arrive.y, -route.arrive.x)).toBeCloseTo(outward(to, route.b), 6)
+  })
+
+  /** No corner anywhere: consecutive steps along the path never turn by more than a sampling step. */
+  it('turns smoothly all the way', () => {
+    const route = routeBetween(box(0, 0), box(600, 600), 10)
+    const p = route.points
+    for (let at = 2; at < p.length; at++) {
+      const turn = heading(p[at - 1]!, p[at]!) - heading(p[at - 2]!, p[at - 1]!)
+      expect(Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn)))).toBeLessThan(0.1)
+    }
+  })
+
+  it('joins the facing edges of a pair that is far enough apart', () => {
+    const route = routeBetween(box(0, 0), box(600, 0), 10)
+    expect(route.a).toEqual({ x: 50, y: 0 })
+    expect(route.b).toEqual({ x: 550, y: 0 })
+  })
+
+  /** Side by side and close, the facing edges would launch into each other, so it goes round the outside. */
+  it('lands a close pair on an outer edge rather than the facing one', () => {
+    const route = routeBetween(box(0, 0), box(130, 0), 10)
+    expect(route.a.x).toBeCloseTo(0, 6)
+    expect(route.b.x).toBeCloseTo(130, 6)
+    expect(Math.abs(route.b.y)).toBeCloseTo(20, 6)
+  })
+
+  /** A click on the path as drawn lands on it; one on the straight chord beneath does not. */
+  it('is hit along the path rather than along its chord', () => {
+    const route = routeBetween(box(0, 0), box(130, 0), 10)
+    const apex = route.points.reduce((top, p) => (p.y < top.y ? p : top))
+    expect(distanceToRoute(apex, route.points)).toBeLessThan(1)
+    expect(distanceToRoute({ x: (route.a.x + route.b.x) / 2, y: (route.a.y + route.b.y) / 2 }, route.points)).toBeGreaterThan(20)
+  })
+})
+
+describe('where a line sets out', () => {
+  it('leaves from another edge than the one a line arrives at', () => {
+    const second = box(600, 0)
+    const third = box(300, 300)
+    const unhindered = routeBetween(second, third, 10).a
+    expect(routeBetween(second, third, 10, [unhindered]).a).not.toEqual(unhindered)
+  })
+
+  /** Its arrival settled, only the start moves. */
+  it('keeps an arrival it was handed', () => {
+    const arrival = { x: 300, y: 280 }
+    expect(routeBetween(box(600, 0), box(300, 300), 10, [], arrival).b).toEqual(arrival)
   })
 })
 

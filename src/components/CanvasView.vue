@@ -420,13 +420,13 @@ import { SOURCE_COLOR, sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
-  bowOf,
   chainsOf,
-  distanceToBow,
+  distanceToRoute,
+  launchedRoute,
   nearestAnchor,
-  readingLineBetween,
+  routeBetween,
   type FrameBox,
-  type ReadingLine,
+  type LineRoute,
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
 import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
@@ -1348,8 +1348,10 @@ const leavesFrom = (unit: string) => unitBlocks.value.get(unit)?.at(-1)
 const joints = computed(() => {
   const out: { key: string; d: string }[] = []
   for (const [unit, boxes] of unitBlocks.value)
-    for (let at = 1; at < boxes.length; at++)
-      out.push({ key: `${unit}/${at}`, d: drawnPath(readingLineBetween(boxes[at - 1]!, boxes[at]!)).d })
+    for (let at = 1; at < boxes.length; at++) {
+      const route = routes.value.byKey.get(`joint/${unit}/${at}`)
+      if (route) out.push({ key: `${unit}/${at}`, d: drawnPath(route).d })
+    }
   return out
 })
 
@@ -1414,19 +1416,14 @@ const lineWidth = computed(() => Math.max(1, Math.min(pageSize.value.w, pageSize
 /** How long each side of an arrow head is, as a multiple of the line's width. */
 const ARROW_PER_WIDTH = 4.5
 
-/** A line as path data: bowed outward, an open arrow head at its far end. */
-function drawnPath(line: ReadingLine): { d: string; head: string } {
-  const c = bowOf(line)
-  const { a, b } = line
-  const d = `M ${a.x} ${a.y} Q ${c.x} ${c.y} ${b.x} ${b.y}`
-  // Along the curve where it arrives, which is from the control point.
-  const tx = b.x - c.x
-  const ty = b.y - c.y
-  const along = Math.hypot(tx, ty)
-  if (along === 0) return { d, head: '' }
+/** A route as path data, an open arrow head at its far end. */
+function drawnPath(route: LineRoute): { d: string; head: string } {
+  const [first, ...rest] = route.points
+  const d = `M ${first!.x} ${first!.y}` + rest.map((p) => ` L ${p.x} ${p.y}`).join('')
+  const { b } = route
   const size = lineWidth.value * ARROW_PER_WIDTH
-  const ux = tx / along
-  const uy = ty / along
+  const ux = route.arrive.x
+  const uy = route.arrive.y
   const back = { x: b.x - ux * size, y: b.y - uy * size }
   const side = size * 0.55
   return {
@@ -1451,19 +1448,49 @@ const edgeKey = (edge: ReadingEdge) => JSON.stringify([edge.from, edge.to])
  * the wrong way rather than no line, because that at least says out loud that
  * they are sitting on top of each other.
  */
+/**
+ * Every route on the page, joints included, keyed as `drawnLines` and `joints`
+ * read them. Worked out together because where one line sets out depends on
+ * where the others arrive: arrivals first, then each start kept off any arrival
+ * on its own block with its own arrival held where it was, so one pass of each
+ * settles it.
+ */
+const routes = computed(() => {
+  const legs: { key: string; from: FrameBox; to: FrameBox }[] = []
+  for (const [unit, boxes] of unitBlocks.value)
+    for (let at = 1; at < boxes.length; at++) legs.push({ key: `joint/${unit}/${at}`, from: boxes[at - 1]!, to: boxes[at]! })
+  for (const edge of [...heldEdges.value, ...connect.links]) {
+    const from = leavesFrom(edge.from)
+    const to = arrivesAt(edge.to)
+    if (from !== undefined && to !== undefined) legs.push({ key: `edge/${edgeKey(edge)}`, from, to })
+  }
+  const arrivals = new Map<FrameBox, Anchor[]>()
+  const ends = legs.map((leg) => routeBetween(leg.from, leg.to, lineWidth.value).b)
+  legs.forEach((leg, at) => arrivals.set(leg.to, [...(arrivals.get(leg.to) ?? []), ends[at]!]))
+  return {
+    byKey: new Map(
+      legs.map((leg, at) => [
+        leg.key,
+        routeBetween(leg.from, leg.to, lineWidth.value, arrivals.get(leg.from), ends[at]),
+      ]),
+    ),
+    // For the line being drawn, to keep its start off them as well.
+    arrivals,
+  }
+})
+
 const drawnLines = computed(() => {
   const chosen = connect.selected
   const all = [...heldEdges.value, ...connect.links]
   const chains = chainsOf(all, currentFile.value?.page.readingOrder ?? [])
   const out: { key: string; d: string; head: string; color: string; chosen: boolean }[] = []
   const draw = (edge: ReadingEdge, keyPrefix: string) => {
-    const from = leavesFrom(edge.from)
-    const to = arrivesAt(edge.to)
-    if (from === undefined || to === undefined) return
+    const route = routes.value.byKey.get(`edge/${edgeKey(edge)}`)
+    if (route === undefined) return
     out.push({
       // Both ends quoted, so no pair of ids spells another pair's key.
       key: `${keyPrefix}${edgeKey(edge)}`,
-      ...drawnPath(readingLineBetween(from, to)),
+      ...drawnPath(route),
       color: CHAIN_COLORS[(chains.get(edgeKey(edge)) ?? 0) % CHAIN_COLORS.length]!,
       chosen: chosen !== null && chosen.edge.from === edge.from && chosen.edge.to === edge.to,
     })
@@ -1491,10 +1518,12 @@ const previewLine = computed(() => {
   if (from === undefined) return null
   const target = hoverTargetId.value
   const to = target === null ? undefined : arrivesAt(target)
+  const taken = routes.value.arrivals.get(from) ?? []
   if (to === undefined) {
-    return { ...drawnPath({ a: nearestAnchor(from, g.at), b: g.at }), refused: false }
+    const a = nearestAnchor(from, g.at, taken, lineWidth.value * 4)
+    return { ...drawnPath(launchedRoute(from, a, g.at, lineWidth.value)), refused: false }
   }
-  return { ...drawnPath(readingLineBetween(from, to)), refused: connect.refuses(target as string) }
+  return { ...drawnPath(routeBetween(from, to, lineWidth.value, taken)), refused: connect.refuses(target as string) }
 })
 
 /**
@@ -1508,12 +1537,9 @@ function lineAt(p: Anchor): ReadingEdge | null {
   const at = toScreen(p)
   let nearest: { edge: ReadingEdge; away: number } | null = null
   for (const edge of heldEdges.value) {
-    const from = leavesFrom(edge.from)
-    const to = arrivesAt(edge.to)
-    if (from === undefined || to === undefined) continue
-    const line = readingLineBetween(from, to)
-    const onScreen = { a: toScreen(line.a), b: toScreen(line.b) }
-    const away = distanceToBow(at, onScreen, toScreen(bowOf(line)))
+    const route = routes.value.byKey.get(`edge/${edgeKey(edge)}`)
+    if (route === undefined) continue
+    const away = distanceToRoute(at, route.points.map(toScreen))
     if (away > lineHitPx.value) continue
     if (nearest === null || away < nearest.away) nearest = { edge, away }
   }

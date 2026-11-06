@@ -1,4 +1,5 @@
 import { turnedAround } from '@/lib/coords'
+import { samplePath, shortestDubins, toPoint, type Pose } from '@/lib/dubins'
 import type { Point } from '@/lib/labelBox'
 
 /**
@@ -14,11 +15,6 @@ export interface FrameBox {
   w: number
   h: number
   rotation: number
-}
-
-export interface ReadingLine {
-  a: Point
-  b: Point
 }
 
 const ORIGIN: Point = { x: 0, y: 0 }
@@ -47,29 +43,16 @@ export function edgeAnchors(box: FrameBox): Point[] {
 }
 
 /** Whichever of the four lies closest to what is being reached for. */
-export function nearestAnchor(box: FrameBox, toward: Point): Point {
-  let best = { at: ORIGIN, away: Number.POSITIVE_INFINITY }
+export function nearestAnchor(box: FrameBox, toward: Point, taken: readonly Point[] = [], keepAway = 0): Point {
+  const free = (at: Point) => taken.every((t) => Math.hypot(at.x - t.x, at.y - t.y) >= keepAway)
+  let best = { at: ORIGIN, away: Number.POSITIVE_INFINITY, free: false }
   for (const at of edgeAnchors(box)) {
     const away = Math.hypot(at.x - toward.x, at.y - toward.y)
-    if (away < best.away) best = { at, away }
+    const open = free(at)
+    // A free anchor beats a taken one however far; only among equals does distance decide.
+    if ((open && !best.free) || (open === best.free && away < best.away)) best = { at, away, free: open }
   }
   return best.at
-}
-
-/**
- * The line between two objects, edge to edge. It always answers.
- *
- * ⚠️ Two frames that overlap get a line whose ends are on their inward-facing
- * edges, so it runs against the way the objects lie and reads oddly. That is
- * on purpose: a line the file holds and the canvas declines to draw cannot be
- * found or removed, while one that looks wrong says out loud that two objects
- * are sitting on top of each other.
- */
-export function readingLineBetween(from: FrameBox, to: FrameBox): ReadingLine {
-  return {
-    a: nearestAnchor(from, to.center),
-    b: nearestAnchor(to, from.center),
-  }
 }
 
 /** How far a point lies from a segment, for deciding whether a click hit it. */
@@ -85,40 +68,136 @@ export function distanceToSegment(p: Point, a: Point, b: Point): number {
 }
 
 /**
- * The control point that bows a line outward: off its middle, to the left of
- * the way it runs, by a share of its length. Lines leaving one object for two
- * others bow apart instead of lying on top of each other.
+ * The path a line is drawn along: a short straight launch out of its edge, the
+ * shortest turn-and-straight to the start of the landing, a short straight
+ * into the other edge. Held as points, since nothing about it is one curve.
  */
-export function bowOf(line: ReadingLine): Point {
-  const dx = line.b.x - line.a.x
-  const dy = line.b.y - line.a.y
-  const length = Math.hypot(dx, dy)
-  if (length === 0) return line.a
-  const bow = Math.min(length * 0.18, 220)
+export interface LineRoute {
+  a: Point
+  b: Point
+  points: readonly Point[]
+  /** Which way the line is travelling as it reaches `b`, a unit vector. */
+  arrive: Point
+  length: number
+}
+
+/** How far a line runs straight out of its edge before it may turn, in line widths. */
+const LAUNCH_WIDTHS = 3
+/** The tightest a line may turn, as a radius in line widths. */
+const TURN_WIDTHS = 6
+
+/** Straight out of `box` through the anchor `at`: the edge's outward normal, turned with the object. */
+function outwardOf(box: FrameBox, at: Point): Point {
+  const ox = at.x - box.center.x
+  const oy = at.y - box.center.y
+  const o = Math.hypot(ox, oy) || 1
+  return { x: ox / o, y: oy / o }
+}
+
+function launchPose(at: Point, out: Point, width: number): Pose {
+  const reach = width * LAUNCH_WIDTHS
+  return { x: at.x + out.x * reach, y: at.y + out.y * reach, heading: Math.atan2(out.y, out.x) }
+}
+
+/**
+ * Out of an edge and on to a loose point — the line being drawn, whose far end
+ * is the pointer and has no edge to land on. It arrives travelling straight at
+ * the pointer from where its launch ended.
+ */
+export function launchedRoute(from: FrameBox, a: Point, b: Point, width: number): LineRoute {
+  const start = launchPose(a, outwardOf(from, a), width)
+  const toward = Math.atan2(b.y - start.y, b.x - start.x)
+  const path = shortestDubins(start, { x: b.x, y: b.y, heading: toward }, width * TURN_WIDTHS)
   return {
-    x: (line.a.x + line.b.x) / 2 - (dy / length) * bow,
-    y: (line.a.y + line.b.y) / 2 + (dx / length) * bow,
+    a,
+    b,
+    points: [a, ...samplePath(path).map(toPoint)],
+    arrive: { x: Math.cos(toward), y: Math.sin(toward) },
+    length: width * LAUNCH_WIDTHS + path.length,
   }
 }
 
-export function pointOnBow(line: ReadingLine, control: Point, t: number): Point {
-  const u = 1 - t
+/** Whether a point lies inside a frame, its edge excluded. */
+function inside(box: FrameBox, p: Point): boolean {
+  const local = turnedAround(ORIGIN, { x: p.x - box.center.x, y: p.y - box.center.y }, -box.rotation)
+  return Math.abs(local.x) < box.w / 2 - 0.5 && Math.abs(local.y) < box.h / 2 - 0.5
+}
+
+/** Out of `a` at right angles to its edge, into `b` at right angles to its. */
+function pairedRoute(from: FrameBox, a: Point, to: FrameBox, b: Point, width: number): LineRoute {
+  const outB = outwardOf(to, b)
+  const landing = launchPose(b, outB, width)
+  const path = shortestDubins(
+    launchPose(a, outwardOf(from, a), width),
+    { ...landing, heading: landing.heading + Math.PI },
+    width * TURN_WIDTHS,
+  )
   return {
-    x: u * u * line.a.x + 2 * u * t * control.x + t * t * line.b.x,
-    y: u * u * line.a.y + 2 * u * t * control.y + t * t * line.b.y,
+    a,
+    b,
+    points: [a, ...samplePath(path).map(toPoint), b],
+    arrive: { x: -outB.x, y: -outB.y },
+    length: width * LAUNCH_WIDTHS * 2 + path.length,
   }
 }
 
-/** How far a point lies from the bowed line, for deciding whether a click hit the curve as drawn. */
-export function distanceToBow(p: Point, line: ReadingLine, control: Point): number {
-  const STEPS = 24
+/**
+ * How long a route runs, or Infinity where it cuts back through either of its
+ * own frames — the sign that its ends were put on the wrong edges.
+ */
+function costOf(route: LineRoute, from: FrameBox, to: FrameBox): number {
+  const between = route.points.slice(1, -1)
+  return between.some((p) => inside(from, p) || inside(to, p)) ? Number.POSITIVE_INFINITY : route.length
+}
+
+/**
+ * The line between two objects as drawn.
+ *
+ * Both ends are settled before the line between them is: each leaves or
+ * arrives at right angles to its edge, and what runs between the two launches
+ * is the shortest path that never turns tighter than a set radius — so it is
+ * smooth by construction, with no corner anywhere along it. Among every pair
+ * of edges the one kept is the shortest whose path stays out of both frames.
+ * Facing edges win when the objects stand apart; set close, the launches meet
+ * head on and the path between them has to loop, and the pair that wins is
+ * one that goes round the outside.
+ *
+ * ⚠️ It always answers, even for frames that overlap and have no clean pair:
+ * the first pair is kept, and a line that looks wrong says out loud that two
+ * objects sit on top of each other, where a line the canvas declined to draw
+ * could be neither found nor removed.
+ */
+export function routeBetween(
+  from: FrameBox,
+  to: FrameBox,
+  width: number,
+  /**
+   * Where other lines arrive on `from`. A line setting out from the same spot
+   * reads as one line running through, so it leaves from another edge.
+   */
+  arrivals: readonly Point[] = [],
+  /** Where this line has already been settled to arrive, when only its start is still open. */
+  arrival?: Point,
+): LineRoute {
+  const keepAway = width * 4
+  const starts = edgeAnchors(from)
+  const free = starts.filter((at) => arrivals.every((t) => Math.hypot(at.x - t.x, at.y - t.y) >= keepAway))
+  const ends = arrival === undefined ? edgeAnchors(to) : [arrival]
+  let best: { route: LineRoute; cost: number } | null = null
+  for (const a of free.length > 0 ? free : starts)
+    for (const b of ends) {
+      const route = pairedRoute(from, a, to, b, width)
+      const cost = costOf(route, from, to)
+      // Strictly less, so a tie goes to the edge listed first and the choice holds still.
+      if (best === null || cost < best.cost) best = { route, cost }
+    }
+  return best!.route
+}
+
+/** How far a point lies from the route as drawn, for deciding whether a click hit it. */
+export function distanceToRoute(p: Point, points: readonly Point[]): number {
   let nearest = Number.POSITIVE_INFINITY
-  let previous = line.a
-  for (let step = 1; step <= STEPS; step++) {
-    const next = pointOnBow(line, control, step / STEPS)
-    nearest = Math.min(nearest, distanceToSegment(p, previous, next))
-    previous = next
-  }
+  for (let at = 1; at < points.length; at++) nearest = Math.min(nearest, distanceToSegment(p, points[at - 1]!, points[at]!))
   return nearest
 }
 
