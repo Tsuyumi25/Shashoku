@@ -117,7 +117,9 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "`14.2 <text>  候選 …`; the blocks are read as one sentence with `/` between them. " +
         "Each section ends with a mermaid flowchart of those lines, one node per sentence " +
         "(`n14`, holding its 譯, 原 and 標記) and one arrow per line; a sentence inside " +
-        "`subgraph 未維護` has no line yet, so where it falls in the story is not known. " +
+        "`subgraph 未維護` is one the person has not drawn a line for, which is normal and " +
+        "not a gap to fill: lines are optional, many sentences (sound effects, text outside " +
+        "balloons) never get one, and their typed order is the reading to use. " +
         "Two arrows out of one node are two things read at the same time. " +
         GRAMMAR +
         " page_ids reads only those pages; face reads only that face. changed_only answers " +
