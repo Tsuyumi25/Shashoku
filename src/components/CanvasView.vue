@@ -134,6 +134,9 @@
           class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
           :style="{ '--line': `${lineWidth}px` }"
         >
+          <g class="reading-line reading-joint">
+            <path v-for="joint in joints" :key="joint.key" :d="joint.d" />
+          </g>
           <g v-for="line in drawnLines" :key="line.key" class="reading-line" :class="line.chosen && 'reading-line-chosen'">
             <path :d="line.d" :style="{ stroke: line.color }" />
             <path :d="line.head" :style="{ stroke: line.color }" />
@@ -426,7 +429,7 @@ import {
   type ReadingLine,
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
-import { cornersOf, obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
+import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -1318,8 +1321,14 @@ const objectBoxes = computed(() => {
  * answer different questions: a line joins two pieces of content, and a handle
  * takes hold of one piece of lettering.
  */
-const unitBoxes = computed(() => {
-  const out = new Map<string, FrameBox>()
+/**
+ * Each unit's blocks, in the order they are read, where lines meet the unit: a
+ * line arrives at its first block and leaves from its last. A box drawn round
+ * blocks set far apart is a rectangle nobody drew, and a line ending on it ends
+ * somewhere in between that belongs to neither.
+ */
+const unitBlocks = computed(() => {
+  const out = new Map<string, FrameBox[]>()
   const page = currentFile.value?.page
   if (page === undefined) return out
   const view = facePage(page, project.activeFace)
@@ -1327,27 +1336,20 @@ const unitBoxes = computed(() => {
     const boxes = blocksOf(view, unit, editor.textSide)
       .map((block) => objectBoxes.value.get(block.id))
       .filter((b): b is FrameBox => b !== undefined)
-    if (boxes.length === 0) continue
-    if (boxes.length === 1) {
-      out.set(unit.id, boxes[0])
-      continue
-    }
-    // The turn goes: two blocks set at different angles have no shared one, and
-    // a line arriving at a tilted rectangle nobody drew reads as a mistake.
-    const corners = boxes.flatMap((b) => cornersOf({ center: b.center, w: b.w, h: b.h, rotation: b.rotation }))
-    const xs = corners.map((c) => c.x)
-    const ys = corners.map((c) => c.y)
-    const left = Math.min(...xs)
-    const right = Math.max(...xs)
-    const top = Math.min(...ys)
-    const bottom = Math.max(...ys)
-    out.set(unit.id, {
-      center: { x: (left + right) / 2, y: (top + bottom) / 2 },
-      w: right - left,
-      h: bottom - top,
-      rotation: 0,
-    })
+    if (boxes.length > 0) out.set(unit.id, boxes)
   }
+  return out
+})
+
+const arrivesAt = (unit: string) => unitBlocks.value.get(unit)?.[0]
+const leavesFrom = (unit: string) => unitBlocks.value.get(unit)?.at(-1)
+
+/** One sentence set in several blocks, drawn as one: each block joined to the next, with no arrow. */
+const joints = computed(() => {
+  const out: { key: string; d: string }[] = []
+  for (const [unit, boxes] of unitBlocks.value)
+    for (let at = 1; at < boxes.length; at++)
+      out.push({ key: `${unit}/${at}`, d: drawnPath(readingLineBetween(boxes[at - 1]!, boxes[at]!)).d })
   return out
 })
 
@@ -1455,8 +1457,8 @@ const drawnLines = computed(() => {
   const chains = chainsOf(all, currentFile.value?.page.readingOrder ?? [])
   const out: { key: string; d: string; head: string; color: string; chosen: boolean }[] = []
   const draw = (edge: ReadingEdge, keyPrefix: string) => {
-    const from = unitBoxes.value.get(edge.from)
-    const to = unitBoxes.value.get(edge.to)
+    const from = leavesFrom(edge.from)
+    const to = arrivesAt(edge.to)
     if (from === undefined || to === undefined) return
     out.push({
       // Both ends quoted, so no pair of ids spells another pair's key.
@@ -1485,10 +1487,10 @@ const hoverTargetId = ref<string | null>(null)
 const previewLine = computed(() => {
   const g = connect.gesture
   if (g === null) return null
-  const from = unitBoxes.value.get(g.source)
+  const from = leavesFrom(g.source)
   if (from === undefined) return null
   const target = hoverTargetId.value
-  const to = target === null ? undefined : unitBoxes.value.get(target)
+  const to = target === null ? undefined : arrivesAt(target)
   if (to === undefined) {
     return { ...drawnPath({ a: nearestAnchor(from, g.at), b: g.at }), refused: false }
   }
@@ -1506,8 +1508,8 @@ function lineAt(p: Anchor): ReadingEdge | null {
   const at = toScreen(p)
   let nearest: { edge: ReadingEdge; away: number } | null = null
   for (const edge of heldEdges.value) {
-    const from = unitBoxes.value.get(edge.from)
-    const to = unitBoxes.value.get(edge.to)
+    const from = leavesFrom(edge.from)
+    const to = arrivesAt(edge.to)
     if (from === undefined || to === undefined) continue
     const line = readingLineBetween(from, to)
     const onScreen = { a: toScreen(line.a), b: toScreen(line.b) }
@@ -2470,6 +2472,9 @@ useEventListener(window, 'blur', () => {
   stroke-width: var(--line);
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.reading-joint path {
+  stroke: var(--muted-foreground);
 }
 .reading-line-chosen path {
   stroke: var(--foreground) !important;
