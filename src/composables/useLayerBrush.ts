@@ -3,7 +3,7 @@ import type { RasterLayerEntry } from '@shared/page/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { hexToRgb } from '@/lib/color'
-import { screenToContentPx } from '@/lib/coords'
+import { useExplodeStore } from '@/stores/explodeStore'
 import { pressureFrom } from '@/lib/selection/brushInput'
 import { stampMaskCircle } from '@/lib/selection/brushMask'
 import {
@@ -135,6 +135,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   const preferences = usePreferencesStore()
   const raster = useRasterStore()
   const overlay = useStrokeOverlayStore()
+  const explode = useExplodeStore()
   const { target, refuse } = useRasterTarget()
 
   let stroke: Stroke | null = null
@@ -158,10 +159,19 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   let inkScratch = new Uint8ClampedArray(0)
   let stampScratch = new Uint8ClampedArray(0)
 
+  /**
+   * Where a dab lands, read through whichever piece of a split page is under
+   * the pointer right now — the brush is aimed on the screen, so each dab
+   * answers for itself. Null in the gap between two pieces, where there is no
+   * page to put ink on.
+   */
   function pageAt(e: MouseEvent): Point | null {
     const el = container.value
     if (!el) return null
-    return screenToContentPx(e.clientX, e.clientY, el.getBoundingClientRect(), editor.view)
+    const rect = el.getBoundingClientRect()
+    const region = explode.regionAtScreen(e.clientX, e.clientY, rect)
+    if (region === null) return null
+    return explode.pageAtScreen(e.clientX, e.clientY, rect, region)
   }
 
   /**
@@ -362,7 +372,10 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     if (mode === null) return false
     const page = editor.currentPageId
     const at = pageAt(e)
-    if (page === null || at === null) return false
+    if (page === null) return false
+    // Pressed in the gap between two pieces of a split page: nothing to paint
+    // on, and the press is still the brush's rather than what lies behind it.
+    if (at === null) return true
     const file = project.pageById(page)
     if (!file) return false
 

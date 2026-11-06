@@ -9,7 +9,7 @@ import type {
   TranslationCandidate,
 } from '@shared/page/types'
 import { PASS_THROUGH } from '@shared/page/types'
-import { useZoomPan, type Size } from '@/composables/useZoomPan'
+import { useZoomPan, type Area, type Size } from '@/composables/useZoomPan'
 import type { ProjectFile } from '@/types/project'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useCardStore } from '@/stores/cardStore'
@@ -636,9 +636,12 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const viewContainerSize = ref<Size>({ w: 0, h: 0 })
   const viewContentSize = ref<Size>({ w: 0, h: 0 })
+  /** Where the page is shown, when that is not where it lies — the split page's pieces, pushed apart. */
+  const viewFitArea = ref<Area | null>(null)
   const { view, fitToView, wheelZoom, zoomBy, panBy, rotateTo } = useZoomPan(
     viewContainerSize,
     viewContentSize,
+    viewFitArea,
   )
   /** The page the view was last fitted to, so re-decoding one does not refit. */
   const viewFittedPage = ref<string | null>(null)
@@ -3233,6 +3236,7 @@ export const useEditorStore = defineStore('editor', () => {
     viewFittedPage,
     maskTarget,
     fitToView,
+    viewFitArea,
     wheelZoom,
     zoomBy,
     panBy,

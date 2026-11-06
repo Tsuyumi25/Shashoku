@@ -123,6 +123,7 @@ import {
 import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useExplodeStore } from '@/stores/explodeStore'
 
 const props = defineProps<{
   /**
@@ -152,6 +153,7 @@ const linked = computed(() => pointedCard.value ?? props.linked)
 const editor = useEditorStore()
 const project = useProjectStore()
 const cards$ = useCardStore()
+const explode = useExplodeStore()
 const viewportOrigin = useViewportOrigin()
 
 const file = computed(() =>
@@ -305,13 +307,21 @@ const drawn = computed<DrawnCard[]>(() => {
  * held still on purpose; the line is the one thing that must keep up, since what
  * it says is which list belongs to the object in your hand — and an end left
  * behind points at where that object was.
+ *
+ * ⚠️ The object end follows whichever piece of a split page the object is drawn
+ * on. The card itself stands off the page, where no piece owns it, so it does
+ * not travel — only the line's reach does.
  */
 const tether = computed(() => {
   if (linked.value === null) return null
   const list = listed.value.find((l) => l.objectId === linked.value)
   const box = cards$.boxOf(pinKey(linked.value))
   if (!list || !box) return null
-  return tetherBetween(frameOf(list.entry), box)
+  const frame = frameOf(list.entry)
+  const offset = explode.offsetOf(
+    explode.regionAtPage({ x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 }),
+  )
+  return tetherBetween({ ...frame, x: frame.x + offset.x, y: frame.y + offset.y }, box)
 })
 
 function whoWrote(row: TranslationRow): string {

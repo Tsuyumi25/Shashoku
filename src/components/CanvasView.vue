@@ -6,7 +6,7 @@
     :class="[canvasCursor]"
     @wheel.prevent="onWheel"
     @pointerdown="onPointerDown"
-    @pointerdown.capture="onAltPress"
+    @pointerdown.capture="onPressCapture"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
@@ -16,7 +16,12 @@
     @contextmenu.prevent
   >
     <template v-if="currentFile && pageReady">
-      <div :style="stageStyle">
+      <!--
+        Gone while the page is in pieces: it is one rectangle the size of the
+        whole page, and left standing it would fill the gaps between the pieces
+        with checker — saying there is page there when there is none.
+      -->
+      <div v-if="!exploded" :style="stageStyle">
         <div class="page-checker" :style="checkerStyle" />
       </div>
 
@@ -27,7 +32,10 @@
         canvas gestures, and the frames go over everything drawn because they
         are what the pointer is meant to find.
       -->
-      <div v-if="pageReady && currentFile" class="pointer-events-none absolute inset-0">
+      <div
+        v-if="pageReady && currentFile"
+        class="pointer-events-none absolute inset-0"
+      >
         <PageStack
           :nodes="shownStack"
           :bitmaps="layerBitmaps"
@@ -65,7 +73,10 @@
         written above the page is an overlay drawn under the base map, which
         covers every page edge to edge. The ants would simply never be seen.
       -->
-      <canvas ref="overlayCanvasRef" class="pointer-events-none absolute inset-0 h-full w-full" />
+      <canvas
+        ref="overlayCanvasRef"
+        class="pointer-events-none absolute inset-0 h-full w-full"
+      />
 
       <!--
         ⭐ Everything that follows the document, under one transform.
@@ -168,6 +179,7 @@
               v-for="layer in rasterFrames"
               :key="layer.id"
               :frame="frameOf(layer)"
+              :copies="copiesOf(layer.id)"
               :view="view"
               :selected="layer.id === editor.cursorId && !inGroup(layer.id)"
               :in-selection="editor.isSelected(layer.id) && !inGroup(layer.id)"
@@ -198,6 +210,7 @@
             :member="object.member"
             :tags="object.tags"
             :natural="editor.viewContentSize"
+            :copies="copiesOf(object.id)"
             :view="view"
             :selected="object.id === editor.cursorId && !inGroup(object.id)"
             :in-selection="editor.isSelected(object.id) && !inGroup(object.id)"
@@ -215,7 +228,7 @@
             @pointerenter="pointedObjectId = object.id"
             @pointerleave="pointedObjectId = null"
             @select="onSelectObject(object.id, $event)"
-            @move="moveLabelTo(object.id, $event)"
+            @move="(from, to) => moveLabelTo(object.id, from, to)"
             @move-end="(from, to) => commitLabelMove(object.id, from, to)"
             @scale-start="beginLabelScale(object.id)"
             @scale="(fontSizePx, at) => scaleLabelTo(object.id, { fontSizePx }, at)"
@@ -236,6 +249,7 @@
           <ObjectFrame
             v-if="groupFrame"
             :box="groupFrame"
+            :copies="groupCopies"
             :view="view"
             :rotation="groupTurn"
             selected
@@ -394,7 +408,13 @@ import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { joinedBelow } from '@shared/effects/stroke'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { originalStack, pageStack, stackedRasterNodes, stackedTextNodes, withoutText } from '@shared/page/stack'
+import {
+  originalStack,
+  pageStack,
+  stackedRasterNodes,
+  stackedTextNodes,
+  withoutText,
+} from '@shared/page/stack'
 import { isLocked } from '@shared/page/tree'
 import { faceTree, treeOf } from '@shared/page/trees'
 import type { ReadingEdge } from '@shared/page/readingGraph'
@@ -409,15 +429,18 @@ import { useRasterTarget } from '@/composables/useRasterTarget'
 import { useSelectionTool } from '@/composables/useSelectionTool'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import {
+  clamp,
   contentToScreenPx,
   screenToContentPx,
   screenToPagePx,
   travelSinceGrab,
   type Anchor,
+  type Displacement,
 } from '@/lib/coords'
 import { drawnLabel } from '@/lib/labelRaster'
 import { SOURCE_COLOR, sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
+import { placementTurn } from '@/lib/layerTransform'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
   chainsOf,
@@ -451,6 +474,9 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 import { useUiStore } from '@/stores/uiStore'
+import { useExplodeStore, WHOLE_PAGE } from '@/stores/explodeStore'
+import type { FrameCopy } from '@/lib/explode/frames'
+import type { Rect } from '@/lib/explode/partition'
 
 const project = useProjectStore()
 const editor = useEditorStore()
@@ -460,6 +486,7 @@ const ocr = useOcrStore()
 const ui = useUiStore()
 const raster = useRasterStore()
 const preferences = usePreferencesStore()
+const explode = useExplodeStore()
 
 const view = editor.view
 
@@ -548,12 +575,19 @@ const ocrBoxes = computed(() => {
   const pageId = editor.currentPageId
   if (!pageId || !ocr.showing(pageId)) return []
   const seen = new Set<string>()
-  return project.readingsOfPage(pageId).filter((c) => {
-    const at = `${c.x},${c.y},${c.w},${c.h}`
-    if (seen.has(at)) return false
-    seen.add(at)
-    return true
-  })
+  return project
+    .readingsOfPage(pageId)
+    .filter((c) => {
+      const at = `${c.x},${c.y},${c.w},${c.h}`
+      if (seen.has(at)) return false
+      seen.add(at)
+      return true
+    })
+    .map((c) => {
+      // A box never straddles a boundary, so its own middle names its piece.
+      const offset = explode.offsetOf(explode.regionAtPage({ x: c.x + c.w / 2, y: c.y + c.h / 2 }))
+      return { hash: c.hash, x: c.x + offset.x, y: c.y + offset.y, w: c.w, h: c.h }
+    })
 })
 
 const ocrPointedBox = computed(() => {
@@ -562,7 +596,11 @@ const ocrPointedBox = computed(() => {
   const found = project
     .readingsOfPage(editor.currentPageId)
     .find((c) => c.hash === hash)
-  return found ? { x: found.x, y: found.y, width: found.w, height: found.h } : null
+  if (!found) return null
+  const offset = explode.offsetOf(
+    explode.regionAtPage({ x: found.x + found.w / 2, y: found.y + found.h / 2 }),
+  )
+  return { x: found.x + offset.x, y: found.y + offset.y, width: found.w, height: found.h }
 })
 
 /**
@@ -688,13 +726,7 @@ const layerAlpha = useLayerAlpha(
 function layerHitAt(p: Anchor): string | null {
   const file = currentFile.value
   if (!file) return null
-  return layerAt(
-    stack.value,
-    p,
-    (id) => isLocked(tree.value, id),
-    layerAlpha.alphaAt,
-    frameOf,
-  )
+  return layerAt(stack.value, p, (id) => isLocked(tree.value, id), layerAlpha.alphaAt, frameOf)
 }
 
 /** Which layer the pointer is on, so its frame can say so before the press. */
@@ -718,13 +750,14 @@ onMounted(() => {
  * only the release enters the undo stack — otherwise one drag would leave a
  * frame's worth of entries to undo one at a time.
  */
-function moveLabelTo(labelId: string, to: Anchor) {
+function moveLabelTo(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
+  const landed = landedAnchor(from, to)
   if (groupIds.value.includes(labelId)) {
-    moveGroupWith(labelId, to)
+    moveGroupWith(labelId, landed)
     return
   }
-  project.moveLabel(editor.currentPageId, labelId, to.x, to.y)
+  project.moveLabel(editor.currentPageId, labelId, landed.x, landed.y)
 }
 
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
@@ -733,7 +766,8 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
     finishGroup()
     return
   }
-  editor.cmdMoveLabel(editor.currentPageId, labelId, from, to)
+  const landed = landedAnchor(from, to)
+  editor.cmdMoveLabel(editor.currentPageId, labelId, from, landed)
 }
 
 
@@ -1055,7 +1089,8 @@ const foretold = computed(() => {
     const o = shown.get(id)
     if (!o) return null
     const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
-    return { x: d.center.x, y: d.center.y, w: d.box.w, h: d.box.h }
+    const offset = offsetOfObject(id)
+    return { x: d.center.x + offset.x, y: d.center.y + offset.y, w: d.box.w, h: d.box.h }
   }
   const main = facePage(file.page, project.activeFace).units.find((u) => u.id === plan.main)
   const inMain = main ? main.members.map(centre).filter((c) => c !== null) : []
@@ -1089,6 +1124,9 @@ function accentOf(tags: readonly string[]): string | undefined {
 }
 
 const containerRef = useTemplateRef('containerRef')
+
+/** Whether the page is being shown in pieces at all, which is what hides the whole one. */
+const exploded = computed(() => explode.exploded)
 
 /**
  * The stage's whole transform, and the one number the overlays on it need to
@@ -1162,8 +1200,8 @@ const objectMarqueeStyle = computed(() => {
   }
   return {
     borderWidth: 'calc(1px * var(--px))',
-    left: `${box.centerX}px`,
-    top: `${box.centerY}px`,
+    left: `${box.centerX + heldOffset.value.x}px`,
+    top: `${box.centerY + heldOffset.value.y}px`,
     width: `${box.width}px`,
     height: `${box.height}px`,
     // No turn of its own: the stage already carries the view's.
@@ -1188,6 +1226,8 @@ function sweepObjects() {
   const hit: string[] = []
   for (const object of objects.value) {
     if (object.locked) continue
+    // Swept through one piece's window, so only what that window shows is in it.
+    if (explode.exploded && !(objectRegions.value.get(object.id) ?? []).includes(heldRegion.value)) continue
     const drawn = drawnLabel(
       object.code,
       object.style,
@@ -1274,6 +1314,22 @@ function finishGroup(): void {
 }
 
 /**
+ * The box round the set is cut like any other frame — and carried whole with
+ * its members while a hand has them.
+ */
+const groupCopies = computed<readonly FrameCopy[]>(() => {
+  const box = groupFrame.value
+  if (!explode.exploded || box === null) return WHOLE_PAGE_COPY
+  const bounds = boundsOf({
+    center: { x: box.centerX, y: box.centerY },
+    w: box.width,
+    h: box.height,
+    rotation: groupTurn.value,
+  })
+  return copiesIn(explode.regionsOfBox(bounds))
+})
+
+/**
  * The objects one gesture has already crossed. Held so that sweeping back over
  * one does not ask twice, and so the whole sweep lands as a single command.
  *
@@ -1312,6 +1368,152 @@ const objectBoxes = computed(() => {
   return out
 })
 
+/** The upright extent of a frame lying at an angle, which is what a cut is asked about. */
+function boundsOf(box: FrameBox): Rect {
+  const cos = Math.abs(Math.cos(box.rotation))
+  const sin = Math.abs(Math.sin(box.rotation))
+  const w = box.w * cos + box.h * sin
+  const h = box.w * sin + box.h * cos
+  return { x: box.center.x - w / 2, y: box.center.y - h / 2, w, h }
+}
+
+/**
+ * Which pieces of a split page each object is drawn on — the one its middle
+ * falls in first, then every other piece its frame reaches into.
+ */
+const objectRegions = computed(() => {
+  const out = new Map<string, readonly number[]>()
+  if (!explode.exploded) return out
+  for (const [id, box] of objectBoxes.value) out.set(id, explode.regionsOfBox(boundsOf(box)))
+  for (const layer of rasterFrames.value) {
+    // What `RasterFrame` draws: the layer's own frame under the gesture in
+    // progress, so the pieces a frame is cut across are the pieces it is on.
+    const frame = frameOf(layer)
+    const place = placement.placementOf(layer.id)
+    out.set(
+      layer.id,
+      explode.regionsOfBox(
+        boundsOf({
+          center: { x: frame.x + frame.w / 2 + place.dx, y: frame.y + frame.h / 2 + place.dy },
+          w: frame.w * Math.hypot(place.a, place.b),
+          h: frame.h * Math.hypot(place.c, place.d),
+          rotation: placementTurn(place),
+        }),
+      ),
+    )
+  }
+  return out
+})
+
+/** One copy, where it stands, uncut. */
+function wholeCopy(offset: Anchor): FrameCopy[] {
+  return [{ key: 'whole', offset }]
+}
+
+/**
+ * Each frame drawn once per piece of the page it crosses, cut to that piece's
+ * shape — which is the cut its own pixels take, so frame and pixels cannot come
+ * apart. A frame inside one piece is simply carried to where that piece stands.
+ */
+function copiesIn(regions: readonly number[]): FrameCopy[] {
+  if (regions.length === 1) return wholeCopy(explode.offsetOf(regions[0]))
+  return regions.map((region) => ({
+    key: `r${region}`,
+    offset: explode.offsetOf(region),
+    clip: explode.clipOf(region),
+  }))
+}
+
+const frameCopies = computed(() => {
+  const out = new Map<string, readonly FrameCopy[]>()
+  if (!explode.exploded) return out
+  for (const [id, regions] of objectRegions.value) out.set(id, copiesIn(regions))
+  return out
+})
+
+const WHOLE_PAGE_COPY: readonly FrameCopy[] = [{ key: 'whole', offset: { x: 0, y: 0 } }]
+
+function copiesOf(id: string): readonly FrameCopy[] {
+  return frameCopies.value.get(id) ?? WHOLE_PAGE_COPY
+}
+
+/** Where an object is drawn, for the lines that have to reach it. */
+function offsetOfObject(id: string): Anchor {
+  return copiesOf(id)[0].offset
+}
+
+/** The same frames, moved to where their region stands — where a line has to reach. */
+const explodedBoxes = computed(() => {
+  if (!explode.exploded) return objectBoxes.value
+  const out = new Map<string, FrameBox>()
+  for (const [id, box] of objectBoxes.value) {
+    const offset = offsetOfObject(id)
+    out.set(id, { ...box, center: { x: box.center.x + offset.x, y: box.center.y + offset.y } })
+  }
+  return out
+})
+
+/**
+ * The piece of the page the gesture in hand is reading through, settled by the
+ * press that began it and held until it ends — so a drag that crosses a gap
+ * goes on measuring in the piece it started in rather than following whatever
+ * is under the pointer now.
+ */
+const heldRegion = ref(WHOLE_PAGE)
+
+/** The view that gesture speaks in: the canvas's, through that piece's window. */
+const heldView = computed(() => explode.viewOf(heldRegion.value))
+
+/** Where its travel has put that piece, for the marks a gesture draws on the stage. */
+const heldOffset = computed(() => explode.offsetOf(heldRegion.value))
+
+/** A point the gesture read, put where the page is showing it. */
+function asDrawn(p: Anchor): Anchor {
+  const at = heldOffset.value
+  return at.x === 0 && at.y === 0 ? p : { x: p.x + at.x, y: p.y + at.y }
+}
+
+/**
+ * Where the press that began it landed on the page, read through that piece —
+ * the point a drag is carrying, and so the point a release is resolved from.
+ */
+let heldGrab: Anchor = { x: 0, y: 0 }
+
+/**
+ * Which piece a press has landed on, or null for the gap between two of them —
+ * where there is no page, and so nothing to take hold of.
+ */
+function takeRegion(clientX: number, clientY: number, origin: { left: number; top: number }): boolean {
+  const region = explode.regionAtScreen(clientX, clientY, origin)
+  heldRegion.value = region ?? WHOLE_PAGE
+  heldGrab = explode.pageAtScreen(clientX, clientY, origin, heldRegion.value)
+  return region !== null
+}
+
+/**
+ * A drag's travel as the page receives it, read on every frame: the grabbed
+ * point stays under the pointer by belonging to whichever piece is showing it
+ * there, and over a gap it lands on the nearest piece, the page having no width
+ * there.
+ */
+function landedTravel(d: Displacement): Displacement {
+  if (!explode.exploded) return d
+  const at = heldOffset.value
+  const landing = explode.landingAtShown({
+    x: heldGrab.x + at.x + d.dx,
+    y: heldGrab.y + at.y + d.dy,
+  })
+  return { dx: landing.point.x - heldGrab.x, dy: landing.point.y - heldGrab.y }
+}
+
+/** Where a drag of a text object puts it, clamped to the page as the drag itself is. */
+function landedAnchor(from: Anchor, to: Anchor): Anchor {
+  if (!explode.exploded) return to
+  const d = landedTravel({ dx: to.x - from.x, dy: to.y - from.y })
+  const page = editor.viewContentSize
+  return { x: clamp(from.x + d.dx, 0, page.w), y: clamp(from.y + d.dy, 0, page.h) }
+}
+
 /**
  * Each translation's frame on the page, which is where its lines begin and end.
  *
@@ -1334,7 +1536,7 @@ const unitBlocks = computed(() => {
   const view = facePage(page, project.activeFace)
   for (const unit of view.units) {
     const boxes = blocksOf(view, unit, editor.textSide)
-      .map((block) => objectBoxes.value.get(block.id))
+      .map((block) => explodedBoxes.value.get(block.id))
       .filter((b): b is FrameBox => b !== undefined)
     if (boxes.length > 0) out.set(unit.id, boxes)
   }
@@ -1533,6 +1735,7 @@ const previewLine = computed(() => {
  */
 const lineHitPx = computed(() => 8 + (lineWidth.value * view.scale) / 2)
 
+/** Takes a point in the space the lines are drawn in, which is the page as shown. */
 function lineAt(p: Anchor): ReadingEdge | null {
   const at = toScreen(p)
   let nearest: { edge: ReadingEdge; away: number } | null = null
@@ -1577,15 +1780,15 @@ function onConnectDown(p: Anchor) {
     return
   }
   if (hit !== null) {
-    connect.begin(page, hit, p)
+    connect.begin(page, hit, asDrawn(p))
     return
   }
-  connect.select(page, lineAt(p))
+  connect.select(page, lineAt(asDrawn(p)))
 }
 
 function onConnectMove(p: Anchor) {
   hoverTargetId.value = unitAt(p)
-  connect.track(p)
+  connect.track(asDrawn(p))
 }
 
 const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.value)
@@ -2016,41 +2219,44 @@ function onPointerDown(e: PointerEvent) {
     if (layerBrush.onPointerDown(e)) return
     if (selectionTool.onPointerDown(e)) return
   }
+  // Every gesture below reads the page through the piece it was pressed on —
+  // settled in `onPressCapture` — and the gap between two pieces shows no page
+  // at all.
+  const rect = containerRef.value.getBoundingClientRect()
+  if (!pressedOnPage) {
+    editor.selectOnly(null)
+    return
+  }
   if (editor.tool === 'text') {
     // Keeps the press from taking focus off the field the new object opens.
     e.preventDefault()
-    const rect = containerRef.value.getBoundingClientRect()
-    const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
+    const p = screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize)
     const id = editor.addLabelAt(p.x, p.y)
     if (id !== null) beginCanvasTextEdit(id, 0)
     return
   }
   if (editor.tool === 'select-text') {
     el.setPointerCapture(e.pointerId)
-    const rect = containerRef.value.getBoundingClientRect()
-    const p = screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize)
+    const p = screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize)
     objectMarquee.value = { origin: p, current: p, additive: e.shiftKey }
     return
   }
   if (painting.value) {
     el.setPointerCapture(e.pointerId)
-    const rect = containerRef.value.getBoundingClientRect()
     // The press is the last word on whether the key was down, and saying so
     // here also resyncs the switch the panel is drawing.
     editor.overrideHeld = e.ctrlKey || e.metaKey
     tagSpray.value = { ids: new Set(), updateStyle: editor.paintStrokeUpdatesStyle }
-    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize))
     return
   }
   if (connecting.value) {
-    const rect = containerRef.value.getBoundingClientRect()
-    onConnectDown(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    onConnectDown(screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize))
     return
   }
   // Unclamped, unlike placing text: a press out in the gutter is a press on
   // nothing, and clamping it to the page edge would take whatever lies there.
-  const rect = containerRef.value.getBoundingClientRect()
-  const at = screenToContentPx(e.clientX, e.clientY, rect, view)
+  const at = screenToContentPx(e.clientX, e.clientY, rect, heldView.value)
   const hit = layerHitAt(at)
   if (hit === null) {
     // Bare page. The one deliberate way to be holding nothing.
@@ -2130,6 +2336,20 @@ function onAltPress(e: PointerEvent): void {
 }
 
 /**
+ * Every press on the canvas passes here on its way down, a frame's own
+ * included — which is where the piece of a split page the gesture reads
+ * through is settled, before anything has a chance to act on it.
+ */
+function onPressCapture(e: PointerEvent): void {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
+  onAltPress(e)
+}
+
+/** Whether that press found page at all, or the gap between two pieces. */
+let pressedOnPage = true
+
+/**
  * Moving a layer by its own body, which its frame no longer takes the pointer
  * for. Everything the gesture means still belongs to the placement — this is
  * only the press, the travel and the release, in the place where the press
@@ -2156,7 +2376,8 @@ function reportLayerDrag(): void {
   const drag = layerDrag.value
   if (drag === null || !drag.engaged || containerRef.value === null) return
   const rect = containerRef.value.getBoundingClientRect()
-  const d = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, view)
+  const travel = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, heldView.value)
+  const d = landedTravel(travel)
   if (groupIds.value.includes(drag.id)) moveGroupBy(d.dx, d.dy)
   else placement.moveBy(drag.id, d)
 }
@@ -2196,8 +2417,8 @@ function endLayerDrag(): void {
   if (layerDragFrame !== null) {
     cancelAnimationFrame(layerDragFrame)
     layerDragFrame = null
-    reportLayerDrag()
   }
+  reportLayerDrag()
   const drag = layerDrag.value
   layerDrag.value = null
   if (drag === null || !drag.engaged) return
@@ -2245,19 +2466,22 @@ function onPointerMove(e: PointerEvent) {
       e.clientX,
       e.clientY,
       rect,
-      view,
+      heldView.value,
       editor.viewContentSize,
     )
     return
   }
   if (tagSpray.value !== null && containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect()
-    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    sprayAt(screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize))
     return
   }
   if (connecting.value && containerRef.value) {
     const rect = containerRef.value.getBoundingClientRect()
-    onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, view, editor.viewContentSize))
+    // Between two clicks there is no press to hold the gesture to one piece of
+    // the page, so the loose end reads through whatever is under it.
+    if (e.buttons === 0) takeRegion(e.clientX, e.clientY, rect)
+    onConnectMove(screenToPagePx(e.clientX, e.clientY, rect, heldView.value, editor.viewContentSize))
     return
   }
   if (layerBrush.onPointerMove(e)) return
@@ -2272,7 +2496,9 @@ function onPointerMove(e: PointerEvent) {
     return
   }
   const rect = containerRef.value.getBoundingClientRect()
-  pointedLayerId.value = layerHitAt(screenToContentPx(e.clientX, e.clientY, rect, view))
+  const pointed = explode.regionAtScreen(e.clientX, e.clientY, rect)
+  pointedLayerId.value =
+    pointed === null ? null : layerHitAt(explode.pageAtScreen(e.clientX, e.clientY, rect, pointed))
 }
 
 function onPointerLeave() {

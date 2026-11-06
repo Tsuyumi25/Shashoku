@@ -59,6 +59,21 @@ describe('useZoomPan.fitToView', () => {
     expect(view.ty).toBeCloseTo(0, 9)
   })
 
+  it('frames the area it is given rather than the content, wherever that area lies', () => {
+    const area = { x: -200, y: -150, w: 800, h: 600 }
+    const { view, fitToView } = useZoomPan(
+      () => CONTAINER,
+      () => CONTENT,
+      () => area,
+    )
+    expect(fitToView()).toBe(true)
+    const topLeft = contentToScreenPx(area.x, area.y, view)
+    const bottomRight = contentToScreenPx(area.x + area.w, area.y + area.h, view)
+    expect([topLeft.x, topLeft.y]).toEqual([0, 0])
+    expect(bottomRight.x).toBeCloseTo(CONTAINER.w, 9)
+    expect(bottomRight.y).toBeCloseTo(CONTAINER.h, 9)
+  })
+
   it('leaves the view untouched while the container has no size', () => {
     const { view, fitToView } = useZoomPan(
       () => ({ w: 0, h: 0 }),

@@ -9,12 +9,14 @@ import type { TextLayerEntry } from '@shared/page/types'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
+import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
 import type { DrawnLabel } from '@/lib/labelRaster'
 import { layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
 import type { RunStackNode } from '@/lib/stackSegments'
+import { useExplodeStore } from '@/stores/explodeStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useStrokeOverlayStore, type StrokeOverlay } from '@/stores/strokeOverlayStore'
 
@@ -74,6 +76,7 @@ const props = defineProps<{
 const { pixelRatio } = useDevicePixelRatio()
 
 const raster = useRasterStore()
+const explode = useExplodeStore()
 const stroke = useStrokeOverlayStore()
 const labels = useCanvasLabel()
 
@@ -201,8 +204,11 @@ function paint() {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, cv.width, cv.height)
-  applyViewTransform(ctx, props.view, dpr)
+  paintPieces(ctx, props.view, pieces.value, dpr, (view) => drawNodes(ctx, view, dpr))
+}
 
+function drawNodes(ctx: CanvasRenderingContext2D, view: ViewTransform, dpr: number) {
+  applyViewTransform(ctx, view, dpr)
   for (const node of props.nodes) {
     // Only a run of normally-blending objects shares a canvas, so drawing each
     // at its own alpha over the last is the same picture CSS would make of
@@ -312,6 +318,9 @@ watch(
   schedulePaint,
   { deep: true },
 )
+
+const pieces = computed(() => explode.piecesOf(props.view))
+watch(pieces, schedulePaint)
 
 /**
  * Nothing above draws a run that has just appeared: every watch here fires on a

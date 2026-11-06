@@ -1,5 +1,6 @@
 import { onBeforeUnmount, watch, type Ref } from 'vue'
 import { applyViewTransform } from '@/lib/coords'
+import { paintPieces, type Piece } from '@/lib/explode/pieces'
 import {
   ANTS_PHASES,
   antsTile,
@@ -8,8 +9,9 @@ import {
   strokeBuildingPath,
   strokeSegments,
 } from '@/lib/selection/overlay'
-import { intersectRect, sameRect, type Rect } from '@/lib/selection/rect'
+import { intersectRect, sameRect, type Point, type Rect } from '@/lib/selection/rect'
 import { useEditorStore } from '@/stores/editorStore'
+import { useExplodeStore } from '@/stores/explodeStore'
 import { useSelectionStore } from '@/stores/selectionStore'
 
 /** A crawl reads as a crawl at about twelve steps a second, and no faster. */
@@ -29,10 +31,12 @@ interface OverlayFrame {
   wash: OffscreenCanvas | null
   /** Whether the ants mask has anything in it this frame. */
   ants: boolean
-  building: Path2D | null
+  /** The shape a gesture is building, in page pixels. */
+  building: readonly Point[] | null
+  pieces: readonly Piece[] | null
 }
 
-const EMPTY_FRAME: OverlayFrame = { wash: null, ants: false, building: null }
+const EMPTY_FRAME: OverlayFrame = { wash: null, ants: false, building: null, pieces: null }
 
 /**
  * The layer over the page that says what is selected.
@@ -50,6 +54,7 @@ const EMPTY_FRAME: OverlayFrame = { wash: null, ants: false, building: null }
 export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready: () => boolean) {
   const editor = useEditorStore()
   const selection = useSelectionStore()
+  const explode = useExplodeStore()
   const view = editor.view
 
   let frame = EMPTY_FRAME
@@ -97,6 +102,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
     const page = editor.currentPageId
     if (page === null || !ready()) return EMPTY_FRAME
     const dpr = window.devicePixelRatio || 1
+    const pieces = explode.piecesOf(view)
 
     const shown = selection.displayFor(page)
     let wash: OverlayFrame['wash'] = null
@@ -142,14 +148,17 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
       const mask = antsMask.getContext('2d')
       if (mask !== null) {
         mask.clearRect(0, 0, w, h)
-        for (const s of segments) if (s.length > 0) strokeSegments(mask, s, view, dpr)
+        paintPieces(mask, view, pieces, dpr, (at) => {
+          mask.setTransform(1, 0, 0, 1, 0, 0)
+          for (const s of segments) if (s.length > 0) strokeSegments(mask, s, at, dpr)
+        })
       }
     }
 
     const placed = selection.buildingPathFor(page)
-    const building = placed.length > 1 ? openPath(placed, view, dpr) : null
+    const building = placed.length > 1 ? placed : null
 
-    return { wash, ants, building }
+    return { wash, ants, building, pieces }
   }
 
   /** The stripes for this phase, kept to where the mask has a boundary. */
@@ -185,13 +194,21 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, cv.width, cv.height)
 
-    if (frame.wash !== null) {
-      applyViewTransform(ctx, view, dpr)
-      ctx.drawImage(frame.wash, 0, 0)
+    const { wash, building, pieces } = frame
+    if (wash !== null) {
+      paintPieces(ctx, view, pieces, dpr, (at) => {
+        applyViewTransform(ctx, at, dpr)
+        ctx.drawImage(wash, 0, 0)
+      })
       ctx.setTransform(1, 0, 0, 1, 0, 0)
     }
     if (frame.ants) drawAnts(ctx)
-    if (frame.building !== null) strokeBuildingPath(ctx, frame.building)
+    if (building !== null) {
+      paintPieces(ctx, view, pieces, dpr, (at) => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        strokeBuildingPath(ctx, openPath(building, at, dpr))
+      })
+    }
   }
 
   function crawl(now: number): void {
@@ -219,6 +236,7 @@ export function useSelectionOverlay(canvas: Ref<HTMLCanvasElement | null>, ready
   }
 
   watch(view, schedulePaint)
+  watch(() => explode.piecesOf(view), schedulePaint)
   watch(() => selection.revision, schedulePaint)
   watch(() => selection.quickMask, schedulePaint)
   watch(() => editor.currentPageId, schedulePaint)

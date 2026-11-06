@@ -1,6 +1,7 @@
 <template>
   <ObjectFrame
     :box="box"
+    :copies="copies"
     per-axis
     :view="view"
     :rotation="rotation"
@@ -98,6 +99,7 @@ import {
   type Displacement,
   type ViewTransform,
 } from '@/lib/coords'
+import type { FrameCopy } from '@/lib/explode/frames'
 import type { TurnedLabel } from '@/stores/editorStore'
 import { samplePadding } from '@/lib/fontSampleCache'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
@@ -136,6 +138,8 @@ const props = defineProps<{
   y: number
   /** The object's own turn on the page, in radians. */
   rotation: number
+  /** Where this frame is drawn, once per piece of a split page. See `ObjectFrame`. */
+  copies: readonly FrameCopy[]
   /**
    * The colour of whichever registered tag sits highest, worn by the frame.
    * Nothing for an object no registered tag speaks for, which leaves the frame
@@ -220,7 +224,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [additive: boolean]
-  move: [to: Anchor]
+  move: [from: Anchor, to: Anchor]
   moveEnd: [from: Anchor, to: Anchor]
   scaleStart: []
   scale: [fontSizePx: number, at: Anchor]
@@ -304,7 +308,7 @@ function onDrag(d: Displacement) {
     x: clamp(dragFrom.x + d.dx, 0, props.natural.w),
     y: clamp(dragFrom.y + d.dy, 0, props.natural.h),
   }
-  emit('move', dragTo)
+  emit('move', dragFrom, dragTo)
 }
 
 function onDragEnd() {

@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import { pixelHexAt } from '@/lib/color'
-import { screenToContentPx } from '@/lib/coords'
+import { useExplodeStore, WHOLE_PAGE } from '@/stores/explodeStore'
 import { pressureFrom } from '@/lib/selection/brushInput'
 import { heldSinceStart } from '@/lib/selection/marquee'
 import type { SelectionOp } from '@/lib/selection/mask'
@@ -57,6 +57,7 @@ export function useSelectionTool(
 ) {
   const editor = useEditorStore()
   const selection = useSelectionStore()
+  const explode = useExplodeStore()
 
   let pressed = false
   let pressAt = { x: 0, y: 0 }
@@ -111,10 +112,28 @@ export function useSelectionTool(
     return pixels
   }
 
+  /**
+   * The piece of a split page this gesture took hold of. A brush takes none:
+   * it is aimed on the screen, so every dab asks again.
+   */
+  let heldRegion = WHOLE_PAGE
+
+  function originOf(): DOMRect | null {
+    return container.value?.getBoundingClientRect() ?? null
+  }
+
+  /** Where a dab lands, through whichever piece is under it, or null in a gap. */
+  function pageAtPointer(e: MouseEvent): Point | null {
+    const rect = originOf()
+    if (rect === null) return null
+    const region = explode.regionAtScreen(e.clientX, e.clientY, rect)
+    return region === null ? null : explode.pageAtScreen(e.clientX, e.clientY, rect, region)
+  }
+
+  /** Where the pointer is, through the piece this gesture took hold of. */
   function pageAt(e: MouseEvent): Point | null {
-    const el = container.value
-    if (!el) return null
-    return screenToContentPx(e.clientX, e.clientY, el.getBoundingClientRect(), editor.view)
+    const rect = originOf()
+    return rect === null ? null : explode.pageAtScreen(e.clientX, e.clientY, rect, heldRegion)
   }
 
   function opOf(e: { shiftKey: boolean; altKey: boolean }): SelectionOp {
@@ -144,8 +163,8 @@ export function useSelectionTool(
 
   function onPointerDown(e: PointerEvent): boolean {
     const target = editor.maskTarget
-    const at = pageAt(e)
-    if (target === null || at === null) return false
+    const rect = originOf()
+    if (target === null || rect === null) return false
     /*
      * The two brushes draw the mask only while Quick Mask is on. Outside it the
      * same two tools are painting the layer, which is another handler's — and
@@ -153,6 +172,13 @@ export function useSelectionTool(
      * declines would still be recorded as one it caught.
      */
     if (maskBrushModeOf(editor.tool) !== null && !selection.quickMask) return false
+    const region = explode.regionAtScreen(e.clientX, e.clientY, rect)
+    // A press in the gap between two pieces of a split page shows no page, so
+    // there is nothing to select or to paint — and the press is still this
+    // tool's rather than what lies behind the gap.
+    if (region === null) return true
+    heldRegion = region
+    const at = explode.pageAtScreen(e.clientX, e.clientY, rect, region)
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     pressed = true
     pressAt = { x: e.clientX, y: e.clientY }
@@ -196,10 +222,14 @@ export function useSelectionTool(
 
   function onPointerMove(e: PointerEvent): boolean {
     if (!pressed && !selection.isDrawing) return false
-    const at = pageAt(e)
-    if (at === null) return false
+    // A mask brush is aimed on the screen and asks again for every dab; a
+    // marquee is measured in the piece its press took hold of.
+    const brushMode = maskBrushModeOf(editor.tool)
+    const at = brushMode === null ? pageAt(e) : pageAtPointer(e)
+    // A dab over the gap is dropped and the stroke carries on past it.
+    if (at === null) return brushMode !== null
     if (Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) >= DRAG_SLOP) moved = true
-    if (maskBrushModeOf(editor.tool) !== null) {
+    if (brushMode !== null) {
       if (pressed) selection.strokeTo(at, pressureFrom(e))
       return true
     }
@@ -217,7 +247,7 @@ export function useSelectionTool(
     const wasPressed = pressed
     pressed = false
     if (maskBrushModeOf(editor.tool) !== null) {
-      if (wasPressed) selection.endStroke(pageAt(e) ?? undefined, pressureFrom(e))
+      if (wasPressed) selection.endStroke(pageAtPointer(e) ?? undefined, pressureFrom(e))
       return wasPressed
     }
     if (!selection.isDrawing) return wasPressed
@@ -257,7 +287,7 @@ export function useSelectionTool(
    */
   function colorAt(e: MouseEvent): string | null {
     const pixels = pixelsOf('colour')
-    const at = pageAt(e)
+    const at = pageAtPointer(e)
     const { w, h } = editor.viewContentSize
     if (pixels === null || at === null) return null
     return pixelHexAt(pixels, w, h, at.x, at.y)

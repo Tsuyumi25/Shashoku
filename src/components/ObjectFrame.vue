@@ -1,84 +1,89 @@
 <template>
+  <!--
+    The gesture's own element, and nothing else: a frame is drawn once per
+    piece of the page it crosses, and the piece a hand took hold of can stop
+    being drawn mid-drag — what is carried is drawn whole instead. The pointer
+    is captured here, where nothing the drawing does can unmount it.
+  -->
   <div
-    ref="boxEl"
-    class="absolute"
-    :class="[locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab']"
-    :style="boxStyle"
-    :title="title || undefined"
-    @pointerenter="entered = true"
-    @pointerleave="entered = false"
-    @pointerdown="onDown"
-    @pointermove="onMove"
-    @pointerup="onUp"
-    @pointercancel="onUp"
-    @dblclick.stop="onDoubleClick"
+    ref="rootEl"
+    class="pointer-events-auto absolute top-0 left-0 h-0 w-0"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
+    @dblclick="onDoubleClick"
   >
-    <slot :counter-turn="-turn" :hovered="hovered" />
-
-    <template v-if="handles && selected && !locked">
-      <!--
-        A band all the way round the outside, under the handles: a press on a
-        handle scales, a press a little further out turns. No mode to enter
-        first — the selected object is always ready to be turned.
-      -->
+    <div v-for="(copy, at) in copies" :key="copy.key" class="absolute top-0 left-0 h-0 w-0" :style="copyStyle(copy)">
       <div
-        v-for="zone in TURN_ZONES"
-        :key="`turn-${zone.key}`"
         class="absolute"
-        :style="turnZoneStyle(zone)"
-        data-frame-handle
-        @pointerdown="ownPress($event) && onRotateDown($event)"
-        @dblclick.stop
-        @pointermove="onRotateMove"
-        @pointerup="onRotateUp"
-        @pointercancel="onRotateUp"
-      />
-
-      <div
-        v-for="corner in CORNERS"
-        :key="corner.key"
-        class="absolute border border-primary bg-background"
-        :class="corner.cursor"
-        :style="cornerStyle(corner)"
-        data-frame-handle
-        @pointerdown="ownPress($event) && onScaleDown($event, corner)"
-        @pointermove="onScaleMove"
-        @pointerup="onScaleUp"
-        @pointercancel="onScaleUp"
-      />
-
-      <template v-if="perAxis">
-        <div
-          v-for="edge in EDGES"
-          :key="edge.key"
-          class="absolute border border-primary bg-background"
-          :class="edge.cursor"
-          :style="cornerStyle(edge)"
-          data-frame-handle
-          @pointerdown="ownPress($event) && onScaleDown($event, edge)"
-          @pointermove="onScaleMove"
-          @pointerup="onScaleUp"
-          @pointercancel="onScaleUp"
-        />
-      </template>
-
-      <div
-        class="absolute flex cursor-move items-center justify-center"
-        :style="referenceStyle"
-        data-frame-handle
-        @pointerdown="ownPress($event) && onReferenceDown($event)"
-        @pointermove="onReferenceMove"
-        @pointerup="onReferenceUp"
-        @pointercancel="onReferenceUp"
+        :class="[locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab']"
+        :style="boxStyle"
+        :title="title || undefined"
+        data-frame-box
+        @pointerenter="entered = true"
+        @pointerleave="entered = false"
+        @pointerdown="onDown"
       >
-        <div class="pointer-events-none absolute bg-primary" :style="crossVerticalStyle" />
-        <div class="pointer-events-none absolute bg-primary" :style="crossHorizontalStyle" />
-        <div
-          class="pointer-events-none absolute rounded-full border border-primary bg-background"
-          :style="dotStyle"
-        />
+        <!--
+          Once, in the first piece the frame is drawn in. A caret, a toolbar and
+          a caption are one each however many pieces the object is cut across.
+        -->
+        <slot v-if="at === 0" :counter-turn="-turn" :hovered="hovered" />
+
+        <template v-if="handles && selected && !locked">
+          <!--
+            A band all the way round the outside, under the handles: a press on a
+            handle scales, a press a little further out turns. No mode to enter
+            first — the selected object is always ready to be turned.
+          -->
+          <div
+            v-for="zone in TURN_ZONES"
+            :key="`turn-${zone.key}`"
+            class="absolute"
+            :style="turnZoneStyle(zone)"
+            data-frame-handle
+            @pointerdown="ownPress($event) && onRotateDown($event)"
+            @dblclick.stop
+          />
+
+          <div
+            v-for="corner in CORNERS"
+            :key="corner.key"
+            class="absolute border border-primary bg-background"
+            :class="corner.cursor"
+            :style="cornerStyle(corner)"
+            data-frame-handle
+            @pointerdown="ownPress($event) && onScaleDown($event, corner)"
+          />
+
+          <template v-if="perAxis">
+            <div
+              v-for="edge in EDGES"
+              :key="edge.key"
+              class="absolute border border-primary bg-background"
+              :class="edge.cursor"
+              :style="cornerStyle(edge)"
+              data-frame-handle
+              @pointerdown="ownPress($event) && onScaleDown($event, edge)"
+            />
+          </template>
+
+          <div
+            class="absolute flex cursor-move items-center justify-center"
+            :style="referenceStyle"
+            data-frame-handle
+            @pointerdown="ownPress($event) && onReferenceDown($event)"
+          >
+            <div class="pointer-events-none absolute bg-primary" :style="crossVerticalStyle" />
+            <div class="pointer-events-none absolute bg-primary" :style="crossHorizontalStyle" />
+            <div
+              class="pointer-events-none absolute rounded-full border border-primary bg-background"
+              :style="dotStyle"
+            />
+          </div>
+        </template>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -94,6 +99,7 @@ import {
 } from '@/lib/coords'
 import { angleAround, angleDelta, axisScaleRatio, uniformScaleRatio, type Point } from '@/lib/labelBox'
 import { rotateCursor } from '@/lib/rotateCursor'
+import type { FrameCopy } from '@/lib/explode/frames'
 import { useViewportOrigin } from '@/composables/useCanvasStage'
 
 /**
@@ -122,6 +128,16 @@ const props = defineProps<{
    * nothing here multiplies by it.
    */
   box: { centerX: number; centerY: number; width: number; height: number }
+  /**
+   * Where this frame is drawn, once per piece of the page it crosses — each
+   * copy cut to that piece's shape and carrying its travel. One copy, uncut and
+   * standing still, while the page is whole.
+   *
+   * ⚠️ Drawing only. Every gesture here reports a difference — a travel, a
+   * ratio, an angle — and a piece's travel cancels in all three, so what is
+   * reported is the same whichever copy was taken hold of.
+   */
+  copies: readonly FrameCopy[]
   /**
    * The view the stage is carrying, which is what puts a pointer on the page —
    * the one thing a gesture has to speak in if it is to survive the view moving
@@ -259,9 +275,28 @@ const DRAG_THRESHOLD_PX = 3
 
 /** The pointer is inside this frame, which only a frame taking it can tell. */
 const entered = ref(false)
-const boxEl = useTemplateRef<HTMLElement>('boxEl')
+const rootEl = useTemplateRef<HTMLElement>('rootEl')
 
-const hovered = computed(() => entered.value || props.pointed === true)
+/**
+ * The copy a gesture took hold of, for the arithmetic that reads a point off
+ * the element itself. It can stop being drawn under the hand — a drag carries
+ * what it holds whole, out of the pieces — so every reader checks.
+ */
+let activeBox: HTMLElement | null = null
+
+function heldBox(): HTMLElement | null {
+  if (activeBox?.isConnected === true) return activeBox
+  return rootEl.value?.querySelector<HTMLElement>('[data-frame-box]') ?? null
+}
+
+/**
+ * ⚠️ A hand on the frame counts as being on it. Taking the pointer sends the
+ * copy that was pressed a `pointerleave` — the capture is on the root, so the
+ * browser treats the pointer as having left everything else — and a frame that
+ * stopped reading as hovered the moment it was grabbed would drop its caption
+ * for the length of the drag.
+ */
+const hovered = computed(() => entered.value || dragging.value || props.pointed === true)
 
 const handlePointer = computed<'none' | 'auto'>(() =>
   props.pointer === 'none' ? 'none' : 'auto',
@@ -319,11 +354,29 @@ const boxStyle = computed(() => ({
   // is what "nobody has said what this is" looks like.
   outlineColor: props.member ?? props.accent ?? 'var(--primary)',
   pointerEvents: props.pointer === 'box' ? ('auto' as const) : ('none' as const),
-  // What is in hand answers before its neighbours, handles and box alike:
-  // objects set close together overlap, and a press meant for the one being
-  // worked on must not land on the frame of the one beside it.
-  zIndex: props.selected || props.held ? 1 : undefined,
 }))
+
+/**
+ * One copy's own box: the piece of the page it is drawn in, carried to where
+ * that piece stands and cut to the shape it shows. The cut is written in page
+ * pixels and the travel applied after it, which is the order the pixels
+ * underneath are blitted in.
+ *
+ * ⚠️ Where the raising lives, rather than on the box inside. A copy that
+ * carries a travel is a stacking context, and a z-index written inside one
+ * cannot reach past it to the frame of the object next door.
+ */
+function copyStyle(copy: FrameCopy) {
+  const moved = copy.offset.x !== 0 || copy.offset.y !== 0
+  return {
+    transform: moved ? `translate(${copy.offset.x}px, ${copy.offset.y}px)` : undefined,
+    clipPath: copy.clip,
+    // What is in hand answers before its neighbours, handles and box alike:
+    // objects set close together overlap, and a press meant for the one being
+    // worked on must not land on the frame of the one beside it.
+    zIndex: props.selected || props.held ? 1 : undefined,
+  }
+}
 
 interface Corner {
   key: string
@@ -409,7 +462,7 @@ function turnZoneStyle(zone: Corner) {
  * rotated element without undoing the rotation first.
  */
 function centerOnScreen(): Point {
-  const rect = boxEl.value?.getBoundingClientRect()
+  const rect = heldBox()?.getBoundingClientRect()
   if (!rect) return { x: 0, y: 0 }
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
 }
@@ -571,13 +624,37 @@ function onReferenceUp(e: PointerEvent) {
   movingReference = false
 }
 
+/** Whether the gesture in hand began on the frame's body rather than on a handle. */
+let pressedBody = false
+
 function capture(e: PointerEvent) {
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  pressedBody = false
+  activeBox = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-frame-box]')
+  rootEl.value?.setPointerCapture(e.pointerId)
 }
 
 function release(e: PointerEvent) {
-  const el = e.currentTarget as HTMLElement
-  if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+  const el = rootEl.value
+  if (el?.hasPointerCapture(e.pointerId) === true) el.releasePointerCapture(e.pointerId)
+}
+
+/**
+ * Every gesture's travel and release arrive here: the pointer is captured on
+ * the root, so the copy that was pressed no longer has to be the element that
+ * hears the rest of it — or to still be drawn at all.
+ */
+function onPointerMove(e: PointerEvent) {
+  onMove(e)
+  onScaleMove(e)
+  onRotateMove(e)
+  onReferenceMove(e)
+}
+
+function onPointerUp(e: PointerEvent) {
+  onUp(e)
+  onScaleUp(e)
+  onRotateUp(e)
+  onReferenceUp(e)
 }
 
 function travelled(e: PointerEvent, from: Point): boolean {
@@ -585,8 +662,8 @@ function travelled(e: PointerEvent, from: Point): boolean {
 }
 
 /**
- * The pointer is captured on the element the gesture started on, so a fast drag
- * that outruns the frame keeps moving it.
+ * The pointer is captured on the root, so a fast drag that outruns the frame —
+ * or a piece of the page that stops being drawn under it — keeps moving it.
  */
 const dragging = ref(false)
 const drag = {
@@ -614,6 +691,7 @@ function ownPress(e: PointerEvent): boolean {
 function onDown(e: PointerEvent) {
   if (!ownPress(e) || e.button !== 0) return
   capture(e)
+  pressedBody = true
   dragging.value = true
   dragEngaged = false
   drag.from = { x: e.clientX, y: e.clientY }
@@ -691,7 +769,22 @@ function onUp(e: PointerEvent) {
  * because `box` is already in screen pixels.
  */
 function onDoubleClick(e: MouseEvent) {
+  // A click goes to the nearest common ancestor of the press and the release,
+  // and a release under pointer capture goes to the root that holds it — so a
+  // double-click on the body arrives here with the root as its target.
+  const target = e.target as Element
+  const box =
+    target === rootEl.value
+      ? pressedBody
+        ? heldBox()
+        : null
+      : target.closest('[data-frame-handle]')
+        ? null
+        : target.closest<HTMLElement>('[data-frame-box]')
+  if (!box) return
+  e.stopPropagation()
   if (props.box.width <= 0 || props.box.height <= 0) return
+  activeBox = box
   const c = centerOnScreen()
   const scale = props.view.scale
   if (scale <= 0) return

@@ -10,11 +10,13 @@ import type { TextLayerEntry } from '@shared/page/types'
 import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
+import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
 import type { EffectedLayer } from '@/lib/layerEffects'
 import { pictureWithEffects } from '@/lib/layerEffects'
 import type { LayerPlacement } from '@/lib/layerTransform'
 import { context2d, drawStack } from '@/lib/pageComposite'
+import { useExplodeStore } from '@/stores/explodeStore'
 import { useRasterStore } from '@/stores/rasterStore'
 import { useStrokeOverlayStore } from '@/stores/strokeOverlayStore'
 
@@ -41,6 +43,7 @@ const props = defineProps<{
 
 const { pixelRatio } = useDevicePixelRatio()
 const raster = useRasterStore()
+const explode = useExplodeStore()
 const stroke = useStrokeOverlayStore()
 const labels = useCanvasLabel()
 
@@ -100,10 +103,15 @@ function paint() {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, cv.width, cv.height)
-  applyViewTransform(ctx, props.view, dpr)
   const { canvas, frame: at } = picture.value
-  ctx.drawImage(canvas, at.x, at.y, at.w, at.h)
+  paintPieces(ctx, props.view, pieces.value, dpr, (view) => {
+    applyViewTransform(ctx, view, dpr)
+    ctx.drawImage(canvas, at.x, at.y, at.w, at.h)
+  })
 }
+
+const pieces = computed(() => explode.piecesOf(props.view))
+watch(pieces, schedulePaint)
 
 let frame: number | null = null
 function schedulePaint() {

@@ -213,11 +213,13 @@ import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { OWN_CONFIDENCE_SCALE, useOcrStore } from '@/stores/ocrStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useExplodeStore, WHOLE_PAGE } from '@/stores/explodeStore'
 
 const editor = useEditorStore()
 const project = useProjectStore()
 const ocr = useOcrStore()
 const cards$ = useCardStore()
+const explode = useExplodeStore()
 const viewportOrigin = useViewportOrigin()
 
 const file = computed(() =>
@@ -418,6 +420,8 @@ function clearOfTheRest(
 interface DrawnCard {
   key: string
   plan: CardPlan
+  /** Where the card stands as the page is drawn, which a drop is refused against. */
+  shown: Box
   rows: { reading: OcrCandidatePersisted; live: boolean; marks: Mark[] }[]
   style: Record<string, string>
 }
@@ -437,6 +441,10 @@ const drawn = computed<DrawnCard[]>(() => {
     // disagreement with something nobody can see.
     const marked = markDisagreements(list.readings.map((r) => r.text))
     const marksOf = new Map(list.readings.map((r, at) => [r.hash, marked[at]]))
+    // A card travels with the balloon it was read off, not with the page's
+    // middle: it is evidence about that one place, and a list left behind
+    // while its box moved would be pointing at nothing.
+    const offset = offsetOfPoint({ x: list.x + list.w / 2, y: list.y + list.h / 2 })
     out.push({
       key,
       plan: {
@@ -446,14 +454,15 @@ const drawn = computed<DrawnCard[]>(() => {
         from: { x: list.x, y: list.y, w: list.w, h: list.h },
         ...box,
       },
+      shown: { x: box.x + offset.x, y: box.y + offset.y, w: box.w, h: box.h },
       rows: [...list.full].sort((a, b) => b.confidence - a.confidence).map((reading) => ({
         reading,
         live: live.has(reading.hash),
         marks: marksOf.get(reading.hash) ?? [],
       })),
       style: {
-        left: `${box.x}px`,
-        top: `${box.y}px`,
+        left: `${box.x + offset.x}px`,
+        top: `${box.y + offset.y}px`,
         width: `${box.w}px`,
         minHeight: `${box.h}px`,
         fontSize: `${base}px`,
@@ -489,8 +498,8 @@ function standingOf(mark: Mark): string {
   return `source-faction source-faction-${Math.min(mark.faction, NAMED_FACTIONS - 1)}`
 }
 
-/** Where every card stands, for refusing a drop that landed on one. */
-const cardBoxes = computed<Box[]>(() => drawn.value.map((c) => c.plan))
+/** Where every card is drawn, for refusing a drop that landed on one. */
+const cardBoxes = computed<Box[]>(() => drawn.value.map((c) => c.shown))
 
 /**
  * Which band a confidence falls in.
@@ -511,6 +520,41 @@ function sureness(confidence: number): string {
 
 function pageAt(e: PointerEvent): { x: number; y: number } {
   return screenToContentPx(e.clientX, e.clientY, viewportOrigin(), editor.view)
+}
+
+/** Which piece of a split page a box belongs to, which its own middle decides. */
+function regionOfBox(box: Box): number {
+  return explode.regionAtPage({ x: box.x + box.w / 2, y: box.y + box.h / 2 })
+}
+
+/** Which piece a page point falls in. */
+function regionOfPoint(p: { x: number; y: number }): number {
+  return explode.regionAtPage(p)
+}
+
+/** How far the piece a page point falls in has been pushed, in page pixels. */
+function offsetOfPoint(p: { x: number; y: number }): { x: number; y: number } {
+  return explode.offsetOf(explode.regionAtPage(p))
+}
+
+/**
+ * A row on its way to a balloon: where the hand is over the page as it is
+ * drawn, and where that is on the page itself. The two differ once the page
+ * has been split — the ghost follows the hand, while what it would land on is
+ * read through whichever piece the hand is over.
+ */
+function carriedTo(e: PointerEvent): {
+  shown: { x: number; y: number }
+  at: { x: number; y: number } | null
+  region: number
+} {
+  const origin = viewportOrigin()
+  const region = explode.regionAtScreen(e.clientX, e.clientY, origin)
+  return {
+    shown: pageAt(e),
+    at: region === null ? null : explode.pageAtScreen(e.clientX, e.clientY, origin, region),
+    region: region ?? WHOLE_PAGE,
+  }
 }
 
 function holds(box: Box, at: { x: number; y: number }): boolean {
@@ -665,7 +709,15 @@ function onGripUp(e: PointerEvent) {
 /** Under this the press was a press and nothing was carried anywhere. */
 const CARRY_THRESHOLD_PX = 4
 
-const carrying = ref<{ reading: OcrCandidatePersisted; at: { x: number; y: number } } | null>(null)
+const carrying = ref<{
+  reading: OcrCandidatePersisted
+  /** Where the hand is over the page as it is drawn — where the ghost stands. */
+  shown: { x: number; y: number }
+  /** The same point on the page itself, or null over the gap between two pieces. */
+  at: { x: number; y: number } | null
+  /** Which piece it is over, so a drop can only land on what that piece shows. */
+  region: number
+} | null>(null)
 let pressed: { reading: OcrCandidatePersisted; from: { x: number; y: number } } | null = null
 
 /**
@@ -685,15 +737,17 @@ type Landing =
 
 const target = computed<Landing | null>(() => {
   const held = carrying.value
-  if (!held) return null
-  if (cardBoxes.value.some((box) => holds(box, held.at))) return null
+  if (!held || held.at === null) return null
+  const at = held.at
+  if (cardBoxes.value.some((box) => holds(box, held.shown))) return null
   // Backwards, so the object drawn over the others is the one taken — the same
   // rule the canvas picks an object by.
   for (let i = droppableObjects.value.length - 1; i >= 0; i -= 1) {
     const hit = droppableObjects.value[i]
-    if (obbHoldsPoint(hit.box, held.at)) return { kind: 'object', id: hit.id, box: hit.box }
+    if (regionOfPoint(hit.box.center) !== held.region) continue
+    if (obbHoldsPoint(hit.box, at)) return { kind: 'object', id: hit.id, box: hit.box }
   }
-  const place = placesIn(pool.value).find((p) => holds(p, held.at))
+  const place = placesIn(pool.value).find((p) => regionOfBox(p) === held.region && holds(p, at))
   return place ? { kind: 'place', place, box: uprightBox(place) } : null
 })
 
@@ -706,11 +760,12 @@ function uprightBox(box: Box): Obb {
   }
 }
 
-/** A frame drawn where its box stands, turned the way its box is turned. */
+/** A frame drawn where its box is shown, turned the way its box is turned. */
 function frameStyle(box: Obb): Record<string, string> {
+  const offset = offsetOfPoint(box.center)
   return {
-    left: `${box.center.x - box.w / 2}px`,
-    top: `${box.center.y - box.h / 2}px`,
+    left: `${box.center.x - box.w / 2 + offset.x}px`,
+    top: `${box.center.y - box.h / 2 + offset.y}px`,
     width: `${box.w}px`,
     height: `${box.h}px`,
     transform: `rotate(${box.rotation}rad)`,
@@ -721,8 +776,8 @@ const ghostStyle = computed(() => {
   const held = carrying.value
   if (!held) return {}
   return {
-    left: `${held.at.x}px`,
-    top: `${held.at.y}px`,
+    left: `${held.shown.x}px`,
+    top: `${held.shown.y}px`,
     fontSize: `${basePx.value}px`,
   }
 })
@@ -740,16 +795,18 @@ function onRowMove(e: PointerEvent) {
     Math.hypot(e.clientX - pressed.from.x, e.clientY - pressed.from.y) < CARRY_THRESHOLD_PX
   )
     return
-  carrying.value = { reading: pressed.reading, at: pageAt(e) }
+  carrying.value = { reading: pressed.reading, ...carriedTo(e) }
 }
 
 function onRowUp(e: PointerEvent) {
   const held = carrying.value
   const landing = target.value
-  const onCard = held !== null && cardBoxes.value.some((box) => holds(box, held.at))
+  const onCard = held !== null && cardBoxes.value.some((box) => holds(box, held.shown))
   onRowCancel(e)
-  if (!held || onCard) return
-  drop(held.reading, pageAt(e), landing)
+  // Let go over the gap between two pieces: there is no page under the hand to
+  // put anything on.
+  if (!held || onCard || held.at === null) return
+  drop(held.reading, held.at, landing)
 }
 
 function onRowCancel(e: PointerEvent) {

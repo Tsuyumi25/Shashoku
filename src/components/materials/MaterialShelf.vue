@@ -183,10 +183,10 @@ import WallPiece from '@/components/wall/WallPiece.vue'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useSelectionSample } from '@/composables/useSelectionSample'
 import { useTrialEnds } from '@/composables/useTrialEnds'
-import { screenToContentPx } from '@/lib/coords'
 import type { Sample } from '@/lib/fontSampleCache'
 import { drawnLabel } from '@/lib/labelRaster'
 import { useEditorStore } from '@/stores/editorStore'
+import { useExplodeStore } from '@/stores/explodeStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -197,6 +197,7 @@ import { useProjectStore } from '@/stores/projectStore'
  * is its ticked switches; a right press opens them.
  */
 const editor = useEditorStore()
+const explode = useExplodeStore()
 const project = useProjectStore()
 const preferences = usePreferencesStore()
 const column = useLeftColumn()
@@ -413,7 +414,12 @@ useEventListener(window, 'pointerup', (e: PointerEvent) => {
   if (!canvas || page === null) return
   const rect = canvas.getBoundingClientRect()
   if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return
-  const at = screenToContentPx(e.clientX, e.clientY, { left: rect.left, top: rect.top }, editor.view)
+  // Let go over a split page: it lands on the piece under the hand, and over
+  // the gap between two there is no page to land on.
+  const origin = { left: rect.left, top: rect.top }
+  const region = explode.regionAtScreen(e.clientX, e.clientY, origin)
+  if (region === null) return
+  const at = explode.pageAtScreen(e.clientX, e.clientY, origin, region)
   const m = held.m
   editor.cmdAddLabelFromMaterial(
     page,

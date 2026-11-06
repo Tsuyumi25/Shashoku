@@ -6,6 +6,13 @@ export interface Size {
   h: number
 }
 
+export interface Area {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 const ZOOM_SPEED = 0.0015
 const MAX_SCALE = 40
 
@@ -18,15 +25,22 @@ const MAX_SCALE = 40
 export function useZoomPan(
   containerSize: MaybeRefOrGetter<Size>,
   contentSize: MaybeRefOrGetter<Size>,
+  /** What a fit frames, in content px, where that is not the content itself. */
+  fitArea: MaybeRefOrGetter<Area | null> = null,
 ) {
   const view = reactive<ViewTransform>({ scale: 1, tx: 0, ty: 0, rotate: 0 })
   const ready = ref(false)
 
+  function framed(): Area {
+    const content = toValue(contentSize)
+    return toValue(fitArea) ?? { x: 0, y: 0, w: content.w, h: content.h }
+  }
+
   function fitScale(): number {
     const container = toValue(containerSize)
-    const content = toValue(contentSize)
-    if (!container.w || !container.h || !content.w || !content.h) return 1
-    return Math.min(container.w / content.w, container.h / content.h)
+    const area = framed()
+    if (!container.w || !container.h || !area.w || !area.h) return 1
+    return Math.min(container.w / area.w, container.h / area.h)
   }
 
   /**
@@ -36,13 +50,13 @@ export function useZoomPan(
    */
   function fitToView(): boolean {
     const container = toValue(containerSize)
-    const content = toValue(contentSize)
-    if (!container.w || !container.h || !content.w || !content.h) return false
+    const area = framed()
+    if (!container.w || !container.h || !area.w || !area.h) return false
     const s = fitScale()
     view.scale = s
     view.rotate = 0
-    view.tx = (container.w - content.w * s) / 2
-    view.ty = (container.h - content.h * s) / 2
+    view.tx = (container.w - area.w * s) / 2 - area.x * s
+    view.ty = (container.h - area.h * s) / 2 - area.y * s
     ready.value = true
     return true
   }

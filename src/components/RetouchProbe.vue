@@ -237,6 +237,8 @@
         </PopoverPortal>
       </PopoverRoot>
     </div>
+
+    <ExplodePanel class="border-t border-border px-2 pt-1.5 pb-2" />
   </div>
 </template>
 
@@ -247,6 +249,7 @@ import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import { useInpaintSelection } from '@/composables/useInpaintSelection'
 import { isEmptyRect } from '@/lib/selection/rect'
+import ExplodePanel from '@/components/ExplodePanel.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useOcrStore } from '@/stores/ocrStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'

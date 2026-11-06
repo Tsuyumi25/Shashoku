@@ -1,6 +1,7 @@
 <template>
   <ObjectFrame
     :box="box"
+    :copies="copies"
     :view="view"
     :rotation="placementTurn(place)"
     :selected="selected"
@@ -23,6 +24,7 @@
 import { computed } from 'vue'
 import ObjectFrame from '@/components/ObjectFrame.vue'
 import type { ViewTransform } from '@/lib/coords'
+import type { FrameCopy } from '@/lib/explode/frames'
 import { frameCenter, placementTurn, type LayerPlacement } from '@/lib/layerTransform'
 
 /**
@@ -53,6 +55,8 @@ import { frameCenter, placementTurn, type LayerPlacement } from '@/lib/layerTran
 const props = defineProps<{
   /** Where the layer's pixels are, in page pixels. */
   frame: { x: number; y: number; w: number; h: number }
+  /** Where this frame is drawn, once per piece of a split page. See `ObjectFrame`. */
+  copies: readonly FrameCopy[]
   view: ViewTransform
   selected: boolean
   inSelection: boolean
