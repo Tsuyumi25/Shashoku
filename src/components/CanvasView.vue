@@ -132,48 +132,20 @@
         <svg
           v-if="pageReady && connecting"
           class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          :style="{ '--line': `${lineWidth}px` }"
         >
-          <defs>
-            <!--
-              Sized in page units that come to a constant number of screen pixels,
-              because `markerWidth` is an attribute rather than a property and
-              cannot be written in `--px`. Two numbers per view change, against a
-              marker that would otherwise grow to the size of a balloon at 8x.
-            -->
-            <marker
-              v-for="head in ARROW_HEADS"
-              :id="head.id"
-              :key="head.id"
-              viewBox="0 0 8 8"
-              refX="7"
-              refY="4"
-              :markerWidth="arrowSize"
-              :markerHeight="arrowSize"
-              markerUnits="userSpaceOnUse"
-              orient="auto"
-            >
-              <path d="M 0 0 L 8 4 L 0 8 z" :fill="head.fill" />
-            </marker>
-          </defs>
-          <line
-            v-for="line in drawnLines"
-            :key="line.key"
-            :x1="line.a.x"
-            :y1="line.a.y"
-            :x2="line.b.x"
-            :y2="line.b.y"
-            :class="line.chosen ? 'reading-line-chosen' : 'reading-line'"
-            :marker-end="line.chosen ? 'url(#reading-arrow-chosen)' : 'url(#reading-arrow)'"
-          />
-          <line
+          <g v-for="line in drawnLines" :key="line.key" class="reading-line" :class="line.chosen && 'reading-line-chosen'">
+            <path :d="line.d" :style="{ stroke: line.color }" />
+            <path :d="line.head" :style="{ stroke: line.color }" />
+          </g>
+          <g
             v-if="previewLine"
-            :x1="previewLine.a.x"
-            :y1="previewLine.a.y"
-            :x2="previewLine.b.x"
-            :y2="previewLine.b.y"
+            class="reading-line"
             :class="previewLine.refused ? 'reading-line-refused' : 'reading-line-preview'"
-            :marker-end="previewLine.refused ? undefined : 'url(#reading-arrow)'"
-          />
+          >
+            <path :d="previewLine.d" />
+            <path v-if="!previewLine.refused" :d="previewLine.head" />
+          </g>
         </svg>
 
         <!--
@@ -445,10 +417,13 @@ import { SOURCE_COLOR, sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
-  distanceToSegment,
+  bowOf,
+  chainsOf,
+  distanceToBow,
   nearestAnchor,
   readingLineBetween,
   type FrameBox,
+  type ReadingLine,
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
 import { cornersOf, obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
@@ -1313,11 +1288,6 @@ function sprayAt(p: Anchor) {
   if (id !== null) spray.ids.add(id)
 }
 
-const ARROW_HEADS = [
-  { id: 'reading-arrow', fill: 'var(--primary)' },
-  { id: 'reading-arrow-chosen', fill: 'var(--foreground)' },
-]
-
 /** Each object's frame on the page, which is where its lines begin and end. */
 const objectBoxes = computed(() => {
   const out = new Map<string, FrameBox>()
@@ -1423,19 +1393,76 @@ function toScreen(p: Anchor): Anchor {
  * the wrong way rather than no line, because that at least says out loud that
  * they are sitting on top of each other.
  */
+/**
+ * One colour per chain, so lines crossing one another stay told apart. Fixed
+ * hues rather than theme colours: they are drawn over artwork, which has no
+ * theme, under the white glow that keeps them off black ink.
+ */
+const CHAIN_COLORS = ['#e05a2b', '#2b7de0', '#2bb36b', '#b33fd6', '#d6a12b', '#d63f7a']
+
+/**
+ * How thick a line is drawn: a share of the page's shorter edge, in page
+ * pixels. A fixed number of screen pixels came out a hairline over a whole
+ * page; tied to the page, a line weighs the same against the artwork at every
+ * zoom and on every size of scan.
+ */
+const LINE_PAGE_SHARE = 0.004
+const lineWidth = computed(() => Math.max(1, Math.min(pageSize.value.w, pageSize.value.h) * LINE_PAGE_SHARE))
+
+/** How long each side of an arrow head is, as a multiple of the line's width. */
+const ARROW_PER_WIDTH = 4.5
+
+/** A line as path data: bowed outward, an open arrow head at its far end. */
+function drawnPath(line: ReadingLine): { d: string; head: string } {
+  const c = bowOf(line)
+  const { a, b } = line
+  const d = `M ${a.x} ${a.y} Q ${c.x} ${c.y} ${b.x} ${b.y}`
+  // Along the curve where it arrives, which is from the control point.
+  const tx = b.x - c.x
+  const ty = b.y - c.y
+  const along = Math.hypot(tx, ty)
+  if (along === 0) return { d, head: '' }
+  const size = lineWidth.value * ARROW_PER_WIDTH
+  const ux = tx / along
+  const uy = ty / along
+  const back = { x: b.x - ux * size, y: b.y - uy * size }
+  const side = size * 0.55
+  return {
+    d,
+    head: `M ${back.x - uy * side} ${back.y + ux * side} L ${b.x} ${b.y} L ${back.x + uy * side} ${back.y - ux * side}`,
+  }
+}
+
+const edgeKey = (edge: ReadingEdge) => JSON.stringify([edge.from, edge.to])
+
+/**
+ * Every line there is to see: the ones the page holds, and the ones the chain
+ * being drawn has already laid.
+ *
+ * The chain's own links are here because they are lines the person drew and can
+ * see no other way — that they are still tool state and land in the manifest
+ * only on commit is bookkeeping, and an interface that made someone track it
+ * would be asking them to hold its implementation in their head.
+ *
+ * Nothing is filtered out on the way. A line that exists and is not drawn can
+ * be neither found nor taken back; two frames that overlap get a line running
+ * the wrong way rather than no line, because that at least says out loud that
+ * they are sitting on top of each other.
+ */
 const drawnLines = computed(() => {
   const chosen = connect.selected
-  const out: { key: string; a: Anchor; b: Anchor; chosen: boolean }[] = []
+  const all = [...heldEdges.value, ...connect.links]
+  const chains = chainsOf(all, currentFile.value?.page.readingOrder ?? [])
+  const out: { key: string; d: string; head: string; color: string; chosen: boolean }[] = []
   const draw = (edge: ReadingEdge, keyPrefix: string) => {
     const from = unitBoxes.value.get(edge.from)
     const to = unitBoxes.value.get(edge.to)
     if (from === undefined || to === undefined) return
-    const line = readingLineBetween(from, to)
     out.push({
       // Both ends quoted, so no pair of ids spells another pair's key.
-      key: `${keyPrefix}${JSON.stringify([edge.from, edge.to])}`,
-      a: line.a,
-      b: line.b,
+      key: `${keyPrefix}${edgeKey(edge)}`,
+      ...drawnPath(readingLineBetween(from, to)),
+      color: CHAIN_COLORS[(chains.get(edgeKey(edge)) ?? 0) % CHAIN_COLORS.length]!,
       chosen: chosen !== null && chosen.edge.from === edge.from && chosen.edge.to === edge.to,
     })
   }
@@ -1463,30 +1490,17 @@ const previewLine = computed(() => {
   const target = hoverTargetId.value
   const to = target === null ? undefined : unitBoxes.value.get(target)
   if (to === undefined) {
-    return { a: nearestAnchor(from, g.at), b: g.at, refused: false }
+    return { ...drawnPath({ a: nearestAnchor(from, g.at), b: g.at }), refused: false }
   }
-  const line = readingLineBetween(from, to)
-  return { a: line.a, b: line.b, refused: connect.refuses(target as string) }
+  return { ...drawnPath(readingLineBetween(from, to)), refused: connect.refuses(target as string) }
 })
-
-/** How thick a line is drawn, in screen pixels; the stylesheet holds the same. */
-const LINE_STROKE_PX = 1.5
-
-/**
- * How long an arrow head is, in the stage's own units, so it comes out the same
- * size on screen at any zoom.
- */
-const ARROW_SCREEN_PX = 7
-const arrowSize = computed(() =>
-  view.scale === 0 ? ARROW_SCREEN_PX : ARROW_SCREEN_PX / view.scale,
-)
 
 /**
  * How close a click has to come to a line to have landed on it. The stroke's
  * own half-width is added, so a thicker line is not harder to hit than the
  * space beside it.
  */
-const LINE_HIT_PX = 8 + LINE_STROKE_PX / 2
+const lineHitPx = computed(() => 8 + (lineWidth.value * view.scale) / 2)
 
 function lineAt(p: Anchor): ReadingEdge | null {
   const at = toScreen(p)
@@ -1496,8 +1510,9 @@ function lineAt(p: Anchor): ReadingEdge | null {
     const to = unitBoxes.value.get(edge.to)
     if (from === undefined || to === undefined) continue
     const line = readingLineBetween(from, to)
-    const away = distanceToSegment(at, toScreen(line.a), toScreen(line.b))
-    if (away > LINE_HIT_PX) continue
+    const onScreen = { a: toScreen(line.a), b: toScreen(line.b) }
+    const away = distanceToBow(at, onScreen, toScreen(bowOf(line)))
+    if (away > lineHitPx.value) continue
     if (nearest === null || away < nearest.away) nearest = { edge, away }
   }
   return nearest?.edge ?? null
@@ -2441,44 +2456,35 @@ useEventListener(window, 'blur', () => {
 }
 
 /*
- * Straight, to begin with. A curve laid over a whiteboard's empty background
- * looks better and over a page of artwork covers more of it — but a straight
- * line through a speech bubble covers the words. Both cost something and which
- * costs less is not decidable on paper.
- *
  * A white glow under every stroke, so a line reads over black ink and over
  * white paper without either having to be sampled — the same trick the brush
  * ring uses, and the reason none of these can go unseen against the page.
  */
-.reading-line,
-.reading-line-chosen,
-.reading-line-preview,
-.reading-line-refused {
-  stroke-linecap: round;
+.reading-line {
   filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.9))
     drop-shadow(0 0 2px rgb(255 255 255 / 0.7));
-  /* Screen pixels whatever the stage is scaled to — a line is a mark on the
-     interface, not something the page holds. The dashes follow it. */
-  vector-effect: non-scaling-stroke;
 }
-.reading-line {
+/* `--line` is in page pixels, set where the page's size is known. */
+.reading-line path {
+  fill: none;
+  stroke-width: var(--line);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.reading-line-chosen path {
+  stroke: var(--foreground) !important;
+  stroke-width: calc(var(--line) * 1.5);
+}
+.reading-line-preview path {
   stroke: var(--primary);
-  stroke-width: 1.5;
 }
-.reading-line-chosen {
-  stroke: var(--foreground);
-  stroke-width: 2.5;
-}
-.reading-line-preview {
-  stroke: var(--primary);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
+.reading-line-preview path:first-child {
+  stroke-dasharray: calc(var(--line) * 2.7) calc(var(--line) * 1.7);
 }
 /* Refused before the click rather than reported after it. */
-.reading-line-refused {
+.reading-line-refused path {
   stroke: var(--destructive);
-  stroke-width: 1.5;
-  stroke-dasharray: 2 4;
+  stroke-dasharray: var(--line) calc(var(--line) * 2);
 }
 
 /*

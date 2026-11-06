@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bowOf,
+  chainsOf,
+  distanceToBow,
   distanceToSegment,
   edgeAnchors,
   nearestAnchor,
+  pointOnBow,
   readingLineBetween,
   type FrameBox,
 } from './readingLine'
@@ -98,5 +102,46 @@ describe('distanceToSegment', () => {
 
   it('measures to the point itself when the two ends are one', () => {
     expect(distanceToSegment({ x: 3, y: 4 }, { x: 0, y: 0 }, { x: 0, y: 0 })).toBeCloseTo(5, 6)
+  })
+})
+
+describe('a bowed line', () => {
+  /** A click on the curve as drawn lands on it; one on the straight chord beneath does not. */
+  it('is hit along the curve rather than along its chord', () => {
+    const line = { a: { x: 0, y: 0 }, b: { x: 1000, y: 0 } }
+    const control = bowOf(line)
+    const apex = pointOnBow(line, control, 0.5)
+    expect(distanceToBow(apex, line, control)).toBeLessThan(1)
+    expect(distanceToBow({ x: 500, y: 0 }, line, control)).toBeGreaterThan(50)
+  })
+})
+
+describe('chainsOf', () => {
+  const at = (chains: Map<string, number>, from: string, to: string) => chains.get(JSON.stringify([from, to]))
+
+  it('keeps a straight run in one chain and gives each branch of a fork its own', () => {
+    const chains = chainsOf(
+      [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'c' },
+        { from: 'c', to: 'd' },
+        { from: 'c', to: 'e' },
+      ],
+      ['a', 'b', 'c', 'd', 'e'],
+    )
+    expect(at(chains, 'a', 'b')).toBe(at(chains, 'b', 'c'))
+    expect(new Set([at(chains, 'a', 'b'), at(chains, 'c', 'd'), at(chains, 'c', 'e')]).size).toBe(3)
+  })
+
+  it('starts a new chain after a merge', () => {
+    const chains = chainsOf(
+      [
+        { from: 'a', to: 'c' },
+        { from: 'b', to: 'c' },
+        { from: 'c', to: 'd' },
+      ],
+      ['a', 'b', 'c', 'd'],
+    )
+    expect(new Set([at(chains, 'a', 'c'), at(chains, 'b', 'c'), at(chains, 'c', 'd')]).size).toBe(3)
   })
 })
