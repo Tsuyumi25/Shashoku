@@ -5,9 +5,14 @@ import { faceTree, isPageEntry } from './trees'
 
 /**
  * A new face lettered the way an existing one is: every sentence carried over
- * under a new id, every block of lettering copied where it stands and how it
- * looks, with no words and no candidates. The artwork's words and the page's
- * reading are shared, so the new face reads in the same order from the start.
+ * under a new id, with one block of lettering where the sentence's first block
+ * stands and how it looks, with no words and no candidates. The artwork's words
+ * and the page's reading are shared, so the new face reads in the same order
+ * from the start.
+ *
+ * ⭐ One block, however many the face it copies split the sentence into. Where
+ * a sentence breaks across blocks is a decision about that language's lines
+ * set against the artwork, which a new language has to make again for itself.
  *
  * Its tree places the page's materials and its own lettering where the face it
  * copies has them. Drawn layers and folders are that face's own and stay
@@ -28,9 +33,11 @@ export function copyFace(manifest: ManifestJson, from: string, to: string, newId
   }
   for (const unit of template.units) {
     const unitId = newId()
-    const members = unit.members.map((member) => {
+    const first = unit.members.find((member) => lettering(member) !== undefined)
+    const members = unit.members.flatMap((member): string[] => {
       const block = lettering(member)
-      if (!block) return member
+      if (!block) return [member]
+      if (member !== first) return []
       // A JSON round trip rather than structuredClone, which refuses the
       // reactive proxies a live page hands out.
       const copy = JSON.parse(JSON.stringify(block)) as TranslationTextLayerEntry
@@ -41,7 +48,7 @@ export function copyFace(manifest: ManifestJson, from: string, to: string, newId
       copy.body.chosen = null
       if (copy.no !== undefined) copy.numberedIn = unitId
       copies.set(member, copy)
-      return copy.id
+      return [copy.id]
     })
     copied.units.push({ id: unitId, ...(unit.no === undefined ? {} : { no: unit.no }), members })
     if (counters.blocks[unit.id] !== undefined) counters.blocks[unitId] = counters.blocks[unit.id]
