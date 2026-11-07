@@ -652,8 +652,8 @@ export async function writeProjectMeta(
  * null for a book that has never been saved, and only for that — the caller
  * starts one from `defaultProjectJson()`, the same way a fresh project does.
  * A permission or I/O error answered the same way would have it take a book
- * that has tags, a glossary and export profiles for a new one, and write
- * those defaults back over them.
+ * that has tags and export profiles for a new one, and write those defaults
+ * back over them.
  */
 export async function readProjectMeta(rootPath: string): Promise<string | null> {
   try {

@@ -1,6 +1,6 @@
 
 
-import type { Glossary, ProjectJson, TranslationFace } from './types'
+import type { ProjectJson, TranslationFace } from './types'
 import { PROJECT_SCHEMA_VERSION } from './types'
 import type { TagDefinition } from '../tags/types'
 import { DEFAULT_TEXT_STYLE } from '../text-style/types'
@@ -85,17 +85,6 @@ function parseNextFace(v: unknown, faces: readonly TranslationFace[] | undefined
   return typeof v === 'number' && Number.isInteger(v) && v > floor ? v : floor
 }
 
-function parseGlossary(v: unknown): Glossary | undefined {
-  if (v === undefined) return undefined
-  if (!isRecord(v)) fail('glossary 必須是物件(key = 原文, value = 譯文)')
-  const out: Glossary = {}
-  for (const [key, value] of Object.entries(v)) {
-    if (typeof value !== 'string') fail(`glossary["${key}"] 必須是字串`)
-    out[key] = value
-  }
-  return out
-}
-
 
 export function defaultColorForTagIndex(i: number): string {
   return CATEGORY_COLORS[i % CATEGORY_COLORS.length]
@@ -178,7 +167,6 @@ export function parseProjectJson(raw: string): ProjectJson {
     tags,
     seedStyle,
     comment,
-    glossary: parseGlossary(data.glossary),
     pinnedLayerNames: parseLayerNames(data.pinnedLayerNames, 'pinnedLayerNames'),
     retouchLayerNames: parseLayerNames(data.retouchLayerNames, 'retouchLayerNames'),
     faces,
@@ -198,7 +186,6 @@ export function serializeProjectJson(project: ProjectJson): string {
   out.tags = project.tags.map((t) => ({ name: t.name, color: t.color }))
   out.seedStyle = serializeTextStyle(project.seedStyle)
   out.comment = project.comment
-  if (project.glossary !== undefined) out.glossary = project.glossary
   if (project.pinnedLayerNames !== undefined) out.pinnedLayerNames = project.pinnedLayerNames
   if (project.retouchLayerNames !== undefined) out.retouchLayerNames = project.retouchLayerNames
   if (project.faces !== undefined) out.faces = project.faces

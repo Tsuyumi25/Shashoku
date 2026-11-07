@@ -148,8 +148,8 @@ export function useLibraryPageOrder() {
    * ⛔ A folder already holding a `shashoku/` is left alone, sentinel or not.
    * `createProject` writes a default `project.json` over whatever is there,
    * so the absence of a sentinel cannot be read as "nothing to lose" — a
-   * project whose sentinel went missing still has its tags, its glossary and
-   * its page order in that file.
+   * project whose sentinel went missing still has its tags and its page
+   * order in that file.
    */
   async function makeBook(book: string): Promise<boolean> {
     try {

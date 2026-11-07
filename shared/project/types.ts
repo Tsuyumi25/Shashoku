@@ -16,8 +16,6 @@ import type { TextStyle } from '../text-style/types'
 export const PROJECT_SCHEMA_VERSION = 4
 
 
-export type Glossary = Record<string, string>
-
 /** One language the book is lettered in. The id is what pages store; the name is only shown. */
 export interface TranslationFace {
   id: string
@@ -70,8 +68,6 @@ export interface ProjectJson {
   seedStyle: TextStyle
 
   comment: string
-  
-  glossary?: Glossary
   /**
    * Layer names the label list's page rows show as controls, in this order.
    * Seeded from the machine's preference the first time the project is opened
