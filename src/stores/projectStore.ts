@@ -1431,11 +1431,11 @@ export const useProjectStore = defineStore('project', () => {
    * ⚠️ The words are untouched. A reading set aside is still what a model read,
    * and an object already made from it goes on saying what it says.
    */
-  function setReadingsAside(pageId: string, hashes: readonly string[], aside: boolean) {
+  function setReadingsAside(pageId: string, hashes: readonly string[], aside: boolean): string[] {
     const file = pageById(pageId)
-    if (!file) return
+    if (!file) return []
     const wanted = new Set(hashes)
-    let moved = false
+    const moved: string[] = []
     for (const reading of file.ocr.candidates) {
       if (!wanted.has(reading.hash)) continue
       if (aside) {
@@ -1445,9 +1445,10 @@ export const useProjectStore = defineStore('project', () => {
         if (reading.setAside !== true) continue
         delete reading.setAside
       }
-      moved = true
+      moved.push(reading.hash)
     }
-    if (moved) markPageDirty(pageId)
+    if (moved.length > 0) markPageDirty(pageId)
+    return moved
   }
 
   /**

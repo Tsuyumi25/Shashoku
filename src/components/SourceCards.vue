@@ -480,7 +480,10 @@ const drawn = computed<DrawnCard[]>(() => {
         full: list.full,
         readings: list.readings,
         from: { x: list.x, y: list.y, w: list.w, h: list.h },
-        ...box,
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
       },
       shown: { x: box.x + offset.x, y: box.y + offset.y, w: box.w, h: box.h },
       rows: [...list.full].sort((a, b) => b.confidence - a.confidence).map((reading) => ({

@@ -62,10 +62,16 @@ export const useCardStore = defineStore('cards', () => {
     return boxes.value.get(key)
   }
 
-  /** Where the placement put a card that had no box yet. */
+  /**
+   * Where the placement put a card that had no box yet.
+   *
+   * ⚠️ The rectangle and nothing else. The placement hands over a whole plan,
+   * readings included, and a card drawn by spreading what is held here would
+   * go on answering with the readings it had when it was placed.
+   */
   function place(key: string, box: CardBox): void {
     const next = new Map(boxes.value)
-    next.set(key, box)
+    next.set(key, { x: box.x, y: box.y, w: box.w, h: box.h })
     boxes.value = next
   }
 

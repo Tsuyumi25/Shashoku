@@ -1536,10 +1536,17 @@ export const useEditorStore = defineStore('editor', () => {
   function cmdSetReadingsAside(pageId: string, hashes: readonly string[], aside: boolean) {
     if (hashes.length === 0) return
     const project = useProjectStore()
+    // Only what this step moved goes back: a reading that was already set aside
+    // stays where an earlier step put it.
+    let moved: string[] = []
     pushCommand({
       label: `${aside ? 'set-aside' : 'take-back'} ${hashes.length}`,
-      do: () => project.setReadingsAside(pageId, hashes, aside),
-      undo: () => project.setReadingsAside(pageId, hashes, !aside),
+      do: () => {
+        moved = project.setReadingsAside(pageId, hashes, aside)
+      },
+      undo: () => {
+        project.setReadingsAside(pageId, moved, !aside)
+      },
     })
   }
 
