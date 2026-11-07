@@ -8,8 +8,8 @@
       <div
         v-for="row in rows"
         :key="row.entry.id"
-        :draggable="renaming?.id !== row.entry.id && !isRowLocked(row)"
-        class="group/row relative flex h-7 items-center gap-1 border-b border-border/40 pr-1"
+        :draggable="renaming?.id !== row.entry.id && !isEditingText(row) && !isRowLocked(row)"
+        class="group/row relative flex min-h-7 items-center gap-1 border-b border-border/40 pr-1"
         :class="[
           isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
           row.hiddenByAncestor && 'opacity-40',
@@ -140,12 +140,33 @@
           @keydown.esc.prevent="renaming = null"
           @blur="commitRename"
         />
+        <!--
+          A text object's name is its words, so opening it here opens the same
+          edit the label list and the canvas share.
+        -->
+        <CodeEditField
+          v-else-if="isEditingText(row)"
+          class="min-w-0 flex-1 py-1 text-xs"
+          :value="textCode(row)"
+          :placeholder="editor.textSide === 'source' ? '(沒有原文)' : '(未翻譯)'"
+          @click.stop
+          @dblclick.stop
+          @key="onTextKey"
+          @blur="onTextBlur(row, $event)"
+        />
+        <!--
+          A text object says all of its words, line breaks included, as the
+          label list does: a first line cut short hides the part being checked.
+        -->
         <span
           v-else
-          class="min-w-0 flex-1 truncate text-xs"
-          :class="isUntitled(row.entry) && 'text-muted-foreground/60 italic'"
-          :title="canRename(row.entry) && !isRowLocked(row) ? '雙擊改名' : undefined"
-          @dblclick.stop="beginRename(row)"
+          class="min-w-0 flex-1 text-xs"
+          :class="[
+            row.entry.kind === 'text' ? 'py-1 leading-snug whitespace-pre-wrap' : 'truncate',
+            isUntitled(row.entry) && 'text-muted-foreground/60 italic',
+          ]"
+          :title="isRowLocked(row) ? undefined : canRename(row.entry) ? '雙擊改名' : '雙擊編輯文字'"
+          @dblclick.stop="onNameOpen(row)"
         >{{ nameFor(row.entry) }}</span>
 
         <!--
@@ -226,10 +247,13 @@ import type {
   RasterLayerEntry,
   TextLayerEntry,
 } from '@shared/page/types'
-import { shownLinesOf } from '@shared/page/units'
+import { shownCodeOf, shownLinesOf } from '@shared/page/units'
 import { plainOf } from '@shared/page/markup'
 import { layersDirOf } from '@shared/ssk/constants'
+import CodeEditField from '@/components/CodeEditField.vue'
 import LayerThumb from '@/components/LayerThumb.vue'
+import { useMarkupSession } from '@/composables/useMarkupSession'
+import { textWriter } from '@/composables/useTextEditSurface'
 import { familyIsMissing, missingFamilyLabel } from '@/lib/labelRaster'
 import { dropTargetFor, flattenLayerRows, type LayerTreeRow } from '@/lib/layerRows'
 import { zoneAt, type DropZone } from '@/lib/rowDrop'
@@ -238,6 +262,7 @@ import { useProjectStore } from '@/stores/projectStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
+const markup = useMarkupSession()
 
 /**
  * The open page only. The tree is about how this page stacks, which is a
@@ -399,6 +424,43 @@ function isRowLocked(row: LayerTreeRow): boolean {
 const renaming = ref<{ id: string; draft: string } | null>(null)
 const renameEls = useTemplateRef<HTMLInputElement[]>('renameEl')
 
+function isEditingText(row: LayerTreeRow): boolean {
+  const pending = editor.pendingTextEdit
+  return row.entry.kind === 'text' && pending?.pageId === editor.currentPageId && pending?.labelId === row.entry.id
+}
+
+function textCode(row: LayerTreeRow): string {
+  const pageId = editor.currentPageId
+  const block = pageId === null ? undefined : project.blockById(pageId, row.entry.id)
+  return block === undefined ? '' : shownCodeOf(block)
+}
+
+function onNameOpen(row: LayerTreeRow) {
+  const pageId = editor.currentPageId
+  if (row.entry.kind !== 'text') {
+    void beginRename(row)
+    return
+  }
+  if (pageId === null || isRowLocked(row)) return
+  editor.revealLabel(pageId, row.entry.id)
+  editor.beginTextEdit(pageId, row.entry.id, textCode(row))
+  textWriter.value = 'code'
+}
+
+function onTextKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    editor.commitTextEdit()
+  }
+}
+
+/** The canvas's box and the bar over the selection are the same edit, so leaving to them is not leaving. */
+function onTextBlur(row: LayerTreeRow, e: FocusEvent) {
+  if (!isEditingText(row)) return
+  if (markup.keepsSession(e.relatedTarget)) return
+  editor.commitTextEdit()
+}
+
 async function beginRename(row: LayerTreeRow) {
   const entry = row.entry
   if (!canRename(entry) || isRowLocked(row)) return
@@ -461,6 +523,6 @@ function wordsOf(entry: TextLayerEntry): readonly string[] {
  */
 function nameFor(entry: LayerEntry): string {
   if (entry.kind !== 'text') return entry.name
-  return wordsOf(entry).find((line) => line.length > 0) ?? '(未翻譯)'
+  return isUntitled(entry) ? '(未翻譯)' : wordsOf(entry).join('\n')
 }
 </script>
