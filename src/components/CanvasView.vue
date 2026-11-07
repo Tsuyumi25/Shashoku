@@ -2339,8 +2339,19 @@ function onAltPress(e: PointerEvent): void {
  * Every press on the canvas passes here on its way down, a frame's own
  * included — which is where the piece of a split page the gesture reads
  * through is settled, before anything has a chance to act on it.
+ *
+ * The middle button pans from anywhere, over a card or a frame as well, so it
+ * is taken here before any of them can stop it.
  */
 function onPressCapture(e: PointerEvent): void {
+  if (e.button === 1 && pageReady.value) {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    containerRef.value?.setPointerCapture(e.pointerId)
+    panning.value = true
+    panLast = { x: e.clientX, y: e.clientY }
+    return
+  }
   const rect = containerRef.value?.getBoundingClientRect()
   if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
   onAltPress(e)
