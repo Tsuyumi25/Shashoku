@@ -11,7 +11,7 @@
       rows="1"
       spellcheck="false"
       :placeholder="placeholder"
-      class="code-input w-full resize-none bg-transparent leading-snug focus:outline-none placeholder:text-muted-foreground/50"
+      class="code-input block w-full resize-none bg-transparent leading-snug focus:outline-none placeholder:text-muted-foreground/50"
       :value="value"
       @input="markup.writeCode(($event.target as HTMLTextAreaElement).value)"
       @keydown="emit('key', $event)"
@@ -27,20 +27,27 @@
       <div v-for="(box, i) in codeSelectionBoxes" :key="i" class="code-selection" :style="box" />
       <div :key="codeCaretKey" class="code-caret" :style="codeCaretBox" />
     </template>
-    <MarkupToolbar
-      v-if="barAt"
-      :placement="barAt"
-      :color="editingColor"
-      :vertical="editingIsVertical"
-      @wrap="markup.apply({ kind: 'wrap', attrs: $event })"
-      @step="(field, dir) => markup.apply({ kind: 'step', field, dir })"
-      @clear="markup.apply({ kind: 'clear' })"
-    />
+    <!--
+      Out at the body, because the panels holding this field scroll and clip:
+      a bar left inside one is cut off at its edge.
+    -->
+    <Teleport to="body">
+      <MarkupToolbar
+        v-if="barAt"
+        :placement="barAt"
+        :color="editingColor"
+        :vertical="editingIsVertical"
+        @wrap="markup.apply({ kind: 'wrap', attrs: $event })"
+        @step="(field, dir) => markup.apply({ kind: 'step', field, dir })"
+        @clear="markup.apply({ kind: 'clear' })"
+      />
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import MarkupToolbar from '@/components/MarkupToolbar.vue'
 import { codeEditSurface, plainEditSurface, textWriter } from '@/composables/useTextEditSurface'
 import { useMarkupSession } from '@/composables/useMarkupSession'
@@ -119,43 +126,54 @@ const BAR_GAP_PX = 4
  * font somewhere else — and the string to set is the one the box is showing
  * now, which during a render is still the one it was showing before.
  */
-watch(
-  () => [projecting.value, markup.code.value, markup.codeRange.value] as const,
-  () => {
-    const el = codeEditSurface.field.value
-    const at = markup.codeRange.value
-    if (el === null || el !== own || markup.editing.value === null) {
-      barAt.value = null
-      return
+function measure(): void {
+  const el = codeEditSurface.field.value
+  const at = markup.codeRange.value
+  if (el === null || el !== own || markup.editing.value === null) {
+    barAt.value = null
+    return
+  }
+  if (projecting.value) {
+    const caret = textareaCaret(el, at.focus)
+    codeCaretBox.value = {
+      left: `${caret.x}px`,
+      top: `${caret.y}px`,
+      height: `${caret.height}px`,
     }
-    if (projecting.value) {
-      const caret = textareaCaret(el, at.focus)
-      codeCaretBox.value = {
-        left: `${caret.x}px`,
-        top: `${caret.y}px`,
-        height: `${caret.height}px`,
-      }
-      const span = spanOf(at)
-      codeSelectionBoxes.value = textareaSelection(el, span.from, span.to).map((r) => ({
-        left: `${r.x}px`,
-        top: `${r.y}px`,
-        width: `${r.width}px`,
-        height: `${r.height}px`,
-      }))
-    }
-    // The bar belongs to whichever box owns the selection: a menu over a
-    // projection would act on a stretch the user picked somewhere else.
     const span = spanOf(at)
-    const last = projecting.value || isCollapsed(at)
-      ? undefined
-      : textareaSelection(el, span.from, span.to).at(-1)
-    barAt.value =
-      last === undefined
-        ? null
-        : { left: `${last.x}px`, top: `${last.y + last.height + BAR_GAP_PX}px` }
-  },
-  { flush: 'post', immediate: true },
-)
+    codeSelectionBoxes.value = textareaSelection(el, span.from, span.to).map((r) => ({
+      left: `${r.x}px`,
+      top: `${r.y}px`,
+      width: `${r.width}px`,
+      height: `${r.height}px`,
+    }))
+  }
+  // The bar belongs to whichever box owns the selection: a menu over a
+  // projection would act on a stretch the user picked somewhere else.
+  const span = spanOf(at)
+  const last = projecting.value || isCollapsed(at)
+    ? undefined
+    : textareaSelection(el, span.from, span.to).at(-1)
+  const box = el.getBoundingClientRect()
+  barAt.value =
+    last === undefined
+      ? null
+      : {
+          position: 'fixed',
+          left: `${box.left + last.x}px`,
+          top: `${box.top + last.y + last.height + BAR_GAP_PX}px`,
+        }
+}
+
+watch(() => [projecting.value, markup.code.value, markup.codeRange.value] as const, measure, {
+  flush: 'post',
+  immediate: true,
+})
+
+// The bar stands in screen coordinates, so whatever moves the field under it
+// moves it too.
+useEventListener(window, 'scroll', measure, { capture: true, passive: true })
+useEventListener(window, 'resize', measure)
 
 /** The object being typed into, for what the bar has to offer about it. */
 const editingBlock = computed(() => {
