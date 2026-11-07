@@ -242,6 +242,17 @@ describe('a sentence set in more than one block', () => {
   })
 
   /**
+   * ⭐ The blocks are the stops, and the sentence's own row is not one: it holds
+   * every block, so landing on it named no block in particular and the next
+   * step found the sentence again instead of the block after.
+   */
+  it('is walked one block at a time, the sentence row passed over', () => {
+    const rows = buildLabelRows([split(['x', 'y'])], 'translation', FACE)
+
+    expect(chapterStops(rows).map((r) => (r.kind === 'block' ? r.block.id : r.kind))).toEqual(['x', 'y'])
+  })
+
+  /**
    * The artwork's words are numbered by the page and not by any sentence, so
    * their rows are named for the page: `s1`, never `1.1`.
    */

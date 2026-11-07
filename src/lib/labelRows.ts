@@ -172,11 +172,14 @@ export function buildLabelRows(
  *
  * ⭐ The blocks of one translation are stepped through before the next
  * translation, which is what makes typing a sound split in two one movement
- * rather than a hunt.
+ * rather than a hunt. Where there are several, they are the stops and the row
+ * holding them is not: it names no block of its own, so a step from any of
+ * them would find that row again rather than the block after.
  */
 export function chapterStops(rows: readonly ChapterRow[]): ChapterRow[] {
   const stops: ChapterRow[] = []
   for (const row of rows) {
+    if (row.kind === 'label' && row.blocks.length >= 2) continue
     if (row.kind !== 'page') stops.push(row)
     else if (row.count === 0) stops.push(row)
   }
