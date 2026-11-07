@@ -826,6 +826,7 @@ const OBJECT_MENU = computed<MenuItem[]>(() => [
   ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
   { id: 'duplicate-unit', label: '製作副本（整句）' },
   ...preferences.prefs.materialRecipes.map((r) => ({ id: `save:${r.id}`, label: `存成素材：${r.name}` })),
+  { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
 ])
 
 function onObjectMenu(pick: string) {
@@ -839,6 +840,12 @@ function onObjectMenu(pick: string) {
       () => useNoticeStore().say(`已複製 ${address}`),
       (err: unknown) => console.error('copy ref failed', err),
     )
+    return
+  }
+  // What the menu opened on is selected, or was already part of a selection,
+  // so this is the Delete key's own act and takes the whole selection.
+  if (pick === 'delete') {
+    editor.deleteSelection()
     return
   }
   if (pick === 'duplicate-unit') {
