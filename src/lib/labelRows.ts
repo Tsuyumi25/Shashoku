@@ -79,6 +79,29 @@ export interface BlockRow {
 export type ChapterRow = PageRow | LabelRow | BlockRow
 
 /**
+ * ⭐ One row under a heading, two kinds. Every question the list asks is
+ * answered for both, so the drag slot keeps a single root: a `v-if` at the top
+ * of it leaves a comment node behind, and Sortable maps a dragged node back to
+ * its row by counting.
+ */
+export type ListRow = LabelRow | BlockRow
+
+/** What a row is named by, a translation by the first block that says it. */
+export function rowId(row: ListRow): string | undefined {
+  return row.kind === 'block' ? row.block.id : row.blocks[0]?.id
+}
+
+/**
+ * Whether a row stands in the selection. A translation is picked whole, so any
+ * block of it being selected lights the row.
+ */
+export function rowSelected(row: ListRow, selected: ReadonlySet<string>): boolean {
+  return row.kind === 'block'
+    ? selected.has(row.block.id)
+    : row.blocks.some((block) => selected.has(block.id))
+}
+
+/**
  * The whole chapter as one list, because proofreading and translating are read
  * at the scale of the chapter rather than the page. Pages keep their headings
  * even when empty — a page with nothing on it is what someone checking for
