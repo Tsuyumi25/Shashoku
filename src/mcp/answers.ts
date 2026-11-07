@@ -1,6 +1,7 @@
 import type {
   ChooseOutcome,
   ChooseParams,
+  GetTextsAnswer,
   GetTextsParams,
   McpQuery,
   PageTexts,
@@ -225,7 +226,11 @@ export async function answer(query: McpQuery): Promise<unknown> {
       const params = query.params as GetTextsParams | undefined
       const project = openProject()
       const face = params?.face === undefined ? undefined : faceOf(project, params.face).id
-      return collectTexts(project.files, project.faces, params?.pageIds, face)
+      return {
+        folder: project.folderPath!,
+        notes: `${project.shashokuDir}/notes`,
+        pages: collectTexts(project.files, project.faces, params?.pageIds, face),
+      } satisfies GetTextsAnswer
     }
     case 'propose_translations': {
       return proposeTranslations(query.params as ProposeParams)

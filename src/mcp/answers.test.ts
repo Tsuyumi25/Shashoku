@@ -23,7 +23,7 @@ import type { ProjectFile } from '@/types/project'
 import type {
   ChooseOutcome,
   ChooseParams,
-  PageTexts,
+  GetTextsAnswer,
   ProposeItem,
   ProposeOutcome,
   WithdrawOutcome,
@@ -150,6 +150,18 @@ describe('answer — the orchestration the bridge drives', () => {
 
   it('refuses every method without an open project', async () => {
     await expect(answer({ id: 'q', method: 'get_texts' })).rejects.toThrow('沒有開啟中的專案')
+  })
+
+  /**
+   * ⭐ An agent starts wherever it was started, so the answer it always reads is
+   * where it learns where this work lives and where its own notes go.
+   */
+  it('says where the open work and the agent’s notes folder are', async () => {
+    const project = useProjectStore()
+    openOne(project, label('a'))
+    const { folder, notes } = (await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer
+    expect(folder).toBe('/root')
+    expect(notes).toBe('/root/shashoku/notes')
   })
 
   it('refuses the items on a damaged page and leaves it unwritten', async () => {
@@ -297,7 +309,7 @@ describe('answer — the orchestration the bridge drives', () => {
       [ZH]: [{ id: 'u-zh', members: ['s', 'z'] }],
       [EN]: [{ id: 'u-en', members: ['s', 'e'] }],
     })
-    const pages = (await answer({ id: 'q', method: 'get_texts' })) as PageTexts[]
+    const { pages } = (await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer
     const rendered = renderTexts(pages, { caller: CLIENT })
     expect(rendered).toContain('第 1 頁 · p1 · 001.jpg · f1 譯文 · 1 句')
     expect(rendered).toContain('第 1 頁 · p1 · 001.jpg · f2 English · 1 句')
@@ -347,11 +359,11 @@ describe('answer — the orchestration the bridge drives', () => {
       [ZH]: [{ id: 'u-zh', members: ['s', 'z'] }],
       [EN]: [{ id: 'u-en', members: ['s', 'e'] }],
     })
-    const pages = (await answer({
+    const { pages } = (await answer({
       id: 'q',
       method: 'get_texts',
       params: { face: 'f2' },
-    })) as PageTexts[]
+    })) as GetTextsAnswer
     expect(pages[0].faces.map((f) => f.faceId)).toEqual([EN])
     await expect(
       answer({ id: 'q', method: 'get_texts', params: { face: 'f9' } }),

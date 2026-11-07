@@ -90,6 +90,15 @@ export interface PageTexts {
   faces: FaceTexts[];
 }
 
+/** What `get_texts` answers: the pages, and where the work lives on this machine. */
+export interface GetTextsAnswer {
+  /** The work's own folder, artwork and all. */
+  folder: string;
+  /** Where an agent is advised to keep its notes on the work. Nothing else reads it, and it may not exist yet. */
+  notes: string;
+  pages: PageTexts[];
+}
+
 export interface GetTextsParams {
   /** Only these pages, in the project's order. Every page when absent. */
   pageIds?: string[];

@@ -23,8 +23,8 @@ import {
 import type {
   ChooseOutcome,
   ChooseParams,
+  GetTextsAnswer,
   GetTextsParams,
-  PageTexts,
   ProposeOutcome,
   ProposeParams,
   WithdrawOutcome,
@@ -70,12 +70,29 @@ function authenticates(header: string | string[] | undefined): boolean {
 }
 
 /**
+ * What every agent has to know, whichever tool it calls first. Harnesses show
+ * a tool's description only in part — oh-my-pi keeps the first line, cut at
+ * 200 bytes — while the server's instructions reach the model whole, so the
+ * rules live here and the descriptions keep to their tool's own mechanics.
+ * Under 2,000 characters: Claude Code before 2.1.296 cuts instructions at 2,048.
+ */
+const INSTRUCTIONS = [
+  "Shashoku is a manga lettering editor; read a work's sentences with get_texts, then propose, choose or withdraw translations by address.",
+  "",
+  "- Sentence numbers are names, not reading order. The order is the person's reading lines, then the typed order of sentences no line reaches.",
+  "- A sentence under `subgraph 未維護` has no reading line yet. That is normal: sound effects and text outside balloons often never get one.",
+  "- get_texts opens with the work's folder (the artwork is there) and a suggested notes folder. You may keep Markdown notes there on whatever is worth remembering about the work — its tone, its characters and how they speak, names to keep fixed — and should expect notes there to read before translating; the folder may not exist until you make it. This is only a suggestion: where the person says otherwise, follow them.",
+  "- Before showing the artwork to a vision model, check the notes for whether this work may be shown to one. If they do not say, ask the person and write the answer down.",
+  "- Never edit project.json or anything under pages/ yourself: the project's own data changes only through these tools.",
+].join("\n");
+
+/**
  * `getSource` answers with the session's clientInfo at call time — the
  * handshake happens after construction, so it cannot be read here and held.
  * It is the server stamping who spoke, not the model signing itself.
  */
 function buildServer(getSource: () => string | undefined): McpServer {
-  const server = new McpServer({ name: "shashoku", version: "0.0.0" });
+  const server = new McpServer({ name: "shashoku", version: "0.0.0" }, { instructions: INSTRUCTIONS });
   // Per session, as the server is: "changed since the last read" means since
   // this caller's last read, and a reconnect starts with nothing seen.
   const seen: SeenTexts = new Map();
@@ -103,24 +120,21 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Read sentences' source and translation, by address",
       description:
+        "Read the open work's sentences — source, translation and candidates — page by page.\n" +
         "Read-only. Lists the open Shashoku project page by page and, within a page, one " +
         "section per translation face (譯文, English, …) named as the person named it. A " +
         "section's header reads `第 3 頁 · p7 · 001.jpg · f1 譯文 · 19 句`: where the page " +
         "reads in the chapter, its id, its name, the face, and how many sentences it holds. " +
-        "Under it each sentence is listed under its number in the order the story reads: " +
-        "first along the reading lines the person drew, then the sentences no line touches " +
-        "yet, in the order they were typed — the numbers are names, not the order. `14  原文 …` " +
+        "Under it each sentence is listed under its number in the order the story reads. `14  原文 …` " +
         "is the artwork's words, each block of them under `s<n>`, `譯文` is what the whole " +
         "sentence reads as today, and `候選` is the drawer, each candidate under a letter " +
         "with `✓` on the one in effect. An empty 譯文 means the sentence is untranslated. " +
         "A sentence set in several blocks of lettering lists each block on its own line as " +
         "`14.2 <text>  候選 …`; the blocks are read as one sentence with `/` between them. " +
         "Each section ends with a mermaid flowchart of those lines, one node per sentence " +
-        "(`n14`, holding its 譯, 原 and 標記) and one arrow per line; a sentence inside " +
-        "`subgraph 未維護` is one the person has not drawn a line for, which is normal and " +
-        "not a gap to fill: lines are optional, many sentences (sound effects, text outside " +
-        "balloons) never get one, and their typed order is the reading to use. " +
-        "Two arrows out of one node are two things read at the same time. " +
+        "(`n14`, holding its 譯, 原 and 標記) and one arrow per line; sentences no line " +
+        "reaches yet sit in `subgraph 未維護`. Two arrows out of one node are two things " +
+        "read at the same time. " +
         GRAMMAR +
         " page_ids reads only those pages; face reads only that face. changed_only answers " +
         "only the sentences that read differently since this session last saw them — " +
@@ -130,7 +144,8 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a " +
         "literal `<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. A " +
         "line break inside one block is shown as `⏎`. Candidates are marked （human） for a " +
-        "person's, （你） for yours and （AI） for another client's.",
+        "person's, （你） for yours and （AI） for another client's. The answer opens with the " +
+        "work's folder on this machine (作品資料夾) and the suggested notes folder (筆記資料夾).",
       inputSchema: {
         page_ids: z.array(z.string()).min(1).optional(),
         face: z.string().optional(),
@@ -139,7 +154,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     },
     async ({ page_ids, face, changed_only }) => {
       try {
-        const pages = await askRenderer<PageTexts[]>("get_texts", {
+        const { folder, notes, pages } = await askRenderer<GetTextsAnswer>("get_texts", {
           pageIds: page_ids,
           face,
         } satisfies GetTextsParams);
@@ -150,6 +165,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         noteRefs(refs, pages);
         const text = renderTexts(since?.pages ?? pages, {
           caller,
+          where: { folder, notes },
           missing,
           changedOnly: since?.gone,
           graphs: since?.graphs,
@@ -166,6 +182,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Propose translation candidates",
       description:
+        "Add translation candidates to sentences, by address; nothing is overwritten.\n" +
         "Append translation candidates, on any number of pages in one batch. Never deletes: " +
         "every item lands in a block of lettering's candidate drawer. Where that block " +
         "currently reads as nothing at all, the new candidate also takes effect immediately; " +
@@ -224,6 +241,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Withdraw candidates this client proposed",
       description:
+        "Take back candidates this client proposed, by address.\n" +
         "Remove translation candidates from a block of lettering's drawer, on any number of " +
         "pages in one batch. Only candidates this client itself proposed (marked （你）) can " +
         "be withdrawn: human-written candidates and other clients' proposals are refused per " +
@@ -261,6 +279,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     {
       title: "Point blocks of lettering at candidates in their drawers",
       description:
+        "Make a candidate already in a drawer the one in effect, by address.\n" +
         "Move a block of lettering's translation slot to a candidate already in its drawer, " +
         "on any number of pages in one batch. Nothing is deleted: the previous choices stay " +
         "in the drawers. " +

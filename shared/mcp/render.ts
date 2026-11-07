@@ -179,6 +179,8 @@ function renderPage(
 
 export interface TextsView {
   caller?: string;
+  /** Where the work and the agent's notes on it live, said above the pages. */
+  where?: { folder: string; notes: string };
   /** Pages asked for by id that the project does not have. */
   missing?: readonly string[];
   /**
@@ -197,6 +199,10 @@ export function renderTexts(pages: PageTexts[], view: TextsView = {}): string {
       ? `自上次讀取後 · ${pages.length} 頁有變動 · ${total} 句`
       : `專案 · ${pages.length} 頁 · ${total} 句`,
   ];
+  if (view.where) {
+    out.push(`作品資料夾 ${view.where.folder}`);
+    out.push(`筆記資料夾 ${view.where.notes}`);
+  }
   if (view.missing && view.missing.length > 0) out.push(`沒有這些頁：${view.missing.join("、")}`);
   for (const page of pages) {
     out.push("");
