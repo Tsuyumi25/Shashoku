@@ -295,7 +295,6 @@ import PagePinnedLayers from '@/components/PagePinnedLayers.vue'
 import PageRowThumb from '@/components/PageRowThumb.vue'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import {
-  buildLabelRows,
   dropAt,
   type BlockRow,
   type ChapterRow,
@@ -309,7 +308,7 @@ import { useEventListener } from '@vueuse/core'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import { textWriter } from '@/composables/useTextEditSurface'
 import { useMarkupSession } from '@/composables/useMarkupSession'
-import { shownCodeOf, tagsOfUnit } from '@shared/page/units'
+import { shownCodeOf } from '@shared/page/units'
 import { lockedEntries } from '@shared/page/tree'
 import { treeOf } from '@shared/page/trees'
 
@@ -322,7 +321,7 @@ const markup = useMarkupSession()
  * at that scale — which is also what makes selecting across pages fall out of
  * this list rather than needing anything of its own.
  */
-const rows = computed(() => buildLabelRows(project.files, editor.textSide, project.activeFace, editor.labelQuery))
+const rows = computed(() => editor.chapterRows)
 
 /**
  * Narrowing lives in the store because moving up and down walks what is on
@@ -527,9 +526,8 @@ function rowCode(row: Row): string {
   return page === undefined || block === undefined ? '' : shownCodeOf(block)
 }
 
-function unitTags(row: LabelRow): string[] {
-  const view = project.viewOf(row.pageId)
-  return view ? tagsOfUnit(view, row.unit) : []
+function unitTags(row: LabelRow): readonly string[] {
+  return row.tags
 }
 
 /**

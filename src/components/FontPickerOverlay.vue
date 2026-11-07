@@ -348,9 +348,28 @@ watch(sampleText, (text) => {
   if (text !== objectText.value) preferences.setFontSampleText(text)
 })
 // The selection's words lead; what was typed into the sample only lasts until it moves.
+//
+// A new selection is followed once it has settled: every sample redraws and the
+// whole catalogue is asked what it can draw, which a key held down to walk the
+// list would otherwise start over on every row it passes. Typing into the same
+// selection is followed at once.
+const SETTLE_MS = 150
+let followedPick = [...editor.selectedIds].join('|')
+let settling: ReturnType<typeof setTimeout> | undefined
 watch(objectText, (text) => {
-  sampleText.value = text.trim() ? text : savedSample()
+  const follow = () => {
+    sampleText.value = text.trim() ? text : savedSample()
+  }
+  clearTimeout(settling)
+  const pick = [...editor.selectedIds].join('|')
+  if (pick === followedPick) {
+    follow()
+    return
+  }
+  followedPick = pick
+  settling = setTimeout(follow, SETTLE_MS)
 })
+onBeforeUnmount(() => clearTimeout(settling))
 // The font library types into the same saved sample while this stays mounted.
 watch(
   () => preferences.prefs.fontSampleText,

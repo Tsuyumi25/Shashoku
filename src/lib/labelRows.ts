@@ -1,7 +1,7 @@
 import type { ProjectFile } from '@/types/project'
 import type { TextLayerEntry, TranslationUnit } from '@shared/page/types'
 import type { TextSide } from '@shared/page/text'
-import { blocksOf, facePage, projectionCodeOf, projectionOf, shownCodeOf, unitsAlongLines, unitsInReadingOrder } from '@shared/page/units'
+import { blocksOf, facePage, projectionCodeOf, projectionOf, shownCodeOf, tagsOfUnit, unitsAlongLines, unitsInReadingOrder } from '@shared/page/units'
 
 export interface PageRow {
   kind: 'page'
@@ -34,6 +34,8 @@ export interface LabelRow {
   main: string
   /** The other side's markup, whole — the context a row is checked against. */
   opposite: string
+  /** What the sentence means, from the artwork's words. */
+  tags: readonly string[]
   /**
    * Its place in this page's reading order — where a drop lands, not what is
    * shown. Since the rows are laid out from the lines, this is no longer the
@@ -137,6 +139,7 @@ export function buildLabelRows(
         blocks,
         main: projectionCodeOf(page, row.unit, side),
         opposite: projectionCodeOf(page, row.unit, other),
+        tags: tagsOfUnit(page, row.unit),
         index,
         depth: row.depth,
         lane: row.lane,

@@ -502,8 +502,17 @@ export const useEditorStore = defineStore('editor', () => {
   const labelQuery = ref('')
 
   /** The label list as it is being shown, filter and all. */
+  /**
+   * The label list as it stands, built once for the list to draw and every
+   * step through it to walk: rebuilt on each step, a held key spent its frames
+   * relaying out the whole chapter.
+   */
+  const chapterRows = computed<ChapterRow[]>(() =>
+    buildLabelRows(useProjectStore().files, textSide.value, useProjectStore().activeFace, labelQuery.value),
+  )
+
   function shownRows(): ChapterRow[] {
-    return buildLabelRows(useProjectStore().files, textSide.value, useProjectStore().activeFace, labelQuery.value)
+    return chapterRows.value
   }
 
   /**
@@ -3255,6 +3264,7 @@ export const useEditorStore = defineStore('editor', () => {
     finishStroke,
     startOnPage,
     pageBy,
+    chapterRows,
     selectLabelBy,
     selectLayerBy,
     revealLabel,
