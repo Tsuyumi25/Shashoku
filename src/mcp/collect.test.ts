@@ -369,15 +369,40 @@ describe('renderTexts', () => {
     expect(graph).toBe(
       [
         'flowchart TD',
-        '  n2["2 譯：（未翻）<br/>原：い"]',
-        '  n1["1 譯：say #quot;hi#quot; #lt;3 go<br/>原：あ<br/>標記：框内"]',
-        '  n2 --> n1',
+        '  n2["2 譯：（未翻）<br/>原：い"] --> n1["1 譯：say #quot;hi#quot; #lt;3 go<br/>原：あ<br/>標記：框内"]',
         '  subgraph unlinked["未維護"]',
         '    n3["3 譯：three<br/>原：う"]',
         '  end',
         '```',
       ].join('\n'),
     )
+  })
+
+  /**
+   * ⭐ Each line followed as far as it runs, one arrow a row: a branch picks up
+   * from the sentence it leaves, and a line that reaches a sentence already
+   * written stops there by name.
+   */
+  it('draws each reading line in order, branches and joins included', () => {
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((id) => balloon(id, [id], []))
+    const page = pageOf([...a.blocks, ...b.blocks, ...c.blocks, ...d.blocks], {
+      [ZH]: [a.unit, b.unit, c.unit, d.unit],
+    })
+    page.readingEdges = [
+      { from: 'as', to: 'bs' },
+      { from: 'bs', to: 'ds' },
+      { from: 'as', to: 'cs' },
+      { from: 'cs', to: 'ds' },
+    ]
+    const [read] = collectTexts([file('p1', page)], ZH_ONLY)
+    const rows = mermaidOf(read.faces[0], { translation: false, source: false, tags: false }).split('\n')
+    expect(rows).toEqual([
+      'flowchart TD',
+      '  n1["1"] --> n2["2"]',
+      '  n2 --> n4["4"]',
+      '  n1 --> n3["3"]',
+      '  n3 --> n4',
+    ])
   })
 
   /** ⚠️ What a person leaves out of the view must not leave a dangling separator in the label. */
@@ -414,7 +439,7 @@ describe('renderTexts', () => {
     expect(read()).not.toContain('```mermaid')
     page.readingEdges = [{ from: 'bs', to: 'as' }]
     const moved = read()
-    expect(moved).toContain('  n2 --> n1')
+    expect(moved).toMatch(/ {2}n2\[.*\] --> n1\[/)
     expect(moved).toContain('自上次讀取後 · 1 頁有變動 · 0 句')
   })
 

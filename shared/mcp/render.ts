@@ -108,12 +108,48 @@ function nodeOf(sentence: SentenceTexts, parts: MermaidParts): string {
   return `n${sentence.no}["${label}"]`;
 }
 
-/** Lines drawn as the graph; what no line touches stays apart, in list order, and is not read into it. */
+/**
+ * Lines drawn as the graph; what no line touches stays apart, in list order, and is not read into it.
+ *
+ * Each line is followed as far as it runs, one arrow to a row, and a sentence is
+ * written out in full where a line first reaches it — so the graph reads down in
+ * the order the story does rather than as a list of sentences and then a list
+ * of arrows between names.
+ */
 export function mermaidOf(face: FaceTexts, parts: MermaidParts = EVERY_PART): string {
+  const bySentence = new Map(face.sentences.map((s) => [s.no, s]));
+  const outgoing = new Map<number, number[]>();
+  for (const e of face.edges) outgoing.set(e.from, [...(outgoing.get(e.from) ?? []), e.to]);
   const touched = new Set(face.edges.flatMap((e) => [e.from, e.to]));
+  const drawn = new Set<number>();
+  const mention = (no: number): string => {
+    const sentence = bySentence.get(no);
+    if (drawn.has(no) || sentence === undefined) return `n${no}`;
+    drawn.add(no);
+    return nodeOf(sentence, parts);
+  };
   const out = ["flowchart TD"];
-  for (const s of face.sentences) if (touched.has(s.no)) out.push(`  ${nodeOf(s, parts)}`);
-  for (const e of face.edges) out.push(`  n${e.from} --> n${e.to}`);
+  for (const s of face.sentences) {
+    if (!touched.has(s.no)) continue;
+    // A sentence with lines still to follow starts a chain; one only ever
+    // reached already stands where its chain wrote it.
+    if ((outgoing.get(s.no)?.length ?? 0) === 0) {
+      if (!drawn.has(s.no)) out.push(`  ${mention(s.no)}`);
+      continue;
+    }
+    while ((outgoing.get(s.no)?.length ?? 0) > 0) {
+      let from = mention(s.no);
+      let at = s.no;
+      for (let next = outgoing.get(at)?.shift(); next !== undefined; next = outgoing.get(at)?.shift()) {
+        const seen = drawn.has(next);
+        out.push(`  ${from} --> ${mention(next)}`);
+        from = `n${next}`;
+        at = next;
+        // Joining a line already written ends this one there.
+        if (seen) break;
+      }
+    }
+  }
   const loose = face.sentences.filter((s) => !touched.has(s.no));
   if (loose.length > 0) {
     out.push('  subgraph unlinked["未維護"]');
