@@ -16,11 +16,12 @@ export interface CardBox {
  * schema for something nobody would miss — and the placement is deterministic,
  * so reopening a project puts every card back where it was.
  *
- * ⭐ Placed once and then left alone. A card whose position was recomputed from
- * the page would wander every time an object was made or a row was taken, and
- * a reader who had just found it would have to find it again. The placement
- * answers where a *new* card goes; a card that already has a box keeps it until
- * somebody moves it themselves.
+ * ⭐ Left alone while it is being worked through. A card whose position was
+ * recomputed from the page would wander every time an object was made or a row
+ * was taken, and a reader who had just found it would have to find it again.
+ * The placement answers where a *new* card goes — and where every card goes
+ * when the page itself is pulled apart differently, which is a hand on a
+ * slider rather than a hand on a card.
  *
  * ⭐ And the box is absolute, not an offset from where the placement wanted it.
  * Stored as an offset, a card somebody pinned would jump the moment the
@@ -79,11 +80,19 @@ export const useCardStore = defineStore('cards', () => {
     place(key, { ...held, w: Math.max(held.w, size.w), h: Math.max(held.h, size.h) })
   }
 
+  /** Cards somebody has put somewhere themselves, which no layout moves again. */
+  const pinned = ref(new Set<string>())
+
   function moveTo(key: string, at: { x: number; y: number }): void {
     const held = boxes.value.get(key)
     if (!held) return
     place(key, { ...held, x: at.x, y: at.y })
+    pinned.value = new Set(pinned.value).add(key)
     touch(key)
+  }
+
+  function isPinned(key: string): boolean {
+    return pinned.value.has(key)
   }
 
   function touch(key: string): void {
@@ -119,23 +128,22 @@ export const useCardStore = defineStore('cards', () => {
   }
 
   /**
-   * Which pages turned out to have no room for their lists, so the lists stand
-   * beside the page instead of on it.
-   *
-   * ⭐ Settled once, when a page's cards are first placed, and then left alone —
-   * like the positions themselves. A verdict that could flip as objects were
-   * made would move every list on the page at once, which is the one thing a
-   * reader in the middle of working through them must not have happen.
+   * For each page, how it was pulled apart when its cards were last laid out
+   * together, and where along its place each card stood then — what the next
+   * layout starts from, so a card moves only as far as the page asks.
    */
-  const crowded = ref(new Set<string>())
+  const laidFor = ref(new Map<string, string>())
+  const picks = ref(new Map<string, number>())
 
-  function isCrowded(page: string): boolean {
-    return crowded.value.has(page)
+  function laidOutFor(page: string): string | undefined {
+    return laidFor.value.get(page)
   }
 
-  function settleCrowding(page: string, tight: boolean): void {
-    if (!tight || crowded.value.has(page)) return
-    crowded.value = new Set(crowded.value).add(page)
+  function noteLayout(page: string, explosion: string, picked: ReadonlyMap<string, number>): void {
+    laidFor.value = new Map(laidFor.value).set(page, explosion)
+    const next = new Map(picks.value)
+    for (const [key, at] of picked) next.set(key, at)
+    picks.value = next
   }
 
   /** Closing a project ends the session these belong to. */
@@ -143,16 +151,19 @@ export const useCardStore = defineStore('cards', () => {
     boxes.value = new Map()
     touched.value = new Map()
     shown.value = new Map()
-    crowded.value = new Set()
+    pinned.value = new Set()
+    laidFor.value = new Map()
+    picks.value = new Map()
     clock = 0
   }
 
   return {
     boxes,
     touched,
-    crowded,
-    isCrowded,
-    settleCrowding,
+    picks,
+    laidOutFor,
+    noteLayout,
+    isPinned,
     boxOf,
     place,
     grow,

@@ -3,11 +3,10 @@ import type { OcrCandidatePersisted } from '@shared/page/types'
 import type { Box } from '@shared/ocr/places'
 import {
   cardSize,
-  CROWDED,
-  crowding,
+  layoutCards,
   outsideCards,
-  planCards,
   textsOf,
+  type Explosion,
   type Listed,
 } from '@/lib/sourceCards'
 
@@ -69,12 +68,15 @@ describe('cardSize', () => {
   })
 })
 
-describe('planCards', () => {
+describe('layoutCards', () => {
   const place = (x: number, y: number): Box => ({ x, y, w: 120, h: 90 })
+  const plan = (lists: Listed[], boxes: Box[], options = {}) =>
+    layoutCards(lists, boxes, BASE, PAGE, options).plans
+  const onPage = (b: Box) => b.x >= 0 && b.y >= 0 && b.x + b.w <= PAGE.width && b.y + b.h <= PAGE.height
 
   it('stands a card beside the place it came off', () => {
     const one = place(400, 500)
-    const [card] = planCards([listed(one, ['ふん'])], [one], BASE, PAGE)
+    const [card] = plan([listed(one, ['ふん'])], [one])
     expect(overlaps(card, one)).toBe(false)
     expect(card.from).toEqual(one)
   })
@@ -83,7 +85,7 @@ describe('planCards', () => {
     const mine = place(400, 500)
     const neighbour = place(560, 500)
     const object: Box = { x: 400, y: 620, w: 140, h: 60 }
-    const [card] = planCards([listed(mine, ['ふん'])], [mine, neighbour, object], BASE, PAGE)
+    const [card] = plan([listed(mine, ['ふん'])], [mine, neighbour, object])
     expect(overlaps(card, mine)).toBe(false)
     expect(overlaps(card, neighbour)).toBe(false)
     expect(overlaps(card, object)).toBe(false)
@@ -91,64 +93,76 @@ describe('planCards', () => {
 
   it('keeps two cards off each other', () => {
     const a = place(300, 300)
-    const b = place(300, 700)
-    const cards = planCards(
-      [listed(a, ['ふん']), listed(b, ['そうかい'])],
-      [a, b],
-      BASE,
-      PAGE,
-    )
+    const b = place(300, 400)
+    const cards = plan([listed(a, ['ふん']), listed(b, ['そうかい'])], [a, b])
     expect(cards).toHaveLength(2)
     expect(overlaps(cards[0], cards[1])).toBe(false)
   })
 
   /**
-   * ⭐ A card somewhere awkward can be dragged; a card that was never drawn
-   * cannot be found. So a page with nowhere clear still gets every card.
+   * ⭐ A card touching its own balloon and a stranger's is a card nobody can
+   * attribute; with a free side away from the stranger, that side is taken.
    */
-  it('takes the least blocked side when every side is blocked, rather than giving up', () => {
-    const middle = place(500, 700)
-    const size = cardSize(['ふん'], BASE)
-    // One obstacle squarely on each of the four sides, so nothing is free. The
-    // one to the left is a sliver and the other three are the whole card.
-    const sides = [
-      { x: middle.x + middle.w, y: middle.y, w: size.w * 2, h: size.h * 2 },
-      { x: middle.x - size.w, y: middle.y, w: size.w / 8, h: size.h * 2 },
-      { x: middle.x, y: middle.y + middle.h, w: size.w * 2, h: size.h * 2 },
-      { x: middle.x - size.w, y: middle.y - size.h * 2, w: size.w * 3, h: size.h * 2 },
-    ]
-    const [card] = planCards([listed(middle, ['ふん'])], [middle, ...sides], BASE, PAGE)
-    expect(card).toBeDefined()
-    // The sliver's side: everywhere else swallows the card whole.
-    expect(card.x).toBeLessThan(middle.x)
+  it('stands on the side away from a neighbouring place when that side is free', () => {
+    const mine = place(500, 700)
+    const stranger = place(500 + 120 + 100, 700)
+    const [card] = plan([listed(mine, ['ふん'])], [mine, stranger])
+    expect(card.x + card.w).toBeLessThanOrEqual(mine.x)
   })
 
   /**
-   * ⭐ A box this size is not something a card can hide — it lands on a corner
-   * and the rest is still there to read — while refusing to cover it would
-   * leave its own card nowhere to go.
+   * ⭐ A card somewhere awkward can be dragged; a card that was never drawn
+   * cannot be found. So a place with nowhere clear still gets its card.
    */
+  it('places every card even when nothing near its place is clear', () => {
+    const middle = place(500, 700)
+    const wall: Box = { x: middle.x - 300, y: middle.y - 300, w: 720, h: 690 }
+    const ring = [
+      { ...wall, h: 290 },
+      { ...wall, y: middle.y + middle.h + 10, h: 290 },
+      { ...wall, w: 290, y: middle.y, h: middle.h },
+      { ...wall, x: middle.x + middle.w + 10, w: 290, y: middle.y, h: middle.h },
+    ]
+    const cards = plan([listed(middle, ['ふん'])], [middle, ...ring])
+    expect(cards).toHaveLength(1)
+  })
+
+  /**
+   * ⭐ The cards that have room keep it. Only the ones that found none stand
+   * outside, rather than the whole page going out together.
+   */
+  it('sends out only the cards with no room, and keeps the rest on the page', () => {
+    const packed: Box[] = []
+    for (let y = 0; y < PAGE.height; y += 100) for (let x = 0; x < 500; x += 100) packed.push({ x, y, w: 95, h: 95 })
+    const alone = place(900, 800)
+    const boxes = [...packed, alone]
+    const cards = plan(
+      boxes.map((b, i) => listed(b, [`ふん${i}`])),
+      boxes,
+    )
+    const own = cards.find((c) => c.from.x === alone.x && c.from.y === alone.y)!
+    expect(onPage(own)).toBe(true)
+    expect(cards.some((c) => !onPage(c))).toBe(true)
+  })
+
   it('does not treat a box covering much of the page as an obstacle', () => {
     const one = place(500, 700)
     const huge: Box = { x: 0, y: 0, w: PAGE.width, h: PAGE.height }
-    const [card] = planCards([listed(one, ['ふん'])], [one, huge], BASE, PAGE)
+    const [card] = plan([listed(one, ['ふん'])], [one, huge])
     expect(overlaps(card, huge)).toBe(true)
   })
 
   it('keeps a card on the page rather than hanging it off the edge', () => {
     const edge: Box = { x: 1050, y: 500, w: 120, h: 90 }
-    const [card] = planCards([listed(edge, ['ふん'])], [edge], BASE, PAGE)
-    expect(card.x).toBeGreaterThanOrEqual(0)
-    expect(card.x + card.w).toBeLessThanOrEqual(PAGE.width)
+    const [card] = plan([listed(edge, ['ふん'])], [edge])
+    expect(onPage(card)).toBe(true)
   })
 
   /** ⭐ The order the pool happens to be in is not something a reader can see. */
-  it('plans the same page the same way twice, whatever order it is handed', () => {
+  it('lays out the same page the same way twice, whatever order it is handed', () => {
     const boxes = [place(300, 900), place(700, 200), place(200, 500)]
     const lists = boxes.map((b, i) => listed(b, [`ふん${i}`]))
-    const forwards = planCards(lists, boxes, BASE, PAGE)
-    const backwards = planCards([...lists].reverse(), boxes, BASE, PAGE)
-    expect(backwards).toEqual(forwards)
+    expect(plan([...lists].reverse(), boxes)).toEqual(plan(lists, boxes))
   })
 
   /**
@@ -158,23 +172,47 @@ describe('planCards', () => {
   it('leaves a card exactly where it was when a row is taken out of it', () => {
     const one = place(400, 500)
     const full = ['ふん', 'そうかい', 'ふう'].map(read)
-    const before = planCards([{ ...one, full, readings: full }], [one], BASE, PAGE)
-    const after = planCards(
-      [{ ...one, full, readings: full.slice(1) }],
-      [one],
-      BASE,
-      PAGE,
-    )
-    expect(after[0].x).toBe(before[0].x)
-    expect(after[0].y).toBe(before[0].y)
-    expect(after[0].w).toBe(before[0].w)
-    expect(after[0].h).toBe(before[0].h)
+    const [before] = plan([{ ...one, full, readings: full }], [one])
+    const [after] = plan([{ ...one, full, readings: full.slice(1) }], [one])
+    expect([after.x, after.y, after.w, after.h]).toEqual([before.x, before.y, before.w, before.h])
   })
 
-  it('answers to the place it is about, so a card keeps its name across a redraw', () => {
-    const one = place(400, 500)
-    const [card] = planCards([listed(one, ['ふん'])], [one], BASE, PAGE)
-    expect(card.key).toBe('400,500,120,90')
+  /** ⭐ Starting from where the cards stood, a page nobody changed does not move. */
+  it('starting from its own last answer, gives the same answer', () => {
+    const boxes = [place(300, 300), place(300, 420), place(460, 360), place(900, 1200)]
+    const lists = boxes.map((b, i) => listed(b, [`ふん${i}`, `ふう${i}`]))
+    const first = layoutCards(lists, boxes, BASE, PAGE)
+    const again = layoutCards(lists, boxes, BASE, PAGE, { previous: first.picks })
+    expect(again.plans).toEqual(first.plans)
+  })
+
+  describe('on a page in pieces', () => {
+    // The page cut down the middle and each half pushed 100 px outward, which
+    // opens a 200 px gap between x = 500 and x = 700 where the page is shown.
+    const travel = (box: Box) => ({ x: box.x + box.w / 2 < 600 ? -100 : 100, y: 0 })
+    const explosion: Explosion = {
+      shiftOf: travel,
+      pieces: [
+        { x: -100, y: 0, w: 600, h: PAGE.height },
+        { x: 700, y: 0, w: 600, h: PAGE.height },
+      ],
+    }
+    const shown = (card: Box, from: Box): Box => ({ ...card, x: card.x + travel(from).x })
+
+    it('answers in page pixels, so the card travels with its place', () => {
+      const one = place(200, 700)
+      const [card] = plan([listed(one, ['ふん'])], [one], { explosion })
+      expect(overlaps(shown(card, one), { ...one, x: one.x - 100 })).toBe(false)
+      expect(overlaps(card, one)).toBe(false)
+    })
+
+    /** ⭐ The gap is nobody's artwork, so a card beside it stands in it. */
+    it('stands a card in the gap rather than on the artwork', () => {
+      const edge: Box = { x: 600, y: 700, w: 120, h: 90 }
+      const [card] = plan([listed(edge, ['ふん'])], [edge], { explosion })
+      const at = shown(card, edge)
+      for (const piece of explosion.pieces) expect(overlaps(at, piece)).toBe(false)
+    })
   })
 })
 
@@ -231,30 +269,6 @@ describe('outsideCards', () => {
     expect(outsideCards([...lists].reverse(), BASE, PAGE)).toEqual(
       outsideCards(lists, BASE, PAGE),
     )
-  })
-})
-
-describe('crowding', () => {
-  const place = (x: number, y: number): Box => ({ x, y, w: 120, h: 90 })
-
-  it('spends nothing on a page with room to spare', () => {
-    const one = place(400, 500)
-    const cards = planCards([listed(one, ['ふん'])], [one], BASE, PAGE)
-    expect(crowding(cards, [one], PAGE)).toBeCloseTo(0, 9)
-  })
-
-  /**
-   * ⭐ Not a count of the lists but a measure of whether there was anywhere to
-   * stand — which is the thing that decides whether a page can hold them.
-   */
-  it('reports a page with nowhere to stand as crowded', () => {
-    const boxes: Box[] = []
-    for (let y = 0; y < PAGE.height; y += 150) {
-      for (let x = 0; x < PAGE.width; x += 150) boxes.push({ x, y, w: 140, h: 140 })
-    }
-    const lists = boxes.map((b, i) => listed(b, [`ふん${i}`, `ふう${i}`, `ふーん${i}`]))
-    const cards = planCards(lists, boxes, BASE, PAGE)
-    expect(crowding(cards, boxes, PAGE)).toBeGreaterThan(CROWDED)
   })
 })
 

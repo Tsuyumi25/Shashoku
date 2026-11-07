@@ -140,7 +140,7 @@ export function textsOf(readings: readonly OcrCandidatePersisted[]): string[] {
  * readings.
  *
  * ⚠️ The card wraps at this same column, and the two have to keep agreeing.
- * Getting the count wrong clips nothing; it hands `planCards` a card the wrong
+ * Getting the count wrong clips nothing; it hands `layoutCards` a card the wrong
  * size to place, and the lists come out over each other.
  */
 export function cardSize(
@@ -184,31 +184,6 @@ function overlap(a: Box, b: Box): number {
   return w > 0 && h > 0 ? w * h : 0
 }
 
-/** How much of the card hangs off the page, which is as bad as covering a box. */
-function spilled(card: Box, page: { width: number; height: number }): number {
-  const inside = overlap(card, { x: 0, y: 0, w: page.width, h: page.height })
-  return card.w * card.h - inside
-}
-
-/**
- * The four sides, in the order a reader's eye takes them.
- *
- * Right first because these pages are read right to left, so the space beside a
- * balloon on that side is the space the next balloon has already been read out
- * of. Above last: a balloon's tail hangs below it far more often than above,
- * and what is above is usually the panel it belongs to.
- */
-function sidesFor(place: Box, size: { w: number; h: number }, gap: number): Box[] {
-  const middleY = place.y + place.h / 2 - size.h / 2
-  const middleX = place.x + place.w / 2 - size.w / 2
-  return [
-    { x: place.x + place.w + gap, y: middleY, ...size },
-    { x: place.x - size.w - gap, y: middleY, ...size },
-    { x: middleX, y: place.y + place.h + gap, ...size },
-    { x: middleX, y: place.y - size.h - gap, ...size },
-  ]
-}
-
 /**
  * Slide a box along one axis until nothing standing is under it.
  *
@@ -236,16 +211,16 @@ export function slideClear(
 }
 
 /**
- * Every list, standing just off the page rather than on it.
+ * Lists standing just off the page rather than on it.
  *
- * ⭐ For the page that has no room — see `crowding`. Each list keeps its own
+ * ⭐ For the cards that found no room on it — see `layoutCards`. Each keeps its own
  * balloon: it goes out through the nearest edge, level with the place it came
  * off, so the artwork is wholly uncovered and the list is still where the eye
  * would look for it. Poured into one column instead they would all be equally
  * far from everything, which is the same as being nowhere.
  *
  * ⚠️ Not a dismissal. These are lists still waiting to be judged, and what put
- * them here is the page having no room, not anything anybody decided about
+ * them here is a want of room, not anything anybody decided about
  * them — a dismissed list is not drawn at all.
  */
 export function outsideCards(
@@ -365,51 +340,6 @@ function justOutside(
 }
 
 /**
- * How much of the cards' own area the placement had to spend covering things it
- * should not have.
- *
- * ⭐ The honest measure of whether a page has room for its lists, and better
- * than counting them: what matters is not how many there are but whether there
- * was anywhere to stand. It falls out of the placement, which already pays this
- * cost card by card — this only reads the bill.
- */
-export function crowding(
-  cards: readonly Box[],
-  obstacles: readonly Box[],
-  page: { width: number; height: number },
-): number {
-  const area = cards.reduce((sum, card) => sum + card.w * card.h, 0)
-  if (area === 0) return 0
-  const blocking = obstacles.filter(
-    (box) => box.w * box.h < page.width * page.height * COVERABLE_SHARE,
-  )
-  let spent = 0
-  cards.forEach((card, at) => {
-    spent += blocking.reduce((sum, box) => sum + overlap(card, box), 0)
-    spent += cards.slice(0, at).reduce((sum, box) => sum + overlap(card, box), 0)
-    spent += spilled(card, page)
-  })
-  return spent / area
-}
-
-/**
- * Over this the lists belong beside the page rather than on it.
- *
- * ⭐ A card is opaque and the artwork under it is the evidence, so a page whose
- * lists cover this much of their own area in artwork is a page nobody can read
- * either half of. Standing them all outside costs a pan and gives back the
- * whole page — and on a page of hand-drawn lettering, which is where this
- * happens, the artwork is exactly what somebody is reading the candidates
- * against.
- *
- * ⚠️ Descriptive rather than measured, like `SAME_PLACE`. One real page came out
- * at 0.51 with every reader guessing at every balloon, and a page with room to
- * spare comes out near zero; this sits between them. If the wrong pages start
- * going outside, this is the number to look at.
- */
-export const CROWDED = 0.25
-
-/**
  * The name a card answers to, which is the place it is about.
  *
  * ⚠️ Carries the place's rectangle, which is stable today by luck rather than
@@ -421,58 +351,228 @@ export function keyOf(place: Box): string {
   return `${place.x},${place.y},${place.w},${place.h}`
 }
 
+/** The page in pieces, as far as placing cards on it cares. */
+export interface Explosion {
+  /** How far whatever stands at this box has been pushed. */
+  shiftOf(box: Box): { x: number; y: number }
+  /** Every piece's rectangles where they stand now. Whatever is not under one is gap. */
+  pieces: readonly Box[]
+}
+
+export interface LayoutOptions {
+  explosion?: Explosion | null
+  /** Each card's slide position from the last layout, which this one starts from. */
+  previous?: ReadonlyMap<string, number>
+  /** Cards already standing that this layout must not move, where they are shown. */
+  standing?: readonly Box[]
+}
+
+export interface Layout {
+  /** In page pixels: where each card is shown, less the travel of its own place. */
+  plans: CardPlan[]
+  /** Each card's slide position, for the next layout to start from. */
+  picks: Map<string, number>
+}
+
+/** How many stops a card has along each side of its place. */
+const SLIDE_STOPS = 7
+
 /**
- * Every list, placed.
- *
- * `obstacles` is what must not be covered — every place on the page and every
- * object on it, whether or not it has a list of its own. A place whose readings
- * have all been taken has no list and is still evidence.
- *
- * Nothing is ever dropped for want of room: when every side is blocked the
- * least-blocked one is taken, because a list somewhere awkward can be dragged
- * and a list that was never drawn cannot be found.
+ * What one other box costs a card for being as near to it as the card's own
+ * place is, in shares of the card's area. A card that touches its own balloon
+ * and two others is a card nobody can attribute.
  */
-export function planCards(
+const AMBIGUITY = 0.15
+
+/**
+ * What covering artwork costs, at most, against covering nothing. Small: the
+ * artwork is only worth leaving for a gap, never for a balloon.
+ */
+const ARTWORK = 0.2
+
+/**
+ * Over this share of itself covered, a card stands outside instead.
+ *
+ * ⚠️ Descriptive rather than measured against a reader. Across two books it
+ * sent 314 of 1309 cards outside, where a page-wide verdict had sent 636. If
+ * cards start leaving pages that had room, this is the number.
+ */
+const OUTSIDE_COVER = 0.3
+
+/** Where a card may stand against its place: touching one side, slid along it. */
+function stopsFor(place: Box, size: { w: number; h: number }, gap: number): Box[] {
+  const out: Box[] = []
+  const along = (from: number, to: number) =>
+    Array.from({ length: SLIDE_STOPS }, (_, i) => from + ((to - from) * i) / (SLIDE_STOPS - 1))
+  const overY = Math.min(size.h, place.h) / 2
+  const overX = Math.min(size.w, place.w) / 2
+  for (const y of along(place.y - size.h + overY, place.y + place.h - overY)) {
+    out.push({ x: place.x + place.w + gap, y, ...size })
+    out.push({ x: place.x - size.w - gap, y, ...size })
+  }
+  for (const x of along(place.x - size.w + overX, place.x + place.w - overX)) {
+    out.push({ x, y: place.y + place.h + gap, ...size })
+    out.push({ x, y: place.y - size.h - gap, ...size })
+  }
+  return out
+}
+
+function distance(a: Box, b: Box): number {
+  const dx = Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w))
+  const dy = Math.max(0, a.y - (b.y + b.h), b.y - (a.y + a.h))
+  return Math.hypot(dx, dy)
+}
+
+function moved(box: Box, by: { x: number; y: number }): Box {
+  return { x: box.x + by.x, y: box.y + by.y, w: box.w, h: box.h }
+}
+
+function boundsOf(boxes: readonly Box[]): Box {
+  const x = Math.min(...boxes.map((b) => b.x))
+  const y = Math.min(...boxes.map((b) => b.y))
+  return {
+    x,
+    y,
+    w: Math.max(...boxes.map((b) => b.x + b.w)) - x,
+    h: Math.max(...boxes.map((b) => b.y + b.h)) - y,
+  }
+}
+
+const NO_SHIFT = { x: 0, y: 0 }
+
+/**
+ * Every list, laid out together where the page is shown — whole or in pieces.
+ *
+ * Each card stands touching its own place, at one of a few stops along one of
+ * its sides. A stop costs whatever of the card it covers — places, objects,
+ * other cards, off the page — plus the artwork it covers while there is gap to
+ * stand in instead, plus every other box as near to it as its own place. All
+ * cards start where `previous` had them, or at their cheapest stop, and then
+ * each in turn moves to whichever stop is cheapest given the rest, until none
+ * wants to. A card left covering more than `OUTSIDE_COVER` of itself stands
+ * outside the page instead, alone: the cards that had room keep it.
+ *
+ * ⭐ Starting from `previous` is what keeps a card near where it was as the
+ * page is pulled apart: it moves only for a stop that is strictly better.
+ *
+ * Nothing is ever dropped for want of room: a list somewhere awkward can be
+ * dragged, and a list that was never drawn cannot be found.
+ */
+export function layoutCards(
   places: readonly Listed[],
   obstacles: readonly Box[],
   basePx: number,
   page: { width: number; height: number },
-): CardPlan[] {
+  options: LayoutOptions = {},
+): Layout {
   const gap = basePx * GAP
+  const explosion = options.explosion ?? null
+  const shiftOf = (box: Box) => explosion?.shiftOf(box) ?? NO_SHIFT
   const coverable = page.width * page.height * COVERABLE_SHARE
-  const blocking = obstacles.filter((box) => box.w * box.h < coverable)
-  const placed: Box[] = []
-  const out: CardPlan[] = []
+  const blocking = obstacles.filter((b) => b.w * b.h < coverable).map((b) => moved(b, shiftOf(b)))
+  const standing = options.standing ?? []
+  const pieces = explosion?.pieces ?? []
+  const ground = pieces.length > 0 ? boundsOf(pieces) : { x: 0, y: 0, w: page.width, h: page.height }
 
-  // Top to bottom, so the same page plans the same way twice — the order the
-  // pool happens to be in is not something a reader should be able to see. And
-  // greedily, so a card arriving cannot move one already placed above it.
+  // By position, so the order the pool happens to be in is not something a
+  // reader can see.
   const ordered = [...places].sort((a, b) => a.y - b.y || a.x - b.x)
+  const shown = ordered.map((place) => moved(place, shiftOf(place)))
+  const stops = ordered.map((place, i) => stopsFor(shown[i], cardSize(textsOf(place.full), basePx), gap))
+  const pick = new Array<number>(ordered.length).fill(-1)
 
-  for (const place of ordered) {
-    const size = cardSize(textsOf(place.full), basePx)
-    let best: Box | null = null
-    let bestCost = Infinity
-    for (const side of sidesFor(place, size, gap)) {
-      const cost =
-        blocking.reduce((sum, box) => sum + overlap(side, box), 0) +
-        placed.reduce((sum, box) => sum + overlap(side, box), 0) +
-        spilled(side, page)
-      if (cost < bestCost) {
-        bestCost = cost
-        best = side
-      }
-      if (cost === 0) break
+  function cost(card: Box, self: number): { total: number; covered: number } {
+    const area = card.w * card.h
+    let covered = area - overlap(card, ground)
+    for (const box of blocking) covered += overlap(card, box)
+    for (const box of standing) covered += overlap(card, box)
+    for (let j = 0; j < pick.length; j += 1) {
+      if (j !== self && pick[j] >= 0) covered += overlap(card, stops[j][pick[j]])
     }
-    if (!best) continue
-    placed.push(best)
-    out.push({
+    let artwork = 0
+    for (const piece of pieces) artwork += overlap(card, piece)
+    const own = distance(card, shown[self])
+    let rivals = 0
+    for (const box of blocking) {
+      if (box.x === shown[self].x && box.y === shown[self].y && box.w === shown[self].w && box.h === shown[self].h) continue
+      if (distance(card, box) <= own + gap) rivals += 1
+    }
+    const share = covered / area
+    return { total: share + ARTWORK * Math.min(1, artwork / area) + AMBIGUITY * rivals, covered: share }
+  }
+
+  function cheapest(i: number, from: number): number {
+    let best = from
+    let bestCost = from < 0 ? Infinity : cost(stops[i][from], i).total
+    stops[i].forEach((stop, at) => {
+      const c = cost(stop, i).total
+      if (c < bestCost - 1e-9) {
+        bestCost = c
+        best = at
+      }
+    })
+    return best
+  }
+
+  ordered.forEach((place, i) => {
+    const was = options.previous?.get(keyOf(place))
+    pick[i] = was !== undefined && was < stops[i].length ? was : cheapest(i, -1)
+  })
+  // Each pass either lowers the total or ends, and there are finitely many
+  // stops; the bound is for a page that would otherwise take a while to settle.
+  for (let pass = 0; pass < 20; pass += 1) {
+    let changed = false
+    ordered.forEach((_, i) => {
+      const best = cheapest(i, pick[i])
+      if (best === pick[i]) return
+      pick[i] = best
+      changed = true
+    })
+    if (!changed) break
+  }
+
+  const outside = ordered.map(() => false)
+  const kept = pick.slice()
+  ordered.forEach((_, i) => {
+    // Against the cards still standing on the page: one that has gone outside
+    // no longer crowds anybody.
+    outside.forEach((out, j) => (pick[j] = out ? -1 : kept[j]))
+    if (cost(stops[i][kept[i]], i).covered > OUTSIDE_COVER) outside[i] = true
+  })
+  pick.splice(0, pick.length, ...kept)
+
+  const at = new Map<number, Box>()
+  ordered.forEach((_, i) => {
+    if (!outside[i]) at.set(i, stops[i][pick[i]])
+  })
+  const leaving = ordered.flatMap((place, i) => (outside[i] ? [{ place, i }] : []))
+  const beside = outsideCards(
+    leaving.map(({ place, i }) => ({ ...place, x: shown[i].x - ground.x, y: shown[i].y - ground.y })),
+    basePx,
+    { width: ground.w, height: ground.h },
+  )
+  // `outsideCards` hands its cards back in its own order; each still carries the
+  // place it was handed, which is unique to one card.
+  for (const card of beside) {
+    const one = leaving.find(({ i }) => shown[i].x - ground.x === card.from.x && shown[i].y - ground.y === card.from.y)
+    if (one) at.set(one.i, { x: card.x + ground.x, y: card.y + ground.y, w: card.w, h: card.h })
+  }
+
+  const picks = new Map<string, number>()
+  const plans: CardPlan[] = ordered.map((place, i) => {
+    picks.set(keyOf(place), pick[i])
+    const box = at.get(i) ?? stops[i][pick[i]]
+    const shift = shiftOf(place)
+    return {
       key: keyOf(place),
       full: place.full,
       readings: place.readings,
       from: { x: place.x, y: place.y, w: place.w, h: place.h },
-      ...best,
-    })
-  }
-  return out
+      x: box.x - shift.x,
+      y: box.y - shift.y,
+      w: box.w,
+      h: box.h,
+    }
+  })
+  return { plans, picks }
 }

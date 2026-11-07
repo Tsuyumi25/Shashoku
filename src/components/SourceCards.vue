@@ -197,12 +197,10 @@ import { obbHoldsPoint, type Obb } from '@/lib/selection/obb'
 import {
   cardSize,
   EMPTY_READING,
-  CROWDED,
-  crowding,
   keyOf,
-  outsideCards,
-  planCards,
+  layoutCards,
   slideClear,
+  type Explosion,
   textsOf,
   typeSizeFor,
   type CardPlan,
@@ -348,40 +346,70 @@ const listed = computed<Listed[]>(() => {
 })
 
 /**
- * ⭐ The placement answers where a *new* card goes and nothing else. A card that
- * already has a box keeps it: recomputing the whole page every time an object
- * was made or a row was taken would send every card wandering, and a reader who
- * had just found one would have to find it again.
+ * The page's pieces as the placement sees them, or null while it is whole; and
+ * a name for how it is cut and pushed, which says when every card has to be
+ * laid out again.
+ */
+const explosion = computed<{ name: string; shape: Explosion | null }>(() => {
+  if (!explode.exploded) return { name: 'whole', shape: null }
+  const pieces = explode.regions.flatMap((region, at) => {
+    const by = explode.offsetOf(at)
+    return region.runs.map((run) => ({ x: run.x + by.x, y: run.y + by.y, w: run.w, h: run.h }))
+  })
+  return {
+    name: `${explode.cap}|${explode.factor}`,
+    shape: { shiftOf: (box: Box) => explode.offsetOf(regionOfBox(box)), pieces },
+  }
+})
+
+/**
+ * ⭐ Between two changes to how the page is pulled apart, the placement answers
+ * where a *new* card goes and nothing else. A card that already has a box keeps
+ * it: recomputing the whole page every time an object was made or a row was
+ * taken would send every card wandering, and a reader who had just found one
+ * would have to find it again.
  */
 watchEffect(() => {
   const page = file.value?.page
   if (!page) return
   const base = basePx.value
   const prefix = pagePrefix.value
+  const { name, shape } = explosion.value
 
-  // ⭐ Whether the page has room at all is settled here, on the first placement,
-  // and never asked again. A verdict that could flip as objects were made would
-  // move every list on the page at once — the one thing somebody working down
-  // them must not have happen.
-  if (cards$.boxesUnder(prefix).length === 0 && listed.value.length > 0) {
-    const trial = planCards(listed.value, obstacles.value, base, page)
-    cards$.settleCrowding(prefix, crowding(trial, obstacles.value, page) > CROWDED)
+  // Where a standing card is shown, which is what a layout has to keep clear of.
+  const shownAt = (list: Listed, box: Box): Box => {
+    const by = shape?.shiftOf(list) ?? { x: 0, y: 0 }
+    return { x: box.x + by.x, y: box.y + by.y, w: box.w, h: box.h }
   }
+  const standingOf = (lists: readonly Listed[]): Box[] =>
+    lists.flatMap((list) => {
+      const box = cards$.boxOf(pinKey(keyOf(list)))
+      return box ? [shownAt(list, box)] : []
+    })
 
-  const tight = cards$.isCrowded(prefix)
-  const fresh = listed.value.filter((p) => !cards$.boxOf(pinKey(keyOf(p))))
-  if (fresh.length > 0) {
-    // ⚠️ Out through the nearest edge, not into one pile: a list still belongs
-    // to its own balloon, and what moved it was the page rather than any
-    // decision about it.
-    const planned = tight
-      ? outsideCards(fresh, base, page)
-      : planCards(fresh, [...obstacles.value, ...cards$.boxesUnder(prefix)], base, page)
-    for (const plan of planned) {
-      const key = pinKey(plan.key)
-      if (cards$.boxOf(key)) continue
-      cards$.place(key, clearOfTheRest(plan, prefix, base, page))
+  // ⭐ The page pulled apart differently lays every card out again, starting
+  // from where each stood; anything else only places the cards that have none.
+  // A card somebody moved themselves stays where they put it either way.
+  const relaid = cards$.laidOutFor(prefix) !== name
+  const free = listed.value.filter((list) => !cards$.isPinned(pinKey(keyOf(list))))
+  const moving = relaid ? free : free.filter((list) => !cards$.boxOf(pinKey(keyOf(list))))
+  if (moving.length > 0 || relaid) {
+    const still = listed.value.filter((list) => !moving.includes(list))
+    const previous = new Map<string, number>()
+    for (const list of moving) {
+      const at = cards$.picks.get(pinKey(keyOf(list)))
+      if (at !== undefined) previous.set(keyOf(list), at)
     }
+    const { plans, picks } = layoutCards(moving, obstacles.value, base, page, {
+      explosion: shape,
+      previous,
+      standing: standingOf(still),
+    })
+    for (const plan of plans) {
+      const key = pinKey(plan.key)
+      cards$.place(key, relaid ? plan : clearOfTheRest(plan, prefix, base, page))
+    }
+    cards$.noteLayout(prefix, name, new Map([...picks].map(([key, at]) => [pinKey(key), at])))
   }
 
   // A rerun can bring a place something new after its card was placed. It grows
