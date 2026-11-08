@@ -361,8 +361,13 @@
       Outside the page's branch: a refusal is worth saying whether or not there
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
-    <CanvasMenu :at="objectMenu?.at ?? null" :items="OBJECT_MENU" @pick="onObjectMenu" @close="objectMenu = null" />
-    <CanvasTagPicker :at="tagPickerAt" @close="tagPickerAt = null" />
+    <CanvasMenu
+      :at="objectMenu.openOn.value?.at ?? null"
+      :items="objectMenu.items.value"
+      @pick="objectMenu.pick"
+      @close="objectMenu.close"
+    />
+    <CanvasTagPicker :at="objectMenu.tagPickerAt.value" @close="objectMenu.tagPickerAt.value = null" />
 
     <GroupWheel
       v-if="wheelAt !== null"
@@ -378,18 +383,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import type { FacePage } from '@shared/page/units'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import GroupWheel from '@/components/GroupWheel.vue'
-import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
+import CanvasMenu from '@/components/CanvasMenu.vue'
 import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
-import { useNoticeStore } from '@/stores/noticeStore'
-import { refOfBlock } from '@shared/mcp/refs'
 import { logActivity } from '@/lib/activityLog'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
+import { useObjectMenu } from '@/composables/useObjectMenu'
 import LabelBox from '@/components/LabelBox.vue'
 import OcrBoxes from '@/components/OcrBoxes.vue'
 import OcrOverlay from '@/components/OcrOverlay.vue'
@@ -421,7 +425,7 @@ import {
 import { isLocked } from '@shared/page/tree'
 import { faceTree, treeOf } from '@shared/page/trees'
 import type { ReadingEdge } from '@shared/page/readingGraph'
-import { blocksOf, blocksOnSide, facePage, placeOfBlock, shownCodeOf, shownLinesOf, tagsOfBlock } from '@shared/page/units'
+import { blocksOf, blocksOnSide, facePage, placeOfBlock, shownCodeOf, tagsOfBlock } from '@shared/page/units'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
@@ -457,6 +461,7 @@ import {
 import { marqueeRect } from '@/lib/selection/marquee'
 import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
 import { stampedBlocks } from '@/lib/tagStamps'
+import { provideObjectAt } from '@/lib/canvasHit'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -818,89 +823,14 @@ function onRightPress(e: PointerEvent) {
   if (!rect) return
   const pointed = pointedObjectId.value
   if (pointed !== null) {
-    if (!editor.isSelected(pointed)) editor.selectOnly(pointed)
-    objectMenu.value = { id: pointed, at: { x: e.clientX, y: e.clientY } }
+    objectMenu.open(pointed, { x: e.clientX, y: e.clientY })
     return
   }
   wheelOrigin.value = { left: rect.left, top: rect.top }
   wheelAt.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
-/** An object's own menu, and which object it is for. */
-const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null)
-
-/** Where the selection's tag picker was opened from the object menu, or null. */
-const tagPickerAt = ref<{ x: number; y: number } | null>(null)
-
-/** The address an agent uses for the object the menu is open on, or null where it has none. */
-const objectRef = computed(() => {
-  const id = objectMenu.value?.id
-  const pageId = id === undefined ? null : project.pageOfEntry(id)
-  const view = pageId === null ? undefined : project.viewOf(pageId)
-  const face = project.faces.find((f) => f.id === project.activeFace)
-  return id === undefined || pageId === null || !view || !face ? null : refOfBlock(pageId, face.no, view, id)
-})
-
-/**
- * A copy of the whole translation, both sides, read right after the original —
- * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
- */
-const OBJECT_MENU = computed<MenuItem[]>(() => [
-  ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
-  { id: 'tags', label: '標記…' },
-  { id: 'duplicate-unit', label: '製作副本（整句）' },
-  ...preferences.prefs.materialRecipes.map((r) => ({ id: `save:${r.id}`, label: `存成素材：${r.name}` })),
-  { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
-])
-
-function onObjectMenu(pick: string) {
-  const at = objectMenu.value
-  const address = objectRef.value
-  objectMenu.value = null
-  if (at === null) return
-  if (pick === 'copy-ref') {
-    if (address === null) return
-    navigator.clipboard.writeText(address).then(
-      () => useNoticeStore().say(`已複製 ${address}`),
-      (err: unknown) => console.error('copy ref failed', err),
-    )
-    return
-  }
-  // What the menu opened on is selected, or was already part of a selection,
-  // so this is the Delete key's own act and takes the whole selection.
-  if (pick === 'delete') {
-    editor.deleteSelection()
-    return
-  }
-  if (pick === 'tags') {
-    tagPickerAt.value = at.at
-    return
-  }
-  if (pick === 'duplicate-unit') {
-    void merge.duplicateLayer({ id: at.id, wholeUnit: true }).catch((err: unknown) =>
-      console.error('duplicate failed', err),
-    )
-    return
-  }
-  const pageId = project.pageOfEntry(at.id)
-  const entry = project.entryById(at.id)
-  const page = pageId === null ? undefined : project.pageById(pageId)?.page
-  const recipe = preferences.prefs.materialRecipes.find((r) => `save:${r.id}` === pick)
-  if (entry?.kind !== 'text' || !page || !recipe) return
-  // The whole object is kept and the recipe only says what starts ticked. Into
-  // the group the shelf has open, or the first, or a new one when there is
-  // none; saving again what is already there still opens the shelf on it, so
-  // the press always ends with the saved thing in view.
-  const groups = preferences.prefs.materialGroups
-  const groupId =
-    groups.find((g) => g.id === column.openGroupId.value)?.id ?? groups[0]?.id ?? preferences.createMaterialGroup('素材')
-  preferences.saveMaterial(
-    groupId,
-    { text: shownLinesOf(entry).join('\n'), style: entry.body.style, effects: entry.effects },
-    recipe.picks,
-  )
-  column.openGroup(groupId)
-}
+const objectMenu = useObjectMenu()
 
 function chooseFromWheel(pick: { font: true } | { groupId: string }) {
   wheelAt.value = null
@@ -1581,6 +1511,7 @@ function objectAt(p: Anchor): string | null {
   }
   return null
 }
+onScopeDispose(provideObjectAt(objectAt))
 
 const heldEdges = computed<readonly ReadingEdge[]>(
   () => (currentFile.value ? project.readingEdgesOf(currentFile.value.pageId) : []),

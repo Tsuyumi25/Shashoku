@@ -2022,6 +2022,84 @@ describe('layer tree edits', () => {
     })
   })
 
+  describe("one object's colour and stroke lent to others", () => {
+    const BLACK = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
+    const WHITE = { kind: 'stroke', width: 2, color: '#ffffff', position: 'inside' } as const
+    const textOf = (id: string) => entryOnPage(useProjectStore().pageById(PAGE)!.page, id) as TextLayerEntry
+    const held = () =>
+      useEditorStore()
+        .selectedNodes()
+        .filter((t): t is AppearanceTarget<TextLayerEntry> => t.entry.kind === 'text')
+
+    /** Two objects wearing different strokes, both selected. */
+    function twoLabels() {
+      const { editor } = openTree([label('a'), label('b')], ['a', 'b'])
+      editor.selectOnly('a')
+      editor.cmdApplyEffects(held(), [BLACK])
+      editor.selectOnly('b')
+      editor.cmdApplyEffects(held(), [WHITE])
+      editor.selectOnly('a')
+      editor.toggleSelected('b')
+      return editor
+    }
+
+    it('gives every target the lent style fields and the stroke, leaving the rest of its style', () => {
+      const editor = twoLabels()
+      const sizeBefore = textOf('a').body.style.fontSizePx
+
+      editor.cmdApplyLentLook(held(), { color: '#ff0000', fontFamily: 'Lent Sans', fontStyleName: 'Bold' }, WHITE)
+
+      for (const id of ['a', 'b']) {
+        expect(textOf(id).effects).toEqual([WHITE])
+        expect(textOf(id).body.style).toMatchObject({ color: '#ff0000', fontFamily: 'Lent Sans', fontStyleName: 'Bold' })
+      }
+      expect(textOf('a').body.style.fontSizePx).toBe(sizeBefore)
+    })
+
+    it('takes the stroke away where the object lending the look has none', () => {
+      const editor = twoLabels()
+
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+
+      expect(textOf('a').effects).toEqual([])
+      expect(textOf('b').effects).toEqual([])
+    })
+
+    it('goes back in one step, every object and both halves at once', () => {
+      const editor = twoLabels()
+      const colorBefore = textOf('a').body.style.color
+
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+      editor.undo()
+
+      expect(textOf('a').effects).toEqual([BLACK])
+      expect(textOf('b').effects).toEqual([WHITE])
+      expect(textOf('a').body.style.color).toBe(colorBefore)
+    })
+
+    it('puts back what was being tried before writing, so undo returns to what the objects held', () => {
+      const editor = twoLabels()
+
+      editor.previewStyle(held(), { color: '#00ff00' })
+      editor.previewStroke(held(), WHITE)
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+      editor.undo()
+
+      expect(textOf('a').effects).toEqual([BLACK])
+      expect(textOf('b').effects).toEqual([WHITE])
+    })
+
+    it('tries a stroke on each object over its own effects and lets it go again', () => {
+      const editor = twoLabels()
+
+      editor.previewStroke(held(), BLACK)
+      expect(textOf('b').effects).toEqual([BLACK])
+      editor.endEffectsPreview()
+
+      expect(textOf('b').effects).toEqual([WHITE])
+    })
+  })
+
   describe('style on the batch', () => {
     const styleOf = (project: ReturnType<typeof useProjectStore>, id: string) =>
       (entryOnPage(project.pageById(PAGE)!.page, id) as TextLayerEntry).body.style

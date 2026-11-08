@@ -30,6 +30,7 @@
               <FontPickerOverlay />
             </div>
             <MaterialShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
+            <ObjectShelf v-if="column.shown.value === 'objects'" class="min-h-0 flex-1" />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <FontLibrarySidebar v-if="ui.view === 'fonts'" />
@@ -100,6 +101,7 @@ import ExportPanel from '@/components/ExportPanel.vue'
 import ExportPreview from '@/components/ExportPreview.vue'
 import LibraryTabs from '@/components/materials/LibraryTabs.vue'
 import MaterialShelf from '@/components/materials/MaterialShelf.vue'
+import ObjectShelf from '@/components/materials/ObjectShelf.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import FontLibraryList from '@/components/fontLibrary/FontLibraryList.vue'
 import FontLibrarySidebar from '@/components/fontLibrary/FontLibrarySidebar.vue'

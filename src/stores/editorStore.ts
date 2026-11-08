@@ -47,8 +47,9 @@ import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
-import type { LayerEffect } from '@shared/effects/types'
+import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
+import { withStroke } from '@shared/effects/stroke'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -361,6 +362,13 @@ function sourceStyle(
 function anchorFor(style: TextStyle, at: { x: number; y: number }): { x: number; y: number } {
   const empty = drawnLabel('', style, [], { x: 0, y: 0 }, 0)
   return { x: at.x - empty.center.x, y: at.y - empty.center.y }
+}
+
+/** What a material hands a new sentence: its words, its style, its effects. */
+export interface MaterialGives {
+  text: string | null
+  patch: Partial<TextStyle>
+  effects: readonly LayerEffect[] | null
 }
 
 
@@ -1677,12 +1685,11 @@ export const useEditorStore = defineStore('editor', () => {
    * in the project's own style, as a reading's translation does. Placed by its
    * middle, where it was let go.
    */
-  function cmdAddLabelFromMaterial(
-    pageId: string,
+  function materialParts(
     at: { x: number; y: number },
-    gives: { text: string | null; patch: Partial<TextStyle>; effects: readonly LayerEffect[] | null },
+    gives: MaterialGives,
     side: TextSide,
-  ) {
+  ): TranslationParts {
     const project = useProjectStore()
     const seed = project.header.seedStyle
     const style = { ...seed, ...gives.patch }
@@ -1697,7 +1704,45 @@ export const useEditorStore = defineStore('editor', () => {
       if (gives.text !== null) block.body.lines = linesOf(escapeText(gives.text))
       if (gives.effects !== null) block.effects = cloneEffects(gives.effects)
     }
-    return cmdAddLabel(pageId, parts)
+    return parts
+  }
+
+  function cmdAddLabelFromMaterial(
+    pageId: string,
+    at: { x: number; y: number },
+    gives: MaterialGives,
+    side: TextSide,
+  ) {
+    return cmdAddLabel(pageId, materialParts(at, gives, side))
+  }
+
+  /**
+   * Several materials let go of in one gesture. One step, because what was let
+   * go of was one armful — undoing it a sentence at a time would ask for as
+   * many presses as the hand was carrying.
+   */
+  function cmdAddLabelsFromMaterial(
+    pageId: string,
+    drops: readonly { at: { x: number; y: number }; gives: MaterialGives }[],
+    side: TextSide,
+  ): string[] {
+    const project = useProjectStore()
+    if (drops.length === 0) return []
+    const batch = drops.map((drop) => materialParts(drop.at, drop.gives, side))
+    const made = batch.flatMap((parts) => {
+      const first =
+        parts.blocks.find((b) => b.side === side && (b.side === 'source' || b.face === project.activeFace)) ??
+        parts.blocks[0]
+      return first ? [first.id] : []
+    })
+    if (
+      !cmdReshape(`add-labels ${batch.length}`, pageId, () => {
+        for (const parts of batch) project.addLabel(pageId, parts)
+      })
+    )
+      return []
+    selectMany(made, false)
+    return made
   }
 
   /** The objects as a reader meets them, so a group dragged stays a group. */
@@ -2785,6 +2830,60 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * A stroke tried on each object over its own effects, rather than one list
+   * written to them all: what is being offered is a stroke, and an object's
+   * shadow is none of its business.
+   */
+  function previewStroke(targets: readonly AppearanceTarget[], stroke: StrokeEffect | null) {
+    if (previewedFrom !== null && !sameNodes(previewedFrom, targets)) {
+      writeEffects(previewedFrom)
+      previewedFrom = null
+    }
+    previewedFrom ??= effectsOf(targets)
+    writeEffects(previewedFrom.map((s) => ({ ...s, effects: withStroke(s.effects, stroke) })))
+  }
+
+  /**
+   * Part of one object's look lent to others: the style fields in `patch`, and
+   * its stroke. Each keeps the rest of what it carries — only its stroke is
+   * replaced, or taken away where the lender has none — and it all lands in a
+   * single step, since what was asked for was one look.
+   */
+  function cmdApplyLentLook(
+    targets: readonly AppearanceTarget<TextLayerEntry>[],
+    patch: Partial<TextStyle>,
+    stroke: StrokeEffect | null,
+  ) {
+    endStylePreview()
+    endEffectsPreview()
+    if (targets.length === 0) return
+    const stylesBefore = stylesOf(targets)
+    const stylesAfter = stylesBefore.map((entry) => ({ ...entry, style: { ...entry.style, ...patch } }))
+    const effectsBefore = effectsOf(targets)
+    const effectsAfter = effectsBefore.map((entry) => ({
+      ...entry,
+      effects: withStroke(entry.effects, stroke && { ...stroke }),
+    }))
+    if (
+      JSON.stringify(stylesBefore) === JSON.stringify(stylesAfter) &&
+      JSON.stringify(effectsBefore) === JSON.stringify(effectsAfter)
+    )
+      return
+    pushCommand({
+      label: `apply-lent-look ${targets.length}`,
+      detail: { ids: targets.map((t) => t.entry.id), patch },
+      do: () => {
+        writeStyles(stylesAfter)
+        writeEffects(effectsAfter)
+      },
+      undo: () => {
+        writeStyles(stylesBefore)
+        writeEffects(effectsBefore)
+      },
+    })
+  }
+
+  /**
    * The order the blocks of one side are read in, as a step of history.
    *
    * ⭐ On the stack rather than written straight through, unlike a restack in
@@ -3108,6 +3207,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
     cmdAddLabelFromMaterial,
+    cmdAddLabelsFromMaterial,
     cmdLinkSelection,
     isReached,
     cmdDetachSelection,
@@ -3150,6 +3250,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyLook,
     previewEffects,
     endEffectsPreview,
+    previewStroke,
+    cmdApplyLentLook,
     cmdReorderMembers,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,

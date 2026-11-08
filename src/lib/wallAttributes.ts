@@ -133,10 +133,31 @@ export interface WallGroup {
 }
 
 /**
+ * The objects gathered by the one value they hold for an attribute, so every
+ * bucket names a single value and picking one picks every line holding it.
+ * Amounts run smallest first, kinds biggest first.
+ */
+export function bucketsByAttribute(
+  objects: readonly WallObject[],
+  attribute: WallAttribute,
+): WallBucket[] {
+  const byValue = new Map<string, WallBucket>()
+  for (const object of objects) {
+    const value = valueOf(object, attribute)
+    const held = byValue.get(value.key)
+    if (held) held.ids.push(object.id)
+    else byValue.set(value.key, { ...value, ids: [object.id] })
+  }
+  return [...byValue.values()].sort(
+    ORDERED_ATTRIBUTES.has(attribute)
+      ? (a, b) => (a.order ?? 0) - (b.order ?? 0)
+      : (a, b) => b.ids.length - a.ids.length,
+  )
+}
+
+/**
  * The objects gathered by what they mean, then by the one value they hold for
- * an attribute — so every bucket names a single value, and picking one picks
- * every line holding it. Amounts run smallest first, kinds biggest first;
- * meanings in the project's own order, the untagged last.
+ * an attribute. Meanings run in the project's own order, the untagged last.
  */
 export function groupByAttribute(
   objects: readonly WallObject[],
@@ -152,18 +173,7 @@ export function groupByAttribute(
   }
   const groups: WallGroup[] = []
   for (const [key, members] of byMeaning) {
-    const byValue = new Map<string, WallBucket>()
-    for (const object of members) {
-      const value = valueOf(object, attribute)
-      const held = byValue.get(value.key)
-      if (held) held.ids.push(object.id)
-      else byValue.set(value.key, { ...value, key: `${key}|${value.key}`, ids: [object.id] })
-    }
-    const buckets = [...byValue.values()].sort(
-      ORDERED_ATTRIBUTES.has(attribute)
-        ? (a, b) => (a.order ?? 0) - (b.order ?? 0)
-        : (a, b) => b.ids.length - a.ids.length,
-    )
+    const buckets = bucketsByAttribute(members, attribute).map((b) => ({ ...b, key: `${key}|${b.key}` }))
     groups.push({ key, tags: tagsInRegistryOrder(members[0]!.tags, registry), count: members.length, buckets })
   }
   const rank = (g: WallGroup) => registry.findIndex((t) => g.tags.includes(t.name))

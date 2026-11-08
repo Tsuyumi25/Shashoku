@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
-import { groupByAttribute, valueOf, type WallObject } from './wallAttributes'
+import { bucketsByAttribute, groupByAttribute, valueOf, type WallObject } from './wallAttributes'
 
 const obj = (id: string, style: Partial<TextStyle>, tags: string[] = [], effects: LayerEffect[] = []): WallObject => ({
   id,
@@ -61,5 +61,30 @@ describe('valueOf', () => {
     expect(valueOf(obj('y', {}), 'stroke').label).toBe('無描邊')
     const resting = obj('z', {}, [], [{ kind: 'stroke', width: 0, color: '#ffffff', position: 'outside' }] as LayerEffect[])
     expect(valueOf(resting, 'stroke').key).toBe('none')
+  })
+})
+
+describe('bucketsByAttribute', () => {
+  it('gathers by the value alone, whatever the objects are marked', () => {
+    const buckets = bucketsByAttribute(
+      [
+        obj('a', { color: '#ff0000' }, ['心聲']),
+        obj('b', { color: '#ff0000' }),
+        obj('c', { color: '#0000ff' }, ['旁白']),
+      ],
+      'color',
+    )
+    expect(buckets.map((b) => [b.label, b.ids])).toEqual([
+      ['#ff0000', ['a', 'b']],
+      ['#0000ff', ['c']],
+    ])
+  })
+
+  it('runs an amount smallest first however many each holds', () => {
+    const buckets = bucketsByAttribute(
+      [obj('a', { weightPx: 2 }), obj('b', { weightPx: 2 }), obj('c', { weightPx: 0 })],
+      'weight',
+    )
+    expect(buckets.map((b) => b.label)).toEqual(['0', '2'])
   })
 })
