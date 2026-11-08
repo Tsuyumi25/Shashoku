@@ -369,15 +369,6 @@
     />
     <CanvasTagPicker :at="objectMenu.tagPickerAt.value" @close="objectMenu.tagPickerAt.value = null" />
 
-    <GroupWheel
-      v-if="wheelAt !== null"
-      :at="wheelAt"
-      :origin="wheelOrigin"
-      :groups="preferences.prefs.materialGroups"
-      @choose="chooseFromWheel"
-      @close="wheelAt = null"
-    />
-
     <Notice />
   </div>
 </template>
@@ -387,10 +378,8 @@ import { computed, nextTick, onMounted, onScopeDispose, reactive, ref, shallowRe
 import type { FacePage } from '@shared/page/units'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
-import GroupWheel from '@/components/GroupWheel.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
 import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
-import { logActivity } from '@/lib/activityLog'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useObjectMenu } from '@/composables/useObjectMenu'
@@ -805,43 +794,25 @@ function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
 const column = useLeftColumn()
 const merge = useMergeLayers()
 
-/** Where the right button's ring stands, or null when it is down. */
-const wheelAt = ref<{ x: number; y: number } | null>(null)
-const wheelOrigin = ref({ left: 0, top: 0 })
-
 /**
  * The right button means two things by where it lands. Over a text object it is
  * that object's menu — the things done to a translation as a whole; anywhere
- * else it is the ring of the fonts and the material groups. The ring never
- * opens over a text object, so which of the two comes up is never in doubt.
+ * else it opens the fonts in the left column, a way there from where the eye
+ * already is.
  *
  * Raster layers are not asked: the base map covers the whole page, and taking
- * it as the object under the hand would leave the ring nowhere to open.
+ * it as the object under the hand would leave no empty ground to press on.
  */
 function onRightPress(e: PointerEvent) {
-  const rect = containerRef.value?.getBoundingClientRect()
-  if (!rect) return
   const pointed = pointedObjectId.value
   if (pointed !== null) {
     objectMenu.open(pointed, { x: e.clientX, y: e.clientY })
     return
   }
-  wheelOrigin.value = { left: rect.left, top: rect.top }
-  wheelAt.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  column.show('font')
 }
 
 const objectMenu = useObjectMenu()
-
-function chooseFromWheel(pick: { font: true } | { groupId: string }) {
-  wheelAt.value = null
-  if ('font' in pick) {
-    logActivity('wheel', { pick: 'font' })
-    column.show('font')
-  } else {
-    logActivity('wheel', { group: pick.groupId })
-    column.openGroup(pick.groupId)
-  }
-}
 
 function onSelectObject(id: string, additive: boolean) {
   // A press on a member of the set is the start of moving the set.

@@ -5,7 +5,6 @@
     :class="[missing && 'piece-missing', selected && 'piece-selected']"
     :style="{ width: `${w}px`, height: `${h}px` }"
     :title="title"
-    @click="emit('open', $event)"
   >
     <canvas ref="canvasEl" :width="cw" :height="ch" :style="{ width: `${w}px`, height: `${h}px` }" />
     <span v-if="missing" class="badge">缺</span>
@@ -17,8 +16,8 @@ import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { sampleSource, type Sample } from '@/lib/fontSampleCache'
 
 /**
- * One text object as the page draws it, at whatever size the wall shows it.
- * The bitmap is the typesetter's own, so what is on the wall is what is on the
+ * One text object as the page draws it, at whatever size the shelf shows it.
+ * The bitmap is the typesetter's own, so what is on the shelf is what is on the
  * page — a missing face shows as the same boxes it does there.
  */
 const props = defineProps<{
@@ -29,8 +28,6 @@ const props = defineProps<{
   selected: boolean
   title: string
 }>()
-
-const emit = defineEmits<{ open: [event: MouseEvent] }>()
 
 const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 const dpr = window.devicePixelRatio || 1

@@ -95,18 +95,9 @@
         </button>
       </div>
 
-      <!--
-        Not a face of the pill: the wall opens in a window of its own, for a
-        second screen, and leaves the view here as it was.
-      -->
       <div class="tb-center-side">
-        <button class="tb-lib no-drag" title="在另一個視窗打開全覽" @click="openWall">
-          <LayoutGrid :size="14" />
-          <span>全覽</span>
-        </button>
-        <!-- A view of this window, unlike the wall beside it. -->
         <button
-          class="tb-lib no-drag ml-1"
+          class="tb-lib no-drag"
           :class="ui.view === 'topology' && 'tb-lib-on'"
           title="切換到拓樸：每一頁的閱讀線，跟 agent 拿到的 mermaid 一樣"
           @click="ui.setView('topology')"
@@ -132,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { LayoutGrid, LibraryBig, Menu, Save, Settings, Type, Workflow } from '@lucide/vue'
+import { LibraryBig, Menu, Save, Settings, Type, Workflow } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -154,10 +145,6 @@ const FACES: { view: AppView; title: string }[] = [
   { view: 'editor', title: '編輯器' },
   { view: 'export', title: '匯出' },
 ]
-
-function openWall() {
-  window.api.wallOpen()
-}
 
 async function onSave() {
   try {

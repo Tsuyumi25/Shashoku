@@ -117,7 +117,6 @@ export function useActivityLog(): void {
     },
   )
   watch(column.shown, (which) => logActivity('column', { which }))
-  watch(column.openGroupId, (group) => logActivity('shelf', { group }))
   watch(
     () => editor.pendingTextEdit?.labelId ?? null,
     (id, was) => {

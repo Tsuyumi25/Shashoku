@@ -4,7 +4,7 @@ import { faceTree } from '@shared/page/trees'
 import { blocksOnSide, shownCodeOf } from '@shared/page/units'
 import type { TextSide } from '@shared/page/text'
 import type { TextStyle } from '@shared/text-style/types'
-import type { WallAttribute } from '@/lib/wallAttributes'
+import type { ShelfAttribute } from '@/lib/shelfAttributes'
 import type { ProjectFile } from '@/types/project'
 
 /**
@@ -13,7 +13,7 @@ import type { ProjectFile } from '@/types/project'
  * the heap that was being read; the face to begin with, which is nearly all it
  * is asked for.
  */
-export const shelfAttribute = ref<WallAttribute>('font')
+export const shelfAttribute = ref<ShelfAttribute>('font')
 
 export interface ShelfEntry {
   id: string
@@ -22,17 +22,12 @@ export interface ShelfEntry {
   code: string
   style: TextStyle
   effects: readonly LayerEffect[]
-  tags: readonly string[]
 }
-
-const NO_TAGS: readonly string[] = []
 
 /**
  * Every text object of one side in the chapter, read in place rather than
- * copied out as the wall's scene is — this is rebuilt whenever any object
- * changes, a tried-on look included, and copying and tagging the whole chapter
- * each time is most of a frame. Meanings are left empty: the shelf never
- * gathers by them.
+ * copied out — this is rebuilt whenever any object changes, a tried-on look
+ * included, and copying the whole chapter each time is most of a frame.
  */
 export function shelfEntriesOf(files: readonly ProjectFile[], side: TextSide, face: string): ShelfEntry[] {
   const entries: ShelfEntry[] = []
@@ -49,7 +44,6 @@ export function shelfEntriesOf(files: readonly ProjectFile[], side: TextSide, fa
         code,
         style: block.body.style,
         effects: block.effects,
-        tags: NO_TAGS,
       })
     }
   })

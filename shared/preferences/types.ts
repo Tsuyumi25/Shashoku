@@ -1,5 +1,4 @@
 import { defaultExportProfile, type ExportProfile } from "../export/types";
-import { defaultMaterialGroups, defaultRecipes, type MaterialGroup, type MaterialRecipe } from "./materials";
 
 export const MIN_FONT_PICKER_BOX_PX = 60;
 export const MAX_FONT_PICKER_BOX_PX = 240;
@@ -102,10 +101,6 @@ export interface FontGroup {
 }
 
 export interface Preferences {
-  /** Shelves of saved words and looks, in the order the ring and the library list them. */
-  materialGroups: MaterialGroup[];
-  /** The ways a text object can be saved as a material, each a set of switches ticked to start with. */
-  materialRecipes: MaterialRecipe[];
   /** Font families the user starred, in the order they were added. */
   fontFavorites: string[];
   /** Groups in the order the library's sidebar lists them. */
@@ -221,8 +216,6 @@ export interface Preferences {
  */
 export function defaultPreferences(): Preferences {
   return {
-    materialGroups: defaultMaterialGroups(() => crypto.randomUUID()),
-    materialRecipes: defaultRecipes(),
     fontFavorites: [],
     fontGroups: [],
     pinnedLayerSeed: ["修圖", "底圖"],

@@ -20,7 +20,7 @@
             a trip to the other side.
           -->
           <!--
-            What to give the selection, the whole column: a shelf of saved
+            What to give the selection, the whole column: the chapter's own
             materials, or the fonts. The font stays mounted so the picker keeps
             its catalogue and scroll.
           -->
@@ -29,8 +29,7 @@
             <div v-show="column.shown.value === 'font'" class="flex min-h-0 min-w-0 flex-1 flex-col">
               <FontPickerOverlay />
             </div>
-            <MaterialShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
-            <ObjectShelf v-if="column.shown.value === 'objects'" class="min-h-0 flex-1" />
+            <ObjectShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
           </div>
           <LibraryWorkspaces v-show="ui.view === 'library'" />
           <FontLibrarySidebar v-if="ui.view === 'fonts'" />
@@ -100,7 +99,6 @@ import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ExportPanel from '@/components/ExportPanel.vue'
 import ExportPreview from '@/components/ExportPreview.vue'
 import LibraryTabs from '@/components/materials/LibraryTabs.vue'
-import MaterialShelf from '@/components/materials/MaterialShelf.vue'
 import ObjectShelf from '@/components/materials/ObjectShelf.vue'
 import FontPickerOverlay from '@/components/FontPickerOverlay.vue'
 import FontLibraryList from '@/components/fontLibrary/FontLibraryList.vue'
@@ -124,7 +122,6 @@ import { useConnectStore } from '@/stores/connectStore'
 import { useExportStore } from '@/stores/exportStore'
 import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import TopologyMode from '@/modes/TopologyMode.vue'
-import { useWallPublisher } from '@/composables/useWallPublisher'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -141,7 +138,6 @@ const connect = useConnectStore()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
-useWallPublisher()
 const fontPicker = useFontPicker()
 const column = useLeftColumn()
 // The font picker's own "open" follows the column, and "choose a font" from

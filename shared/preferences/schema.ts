@@ -1,5 +1,4 @@
 import { freeGroupName } from "./fontGroups";
-import { parseMaterialGroups, parseRecipes } from "./materials";
 import { parseProfileList, serializeProfile } from "../export/schema";
 import {
   MAX_FONT_PICKER_BOX_PX,
@@ -55,8 +54,6 @@ export function parsePreferences(raw: string): Preferences {
   if (!isRecord(parsed)) return prefs;
 
   const {
-    materialGroups,
-    materialRecipes,
     fontFavorites,
     fontGroups,
     pinnedLayerSeed,
@@ -81,8 +78,6 @@ export function parsePreferences(raw: string): Preferences {
     retouchOpacity,
   } = parsed;
 
-  prefs.materialGroups = parseMaterialGroups(materialGroups);
-  prefs.materialRecipes = parseRecipes(materialRecipes);
   if (Array.isArray(fontFavorites)) {
     prefs.fontFavorites = fontFavorites.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
@@ -224,8 +219,6 @@ export function clampUiZoomLevel(level: number): number {
 export function serializePreferences(prefs: Preferences): string {
   return JSON.stringify(
     {
-      materialGroups: prefs.materialGroups,
-      materialRecipes: prefs.materialRecipes,
       fontFavorites: prefs.fontFavorites,
       fontGroups: prefs.fontGroups,
       pinnedLayerSeed: prefs.pinnedLayerSeed,

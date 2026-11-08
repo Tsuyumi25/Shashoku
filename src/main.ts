@@ -2,7 +2,6 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import Toast, { POSITION, type PluginOptions } from "vue-toastification";
 import App from "./App.vue";
-import WallApp from "./wall/WallApp.vue";
 import { usePreferencesStore } from "./stores/preferencesStore";
 import { registerMcpAnswers } from "./mcp/answers";
 import "vue-toastification/dist/index.css";
@@ -29,13 +28,9 @@ const toastOptions: PluginOptions = {
   hideProgressBar: true,
 };
 
-// The same page serves the wall's window, which is told apart by its hash. It
-// answers no MCP queries: the project lives in the editor's window.
-const isWall = location.hash === "#wall";
+const app = createApp(App).use(createPinia()).use(Toast, toastOptions);
 
-const app = createApp(isWall ? WallApp : App).use(createPinia()).use(Toast, toastOptions);
-
-if (!isWall) registerMcpAnswers();
+registerMcpAnswers();
 
 // Panel geometry has to be on hand before the first render, so preferences are
 // loaded before mounting rather than in a component.
@@ -46,4 +41,4 @@ app.mount("#app");
 // After mounting, because that is what "can answer" means here: the queries
 // read stores the interface owns, and the main process holds anything that
 // arrives before this rather than sending it at a window that would drop it.
-if (!isWall) window.api.mcpReady();
+window.api.mcpReady();

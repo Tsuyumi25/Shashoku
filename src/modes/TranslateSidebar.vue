@@ -30,11 +30,6 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 /**
  * The verbs on top and what the selection looks like under them, the line
  * between them where the reader wants it.
- *
- * The semantic buckets used to share this column. They are needed when they
- * are needed — a few times a chapter, and then wanting a lot of room — so they
- * live in the wall's own window rather than holding a third of it the rest of
- * the time.
  */
 const preferences = usePreferencesStore()
 </script>

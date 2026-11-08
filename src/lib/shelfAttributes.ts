@@ -1,8 +1,6 @@
 import type { LayerEffect } from '@shared/effects/types'
 import { visibleStrokeOf } from '@shared/effects/stroke'
-import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { tagSetKey, tagsInRegistryOrder } from '@shared/tags/set'
 import { styleFieldText } from '@/lib/textStyleFields'
 
 /**
@@ -11,7 +9,7 @@ import { styleFieldText } from '@/lib/textStyleFields'
  * weight together, since that is one choice in the picker; the stroke lives in
  * the effects and is gathered all the same.
  */
-export type WallAttribute =
+export type ShelfAttribute =
   | 'font'
   | 'direction'
   | 'align'
@@ -23,7 +21,7 @@ export type WallAttribute =
   | 'leading'
   | 'size'
 
-export const WALL_ATTRIBUTES: readonly { id: WallAttribute; label: string }[] = [
+export const SHELF_ATTRIBUTES: readonly { id: ShelfAttribute; label: string }[] = [
   { id: 'font', label: '字型' },
   { id: 'direction', label: '方向' },
   { id: 'align', label: '對齊' },
@@ -36,9 +34,8 @@ export const WALL_ATTRIBUTES: readonly { id: WallAttribute; label: string }[] = 
   { id: 'size', label: '字級' },
 ]
 
-export interface WallObject {
+export interface ShelfObject {
   id: string
-  tags: readonly string[]
   style: TextStyle
   effects: readonly LayerEffect[]
 }
@@ -53,7 +50,7 @@ export interface WallObject {
  * size always lands in the same one, keep 55 and 59 together and 47 apart from
  * 70; that chapter falls into 20.
  */
-export interface WallValue {
+export interface ShelfValue {
   key: string
   label: string
   /** Where it falls on a scale, for the attributes that have one. */
@@ -67,7 +64,7 @@ export interface WallValue {
  * first, so 61–66px sits between 55–60px and 67–72px however many lines each
  * holds; the rest are kinds, and the biggest kind leads.
  */
-export const ORDERED_ATTRIBUTES: ReadonlySet<WallAttribute> = new Set([
+export const ORDERED_ATTRIBUTES: ReadonlySet<ShelfAttribute> = new Set([
   'size',
   'weight',
   'scaleX',
@@ -75,7 +72,7 @@ export const ORDERED_ATTRIBUTES: ReadonlySet<WallAttribute> = new Set([
   'leading',
 ])
 
-export function valueOf(object: WallObject, attribute: WallAttribute): WallValue {
+export function valueOf(object: ShelfObject, attribute: ShelfAttribute): ShelfValue {
   const s = object.style
   switch (attribute) {
     case 'font': {
@@ -117,19 +114,12 @@ export function valueOf(object: WallObject, attribute: WallAttribute): WallValue
   }
 }
 
-export interface WallBucket {
+export interface ShelfBucket {
   key: string
   label: string
   swatch?: string
   order?: number
   ids: string[]
-}
-
-export interface WallGroup {
-  key: string
-  tags: string[]
-  count: number
-  buckets: WallBucket[]
 }
 
 /**
@@ -138,10 +128,10 @@ export interface WallGroup {
  * Amounts run smallest first, kinds biggest first.
  */
 export function bucketsByAttribute(
-  objects: readonly WallObject[],
-  attribute: WallAttribute,
-): WallBucket[] {
-  const byValue = new Map<string, WallBucket>()
+  objects: readonly ShelfObject[],
+  attribute: ShelfAttribute,
+): ShelfBucket[] {
+  const byValue = new Map<string, ShelfBucket>()
   for (const object of objects) {
     const value = valueOf(object, attribute)
     const held = byValue.get(value.key)
@@ -153,35 +143,4 @@ export function bucketsByAttribute(
       ? (a, b) => (a.order ?? 0) - (b.order ?? 0)
       : (a, b) => b.ids.length - a.ids.length,
   )
-}
-
-/**
- * The objects gathered by what they mean, then by the one value they hold for
- * an attribute. Meanings run in the project's own order, the untagged last.
- */
-export function groupByAttribute(
-  objects: readonly WallObject[],
-  attribute: WallAttribute,
-  registry: TagRegistry,
-): WallGroup[] {
-  const byMeaning = new Map<string, WallObject[]>()
-  for (const object of objects) {
-    const key = tagSetKey(object.tags)
-    const held = byMeaning.get(key)
-    if (held) held.push(object)
-    else byMeaning.set(key, [object])
-  }
-  const groups: WallGroup[] = []
-  for (const [key, members] of byMeaning) {
-    const buckets = bucketsByAttribute(members, attribute).map((b) => ({ ...b, key: `${key}|${b.key}` }))
-    groups.push({ key, tags: tagsInRegistryOrder(members[0]!.tags, registry), count: members.length, buckets })
-  }
-  const rank = (g: WallGroup) => registry.findIndex((t) => g.tags.includes(t.name))
-  return groups.sort((a, b) => {
-    if (a.tags.length === 0 || b.tags.length === 0) return a.tags.length === 0 ? 1 : -1
-    const ra = rank(a)
-    const rb = rank(b)
-    if (ra !== rb) return (ra === -1 ? Infinity : ra) - (rb === -1 ? Infinity : rb)
-    return b.count - a.count
-  })
 }

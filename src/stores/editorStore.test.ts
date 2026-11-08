@@ -3691,10 +3691,9 @@ describe('a material put down on the page', () => {
   it('becomes a sentence of its own, giving only what is ticked, on the side the canvas shows', () => {
     const { project, editor } = openOnePage()
     const seed = project.header.seedStyle
-    editor.cmdAddLabelFromMaterial(
+    editor.cmdAddLabelsFromMaterial(
       PAGE,
-      { x: 100, y: 100 },
-      { text: '咕啾', patch: { fontFamily: 'HanyiSentyRubber' }, effects: [STROKE] },
+      [{ at: { x: 100, y: 100 }, gives: { text: '咕啾', patch: { fontFamily: 'HanyiSentyRubber' }, effects: [STROKE] } }],
       'translation',
     )
     const [tr] = blocks(project, 'translation')
@@ -3708,14 +3707,14 @@ describe('a material put down on the page', () => {
 
   it('lands as the source when that is the side being worked on', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: 'はぁ', patch: {}, effects: null }, 'source')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: 'はぁ', patch: {}, effects: null } }], 'source')
     expect(blocks(project, 'source').map((b) => b.body.lines.join('\n'))).toEqual(['はぁ'])
     expect(blocks(project, 'translation').map((b) => b.body.lines.join('\n'))).toEqual([''])
   })
 
   it('without its words ticked is an empty sentence wearing the look, taken back by one undo', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: null, patch: { color: '#ffffff' }, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: null, patch: { color: '#ffffff' }, effects: null } }], 'translation')
     expect(blocks(project, 'translation')[0]!.body).toMatchObject({ lines: [''], style: { color: '#ffffff' } })
     editor.undo()
     expect(project.viewOf(PAGE)!.units).toHaveLength(0)
@@ -3727,9 +3726,9 @@ describe('Ctrl+L on the selection', () => {
 
   it('joins two sentences into one and one undo splits them again', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: '哈', patch: {}, effects: null } }], 'translation')
     const a = [...editor.selectedIds][0]!
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 300, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 300, y: 100 }, gives: { text: '哈', patch: {}, effects: null } }], 'translation')
     const b = [...editor.selectedIds][0]!
     editor.selectOnly(a)
     editor.toggleSelected(b)
@@ -3744,9 +3743,9 @@ describe('Ctrl+L on the selection', () => {
 
   it('takes a block out into a sentence of its own with Ctrl+Shift+L', () => {
     const { project, editor } = openOnePage()
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '撲', patch: {}, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: '撲', patch: {}, effects: null } }], 'translation')
     const a = [...editor.selectedIds][0]!
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 300, y: 100 }, { text: '通', patch: {}, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 300, y: 100 }, gives: { text: '通', patch: {}, effects: null } }], 'translation')
     const b = [...editor.selectedIds][0]!
     editor.selectOnly(a)
     editor.toggleSelected(b)
@@ -3783,7 +3782,7 @@ describe('the selection seen from the other side', () => {
   it('reaches the same sentences on the side shown, for anything that changes how they look', () => {
     const { project, editor } = openOnePage()
     editor.setTextSide('translation')
-    editor.cmdAddLabelFromMaterial(PAGE, { x: 100, y: 100 }, { text: '哈', patch: {}, effects: null }, 'translation')
+    editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: '哈', patch: {}, effects: null } }], 'translation')
     const translation = [...editor.selectedIds][0]!
     const source = sourceBlocksOf(project.viewOf(PAGE)!, project.viewOf(PAGE)!.units[0]!)[0]!.id
 

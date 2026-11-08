@@ -1707,15 +1707,6 @@ export const useEditorStore = defineStore('editor', () => {
     return parts
   }
 
-  function cmdAddLabelFromMaterial(
-    pageId: string,
-    at: { x: number; y: number },
-    gives: MaterialGives,
-    side: TextSide,
-  ) {
-    return cmdAddLabel(pageId, materialParts(at, gives, side))
-  }
-
   /**
    * Several materials let go of in one gesture. One step, because what was let
    * go of was one armful — undoing it a sentence at a time would ask for as
@@ -2579,7 +2570,7 @@ export const useEditorStore = defineStore('editor', () => {
    * The selection as the side on screen reaches it. A text block selected on
    * the other side stands for its sentence's blocks on this one: the selection
    * outlives Shift+S so Ctrl+L can pair across the two sides, and a person who
-   * picked translations on the wall and turned to the sources means to change
+   * picked translations on the shelf and turned to the sources means to change
    * those sources, not the translations they can no longer see.
    *
    * ⚠️ Ctrl+L and every move read the selection itself, never this.
@@ -3206,7 +3197,6 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyVerdict,
     cmdSetReadingsAside,
     cmdAddLabelFromReading,
-    cmdAddLabelFromMaterial,
     cmdAddLabelsFromMaterial,
     cmdLinkSelection,
     isReached,

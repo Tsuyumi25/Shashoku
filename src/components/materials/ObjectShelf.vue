@@ -16,9 +16,6 @@
     </p>
 
     <div v-else ref="bodyEl" class="min-h-0 flex-1 space-y-2 overflow-auto p-2">
-      <p class="px-1 text-xs leading-relaxed text-muted-foreground">
-        拖一顆字到別的字上，給它字型、文字色和描邊；拖到空白處變成新的一句。背景按右鍵換排法。
-      </p>
       <div v-for="bucket in buckets" :key="bucket.key" class="cluster">
         <div class="cluster-label">
           <span v-if="bucket.swatch" class="swatch" :style="{ backgroundColor: bucket.swatch }" />
@@ -26,7 +23,7 @@
           <span class="ml-auto shrink-0 tabular-nums opacity-70">{{ bucket.items.length }}</span>
         </div>
         <div class="flex flex-wrap items-center gap-1">
-          <WallPiece
+          <ShelfPiece
             v-for="item in bucket.items"
             :key="item.id"
             :data-piece-id="item.id"
@@ -65,14 +62,13 @@ import type { TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
-import WallPiece from '@/components/wall/WallPiece.vue'
+import ShelfPiece from '@/components/materials/ShelfPiece.vue'
 import { useObjectMenu } from '@/composables/useObjectMenu'
 import type { AppearanceTarget } from '@/lib/appearance'
 import type { Sample } from '@/lib/fontSampleCache'
 import { drawnLabel } from '@/lib/labelRaster'
 import { shelfAttribute, shelfEntriesOf, type ShelfEntry } from '@/lib/objectShelf'
-import { shownEm } from '@/lib/wall'
-import { WALL_ATTRIBUTES, bucketsByAttribute, type WallAttribute } from '@/lib/wallAttributes'
+import { SHELF_ATTRIBUTES, bucketsByAttribute, type ShelfAttribute } from '@/lib/shelfAttributes'
 import { useEditorStore } from '@/stores/editorStore'
 import { useExplodeStore } from '@/stores/explodeStore'
 import { objectAtPage } from '@/lib/canvasHit'
@@ -108,7 +104,7 @@ interface Piece {
 
 const sideName = computed(() => (editor.textSide === 'source' ? '原文' : '譯文'))
 const attributeLabel = computed(
-  () => WALL_ATTRIBUTES.find((a) => a.id === shelfAttribute.value)?.label ?? '',
+  () => SHELF_ATTRIBUTES.find((a) => a.id === shelfAttribute.value)?.label ?? '',
 )
 
 /** The whole chapter, which is why no page is named: turning one changes nothing here. */
@@ -154,7 +150,9 @@ const pieces = computed<Piece[]>(() =>
       sizePx: entry.style.fontSizePx,
       sample: drawn.sample,
       missing: drawn.missingFamily !== null,
-      scale: shownEm(entry.style.fontSizePx, 'eased') / entry.style.fontSizePx,
+      // The square root keeps the order of sizes while pulling a 368px shout
+      // and a 47px aside within reach of one column.
+      scale: 3.6 / Math.sqrt(entry.style.fontSizePx),
       title: `第 ${entry.pageNumber} 頁 · ${font} ${entry.style.fontStyleName} · ${entry.style.fontSizePx}px`,
     }
   }),
@@ -192,12 +190,12 @@ const fit = computed(() => {
 const arrangeAt = ref<{ x: number; y: number } | null>(null)
 
 const ARRANGEMENTS = computed<MenuItem[]>(() =>
-  WALL_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
+  SHELF_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
 )
 
 function chooseArrangement(id: string) {
   arrangeAt.value = null
-  shelfAttribute.value = id as WallAttribute
+  shelfAttribute.value = id as ShelfAttribute
 }
 
 /**
@@ -270,7 +268,7 @@ const ShelfOverlay = defineComponent(() => () => {
     // Over an object the look is already tried on it, and the piece would only hide that.
     held && lead && plan.value.kind !== 'style'
       ? h('div', { class: 'shelf-carry', style: { left: `${held.x - held.grab.x}px`, top: `${held.y - held.grab.y}px` } }, [
-          h(WallPiece, { sample: lead.sample, scale: lead.scale * fit.value, missing: lead.missing, selected: false, title: '' }),
+          h(ShelfPiece, { sample: lead.sample, scale: lead.scale * fit.value, missing: lead.missing, selected: false, title: '' }),
           held.ids.length > 1 ? h('span', { class: 'shelf-carry-count' }, String(held.ids.length)) : null,
         ])
       : null,

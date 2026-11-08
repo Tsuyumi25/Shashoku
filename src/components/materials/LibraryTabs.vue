@@ -24,8 +24,7 @@
 import { useLeftColumn, type ColumnView } from '@/composables/useLeftColumn'
 
 const TABS: { view: ColumnView; label: string; title: string }[] = [
-  { view: 'materials', label: '素材', title: '存下來的文字與樣式，分群組放' },
-  { view: 'objects', label: "素材'", title: '這一話自己的文字物件，照一種排法分堆' },
+  { view: 'materials', label: '素材', title: '這一話自己的文字物件，照一種排法分堆' },
   { view: 'font', label: '字型', title: '字型' },
 ]
 

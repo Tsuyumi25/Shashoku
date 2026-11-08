@@ -282,7 +282,7 @@ const seen = computed(() => picker.isOpen.value && ui.view === 'editor')
  * The text objects selected, as the picker shows them: read while the picker
  * can be seen, and only once the frame showing the new selection is painted.
  * The picker follows the selection and nothing waits on it — a hundred objects
- * picked on the wall would otherwise wait for every sample in the grid to be
+ * picked on the shelf would otherwise wait for every sample in the grid to be
  * asked for again. Writes read the selection afresh, so this lagging never
  * sends a change to what is no longer selected.
  */
