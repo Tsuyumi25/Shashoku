@@ -506,7 +506,7 @@ function objectAt(x: number, y: number): string | undefined {
 function lookTargets(overId: string): AppearanceTarget<TextLayerEntry>[] {
   const page = editor.currentPageId
   if (page === null) return []
-  if (editor.isSelected(overId)) return editor.selectedTextObjects().filter((t) => t.pageId === page)
+  if (editor.isSelected(overId)) return editor.selectedTextObjects()
   const entry = project.entryById(overId)
   if (entry?.kind !== 'text' || project.pageOfEntry(overId) !== page) return []
   return [{ pageId: page, entry }]
