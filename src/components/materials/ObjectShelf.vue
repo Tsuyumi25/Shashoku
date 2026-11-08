@@ -273,7 +273,6 @@ const ShelfOverlay = defineComponent(() => () => {
           held.ids.length > 1 ? h('span', { class: 'shelf-carry-count' }, String(held.ids.length)) : null,
         ])
       : null,
-    held ? h('div', { class: 'shelf-carry-label', style: { left: `${held.x + 14}px`, top: `${held.y + 18}px` } }, plan.value.label) : null,
   ]
 })
 
@@ -401,7 +400,6 @@ useEventListener(window, 'pointermove', (e: PointerEvent) => {
 interface Plan {
   kind: 'style' | 'create' | 'none'
   targets: AppearanceTarget<TextLayerEntry>[]
-  label: string
   /** The object under the hand that the look lands through. */
   over?: string
 }
@@ -432,7 +430,7 @@ function withinTrial(x: number, y: number): string | undefined {
   return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom ? t.id : undefined
 }
 
-const NOTHING: Plan = { kind: 'none', targets: [], label: '放開取消' }
+const NOTHING: Plan = { kind: 'none', targets: [] }
 
 const plan = ref<Plan>(NOTHING)
 
@@ -490,10 +488,9 @@ function planFor(x: number, y: number, held: Carried): Plan {
   if (alone !== undefined) {
     const over = withinTrial(x, y) ?? objectAt(x, y)
     const targets = over === undefined || over === alone ? [] : lookTargets(over)
-    if (targets.length > 0) return { kind: 'style', targets, over, label: `套用字型＋文字色＋描邊 → ${targets.length} 個` }
-    return { kind: 'create', targets: [], label: '在這裡新建' }
+    if (targets.length > 0) return { kind: 'style', targets, over }
   }
-  return { kind: 'create', targets: [], label: `新建 ${held.ids.length} 句` }
+  return { kind: 'create', targets: [] }
 }
 
 /** The font, the colour and the stroke the piece under the hand is lending. */
@@ -685,16 +682,5 @@ html.shelf-carrying * {
   font-size: 11px;
   line-height: 1.1rem;
   color: var(--primary-foreground);
-}
-.shelf-carry-label {
-  position: fixed;
-  z-index: 60;
-  pointer-events: none;
-  border-radius: 0.25rem;
-  background: var(--popover);
-  padding: 0.1rem 0.4rem;
-  font-size: 11px;
-  color: var(--foreground);
-  box-shadow: 0 0.25rem 0.75rem oklch(0 0 0 / 0.35);
 }
 </style>
