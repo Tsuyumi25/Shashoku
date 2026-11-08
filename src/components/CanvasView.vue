@@ -363,6 +363,7 @@
       is a page ready to draw, and last in the box so nothing drawn covers it.
     -->
     <CanvasMenu :at="objectMenu?.at ?? null" :items="OBJECT_MENU" @pick="onObjectMenu" @close="objectMenu = null" />
+    <CanvasTagPicker :at="tagPickerAt" @close="tagPickerAt = null" />
 
     <GroupWheel
       v-if="wheelAt !== null"
@@ -384,6 +385,7 @@ import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueus
 import Notice from '@/components/Notice.vue'
 import GroupWheel from '@/components/GroupWheel.vue'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
+import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { refOfBlock } from '@shared/mcp/refs'
 import { logActivity } from '@/lib/activityLog'
@@ -828,6 +830,9 @@ function onRightPress(e: PointerEvent) {
 /** An object's own menu, and which object it is for. */
 const objectMenu = ref<{ id: string; at: { x: number; y: number } } | null>(null)
 
+/** Where the selection's tag picker was opened from the object menu, or null. */
+const tagPickerAt = ref<{ x: number; y: number } | null>(null)
+
 /** The address an agent uses for the object the menu is open on, or null where it has none. */
 const objectRef = computed(() => {
   const id = objectMenu.value?.id
@@ -843,6 +848,7 @@ const objectRef = computed(() => {
  */
 const OBJECT_MENU = computed<MenuItem[]>(() => [
   ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
+  { id: 'tags', label: '標記…' },
   { id: 'duplicate-unit', label: '製作副本（整句）' },
   ...preferences.prefs.materialRecipes.map((r) => ({ id: `save:${r.id}`, label: `存成素材：${r.name}` })),
   { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
@@ -865,6 +871,10 @@ function onObjectMenu(pick: string) {
   // so this is the Delete key's own act and takes the whole selection.
   if (pick === 'delete') {
     editor.deleteSelection()
+    return
+  }
+  if (pick === 'tags') {
+    tagPickerAt.value = at.at
     return
   }
   if (pick === 'duplicate-unit') {
