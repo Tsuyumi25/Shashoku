@@ -228,6 +228,8 @@ export interface TextsView {
   changedOnly?: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
   /** With `changedOnly`, the graphs drawn differently since, per page and face; a whole read draws every one. */
   graphs?: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** On a whole read, the addresses in it that somebody else changed since this session last saw them. */
+  touched?: readonly string[];
 }
 
 export function renderTexts(pages: PageTexts[], view: TextsView = {}): string {
@@ -242,6 +244,7 @@ export function renderTexts(pages: PageTexts[], view: TextsView = {}): string {
     out.push(`筆記資料夾 ${view.where.notes}`);
   }
   if (view.missing && view.missing.length > 0) out.push(`沒有這些頁：${view.missing.join("、")}`);
+  if (view.touched && view.touched.length > 0) out.push(`自上次讀取後別人改過：${view.touched.join("、")}`);
   for (const page of pages) {
     out.push("");
     const graphs = view.changedOnly ? view.graphs?.get(page.pageId) : graphsOf(page);
@@ -347,6 +350,34 @@ export function sinceSeen(
     if (faces.length > 0 || page.badge !== "ok") changed.push({ ...page, faces });
   }
   return { pages: changed, gone, graphs };
+}
+
+/**
+ * These pages cut down to the faces this session has read whole. A write's
+ * reply shows only what it touched, and the rest of that face was never seen,
+ * so nothing in it can have changed for this session.
+ */
+export function readBefore(seen: SeenTexts, pages: readonly PageTexts[]): PageTexts[] {
+  return pages.flatMap((page) => {
+    const held = seen.get(page.pageId);
+    const faces = page.faces.filter((face) => held?.get(face.faceId)?.shape !== undefined);
+    return faces.length > 0 ? [{ ...page, faces }] : [];
+  });
+}
+
+/** What `sinceSeen` found, as addresses: each changed sentence spelled with its face, then those gone. */
+export function changedRefs(
+  pages: readonly PageTexts[],
+  gone: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>,
+): string[] {
+  const out: string[] = [];
+  for (const page of pages) {
+    for (const face of page.faces) {
+      for (const s of face.sentences) out.push(formatRef({ pageId: page.pageId, face: face.faceNo, sentence: s.no }));
+    }
+  }
+  for (const faces of gone.values()) for (const refs of faces.values()) out.push(...refs);
+  return out;
 }
 
 /**

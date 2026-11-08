@@ -32,7 +32,7 @@ import type {
   WriteRef,
   WriteResult,
 } from '@shared/mcp/types'
-import { newRefMemory, noteRefs, noteSeen, renderTexts, seenIdsFor, sinceSeen, type SeenTexts } from '@shared/mcp/render'
+import { newRefMemory, noteRefs, noteSeen, readBefore, renderTexts, seenIdsFor, sinceSeen, type SeenTexts } from '@shared/mcp/render'
 import { answer } from './answers'
 
 const PAGE_ID = 'p1'
@@ -542,5 +542,30 @@ describe('answer — the orchestration the bridge drives', () => {
     project.setLabelTags(PAGE_ID, 'u-a', ['x'], ZH)
     const since = sinceSeen(seen, await read(), CLIENT)
     expect(since.pages[0].faces[0].sentences.map((s) => s.no)).toEqual([1])
+  })
+
+  /** ⚠️ A face only ever seen through a write's reply would otherwise come back whole as "changed". */
+  it('compares only the faces the session has read whole', async () => {
+    const project = useProjectStore()
+    openWith(project, [src('s1'), tr('t1', ZH), src('s2'), tr('t2', ZH)], {
+      [ZH]: [
+        { id: 'u1', members: ['s1', 't1'] },
+        { id: 'u2', members: ['s2', 't2'] },
+      ],
+    })
+    const read = async () => ((await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer).pages
+    const seen: SeenTexts = new Map()
+    const written = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { items: [{ ref: 'p1/1', tags: ['x'] }] },
+    })) as SetTagsResult
+    noteSeen(seen, written.pages, CLIENT, false)
+    expect(readBefore(seen, await read())).toEqual([])
+
+    noteSeen(seen, await read(), CLIENT, true)
+    project.setLabelTags(PAGE_ID, 'u2', ['y'], ZH)
+    const since = sinceSeen(seen, readBefore(seen, await read()), CLIENT)
+    expect(since.pages.flatMap((p) => p.faces.map((f) => [f.faceNo, f.sentences.map((s) => s.no)]))).toEqual([[1, [2]]])
   })
 })

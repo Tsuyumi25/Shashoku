@@ -12,6 +12,8 @@ import {
   newRefMemory,
   noteRefs,
   noteSeen,
+  changedRefs,
+  readBefore,
   renderChooseResult,
   renderProposeResult,
   renderSetTagsResult,
@@ -88,6 +90,7 @@ const INSTRUCTIONS = [
   "- get_texts opens with the work's folder (the artwork is there) and a suggested notes folder. You may keep Markdown notes there on whatever is worth remembering about the work — its tone, its characters and how they speak, names to keep fixed — and should expect notes there to read before translating; the folder may not exist until you make it. This is only a suggestion: where the person says otherwise, follow them.",
   "- Before showing the artwork to a vision model, check the notes for whether this work may be shown to one. If they do not say, ask the person and write the answer down.",
   "- Tags (標記) are yours to keep: name what helps the translating — who speaks a line, whether it is dialogue, narration or a sound. The person may change them too; take what they set as the better reading.",
+  "- Every write's answer opens with what somebody else changed since you last looked, and a whole get_texts read names those sentences. Take their changes into account before going on.",
   "- Never edit project.json or anything under pages/ yourself: the project's own data changes only through these tools.",
 ].join("\n");
 
@@ -107,6 +110,23 @@ function buildServer(getSource: () => string | undefined): McpServer {
    * how a write quoting a number from before it is caught.
    */
   const refs: RefMemory = newRefMemory();
+
+  /**
+   * What somebody else changed since this session last looked, said ahead of a
+   * write's own answer so the caller need not think to ask. Only faces the
+   * session has read whole are compared. ⚠️ The addresses it shows are not
+   * taken into `refs`: the call being answered was written before this was
+   * seen, and its stale addresses must still be caught.
+   */
+  async function othersChanges(caller: string | undefined): Promise<string | null> {
+    const { pages } = await askRenderer<GetTextsAnswer>("get_texts", {} satisfies GetTextsParams);
+    const known = readBefore(seen, pages);
+    const since = sinceSeen(seen, known, caller);
+    noteSeen(seen, known, caller, true);
+    if (since.pages.length === 0) return null;
+    const changes = renderTexts(since.pages, { caller, changedOnly: since.gone, graphs: since.graphs });
+    return `在這次呼叫之前，別人改了這些：\n${changes}\n\n`;
+  }
 
   const GRAMMAR =
     "Addresses are short and permanent: `p7/14` is sentence 14 of the face being read and " +
@@ -146,7 +166,8 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "only the sentences that read differently since this session last saw them — " +
         "through get_texts or any write's reply — plus the addresses that are gone, and a " +
         "face's flowchart again only when its lines or sentences changed; the first read of " +
-        "a session is all of it, flowcharts included. 原文 and 譯文 are markup: " +
+        "a session is all of it, flowcharts included. Any later whole read names, under " +
+        "`自上次讀取後別人改過`, the sentences in it somebody else changed since. 原文 and 譯文 are markup: " +
         "`<size=×1.3 color=#ff0000 weight=+1 upright>…</>` sets one stretch apart, and a " +
         "literal `<` or `&` is written `&lt;` or `&amp;`. Keep the tags you are given. A " +
         "line break inside one block is shown as `⏎`. Candidates are marked （human） for a " +
@@ -166,16 +187,23 @@ function buildServer(getSource: () => string | undefined): McpServer {
         } satisfies GetTextsParams);
         const caller = getSource();
         const missing = page_ids?.filter((id) => !pages.some((p) => p.pageId === id)) ?? [];
-        const since = changed_only ? sinceSeen(seen, pages, caller) : null;
+        const since = changed_only ? sinceSeen(seen, pages, caller) : sinceSeen(seen, readBefore(seen, pages), caller);
         noteSeen(seen, pages, caller, true);
         noteRefs(refs, pages);
-        const text = renderTexts(since?.pages ?? pages, {
-          caller,
-          where: { folder, notes },
-          missing,
-          changedOnly: since?.gone,
-          graphs: since?.graphs,
-        });
+        const text = changed_only
+          ? renderTexts(since.pages, {
+              caller,
+              where: { folder, notes },
+              missing,
+              changedOnly: since.gone,
+              graphs: since.graphs,
+            })
+          : renderTexts(pages, {
+              caller,
+              where: { folder, notes },
+              missing,
+              touched: changedRefs(since.pages, since.gone),
+            });
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return toolError(err);
@@ -223,6 +251,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     async ({ face, items }) => {
       try {
         const caller = getSource();
+        const changes = await othersChanges(caller);
         const result = await askRenderer<WriteResult<ProposeOutcome>>("propose_translations", {
           face,
           items: items.map((i) => ({
@@ -235,7 +264,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         } satisfies ProposeParams);
         noteSeen(seen, result.pages, caller, false);
         noteRefs(refs, result.pages);
-        return { content: [{ type: "text", text: renderProposeResult(result, caller) }] };
+        return { content: [{ type: "text", text: (changes ?? "") + renderProposeResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -266,6 +295,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     async ({ face, items }) => {
       try {
         const caller = getSource();
+        const changes = await othersChanges(caller);
         const result = await askRenderer<WriteResult<WithdrawOutcome>>("withdraw_translation", {
           face,
           items: items.map((i) => ({ ref: i.ref, seen: seenIdsFor(refs, i.ref) })),
@@ -273,7 +303,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         } satisfies WithdrawParams);
         noteSeen(seen, result.pages, caller, false);
         noteRefs(refs, result.pages);
-        return { content: [{ type: "text", text: renderWithdrawResult(result, caller) }] };
+        return { content: [{ type: "text", text: (changes ?? "") + renderWithdrawResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -302,13 +332,14 @@ function buildServer(getSource: () => string | undefined): McpServer {
     async ({ face, items }) => {
       try {
         const caller = getSource();
+        const changes = await othersChanges(caller);
         const result = await askRenderer<WriteResult<ChooseOutcome>>("choose_translation", {
           face,
           items: items.map((i) => ({ ref: i.ref, seen: seenIdsFor(refs, i.ref) })),
         } satisfies ChooseParams);
         noteSeen(seen, result.pages, caller, false);
         noteRefs(refs, result.pages);
-        return { content: [{ type: "text", text: renderChooseResult(result, caller) }] };
+        return { content: [{ type: "text", text: (changes ?? "") + renderChooseResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
@@ -340,6 +371,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
     async ({ face, items, colors }) => {
       try {
         const caller = getSource();
+        const changes = await othersChanges(caller);
         const result = await askRenderer<SetTagsResult>("set_tags", {
           face,
           items: items.map((i) => ({ ref: i.ref, tags: i.tags, seen: seenIdsFor(refs, i.ref, "sentences") })),
@@ -347,7 +379,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
         } satisfies SetTagsParams);
         noteSeen(seen, [...result.pages, ...result.elsewhere], caller, false);
         noteRefs(refs, result.pages);
-        return { content: [{ type: "text", text: renderSetTagsResult(result, caller) }] };
+        return { content: [{ type: "text", text: (changes ?? "") + renderSetTagsResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }
