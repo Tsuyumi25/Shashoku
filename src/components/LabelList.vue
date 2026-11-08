@@ -414,8 +414,10 @@ function turnFromHeading(pageId: string): void {
  * Selecting on the canvas has to bring the list to the object, and turning the
  * page has to bring it to the page, or the two stop being about the same
  * thing. The cursor's row is the target when it is on the page now showing;
- * otherwise the page itself — a selection reaches across pages and survives a
- * turn, so a cursor left on page 3 says nothing about where page 7 is.
+ * otherwise the page itself, but only when the page is what moved — a
+ * selection reaches across pages and adding to it does not turn the page, so a
+ * cursor gone to another page by itself is a row the person just pointed at,
+ * already in view, and pulling the list to the page showing would yank it away.
  *
  * A row is only brought as far as it takes to be seen. A page just turned to
  * from elsewhere is brought to the top, its heading pinned and its rows below it:
@@ -446,6 +448,7 @@ watch(
             r.blocks[0].id === labelId,
       )
     if (!onPage && !rows.value.some((r) => r.kind === 'page' && r.pageId === pageId)) return
+    if (!onPage && previous !== undefined && previous[0] === pageId) return
     const selector = onPage
       ? `[data-row-id="${CSS.escape(labelId)}"]`
       : `[data-page-id="${CSS.escape(pageId)}"]`

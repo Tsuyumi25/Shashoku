@@ -406,14 +406,10 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Turn to the page an object lives on. Building a selection carries this
-   * second duty: a selection reaches across pages, so the click that reaches
-   * another one is also what says to go and look at it.
-   *
-   * Driven by what was clicked rather than by where the cursor ends up. Taking
-   * an object back out of the selection moves the cursor to some other member,
-   * which may be pages away — and throwing the view there would leave the
-   * person looking at somewhere they did not point at.
+   * Turn to the page an object lives on — for a plain click only. Adding to a
+   * selection or taking out of one leaves the page where it is: a selection
+   * reaches across pages, and reaching for an object on another one, as a
+   * sample to carry back here, is not asking to go and look at it.
    */
   function showPageOf(id: string) {
     const page = useProjectStore().pageOfEntry(id)
@@ -449,20 +445,9 @@ export const useEditorStore = defineStore('editor', () => {
     }
     selectedIds.value = next
     anchorId.value = id
-    showPageOf(id)
   }
 
-  /**
-   * Everything from the cursor to where the pointer landed, in the order the
-   * panel is showing — which the caller passes in, because what counts as a
-   * range is the list's question and not this store's.
-   */
-  /**
-   * What a sweep leaves selected, in one step. Adding them one at a time would
-   * move the cursor — and with it the page the canvas turns to — once per
-   * object caught, so a drag over a dozen would walk the view across all of
-   * them before landing.
-   */
+  /** What a sweep leaves selected, in one step, the cursor on the last object caught. */
   function selectMany(ids: readonly string[], additive: boolean) {
     const last = ids[ids.length - 1]
     if (last === undefined) {
@@ -476,6 +461,11 @@ export const useEditorStore = defineStore('editor', () => {
     anchorId.value = last
   }
 
+  /**
+   * Everything from the cursor to where the pointer landed, in the order the
+   * panel is showing — which the caller passes in, because what counts as a
+   * range is the list's question and not this store's.
+   */
   function extendSelectionTo(id: string, sequence: readonly string[]) {
     const to = sequence.indexOf(id)
     if (to === -1) return
@@ -488,7 +478,6 @@ export const useEditorStore = defineStore('editor', () => {
     const [lo, hi] = from <= to ? [from, to] : [to, from]
     selectedIds.value = new Set(sequence.slice(lo, hi + 1))
     cursorId.value = id
-    showPageOf(id)
   }
 
   /**

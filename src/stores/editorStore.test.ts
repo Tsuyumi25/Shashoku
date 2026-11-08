@@ -2654,42 +2654,37 @@ describe('a selection that reaches across pages', () => {
   }
 
   /**
-   * The page shown is wherever the cursor is, and adding an object to the
-   * selection moves the cursor onto it — so the click that reaches another
-   * page is also the click that turns to it.
+   * Only a plain click turns the page. Building a selection is reaching for
+   * objects, often pages away, without wanting to stop looking at this one —
+   * which is the whole of picking a sample from another page in the shelf.
    */
-  it('turns to the page of an object added from another one', () => {
+  it('stays on this page when an object from another one is added', () => {
     const { editor } = open()
 
     editor.toggleSelected('c')
 
     expect(editor.cursorId).toBe('c')
-    expect(editor.currentPageId).toBe('002.png')
+    expect(editor.currentPageId).toBe('001.png')
     expect([...editor.selectedIds].sort()).toEqual(['a', 'c'])
   })
 
-  it('turns to the page a range was reached out to', () => {
+  it('stays on this page when a range reaches out to another one', () => {
     const { editor } = open()
 
     editor.extendSelectionTo('c', ['a', 'b', 'c', 'd'])
 
-    expect(editor.currentPageId).toBe('002.png')
+    expect(editor.currentPageId).toBe('001.png')
     expect([...editor.selectedIds].sort()).toEqual(['a', 'b', 'c'])
   })
 
-  /**
-   * The click decides the page, not the cursor. Taking an object out sends the
-   * cursor to some other member, possibly pages away — going there would be
-   * going somewhere nobody pointed at.
-   */
-  it('stays where the click was, even when the click took something away', () => {
+  it('stays on this page when an object on another one is taken out', () => {
     const { editor } = open()
     editor.toggleSelected('c')
 
     editor.toggleSelected('c')
 
     expect(editor.cursorId).toBe('a')
-    expect(editor.currentPageId).toBe('002.png')
+    expect(editor.currentPageId).toBe('001.png')
   })
 
   it('leaves the page alone when the selection empties', () => {
