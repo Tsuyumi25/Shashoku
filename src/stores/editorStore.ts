@@ -51,7 +51,7 @@ import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { normalizeTagSet, sameTagSet, tagSetKey } from '@shared/tags/set'
+import { normalizeTagSet, sameTagSet, tagSetKey, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 import { logActivity } from '@/lib/activityLog'
@@ -3095,16 +3095,38 @@ export const useEditorStore = defineStore('editor', () => {
     return sourceBlocksOf(view, unit).map((b) => ({ pageId, id: b.id, tags: [...b.body.tags] }))
   }
 
-  function cmdSetLabelTags(pageId: string, labelId: string, from: string[], to: string[]) {
-    if (sameTagSet(from, to) || isLayerLocked(labelId)) return
+  /** The sentences these blocks belong to in the face being worked on, each once. */
+  function sentencesOf(ids: Iterable<string>): Array<{ pageId: string; unitId: string }> {
     const project = useProjectStore()
-    const was = sourceTagsOf(pageId, labelId)
+    const out = new Map<string, { pageId: string; unitId: string }>()
+    for (const id of ids) {
+      const pageId = project.pageOfEntry(id)
+      const unit = pageId === null ? undefined : project.placeOf(pageId, id)?.unit
+      if (pageId !== null && unit !== undefined) out.set(`${pageId}\u0000${unit.id}`, { pageId, unitId: unit.id })
+    }
+    return [...out.values()]
+  }
+
+  /** Puts one tag on these sentences or takes it off them, leaving their other tags be; one undo step. */
+  function cmdTagSentences(targets: readonly { pageId: string; unitId: string }[], tag: string, on: boolean) {
+    const project = useProjectStore()
     const face = project.activeFace
+    const changes = targets.flatMap(({ pageId, unitId }) => {
+      const unit = project.unitById(pageId, unitId)
+      const view = project.viewOf(pageId)
+      if (!unit || !view || unit.members.some(isLayerLocked)) return []
+      const now = tagsOfUnit(view, unit)
+      const next = on ? withTag(now, tag) : withoutTag(now, tag)
+      return sameTagSet(now, next) ? [] : [{ pageId, unitId, next, was: sourceTagsOf(pageId, unitId) }]
+    })
+    if (changes.length === 0) return
     pushCommand({
-      label: `set-tags ${labelId}`,
-      do: () => project.setLabelTags(pageId, labelId, to, face),
+      label: `${on ? 'tag' : 'untag'} ${tag} ×${changes.length}`,
+      do: () => {
+        for (const c of changes) project.setLabelTags(c.pageId, c.unitId, c.next, face)
+      },
       undo: () => {
-        for (const b of was) project.setSourceTags(b.pageId, b.id, b.tags)
+        for (const b of changes.flatMap((c) => c.was)) project.setSourceTags(b.pageId, b.id, b.tags)
       },
     })
   }
@@ -3346,7 +3368,8 @@ export const useEditorStore = defineStore('editor', () => {
     paintTargetScope,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
-    cmdSetLabelTags,
+    sentencesOf,
+    cmdTagSentences,
     cmdReshape,
     cmdAddFace,
     cmdDeleteFace,

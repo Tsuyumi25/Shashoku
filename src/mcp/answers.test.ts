@@ -26,12 +26,13 @@ import type {
   GetTextsAnswer,
   ProposeItem,
   ProposeOutcome,
+  SetTagsResult,
   WithdrawOutcome,
   WithdrawParams,
   WriteRef,
   WriteResult,
 } from '@shared/mcp/types'
-import { renderTexts } from '@shared/mcp/render'
+import { newRefMemory, noteRefs, noteSeen, renderTexts, seenIdsFor, sinceSeen, type SeenTexts } from '@shared/mcp/render'
 import { answer } from './answers'
 
 const PAGE_ID = 'p1'
@@ -432,5 +433,114 @@ describe('answer — the orchestration the bridge drives', () => {
       'p1/1a 現在指的是別的東西：它原本的那則候選已經不在這個專案裡了',
     )
     expect(drawerOf(project, 'a').chosen).toBeNull()
+  })
+
+  /** ⭐ Tags belong to the artwork's words, so a sentence with no lettering yet takes them too. */
+  it('replaces a sentence’s whole tag set on every block of its artwork and registers new names', async () => {
+    const project = useProjectStore()
+    const a = src('s1')
+    a.body.tags = ['old', 'x']
+    openWith(project, [a, src('s2')], { [ZH]: [{ id: 'u1', members: ['s1', 's2'] }] })
+    const result = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { items: [{ ref: 'p1/1', tags: ['y', 'x', 'x '] }], colors: { y: '#123456' } },
+    })) as SetTagsResult
+    expect(result.outcomes).toEqual([{ ref: 'p1/1', ok: true, tags: ['x', 'y'] }])
+    expect(project.blockById(PAGE_ID, 's1')!.body).toMatchObject({ tags: ['x', 'y'] })
+    expect(project.blockById(PAGE_ID, 's2')!.body).toMatchObject({ tags: ['x', 'y'] })
+    expect(project.header.tags.find((t) => t.name === 'y')).toEqual({ name: 'y', color: '#123456' })
+    expect(result.registered.find((r) => r.name === 'y')).toEqual({ name: 'y', color: '#123456', added: true })
+    expect(renderTexts(result.pages)).toContain('    標記 x、y')
+  })
+
+  it('refuses a block address and a reserved name, writing nothing', async () => {
+    const project = useProjectStore()
+    openOne(project, label('a'))
+    const result = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { items: [{ ref: 'p1/1.1', tags: ['x'] }, { ref: 'p1/1', tags: ['_Label'] }] },
+    })) as SetTagsResult
+    expect(refusalOf(result.outcomes[0])).toBe('set_tags 寫的是整句，請用句子的位址 p1/1')
+    expect(refusalOf(result.outcomes[1])).toContain('「_Label」是保留字')
+    expect(project.blockById(PAGE_ID, 'as')!.body).toMatchObject({ tags: [] })
+    expect(result.registered).toEqual([])
+  })
+
+  /**
+   * ⚠️ A sentence set in several blocks has no block answering to its number, so
+   * a session that read it in f2 and its namesake in f1 was told it had only
+   * ever been shown the f1 one.
+   */
+  it('takes a split sentence by the face it was read in', async () => {
+    const project = useProjectStore()
+    openWith(project, [src('s1'), tr('z1', ZH), tr('e1', EN), tr('e2', EN)], {
+      [ZH]: [{ id: 'u-zh', members: ['s1', 'z1'] }],
+      [EN]: [{ id: 'u-en', members: ['s1', 'e1', 'e2'] }],
+    })
+    const memory = newRefMemory()
+    noteRefs(memory, ((await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer).pages)
+    const result = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { face: 'f2', items: [{ ref: 'p1/1', tags: ['x'], seen: seenIdsFor(memory, 'p1/1', 'sentences') }] },
+    })) as SetTagsResult
+    expect(result.outcomes).toEqual([{ ref: 'p1/1', ok: true, tags: ['x'] }])
+  })
+
+  it('refuses a sentence address the session saw standing for another sentence', async () => {
+    const project = useProjectStore()
+    openOne(project, label('a'))
+    const result = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { items: [{ ref: 'p1/1', tags: ['x'], seen: { [ZH]: 'u-gone' } }] },
+    })) as SetTagsResult
+    expect(refusalOf(result.outcomes[0])).toBe('p1/1 現在指的是別的句子——請重新讀取 get_texts')
+    expect(project.blockById(PAGE_ID, 'as')!.body).toMatchObject({ tags: [] })
+  })
+
+  it('gives a colour to the name as it is written onto the sentence, spaces and all trimmed', async () => {
+    const project = useProjectStore()
+    openOne(project, label('a'))
+    await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { items: [{ ref: 'p1/1', tags: ['x'] }], colors: { ' x ': '#123456' } },
+    })
+    expect(project.header.tags.filter((t) => t.name.trim() === 'x')).toEqual([{ name: 'x', color: '#123456' }])
+  })
+
+  /** ⚠️ Tags are on the artwork every face shares, so a write through one face changes the others' sentences too. */
+  it('hands back the other faces a tag write changed, so they are not taken for somebody else’s', async () => {
+    const project = useProjectStore()
+    openWith(project, [src('s1'), tr('z1', ZH), tr('e1', EN)], {
+      [ZH]: [{ id: 'u-zh', members: ['s1', 'z1'] }],
+      [EN]: [{ id: 'u-en', members: ['s1', 'e1'] }],
+    })
+    const read = async () => ((await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer).pages
+    const seen: SeenTexts = new Map()
+    noteSeen(seen, await read(), CLIENT, true)
+    const result = (await answer({
+      id: 'q',
+      method: 'set_tags',
+      params: { face: 'f2', items: [{ ref: 'p1/1', tags: ['x'] }] },
+    })) as SetTagsResult
+    expect(result.elsewhere.flatMap((p) => p.faces.map((f) => f.faceId))).toEqual([ZH])
+    noteSeen(seen, [...result.pages, ...result.elsewhere], CLIENT, false)
+    expect(sinceSeen(seen, await read(), CLIENT).pages).toEqual([])
+  })
+
+  /** ⚠️ Without the tags in the rendered sentence, a person retagging one would not count as a change. */
+  it('counts a sentence whose tags alone changed as changed since the last read', async () => {
+    const project = useProjectStore()
+    openOne(project, label('a'))
+    const read = async () => ((await answer({ id: 'q', method: 'get_texts' })) as GetTextsAnswer).pages
+    const seen: SeenTexts = new Map()
+    noteSeen(seen, await read(), CLIENT, true)
+    project.setLabelTags(PAGE_ID, 'u-a', ['x'], ZH)
+    const since = sinceSeen(seen, await read(), CLIENT)
+    expect(since.pages[0].faces[0].sentences.map((s) => s.no)).toEqual([1])
   })
 })

@@ -10,7 +10,8 @@ export type McpQueryMethod =
   | "get_texts"
   | "propose_translations"
   | "choose_translation"
-  | "withdraw_translation";
+  | "withdraw_translation"
+  | "set_tags";
 
 export interface McpQuery {
   id: string;
@@ -156,6 +157,29 @@ export type WithdrawOutcome =
   | { ref: string; ok: true; clearedSlot: boolean }
   | { ref: string; ok: false; reason: string };
 
+export interface SetTagsItem extends WriteRef {
+  /** The sentence's whole set afterwards; empty takes every tag off. */
+  tags: string[];
+}
+
+export interface SetTagsParams {
+  face?: string;
+  items: SetTagsItem[];
+  /** `#rrggbb` by tag name: registers a name or recolours one already registered. */
+  colors?: Record<string, string>;
+}
+
+export type SetTagsOutcome =
+  | { ref: string; ok: true; tags: string[] }
+  | { ref: string; ok: false; reason: string };
+
+/** A registry entry a `set_tags` call created or recoloured. */
+export interface TagRegistration {
+  name: string;
+  color: string;
+  added: boolean;
+}
+
 /**
  * Every write answers with the touched sentences' full current state, page by
  * page, so a caller audits what actually happened in the same breath rather
@@ -164,4 +188,14 @@ export type WithdrawOutcome =
 export interface WriteResult<Outcome> {
   outcomes: Outcome[];
   pages: PageTexts[];
+}
+
+export interface SetTagsResult extends WriteResult<SetTagsOutcome> {
+  registered: TagRegistration[];
+  /**
+   * The sentences of the other faces that read differently now. Tags are on the
+   * artwork's words, which every face shares; these are not shown, only taken
+   * as seen, so a later read does not hand the caller its own write back.
+   */
+  elsewhere: PageTexts[];
 }

@@ -1,3 +1,4 @@
+import { RESERVED_TAG_NAMES } from '../ssk/constants'
 import type { TagDefinition, TagRegistry } from './types'
 
 /** What a tag no registry entry names draws in. */
@@ -45,6 +46,14 @@ export function withTag(tags: readonly string[], tag: string): string[] {
 
 export function withoutTag(tags: readonly string[], tag: string): string[] {
   return normalizeTagSet(tags.filter((t) => t !== tag))
+}
+
+/** Why a name cannot be a tag, or null. A reserved name would make the page unreadable on the next load. */
+export function tagNameRefusal(name: string): string | null {
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return '標記不能是空白'
+  if (RESERVED_TAG_NAMES.includes(trimmed)) return `「${trimmed}」是保留字（${RESERVED_TAG_NAMES.join('、')}），不能當標記`
+  return null
 }
 
 /**

@@ -27,6 +27,7 @@ import { planWithdraw } from './withdraw'
 import {
   mermaidDocument,
   mermaidOf,
+  newRefMemory,
   noteRefs,
   noteSeen,
   renderProposeResult,
@@ -542,7 +543,7 @@ describe('what one session was shown', () => {
 
   /** ⭐ Both spellings of a one-block sentence are remembered, or one of them writes unchecked. */
   it('remembers which object every address it showed stood for', () => {
-    const memory: RefMemory = new Map()
+    const memory: RefMemory = newRefMemory()
     noteRefs(memory, [
       page('p1', [
         face(ZH, [
@@ -571,6 +572,7 @@ describe('what one session was shown', () => {
     expect(seenIdsFor(memory, 'p1/1.1a')).toEqual({ [ZH]: 'cand' })
     expect(seenIdsFor(memory, 'p1/2')).toBeUndefined()
     expect(seenIdsFor(memory, 'p1/f1/1.1a')).toEqual({ [ZH]: 'cand' })
+    expect(seenIdsFor(memory, 'p1/1', 'sentences')).toEqual({ [ZH]: 'u1' })
   })
 })
 

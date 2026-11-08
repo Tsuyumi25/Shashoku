@@ -89,6 +89,8 @@
         </span>
       </div>
     </div>
+
+    <LabelTagPicker v-if="row.kind === 'label'" :row="row" :disabled="locked" />
   </div>
 </template>
 
@@ -96,6 +98,7 @@
 import { computed } from 'vue'
 import { Lock } from '@lucide/vue'
 import CodeEditField from '@/components/CodeEditField.vue'
+import LabelTagPicker from '@/components/labelList/LabelTagPicker.vue'
 import { rowId, rowSelected, type ListRow } from '@/lib/labelRows'
 import { tagColor, tagsInRegistryOrder } from '@shared/tags/set'
 import { shownCodeOf } from '@shared/page/units'

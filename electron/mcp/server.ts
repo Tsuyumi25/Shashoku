@@ -9,10 +9,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { askRenderer } from "./bridge";
 import {
+  newRefMemory,
   noteRefs,
   noteSeen,
   renderChooseResult,
   renderProposeResult,
+  renderSetTagsResult,
   renderTexts,
   renderWithdrawResult,
   seenIdsFor,
@@ -27,6 +29,8 @@ import type {
   GetTextsParams,
   ProposeOutcome,
   ProposeParams,
+  SetTagsParams,
+  SetTagsResult,
   WithdrawOutcome,
   WithdrawParams,
   WriteResult,
@@ -77,12 +81,13 @@ function authenticates(header: string | string[] | undefined): boolean {
  * Under 2,000 characters: Claude Code before 2.1.296 cuts instructions at 2,048.
  */
 const INSTRUCTIONS = [
-  "Shashoku is a manga lettering editor; read a work's sentences with get_texts, then propose, choose or withdraw translations by address.",
+  "Shashoku is a manga lettering editor; read a work's sentences with get_texts, then propose, choose or withdraw translations and set tags by address.",
   "",
   "- Sentence numbers are names, not reading order. The order is the person's reading lines, then the typed order of sentences no line reaches.",
   "- A sentence under `subgraph 未維護` has no reading line yet. That is normal: sound effects and text outside balloons often never get one.",
   "- get_texts opens with the work's folder (the artwork is there) and a suggested notes folder. You may keep Markdown notes there on whatever is worth remembering about the work — its tone, its characters and how they speak, names to keep fixed — and should expect notes there to read before translating; the folder may not exist until you make it. This is only a suggestion: where the person says otherwise, follow them.",
   "- Before showing the artwork to a vision model, check the notes for whether this work may be shown to one. If they do not say, ask the person and write the answer down.",
+  "- Tags (標記) are yours to keep: name what helps the translating — who speaks a line, whether it is dialogue, narration or a sound. The person may change them too; take what they set as the better reading.",
   "- Never edit project.json or anything under pages/ yourself: the project's own data changes only through these tools.",
 ].join("\n");
 
@@ -101,7 +106,7 @@ function buildServer(getSource: () => string | undefined): McpServer {
    * the project records that a page was regrouped, so this is the whole of
    * how a write quoting a number from before it is caught.
    */
-  const refs: RefMemory = new Map();
+  const refs: RefMemory = newRefMemory();
 
   const GRAMMAR =
     "Addresses are short and permanent: `p7/14` is sentence 14 of the face being read and " +
@@ -126,7 +131,8 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "section's header reads `第 3 頁 · p7 · 001.jpg · f1 譯文 · 19 句`: where the page " +
         "reads in the chapter, its id, its name, the face, and how many sentences it holds. " +
         "Under it each sentence is listed under its number in the order the story reads. `14  原文 …` " +
-        "is the artwork's words, each block of them under `s<n>`, `譯文` is what the whole " +
+        "is the artwork's words, each block of them under `s<n>`, `標記` is the sentence's tags, " +
+        "`譯文` is what the whole " +
         "sentence reads as today, and `候選` is the drawer, each candidate under a letter " +
         "with `✓` on the one in effect. An empty 譯文 means the sentence is untranslated. " +
         "A sentence set in several blocks of lettering lists each block on its own line as " +
@@ -303,6 +309,45 @@ function buildServer(getSource: () => string | undefined): McpServer {
         noteSeen(seen, result.pages, caller, false);
         noteRefs(refs, result.pages);
         return { content: [{ type: "text", text: renderChooseResult(result, caller) }] };
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "set_tags",
+    {
+      title: "Set sentences' tags",
+      description:
+        "Replace sentences' tags, by sentence address; new names are registered.\n" +
+        "Set the whole tag set of sentences, on any number of pages in one batch: each item's " +
+        "tags replace what the sentence carried, and an empty list takes every tag off. A tag " +
+        "is any name you choose. " +
+        GRAMMAR +
+        " ref names a sentence (`p7/14`), never a block or a candidate: tags say what the " +
+        "whole sentence is, and land on every block of its artwork. A name the project has not " +
+        "registered is registered with a colour; colors gives `#rrggbb` by name, for a new " +
+        "name or to recolour one already there, and a new name without one takes the next " +
+        "colour in the palette. Replies with each touched sentence in the same form get_texts " +
+        "uses.",
+      inputSchema: {
+        face: z.string().optional(),
+        items: z.array(z.object({ ref: z.string(), tags: z.array(z.string()) })).min(1),
+        colors: z.record(z.string(), z.string().regex(/^#[0-9a-fA-F]{6}$/)).optional(),
+      },
+    },
+    async ({ face, items, colors }) => {
+      try {
+        const caller = getSource();
+        const result = await askRenderer<SetTagsResult>("set_tags", {
+          face,
+          items: items.map((i) => ({ ref: i.ref, tags: i.tags, seen: seenIdsFor(refs, i.ref, "sentences") })),
+          colors,
+        } satisfies SetTagsParams);
+        noteSeen(seen, [...result.pages, ...result.elsewhere], caller, false);
+        noteRefs(refs, result.pages);
+        return { content: [{ type: "text", text: renderSetTagsResult(result, caller) }] };
       } catch (err) {
         return toolError(err);
       }

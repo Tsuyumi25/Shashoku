@@ -4058,10 +4058,10 @@ describe('the meaning of a sentence holding two blocks of the artwork', () => {
     const { project, editor } = openTwoSources()
     expect(project.tagsOf(PAGE, 'a')).toEqual(['心聲', '框内'])
 
-    editor.cmdSetLabelTags(PAGE, 'a', project.tagsOf(PAGE, 'a'), ['旁白'])
+    editor.cmdTagSentences([{ pageId: PAGE, unitId: 'a' }], '旁白', true)
 
-    expect(tagsOfArtwork(project, SOURCE_OF('a'))).toEqual(['旁白'])
-    expect(tagsOfArtwork(project, SOURCE_OF('b'))).toEqual(['旁白'])
+    expect(tagsOfArtwork(project, SOURCE_OF('a'))).toEqual(['心聲', '旁白', '框内'])
+    expect(tagsOfArtwork(project, SOURCE_OF('b'))).toEqual(['心聲', '旁白', '框内'])
 
     editor.undo()
 

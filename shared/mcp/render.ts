@@ -5,11 +5,12 @@ import type {
   PageTexts,
   ProposeOutcome,
   SentenceTexts,
+  SetTagsResult,
   TranslationCandidateView,
   WithdrawOutcome,
   WriteResult,
 } from "./types";
-import { withoutFace } from "./refs";
+import { formatRef, withoutFace } from "./refs";
 import { plainOf } from "../page/markup";
 
 /**
@@ -55,6 +56,7 @@ function blockLine(sentence: SentenceTexts, block: BlockTexts, caller: string | 
 
 export function renderSentence(sentence: SentenceTexts, caller?: string): string {
   const out = [`${sentence.no}  原文 ${sourcesOf(sentence)}`];
+  if (sentence.tags.length > 0) out.push(`${INDENT}標記 ${sentence.tags.join("、")}`);
   out.push(`${INDENT}譯文 ${sentence.translation === "" ? "（未翻）" : flat(sentence.translation)}`);
   if (sentence.blocks.length === 0) {
     out.push(`${INDENT}（這一面還沒有譯文方塊）`);
@@ -353,22 +355,41 @@ export function sinceSeen(
  * Numbers are never reissued, so an address either still names the thing the
  * session saw or names nothing — and a write that quotes one the page has
  * since regrouped is caught here rather than landing somewhere else.
+ *
+ * Sentences are held apart from blocks: `p7/14` is also the block address of a
+ * sentence set in one block, but a sentence set in several has no block that
+ * answers to it, and a write about the whole sentence still has to know which
+ * face showed it.
  */
-export type RefMemory = Map<string, Map<string, string>>;
+export interface RefMemory {
+  blocks: Map<string, Map<string, string>>;
+  sentences: Map<string, Map<string, string>>;
+}
+
+export function newRefMemory(): RefMemory {
+  return { blocks: new Map(), sentences: new Map() };
+}
+
+function heldFor(memory: Map<string, Map<string, string>>, faceId: string): Map<string, string> {
+  let held = memory.get(faceId);
+  if (!held) {
+    held = new Map();
+    memory.set(faceId, held);
+  }
+  return held;
+}
 
 export function noteRefs(memory: RefMemory, pages: readonly PageTexts[]): void {
   for (const page of pages) {
     for (const face of page.faces) {
-      let held = memory.get(face.faceId);
-      if (!held) {
-        held = new Map();
-        memory.set(face.faceId, held);
-      }
+      const blocks = heldFor(memory.blocks, face.faceId);
+      const sentences = heldFor(memory.sentences, face.faceId);
       for (const sentence of face.sentences) {
+        sentences.set(formatRef({ pageId: page.pageId, sentence: sentence.no }), sentence.id);
         for (const block of sentence.blocks) {
           for (const ref of block.refs) {
-            held.set(ref, block.id);
-            for (const candidate of block.candidates) held.set(`${ref}${candidate.letter}`, candidate.id);
+            blocks.set(ref, block.id);
+            for (const candidate of block.candidates) blocks.set(`${ref}${candidate.letter}`, candidate.id);
           }
         }
       }
@@ -381,11 +402,15 @@ export function noteRefs(memory: RefMemory, pages: readonly PageTexts[]): void {
  * in the address is looked past here: listings spell refs without one, and the
  * caller picks the face it resolves in.
  */
-export function seenIdsFor(memory: RefMemory, ref: string): Record<string, string> | undefined {
+export function seenIdsFor(
+  memory: RefMemory,
+  ref: string,
+  kind: keyof RefMemory = "blocks",
+): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   let any = false;
   const spelled = withoutFace(ref);
-  for (const [faceId, held] of memory) {
+  for (const [faceId, held] of memory[kind]) {
     const id = held.get(spelled);
     if (id !== undefined) {
       out[faceId] = id;
@@ -418,6 +443,16 @@ export function renderProposeResult(result: WriteResult<ProposeOutcome>, caller?
 
 export function renderChooseResult(result: WriteResult<ChooseOutcome>, caller?: string): string {
   const out = result.outcomes.map((o) => (o.ok ? `${o.ref} 現在是現值` : `${o.ref} ✗ ${o.reason}`));
+  return withStates(out, result.pages, caller);
+}
+
+export function renderSetTagsResult(result: SetTagsResult, caller?: string): string {
+  const taken = result.outcomes.filter((o) => o.ok);
+  const out: string[] = [`標記 ${taken.length} 句，拒絕 ${result.outcomes.length - taken.length} 句`];
+  for (const o of result.outcomes) {
+    out.push(o.ok ? `${o.ref} → ${o.tags.length === 0 ? "（無標記）" : o.tags.join("、")}` : `${o.ref} ✗ ${o.reason}`);
+  }
+  for (const r of result.registered) out.push(`${r.added ? "新登記" : "改色"} ${r.name} ${r.color}`);
   return withStates(out, result.pages, caller);
 }
 
