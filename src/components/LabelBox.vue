@@ -10,7 +10,7 @@
     :held="held"
     :locked="locked"
     :handles="!editing && (handles ?? true)"
-    :accent="accent"
+    :accent="tagsShown ? accent : undefined"
     :member="member"
     :standing="framed || untyped"
     :pointer="pointer"
@@ -28,7 +28,7 @@
     @rotate="onRotate"
     @rotate-end="onRotateEnd"
   >
-    <template #default="{ counterTurn, hovered }">
+    <template #default="{ counterTurn }">
       <!--
         Always present so that a double click has a frame to be measured in, and
         only takes the pointer while editing — a press on it any other time
@@ -76,16 +76,6 @@
         </div>
       </template>
 
-      <div
-        v-else-if="tags.length > 0 && (hovered || inSelection)"
-        class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[11px] leading-tight whitespace-nowrap text-white select-none"
-        :style="captionStyle(counterTurn)"
-      >
-        <span v-for="tag in tags" :key="tag.name" class="flex items-center gap-1">
-          <span class="h-1.5 w-1.5 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />
-          {{ tag.name }}
-        </span>
-      </div>
     </template>
   </ObjectFrame>
 </template>
@@ -157,10 +147,9 @@ const props = defineProps<{
   /** Where this frame is drawn, once per piece of a split page. See `ObjectFrame`. */
   copies: readonly FrameCopy[]
   /**
-   * The colour of whichever registered tag sits highest, worn by the frame.
-   * Nothing for an object no registered tag speaks for, which leaves the frame
-   * drawing in `primary` — not being coloured is what "nobody has said what
-   * this is" looks like.
+   * The colour of whichever registered tag sits highest, worn by the frame and
+   * the tint while the tag view is on. Nothing for an object no registered tag
+   * speaks for, which leaves it drawing in `primary`.
    */
   accent?: string
   /**
@@ -184,27 +173,9 @@ const props = defineProps<{
    * drawn at all — so it is the whole box or nothing, never the handles alone.
    */
   pointer: 'box' | 'none'
-  /**
-   * What the object is, one tag to a line, shown while the pointer is here or
-   * while this is in the selection.
-   *
-   * Every member of the selection and not only the cursor: a selection is a set
-   * of objects being asked about together, and answering for one of them is not
-   * an answer. ⚠️ The cost lands on a batch pass over the whole chapter, where
-   * every object caught wears its own caption at once.
-   *
-   * It comes and goes with the frame's own outline rather than waiting out a
-   * dwell: the outline is the signal that says the pointer found something, and
-   * a caption that arrives after it reads as the interface lagging.
-   *
-   * One line each rather than a row that truncates: three tags or one long name
-   * is not an unusual object, and a name cut off mid-word says less than no
-   * name at all. It is the frame colours that a page is read at a glance from;
-   * this is for reading one object properly, which is why it is never on more
-   * than the two objects the hand is pointing at.
-   */
+  /** What the object is, in the project's order, for the tag view's stamps. */
   tags: { name: string; color: string }[]
-  /** Tinted by its accent and stamped with every tag, in place of the caption. */
+  /** Tinted by its accent and stamped with every tag. */
   tagsShown?: boolean
   /** Whether this one carries the stamp, or leaves it to another piece of the same lettering. */
   stamped?: boolean
@@ -548,7 +519,7 @@ const canCut = computed(() => {
 /** A gap between the selection's corner and the bar, in screen pixels. */
 const BAR_GAP_PX = 6
 
-/** Upright and screen-sized however the page and the object are turned, as the caption is. */
+/** Upright and screen-sized however the page and the object are turned. */
 function barStyle(counterTurn: number): Record<string, string> {
   const at = barAt.value
   if (!at) return {}
@@ -704,15 +675,6 @@ function onTextUp(e: PointerEvent) {
 const untyped = computed(() => drawn.value.plain.length === 0)
 
 /**
- * How far outside the top left corner the caption sits, on each axis. Out along
- * the diagonal rather than straight out to the side: the diagonal buys the same
- * clearance from that corner's scale handle for less distance from the object,
- * and on a wide frame something level with the top edge reads as floating
- * beside the object rather than belonging to that corner.
- */
-const CAPTION_CORNER_OFFSET_PX = 16
-
-/**
  * A stamp is this big, in page pixels, on an object set at body size, and grows
  * with the logarithm of the object's font from there: a sound effect set ten
  * times larger gets a stamp half again as large rather than one that covers it.
@@ -735,16 +697,6 @@ const stampStyle = computed(() => {
     lineHeight: 1.35,
   }
 })
-
-function captionStyle(counterTurn: number) {
-  const out = `${CAPTION_CORNER_OFFSET_PX}px * var(--px)`
-  return {
-    left: '0px',
-    top: '0px',
-    transform: `translate(calc(-50% - ${out}), calc(${out})) rotate(${counterTurn}rad) scale(var(--px))`,
-    transformOrigin: 'top center',
-  }
-}
 </script>
 
 <style scoped>

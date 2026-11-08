@@ -1148,12 +1148,7 @@ const foretold = computed(() => {
   return { frame, lines }
 })
 
-/**
- * Whichever registered tag sits highest in the project's order decides the
- * frame's colour. Nothing for an object no registered tag speaks for — the
- * frame then draws in `primary`, and drawing in the ordinary colour is what
- * "nobody has said what this is" looks like.
- */
+/** Whichever registered tag sits highest in the project's order colours the tag view. */
 function accentOf(tags: readonly string[]): string | undefined {
   return primaryTag(tags, project.header.tags)?.color
 }

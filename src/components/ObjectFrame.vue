@@ -26,9 +26,9 @@
       >
         <!--
           Once, in the first piece the frame is drawn in. A caret, a toolbar and
-          a caption are one each however many pieces the object is cut across.
+          a tag stamp are one each however many pieces the object is cut across.
         -->
-        <slot v-if="at === 0" :counter-turn="-turn" :hovered="hovered" />
+        <slot v-if="at === 0" :counter-turn="-turn" />
 
         <template v-if="handles && selected && !locked">
           <!--
@@ -293,7 +293,7 @@ function heldBox(): HTMLElement | null {
  * ⚠️ A hand on the frame counts as being on it. Taking the pointer sends the
  * copy that was pressed a `pointerleave` — the capture is on the root, so the
  * browser treats the pointer as having left everything else — and a frame that
- * stopped reading as hovered the moment it was grabbed would drop its caption
+ * stopped reading as hovered the moment it was grabbed would drop its outline
  * for the length of the drag.
  */
 const hovered = computed(() => entered.value || dragging.value || props.pointed === true)
