@@ -1,5 +1,7 @@
 import type { LayerEffect } from '@shared/effects/types'
 import { visibleStrokeOf } from '@shared/effects/stroke'
+import { tagsInRegistryOrder } from '@shared/tags/set'
+import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { styleFieldText } from '@/lib/textStyleFields'
 
@@ -7,7 +9,8 @@ import { styleFieldText } from '@/lib/textStyleFields'
  * One thing the buckets gather by, as a person sets it — a control of the
  * appearance panel rather than a field of the style. The face is family and
  * weight together, since that is one choice in the picker; the stroke lives in
- * the effects and is gathered all the same.
+ * the effects and is gathered all the same. The sentence's tags are the two
+ * that are not appearance: one bucket a tag, or one a set of them.
  */
 export type ShelfAttribute =
   | 'font'
@@ -20,6 +23,8 @@ export type ShelfAttribute =
   | 'scaleY'
   | 'leading'
   | 'size'
+  | 'tag'
+  | 'tagSet'
 
 export const SHELF_ATTRIBUTES: readonly { id: ShelfAttribute; label: string }[] = [
   { id: 'font', label: '字型' },
@@ -32,12 +37,15 @@ export const SHELF_ATTRIBUTES: readonly { id: ShelfAttribute; label: string }[] 
   { id: 'scaleY', label: '垂直' },
   { id: 'leading', label: '行距' },
   { id: 'size', label: '字級' },
+  { id: 'tag', label: '標籤' },
+  { id: 'tagSet', label: '標籤組合' },
 ]
 
 export interface ShelfObject {
   id: string
   style: TextStyle
   effects: readonly LayerEffect[]
+  tags: readonly string[]
 }
 
 /**
@@ -72,7 +80,21 @@ export const ORDERED_ATTRIBUTES: ReadonlySet<ShelfAttribute> = new Set([
   'leading',
 ])
 
-export function valueOf(object: ShelfObject, attribute: ShelfAttribute): ShelfValue {
+const UNTAGGED: ShelfValue = { key: '', label: '沒有標籤' }
+
+/**
+ * The values an object holds for an attribute: one, except by tag, where an
+ * object is in the bucket of each of its tags.
+ */
+export function valuesOf(object: ShelfObject, attribute: ShelfAttribute, registry: TagRegistry): ShelfValue[] {
+  if (attribute !== 'tag' && attribute !== 'tagSet') return [valueOf(object, attribute)]
+  if (object.tags.length === 0) return [UNTAGGED]
+  const tags = tagsInRegistryOrder(object.tags, registry)
+  if (attribute === 'tagSet') return [{ key: [...tags].sort().join('\n'), label: tags.join('＋') }]
+  return tags.map((tag) => ({ key: tag, label: tag, swatch: registry.find((entry) => entry.name === tag)?.color }))
+}
+
+export function valueOf(object: ShelfObject, attribute: Exclude<ShelfAttribute, 'tag' | 'tagSet'>): ShelfValue {
   const s = object.style
   switch (attribute) {
     case 'font': {
@@ -123,24 +145,30 @@ export interface ShelfBucket {
 }
 
 /**
- * The objects gathered by the one value they hold for an attribute, so every
+ * The objects gathered by the values they hold for an attribute, so every
  * bucket names a single value and picking one picks every line holding it.
- * Amounts run smallest first, kinds biggest first.
+ * Amounts run smallest first, kinds biggest first, and the untagged after
+ * every tag.
  */
 export function bucketsByAttribute(
   objects: readonly ShelfObject[],
   attribute: ShelfAttribute,
+  registry: TagRegistry = [],
 ): ShelfBucket[] {
   const byValue = new Map<string, ShelfBucket>()
   for (const object of objects) {
-    const value = valueOf(object, attribute)
-    const held = byValue.get(value.key)
-    if (held) held.ids.push(object.id)
-    else byValue.set(value.key, { ...value, ids: [object.id] })
+    for (const value of valuesOf(object, attribute, registry)) {
+      const held = byValue.get(value.key)
+      if (held) held.ids.push(object.id)
+      else byValue.set(value.key, { ...value, ids: [object.id] })
+    }
   }
+  const untagged = byValue.get(UNTAGGED.key)
+  const untaggedLast = (a: ShelfBucket, b: ShelfBucket) =>
+    attribute === 'tag' || attribute === 'tagSet' ? Number(a === untagged) - Number(b === untagged) : 0
   return [...byValue.values()].sort(
     ORDERED_ATTRIBUTES.has(attribute)
       ? (a, b) => (a.order ?? 0) - (b.order ?? 0)
-      : (a, b) => b.ids.length - a.ids.length,
+      : (a, b) => untaggedLast(a, b) || b.ids.length - a.ids.length,
   )
 }

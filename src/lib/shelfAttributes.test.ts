@@ -3,11 +3,13 @@ import { DEFAULT_TEXT_STYLE, type TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { bucketsByAttribute, valueOf, type ShelfObject } from './shelfAttributes'
 
-const obj = (id: string, style: Partial<TextStyle>, effects: LayerEffect[] = []): ShelfObject => ({
+const obj = (id: string, style: Partial<TextStyle>, effects: LayerEffect[] = [], tags: string[] = []): ShelfObject => ({
   id,
   style: { ...DEFAULT_TEXT_STYLE, ...style },
   effects,
+  tags,
 })
+const tagged = (id: string, ...tags: string[]) => obj(id, {}, [], tags)
 
 describe('valueOf', () => {
   it('gathers sizes within a tenth into one band and keeps distant ones out', () => {
@@ -51,5 +53,30 @@ describe('bucketsByAttribute', () => {
       'weight',
     )
     expect(buckets.map((b) => b.label)).toEqual(['0', '2'])
+  })
+
+  it('puts an object in the heap of each of its tags, the untagged last', () => {
+    const buckets = bucketsByAttribute(
+      [tagged('a', 'x', 'y'), tagged('b', 'y'), tagged('c'), tagged('d'), tagged('e'), tagged('f', 'x')],
+      'tag',
+      [{ name: 'x', color: '#123456' }],
+    )
+    expect(buckets.map((b) => [b.label, b.ids, b.swatch])).toEqual([
+      ['x', ['a', 'f'], '#123456'],
+      ['y', ['a', 'b'], undefined],
+      ['沒有標籤', ['c', 'd', 'e'], undefined],
+    ])
+  })
+
+  it('gathers a set of tags once whatever order they were given in', () => {
+    const buckets = bucketsByAttribute(
+      [tagged('a', 'y', 'x'), tagged('b', 'x', 'y'), tagged('c', 'x')],
+      'tagSet',
+      [{ name: 'y', color: '#123456' }, { name: 'x', color: '#654321' }],
+    )
+    expect(buckets.map((b) => [b.label, b.ids])).toEqual([
+      ['y＋x', ['a', 'b']],
+      ['x', ['c']],
+    ])
   })
 })

@@ -24,6 +24,7 @@ export interface ShelfEntry {
   code: string
   style: TextStyle
   effects: readonly LayerEffect[]
+  tags: readonly string[]
 }
 
 /**
@@ -31,7 +32,12 @@ export interface ShelfEntry {
  * copied out — this is rebuilt whenever any object changes, a tried-on look
  * included, and copying the whole chapter each time is most of a frame.
  */
-export function shelfEntriesOf(files: readonly ProjectFile[], side: TextSide, face: string): ShelfEntry[] {
+export function shelfEntriesOf(
+  files: readonly ProjectFile[],
+  side: TextSide,
+  face: string,
+  tagsOf: (pageId: string, blockId: string) => string[],
+): ShelfEntry[] {
   const entries: ShelfEntry[] = []
   files.forEach((file, i) => {
     if (file.badge !== 'ok') return
@@ -46,6 +52,7 @@ export function shelfEntriesOf(files: readonly ProjectFile[], side: TextSide, fa
         code,
         style: block.body.style,
         effects: block.effects,
+        tags: tagsOf(file.pageId, block.id),
       })
     }
   })

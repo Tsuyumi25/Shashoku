@@ -115,7 +115,9 @@ const attributeLabel = computed(
 )
 
 /** The whole chapter, which is why no page is named: turning one changes nothing here. */
-const shown = computed<ShelfEntry[]>(() => shelfEntriesOf(project.files, editor.textSide, project.activeFace))
+const shown = computed<ShelfEntry[]>(() =>
+  shelfEntriesOf(project.files, editor.textSide, project.activeFace, project.tagsOf),
+)
 
 /**
  * The list as it stood when a carry began, held until the hand lets go. Trying
@@ -140,7 +142,7 @@ const pieces = computed<ShelfItem[]>((previous) => {
 
 const buckets = computed<ShelfHeap[]>((previous) => {
   const byId = new Map(pieces.value.map((p) => [p.id, p]))
-  const next = bucketsByAttribute(listed.value, shelfAttribute.value).map((bucket) => ({
+  const next = bucketsByAttribute(listed.value, shelfAttribute.value, project.header.tags).map((bucket) => ({
     ...bucket,
     items: bucket.ids
       .flatMap((id) => byId.get(id) ?? [])
@@ -149,8 +151,8 @@ const buckets = computed<ShelfHeap[]>((previous) => {
   return previous !== undefined && sameHeaps(previous, next) ? previous : next
 })
 
-/** The order a Shift press reads a range along. */
-const sequence = computed(() => buckets.value.flatMap((b) => b.items.map((i) => i.id)))
+/** The order a Shift press reads a range along; an object in two heaps by tag counts where it first appears. */
+const sequence = computed(() => [...new Set(buckets.value.flatMap((b) => b.items.map((i) => i.id)))])
 
 const bodyEl = useTemplateRef<HTMLElement>('bodyEl')
 const { width: bodyW } = useElementSize(bodyEl)

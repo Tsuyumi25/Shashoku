@@ -99,7 +99,7 @@ export function resolveFrame(
   hits: readonly string[],
   additive: boolean,
 ): string[] {
-  if (!additive) return [...hits]
+  if (!additive) return [...new Set(hits)]
   return [...new Set([...base, ...hits])]
 }
 
