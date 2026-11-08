@@ -78,6 +78,17 @@ export function obbIntersectsRect(box: Obb, rect: Rect): boolean {
   return axes.every((axis) => overlapsOn(axis, a, b))
 }
 
+/** Whether two turned frames touch at all, by the same separating-axis test. */
+export function obbsIntersect(a: Obb, b: Obb): boolean {
+  const ca = cornersOf(a)
+  const cb = cornersOf(b)
+  const axes = [a.rotation, b.rotation].flatMap((r) => [
+    { x: Math.cos(r), y: Math.sin(r) },
+    { x: -Math.sin(r), y: Math.cos(r) },
+  ])
+  return axes.every((axis) => overlapsOn(axis, ca, cb))
+}
+
 /**
  * Whether a turned frame holds a point — what says which object a click on the
  * page landed on.

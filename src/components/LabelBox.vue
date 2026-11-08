@@ -60,8 +60,24 @@
         @cut="emit('cut')"
       />
 
+      <template v-if="tagsShown && tags.length > 0">
+        <div
+          v-if="accent"
+          class="pointer-events-none absolute inset-0"
+          :style="{ backgroundColor: `color-mix(in srgb, ${accent} 35%, transparent)` }"
+        />
+        <div v-if="stamped" class="pointer-events-none absolute flex whitespace-nowrap select-none" :style="stampStyle">
+          <span
+            v-for="tag in tags"
+            :key="tag.name"
+            class="rounded-[0.15em] px-[0.3em] font-semibold text-white shadow-[0_0_0_0.08em_white]"
+            :style="{ backgroundColor: tag.color }"
+          >{{ tag.name }}</span>
+        </div>
+      </template>
+
       <div
-        v-if="tags.length > 0 && (hovered || inSelection || captioned)"
+        v-else-if="tags.length > 0 && (hovered || inSelection || captioned)"
         class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[11px] leading-tight whitespace-nowrap text-white select-none"
         :style="captionStyle(counterTurn)"
       >
@@ -188,6 +204,10 @@ const props = defineProps<{
    * than the two objects the hand is pointing at.
    */
   tags: { name: string; color: string }[]
+  /** Tinted by its accent and stamped with every tag, in place of the caption. */
+  tagsShown?: boolean
+  /** Whether this one carries the stamp, or leaves it to another piece of the same lettering. */
+  stamped?: boolean
   /**
    * Every object wears its caption, not only the one the hand is pointing at —
    * for a tool whose subject is the meanings themselves, where which object
@@ -702,24 +722,29 @@ const untyped = computed(() => drawn.value.plain.length === 0)
 const CAPTION_CORNER_OFFSET_PX = 16
 
 /**
- * Anchored outside the top left corner, growing downward, never flipping to the
- * other side.
- *
- * Growing down is what pins the first line: the tags arrive in the order the
- * project set, so the one that matters most is always in the same place.
- * Centring the block would read better and put that line somewhere new for
- * every object.
- *
- * The offset is applied in the frame's own axes, so the caption orbits with the
- * page and the object; the turn is undone in place so the words stay upright
- * however either is lying. No scale is undone because the frame is already
- * sized in screen pixels. Turned about its own top edge rather than its middle,
- * so where the first line lands does not move as the block grows a line.
- *
- * Nothing here adapts to an edge. An object can stand off the page and still
- * draw, so the page's border is not a wall; the window's is, and a scroll now
- * and then is cheaper than the logic for flipping sides.
+ * A stamp is this big, in page pixels, on an object set at body size, and grows
+ * with the logarithm of the object's font from there: a sound effect set ten
+ * times larger gets a stamp half again as large rather than one that covers it.
  */
+const STAMP_BASE_PX = 24
+const STAMP_BASE_FONT_PX = 50
+
+/**
+ * Standing on the frame's top edge from its left corner, outside it so the
+ * words stay clear, and sized from the object's own font in page pixels: drawn
+ * on the page like the object, it zooms with the artwork and turns with it.
+ */
+const stampStyle = computed(() => {
+  const px = (STAMP_BASE_PX * Math.log(Math.max(props.textStyle.fontSizePx, 2))) / Math.log(STAMP_BASE_FONT_PX)
+  return {
+    left: '0px',
+    bottom: '100%',
+    gap: `${px * 0.15}px`,
+    fontSize: `${px}px`,
+    lineHeight: 1.35,
+  }
+})
+
 function captionStyle(counterTurn: number) {
   const out = `${CAPTION_CORNER_OFFSET_PX}px * var(--px)`
   return {

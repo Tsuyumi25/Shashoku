@@ -209,6 +209,8 @@
             :accent="object.accent"
             :member="object.member"
             :tags="object.tags"
+            :tags-shown="editor.tagsShown"
+            :stamped="stamped.has(object.id)"
             :natural="editor.viewContentSize"
             :copies="copiesOf(object.id)"
             :view="view"
@@ -453,6 +455,7 @@ import {
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
 import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
+import { stampedBlocks } from '@/lib/tagStamps'
 import { loadFontCatalog } from '@/lib/fontCatalog'
 import {
   beginRotationDirection,
@@ -655,6 +658,22 @@ const objects = computed(() => {
     })),
     }
   })
+})
+
+/** The objects that wear a tag stamp while the tag view is on. See `stampedBlocks`. */
+const stamped = computed<ReadonlySet<string>>(() => {
+  const file = currentFile.value
+  if (!editor.tagsShown || !file) return new Set()
+  const frames = new Map(
+    objects.value.map((o) => {
+      const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
+      return [o.id, { center: d.center, w: d.box.w, h: d.box.h, rotation: o.rotation }]
+    }),
+  )
+  return stampedBlocks(
+    facePage(file.page, project.activeFace).units.map((u) => u.members),
+    frames,
+  )
 })
 
 /**

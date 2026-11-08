@@ -12,6 +12,16 @@
     <button class="page-btn" title="適應視窗" :disabled="!project.isOpen" @click="editor.fitToView()">
       <Maximize :size="13" />
     </button>
+    <button
+      class="page-btn"
+      :class="editor.tagsShown && 'page-btn-on'"
+      :aria-pressed="editor.tagsShown"
+      title="在畫布上用底色和字章看每個文字物件的標記"
+      :disabled="!project.isOpen"
+      @click="editor.tagsShown = !editor.tagsShown"
+    >
+      <Tag :size="13" />
+    </button>
 
     <!--
       Centred on the bar rather than flexed between its neighbours, so it does
@@ -49,6 +59,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize,
+  Tag,
   ZoomIn,
   ZoomOut,
 } from '@lucide/vue'
@@ -87,5 +98,9 @@ function onSelect(e: Event) {
 }
 .page-btn:disabled {
   opacity: 0.5;
+}
+.page-btn-on {
+  background: var(--secondary);
+  color: var(--primary);
 }
 </style>

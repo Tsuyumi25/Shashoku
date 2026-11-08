@@ -621,6 +621,9 @@ export const useEditorStore = defineStore('editor', () => {
    */
   const showingOriginal = ref(false)
 
+  /** Every text object tinted and stamped with its tags on the canvas. A switch on the view, like `textsHidden`. */
+  const tagsShown = ref(false)
+
   /**
    * The colour the eyedropper puts away. Nothing reads it yet — it is here so
    * that sampling has somewhere to land rather than being invented alongside
@@ -3265,6 +3268,7 @@ export const useEditorStore = defineStore('editor', () => {
     setTextSide,
     textsHidden,
     showingOriginal,
+    tagsShown,
     foreground,
     fontSize,
     adjustFontSize,
