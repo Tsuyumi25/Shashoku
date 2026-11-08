@@ -204,6 +204,18 @@ function measured(
 }
 
 /**
+ * The size `drawnLabel` draws an upright object's bitmap at, without drawing
+ * it — for laying out many objects before deciding which to draw.
+ */
+export function drawnLabelSize(
+  code: string,
+  style: TextStyle,
+  effects: readonly LayerEffect[],
+): { width: number; height: number } | null {
+  return measured(paintedText(code, style), style, effects)
+}
+
+/**
  * Whether this machine has no face for the family, without drawing anything.
  *
  * For surfaces that show one row per object and would otherwise rasterize a

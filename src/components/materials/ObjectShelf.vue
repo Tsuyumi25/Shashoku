@@ -27,9 +27,8 @@
             v-for="item in bucket.items"
             :key="item.id"
             :data-piece-id="item.id"
-            :sample="item.sample"
+            :item="item"
             :scale="item.scale * fit"
-            :missing="item.missing"
             :selected="editor.isSelected(item.id)"
             :title="item.title"
           />
@@ -56,7 +55,7 @@
 import { computed, defineComponent, h, onBeforeUnmount, ref, shallowRef, useTemplateRef, watchEffect } from 'vue'
 import { useElementSize, useEventListener } from '@vueuse/core'
 import { strokeOf } from '@shared/effects/stroke'
-import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
+import type { StrokeEffect } from '@shared/effects/types'
 import { plainOf } from '@shared/page/markup'
 import type { TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
@@ -65,9 +64,17 @@ import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
 import ShelfPiece from '@/components/materials/ShelfPiece.vue'
 import { useObjectMenu } from '@/composables/useObjectMenu'
 import type { AppearanceTarget } from '@/lib/appearance'
-import type { Sample } from '@/lib/fontSampleCache'
-import { drawnLabel } from '@/lib/labelRaster'
-import { shelfAttribute, shelfEntriesOf, type ShelfEntry } from '@/lib/objectShelf'
+import {
+  forgetShelfPiecesExcept,
+  sameHeaps,
+  sameItems,
+  shelfAttribute,
+  shelfEntriesOf,
+  shelfPieceOf,
+  type ShelfEntry,
+  type ShelfHeap,
+  type ShelfItem,
+} from '@/lib/objectShelf'
 import { SHELF_ATTRIBUTES, bucketsByAttribute, type ShelfAttribute } from '@/lib/shelfAttributes'
 import { useEditorStore } from '@/stores/editorStore'
 import { useExplodeStore } from '@/stores/explodeStore'
@@ -89,18 +96,6 @@ const explode = useExplodeStore()
 const project = useProjectStore()
 const objectMenu = useObjectMenu()
 
-interface Piece {
-  id: string
-  pageId: string
-  code: string
-  style: TextStyle
-  effects: readonly LayerEffect[]
-  sizePx: number
-  sample: Sample | null
-  missing: boolean
-  scale: number
-  title: string
-}
 
 const sideName = computed(() => (editor.textSide === 'source' ? '原文' : '譯文'))
 const attributeLabel = computed(
@@ -120,52 +115,26 @@ const frozen = shallowRef<ShelfEntry[] | null>(null)
 const listed = computed(() => frozen.value ?? shown.value)
 
 /**
- * Each piece's drawing, kept by id for as long as what it draws is unchanged.
- * The chapter holds more pieces than the sample cache does (240), so drawing
- * them all afresh whenever one object changes — as trying a look on does, on
- * every move of a drag — would push every one out of the cache and set it again.
+ * The pieces and their heaps, handed back unchanged whenever an edit left them
+ * so — moving an object, or editing one on a page, rebuilds the chapter's
+ * entries, and a fresh list here would redraw every piece of the shelf for an
+ * edit none of them shows.
  */
-const drawings = new Map<string, { key: string; drawn: ReturnType<typeof drawnLabel> }>()
+const pieces = computed<ShelfItem[]>((previous) => {
+  const next = listed.value.map(shelfPieceOf)
+  forgetShelfPiecesExcept(next)
+  return previous !== undefined && sameItems(previous, next) ? previous : next
+})
 
-function drawingOf(entry: ShelfEntry): ReturnType<typeof drawnLabel> {
-  const key = JSON.stringify([entry.code, entry.style, entry.effects])
-  const held = drawings.get(entry.id)
-  if (held?.key === key) return held.drawn
-  // Upright: the shelf compares how pieces are set, not how they lie.
-  const drawn = drawnLabel(entry.code, entry.style, entry.effects, { x: 0, y: 0 }, 0)
-  drawings.set(entry.id, { key, drawn })
-  return drawn
-}
-
-const pieces = computed<Piece[]>(() =>
-  listed.value.map((entry) => {
-    const drawn = drawingOf(entry)
-    const font = entry.style.fontFamily || '未指定'
-    return {
-      id: entry.id,
-      pageId: entry.pageId,
-      code: entry.code,
-      style: entry.style,
-      effects: entry.effects,
-      sizePx: entry.style.fontSizePx,
-      sample: drawn.sample,
-      missing: drawn.missingFamily !== null,
-      // The square root keeps the order of sizes while pulling a 368px shout
-      // and a 47px aside within reach of one column.
-      scale: 3.6 / Math.sqrt(entry.style.fontSizePx),
-      title: `第 ${entry.pageNumber} 頁 · ${font} ${entry.style.fontStyleName} · ${entry.style.fontSizePx}px`,
-    }
-  }),
-)
-
-const buckets = computed(() => {
+const buckets = computed<ShelfHeap[]>((previous) => {
   const byId = new Map(pieces.value.map((p) => [p.id, p]))
-  return bucketsByAttribute(listed.value, shelfAttribute.value).map((bucket) => ({
+  const next = bucketsByAttribute(listed.value, shelfAttribute.value).map((bucket) => ({
     ...bucket,
     items: bucket.ids
       .flatMap((id) => byId.get(id) ?? [])
       .sort((a, b) => b.sizePx - a.sizePx),
   }))
+  return previous !== undefined && sameHeaps(previous, next) ? previous : next
 })
 
 /** The order a Shift press reads a range along. */
@@ -180,7 +149,7 @@ const { width: bodyW } = useElementSize(bodyEl)
  * which is what lets a narrow column hold a 368px shout.
  */
 const fit = computed(() => {
-  const widest = Math.max(1, ...pieces.value.map((p) => (p.sample?.image.width ?? 40) * p.scale))
+  const widest = Math.max(1, ...pieces.value.map((p) => p.width * p.scale))
   const room = bodyW.value > 0 ? bodyW.value / 2 : Infinity
   return Math.min(1, room / widest)
 })
@@ -219,7 +188,7 @@ function onMenu(e: MouseEvent) {
  * chapter turns to the piece first — right-clicking something three pages away
  * and deleting it elsewhere would be a menu lying about what it is for.
  */
-function onPieceMenu(item: Piece, e: MouseEvent) {
+function onPieceMenu(item: ShelfItem, e: MouseEvent) {
   arrangeAt.value = null
   if (editor.isSelected(item.id)) editor.showPage(item.pageId)
   else editor.revealLabel(item.pageId, item.id)
@@ -268,7 +237,7 @@ const ShelfOverlay = defineComponent(() => () => {
     // Over an object the look is already tried on it, and the piece would only hide that.
     held && lead && plan.value.kind !== 'style'
       ? h('div', { class: 'shelf-carry', style: { left: `${held.x - held.grab.x}px`, top: `${held.y - held.grab.y}px` } }, [
-          h(ShelfPiece, { sample: lead.sample, scale: lead.scale * fit.value, missing: lead.missing, selected: false, title: '' }),
+          h(ShelfPiece, { item: lead, scale: lead.scale * fit.value, selected: false, title: '' }),
           held.ids.length > 1 ? h('span', { class: 'shelf-carry-count' }, String(held.ids.length)) : null,
         ])
       : null,
