@@ -96,10 +96,6 @@ const api: ShashokuApi = {
   onWallSelection: (handler) => {
     ipcRenderer.on(CHANNELS.wallSelection, (_e, ids: string[]) => handler(ids));
   },
-  wallBrush: (tags) => ipcRenderer.send(CHANNELS.wallBrush, tags),
-  onWallBrush: (handler) => {
-    ipcRenderer.on(CHANNELS.wallBrush, (_e, tags: string[]) => handler(tags));
-  },
 };
 
 const engineApi: ShashokuEngineApi = {

@@ -42,10 +42,3 @@ export function selectPieces(ids: readonly string[]): void {
   turnTo(kept.length ? project.entryById(kept[0]!) : undefined)
   editor.selectMany(kept, false)
 }
-
-export function brushMeaning(tags: readonly string[]): void {
-  const editor = useEditorStore()
-  editor.loadPaintTags(tags)
-  editor.setTool('tag-paint')
-  useUiStore().setView('editor')
-}

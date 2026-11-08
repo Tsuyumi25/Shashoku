@@ -4,7 +4,7 @@ import type { WallScene } from '@shared/wall/scene'
 import { wallSceneOf } from '@/lib/wallScene'
 import { useProjectStore } from '@/stores/projectStore'
 import { useEditorStore } from '@/stores/editorStore'
-import { brushMeaning, revealPiece, selectPieces } from '@/lib/wallActions'
+import { revealPiece, selectPieces } from '@/lib/wallActions'
 
 /**
  * The editor's half of the wall: hands the wall window the chapter while it is
@@ -48,5 +48,4 @@ export function useWallPublisher(): void {
 
   window.api.onWallReveal((pageId, id) => revealPiece(pageId, id))
   window.api.onWallSelect((ids) => selectPieces(ids))
-  window.api.onWallBrush((tags) => brushMeaning(tags))
 }

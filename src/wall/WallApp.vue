@@ -4,13 +4,7 @@
       <WallControls />
     </div>
     <div class="min-w-0 flex-1">
-      <WallView
-        :scene="scene"
-        :selected="selected"
-        @reveal="reveal"
-        @select="select"
-        @brush="brush"
-      />
+      <WallView :scene="scene" :selected="selected" @reveal="reveal" @select="select" />
     </div>
   </div>
 </template>
@@ -46,10 +40,6 @@ function reveal(pageId: string, id: string) {
 
 function select(ids: string[]) {
   window.api.wallSelect(ids)
-}
-
-function brush(tags: readonly string[]) {
-  window.api.wallBrush([...tags])
 }
 
 loadFontCatalog(usePreferencesStore().prefs.fontFolders).catch((err: unknown) => {

@@ -42,16 +42,14 @@ import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
 import type { LayerPlace } from '@/lib/layerTransform'
 import { buildLabelRows, chapterStops, type ChapterRow } from '@/lib/labelRows'
-import { bucketObjectsOf, type BucketObject } from '@/lib/valueBuckets'
 import type { AppearanceKind, AppearanceTarget } from '@/lib/appearance'
-import { deriveStyle } from '@/lib/styleRecommendation'
 import type { MaskBrushMode } from '@/lib/selection/brushMask'
 import type { MaskTarget } from '@/lib/selection/mask'
 import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { normalizeTagSet, sameTagSet, tagSetKey, withTag, withoutTag } from '@shared/tags/set'
+import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
 import { logActivity } from '@/lib/activityLog'
@@ -219,9 +217,9 @@ export const MAX_TRACKED_BOOKS = 20
  *
  * `select` and `select-text` are two move tools side by side, both with the
  * same feel: click to take hold, drag to move. What is text's alone lives on
- * the second one — sweeping a marquee over objects, and drawing what they mean
- * over the page — because a general move tool that grew those would be
- * answering questions about text while somebody is nudging an erase patch.
+ * the second one — sweeping a marquee over objects — because a general move
+ * tool that grew it would be answering questions about text while somebody is
+ * nudging an erase patch.
  *
  * `connect` is where the tool being the mode pays for itself: pressing an
  * object already means take hold of it, so drawing a line from one would have
@@ -240,7 +238,6 @@ export type CanvasTool =
   | 'wand'
   | 'brush'
   | 'eraser'
-  | 'tag-paint'
 
 /** The tools whose drag builds a selection rather than acting on objects. */
 export const SELECTION_TOOLS = [
@@ -523,70 +520,6 @@ export const useEditorStore = defineStore('editor', () => {
   const collapsedLayerIds = ref<Set<string>>(new Set())
 
   const tool = ref<CanvasTool>('select')
-
-  /**
-   * What the tag brush is loaded with. Empty is a load like any other — it is
-   * how the brush takes a meaning away, so there is no second tool for that.
-   */
-  const paintTags = ref<string[]>([])
-
-  function loadPaintTags(tags: readonly string[]) {
-    paintTags.value = normalizeTagSet(tags)
-  }
-
-  /**
-   * Whether spraying a meaning also hands the object that meaning's style.
-   *
-   * On to begin with: an object taking its first tag has no style of its own to
-   * lose, and that is the case the derivation was built for. Off is for a pass
-   * that is correcting labels rather than setting them — the page is already
-   * laid out and only the classification was wrong.
-   *
-   * ⭐ Said rather than guessed. Which of the two a tag change is cannot be read
-   * off the tag sets: the same edit is a correction one minute and a change of
-   * meaning the next, and every rule that tries to tell them apart is a rule
-   * that is sometimes wrong without saying so.
-   */
-  const paintUpdatesStyle = ref(true)
-
-  /**
-   * Whether the key that turns a tool's switch over is down right now.
-   *
-   * Kept here rather than read off each event on its own, because the panel
-   * drawing the switch has to move with it: a quasimode the interface does not
-   * show is just a mode with a shorter fuse. Pointer events resync it, so a
-   * keyup missed while the window was away cannot leave it stuck.
-   */
-  const overrideHeld = ref(false)
-
-  /** What one stroke would do right now, switch and held key together. */
-  const paintStrokeUpdatesStyle = computed(() => paintUpdatesStyle.value !== overrideHeld.value)
-
-  /**
-   * What a load aimed at the selection would land on: how many text objects,
-   * and how many meanings they hold between them.
-   *
-   * ⭐ The second number is the one worth showing. The act writes one meaning,
-   * so anything above one is being flattened — and a selection gathered by
-   * eye is exactly where that happens without being noticed.
-   */
-  const paintTargetScope = computed(() => {
-    const project = useProjectStore()
-    const targets = selectedTextObjects()
-    // ⭐ Counted over the translations the blocks belong to, not the blocks. A
-    // sound set in two blocks means one thing, so seeing it twice is not two
-    // meanings about to be flattened into one.
-    const units = new Map<string, readonly string[]>()
-    for (const { pageId, entry } of targets) {
-      const unit = project.placeOf(pageId, entry.id)?.unit
-      const view = project.viewOf(pageId)
-      if (unit && view) units.set(`${pageId}\u0000${unit.id}`, tagsOfUnit(view, unit))
-    }
-    return {
-      objects: targets.length,
-      meanings: new Set([...units.values()].map(tagSetKey)).size,
-    }
-  })
 
   /**
    * Which of an object's two bodies everything is working on.
@@ -2863,48 +2796,6 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Every text object in the chapter, which is what the statistics count.
-   *
-   * The translation whatever tool is open: what this feeds is the style a newly
-   * tagged object is given, and that style is written to the translation.
-   */
-  function chapterBucketObjects(): BucketObject[] {
-    const project = useProjectStore()
-    return project.files.flatMap((file) =>
-      bucketObjectsOf(file.pageId, file.page, 'translation', project.activeFace),
-    )
-  }
-
-  /** Every text object among these ids a change is allowed to reach. */
-  function textObjectsByIds(ids: readonly string[]): AppearanceTarget<TextLayerEntry>[] {
-    const project = useProjectStore()
-    const out: AppearanceTarget<TextLayerEntry>[] = []
-    for (const id of ids) {
-      if (isLayerLocked(id)) continue
-      const pageId = project.pageOfEntry(id)
-      if (pageId === null) continue
-      const entry = project.entryById(id)
-      if (entry?.kind === 'text') out.push({ pageId, entry })
-    }
-    return out
-  }
-
-  /**
-   * One aim's worth of writing, however many objects it reaches — a sweep that
-   * crosses five, or a batch that lands on forty, is one thing that happened.
-   *
-   * The load replaces what an object carried rather than joining it. A brush
-   * holds a whole meaning, and adding would build combinations nobody chose,
-   * which is the drift the buckets exist to find. Taking a meaning away is the
-   * same act with nothing loaded, so there is no second tool for that. Changing
-   * one part of a meaning is composing the load and writing it again — what is
-   * shown is what will be written, where a diff would have to be worked out.
-   *
-   * The style is derived from a sample read before anything is written, and it
-   * travels in one command with the tags: an undo that took back the meaning
-   * and left the look would leave a style nobody asked for standing.
-   */
-  /**
    * The order the blocks of one side are read in, as a step of history.
    *
    * ⭐ On the stack rather than written straight through, unlike a restack in
@@ -2929,52 +2820,6 @@ export const useEditorStore = defineStore('editor', () => {
       label: `reorder-members ${unitId}`,
       do: () => project.reorderMembers(pageId, unitId, side, wanted, face),
       undo: () => project.reorderMembers(pageId, unitId, side, was, face),
-    })
-  }
-
-  function cmdPaintTags(
-    ids: readonly string[],
-    tags: readonly string[],
-    updateStyle = true,
-  ) {
-    const project = useProjectStore()
-    const wanted = normalizeTagSet(tags)
-    const face = project.activeFace
-    // ⭐ The meaning is written onto the artwork's words and the look on the
-    // block itself, so a stroke across two blocks of one sound writes that
-    // meaning once and both looks.
-    const targets = textObjectsByIds(ids).flatMap(({ pageId, entry }) => {
-      const unit = project.placeOf(pageId, entry.id)?.unit
-      const view = project.viewOf(pageId)
-      return unit === undefined || view === undefined || sameTagSet(tagsOfUnit(view, unit), wanted)
-        ? []
-        : [{ pageId, entry, unit }]
-    })
-    if (targets.length === 0) return
-
-    const units = new Map(targets.map(({ pageId, unit }) => [`${pageId}\u0000${unit.id}`, { pageId, unitId: unit.id }]))
-    const tagsBefore = [...units.values()].flatMap(({ pageId, unitId }) => sourceTagsOf(pageId, unitId))
-    const stylesBefore = targets.map(({ pageId, entry }) => ({ pageId, id: entry.id, style: { ...entry.body.style } }))
-    let stylesAfter = stylesBefore
-    if (updateStyle) {
-      const sample = chapterBucketObjects()
-      const { tags: registry, seedStyle } = project.header
-      const style = deriveStyle(sample, wanted, registry, seedStyle)
-      stylesAfter = stylesBefore.map((entry) => ({ ...entry, style }))
-    }
-    const restyle = (states: typeof stylesBefore) => {
-      for (const state of states) project.setLabelStyle(state.pageId, state.id, state.style)
-    }
-    pushCommand({
-      label: `paint-tags ${targets.length}`,
-      do: () => {
-        for (const { pageId, unitId } of units.values()) project.setLabelTags(pageId, unitId, wanted, face)
-        restyle(stylesAfter)
-      },
-      undo: () => {
-        for (const b of tagsBefore) project.setSourceTags(b.pageId, b.id, b.tags)
-        restyle(stylesBefore)
-      },
     })
   }
 
@@ -3153,42 +2998,6 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * Dropping a registry entry takes away a colour and nothing else. Every
-   * object keeps the tag, so this is not a delete anybody has to be warned
-   * about — putting the entry back restores exactly what was lost.
-   */
-  function cmdRemoveTag(index: number) {
-    const project = useProjectStore()
-    const removed = project.removeTagAt(index)
-    if (removed === null) return
-    pushCommand(
-      {
-        label: `remove-tag ${removed.name}`,
-        do: () => {
-          project.removeTagAt(index)
-        },
-        undo: () => project.insertTagAt(index, removed),
-      },
-      { alreadyApplied: true },
-    )
-  }
-
-  /** Reaches every object carrying the old name — see `projectStore.renameTag`. */
-  function cmdRenameTag(from: string, to: string): boolean {
-    const project = useProjectStore()
-    if (!project.renameTag(from, to)) return false
-    pushCommand(
-      {
-        label: `rename-tag ${from}`,
-        do: () => project.renameTag(from, to),
-        undo: () => project.renameTag(to, from),
-      },
-      { alreadyApplied: true },
-    )
-    return true
-  }
-
-  /**
    * A drop in the page grid. Reordering is the easiest thing to do by accident
    * and the hardest to notice, and putting an array back is free. Making pages
    * stays off the stack — it reads source images and writes directories, which
@@ -3238,16 +3047,6 @@ export const useEditorStore = defineStore('editor', () => {
       { alreadyApplied: true },
     )
     return deleted
-  }
-
-  function cmdMoveTag(from: number, to: number) {
-    if (from === to) return
-    const project = useProjectStore()
-    pushCommand({
-      label: `move-tag ${from}`,
-      do: () => project.moveTag(from, to),
-      undo: () => project.moveTag(to, from),
-    })
   }
 
   return {
@@ -3363,13 +3162,6 @@ export const useEditorStore = defineStore('editor', () => {
     previewEffects,
     endEffectsPreview,
     cmdReorderMembers,
-    cmdPaintTags,
-    paintTags,
-    loadPaintTags,
-    paintUpdatesStyle,
-    overrideHeld,
-    paintStrokeUpdatesStyle,
-    paintTargetScope,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
     sentencesOf,
@@ -3380,9 +3172,6 @@ export const useEditorStore = defineStore('editor', () => {
     cmdRenameFace,
     setActiveFace,
     cmdAddTag,
-    cmdRemoveTag,
-    cmdRenameTag,
-    cmdMoveTag,
     cmdMovePage,
     cmdDeletePages,
   }

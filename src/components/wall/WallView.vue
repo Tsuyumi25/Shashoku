@@ -32,14 +32,6 @@
           </button>
           <button
             type="button"
-            class="row-action"
-            :title="`用「${group.tags.join('、') || '未標記'}」裝上標記畫筆`"
-            @click="emit('brush', group.tags)"
-          >
-            <Palette :size="12" />
-          </button>
-          <button
-            type="button"
             class="flex min-w-0 flex-1 items-center gap-2 text-left"
             :title="`選中「${group.tags.join('、') || '未標記'}」的全部 ${group.count} 個物件；Shift 加進或拿出目前的選取`"
             @click="pick(group.buckets.flatMap((b) => b.ids), $event)"
@@ -95,7 +87,7 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef } from 'vue'
 import { useElementSize } from '@vueuse/core'
-import { ChevronRight, Palette } from '@lucide/vue'
+import { ChevronRight } from '@lucide/vue'
 import { tagColor } from '@shared/tags/set'
 import type { WallScene } from '@shared/wall/scene'
 import WallPiece from '@/components/wall/WallPiece.vue'
@@ -123,7 +115,6 @@ const emit = defineEmits<{
   reveal: [pageId: string, id: string]
   /** Every object of a bucket or a meaning, the way the semantic buckets pick them. */
   select: [ids: string[]]
-  brush: [tags: readonly string[]]
 }>()
 
 interface Item {

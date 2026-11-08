@@ -77,7 +77,7 @@
       </template>
 
       <div
-        v-else-if="tags.length > 0 && (hovered || inSelection || captioned)"
+        v-else-if="tags.length > 0 && (hovered || inSelection)"
         class="absolute flex flex-col gap-px rounded bg-black/70 px-1 py-px text-[11px] leading-tight whitespace-nowrap text-white select-none"
         :style="captionStyle(counterTurn)"
       >
@@ -208,15 +208,6 @@ const props = defineProps<{
   tagsShown?: boolean
   /** Whether this one carries the stamp, or leaves it to another piece of the same lettering. */
   stamped?: boolean
-  /**
-   * Every object wears its caption, not only the one the hand is pointing at —
-   * for a tool whose subject is the meanings themselves, where which object
-   * already says what is the question being asked of the whole page.
-   *
-   * ⚠️ This is the cost the note above names, taken on purpose: a chapter-wide
-   * pass has every caught object captioned at once.
-   */
-  captioned?: boolean
   natural: { w: number; h: number }
   view: ViewTransform
   selected: boolean

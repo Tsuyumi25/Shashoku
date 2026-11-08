@@ -83,15 +83,13 @@ export function registerWallHandlers(): void {
     wallWindow.webContents.send(CHANNELS.wallSelection, ids);
   });
 
-  for (const channel of [CHANNELS.wallSelect, CHANNELS.wallBrush]) {
-    ipcMain.on(channel, (e, payload: string[]) => {
-      if (!fromWall(e)) return;
-      for (const w of editors()) {
-        w.webContents.send(channel, payload);
-        w.focus();
-      }
-    });
-  }
+  ipcMain.on(CHANNELS.wallSelect, (e, ids: string[]) => {
+    if (!fromWall(e)) return;
+    for (const w of editors()) {
+      w.webContents.send(CHANNELS.wallSelect, ids);
+      w.focus();
+    }
+  });
 
   ipcMain.on(CHANNELS.wallReveal, (e, pageId: string, id: string) => {
     if (!fromWall(e)) return;

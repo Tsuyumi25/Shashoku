@@ -1597,15 +1597,6 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
-  /** Every text object in the chapter, with the page each one came from. */
-  function allTextObjects(): { pageId: string; label: TextLayerEntry }[] {
-    const out: { pageId: string; label: TextLayerEntry }[] = []
-    for (const file of files.value) {
-      for (const label of everyText(file.page)) out.push({ pageId: file.pageId, label })
-    }
-    return out
-  }
-
   /** Every sentence of the face being worked on in the chapter, with the page it is on. */
   function allUnits(): { pageId: string; unit: TranslationUnit; tags: string[] }[] {
     const out: { pageId: string; unit: TranslationUnit; tags: string[] }[] = []
@@ -1641,42 +1632,12 @@ export const useProjectStore = defineStore('project', () => {
     return removed ?? null
   }
 
-  function moveTag(from: number, to: number): void {
-    const tags = projectMeta.value.tags
-    if (from < 0 || from >= tags.length || to < 0 || to >= tags.length || from === to) return
-    const [moved] = tags.splice(from, 1)
-    if (moved) tags.splice(to, 0, moved)
-    markMetaDirty()
-  }
-
   function setTagColor(index: number, color: string): void {
     const tags = projectMeta.value.tags
     if (index < 0 || index >= tags.length) return
     tags[index].color = color
     markMetaDirty()
   }
-
-  /**
-   * Renaming reaches every object carrying the old name — the name *is* the
-   * reference, so leaving them behind would strand them under a word the user
-   * just said they no longer use. Refused when the new name is already taken,
-   * which also keeps the inverse well defined: renaming back cannot collide.
-   */
-  function renameTag(from: string, to: string): boolean {
-    const tags = projectMeta.value.tags
-    const index = tags.findIndex((t) => t.name === from)
-    if (index === -1 || from === to) return false
-    if (tags.some((t) => t.name === to)) return false
-    tags[index].name = to
-    markMetaDirty()
-    for (const { pageId, label } of allTextObjects()) {
-      if (label.side !== 'source' || !label.body.tags.includes(from)) continue
-      label.body.tags = normalizeTagSet(label.body.tags.map((t) => (t === from ? to : t)))
-      markPageDirty(pageId)
-    }
-    return true
-  }
-
 
   const pinnedLayerNames = computed(() => projectMeta.value.pinnedLayerNames ?? [])
 
@@ -1822,7 +1783,6 @@ export const useProjectStore = defineStore('project', () => {
     forgetReadings,
     setLabelStyle,
     setLayerEffects,
-    allTextObjects,
     setLayerVisible,
     setLayerLocked,
     setLayerLinked,
@@ -1855,9 +1815,7 @@ export const useProjectStore = defineStore('project', () => {
     addTag,
     insertTagAt,
     removeTagAt,
-    moveTag,
     setTagColor,
-    renameTag,
     updateComment,
     markMetaDirty,
   }
