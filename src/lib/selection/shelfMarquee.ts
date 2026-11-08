@@ -13,6 +13,10 @@ export interface ScrollerFrame {
   scrollTop: number
 }
 
+export function scrollerFrame(el: HTMLElement, rect: DOMRect): ScrollerFrame {
+  return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
+}
+
 /**
  * Client coordinates to content coordinates. Not compensated for scroll: the
  * same pointer position naturally reads a different content point as
@@ -146,11 +150,19 @@ export type ScrollEdge = 'up' | 'down' | null
  * one check already covers both of the cases scrolling has to tell apart: a
  * band taller than the viewport lets the box reach the edge and this fires,
  * a band that fits does not and it stays still.
+ *
+ * Only the end the pointer drives counts: a box taller than the view has its
+ * anchored end past an edge too, and reading that one would stall the scroll
+ * the moment the box outgrows the view.
  */
-export function scrollEdgeFor(clamped: Rect, viewportTop: number, viewportBottom: number): ScrollEdge {
-  if (clamped.y + clamped.h >= viewportBottom) return 'down'
-  if (clamped.y <= viewportTop) return 'up'
-  return null
+export function scrollEdgeFor(
+  clamped: Rect,
+  viewportTop: number,
+  viewportBottom: number,
+  pointerY: number,
+): ScrollEdge {
+  if (pointerY >= clamped.y + clamped.h / 2) return clamped.y + clamped.h >= viewportBottom ? 'down' : null
+  return clamped.y <= viewportTop ? 'up' : null
 }
 
 export function edgeDistance(
@@ -162,4 +174,36 @@ export function edgeDistance(
   if (edge === 'down') return viewportClientBottom - clientY
   if (edge === 'up') return clientY - viewportClientTop
   return Infinity
+}
+
+/** What edge auto-scroll carries from one frame of a drag to the next. */
+export interface EdgeScrolling {
+  lastTick: number | null
+  zoneEnteredAt: number | null
+}
+
+/**
+ * One frame of edge auto-scroll for a marquee held against the scroller's
+ * top or bottom. Called every animation frame of the drag rather than on
+ * `pointermove`, which stops arriving once the hand holds still at the edge.
+ */
+export function scrollAlongEdge(
+  state: EdgeScrolling,
+  el: HTMLElement,
+  rect: DOMRect,
+  marquee: Rect,
+  clientY: number,
+  now: number,
+): void {
+  const dt = state.lastTick === null ? 0 : now - state.lastTick
+  state.lastTick = now
+  const edge = scrollEdgeFor(marquee, el.scrollTop, el.scrollTop + rect.height, clientY - rect.top + el.scrollTop)
+  const factor = edgeDistanceFactor(edgeDistance(edge, clientY, rect.top, rect.bottom), scrollZoneDepth(rect.height))
+  if (edge === null || factor <= 0) {
+    state.zoneEnteredAt = null
+    return
+  }
+  state.zoneEnteredAt ??= now
+  const delta = (edgeScrollSpeed(factor, edgeTimeFactor(now - state.zoneEnteredAt)) * dt) / 1000
+  el.scrollTop += edge === 'down' ? delta : -delta
 }

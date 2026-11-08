@@ -81,16 +81,12 @@ import { insertionIndexAt } from '@/lib/selection/shelfDrop'
 import {
   clientToContent,
   DRAG_THRESHOLD_PX,
-  edgeDistance,
-  edgeDistanceFactor,
-  edgeScrollSpeed,
-  edgeTimeFactor,
   resolveFrame,
-  scrollEdgeFor,
-  scrollZoneDepth,
+  scrollAlongEdge,
+  scrollerFrame,
   touchedKeys,
   type CardBox,
-  type ScrollerFrame,
+  type EdgeScrolling,
 } from '@/lib/selection/shelfMarquee'
 import { useEditorStore } from '@/stores/editorStore'
 import { useExportStore } from '@/stores/exportStore'
@@ -133,15 +129,13 @@ interface PendingGap {
   start: Point
 }
 
-interface Framing {
+interface Framing extends EdgeScrolling {
   pointerId: number
   origin: Point
   base: string[]
   additive: boolean
   cardBoxes: CardBox[]
   lastClient: Point
-  lastTick: number | null
-  zoneEnteredAt: number | null
   raf: number
 }
 
@@ -160,12 +154,8 @@ let pending: PendingCard | PendingGap | null = null
 let framing: Framing | null = null
 let sorting: Sorting | null = null
 
-function frameOf(el: HTMLElement, rect: DOMRect): ScrollerFrame {
-  return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
-}
-
 function cardBoxes(el: HTMLElement, rect: DOMRect, skip: ReadonlySet<string>): CardBox[] {
-  const frame = frameOf(el, rect)
+  const frame = scrollerFrame(el, rect)
   const out: CardBox[] = []
   for (const cardEl of el.querySelectorAll<HTMLElement>('.export-card')) {
     const key = cardEl.dataset.key
@@ -178,7 +168,7 @@ function cardBoxes(el: HTMLElement, rect: DOMRect, skip: ReadonlySet<string>): C
 }
 
 function currentRect(f: Framing, el: HTMLElement, rect: DOMRect): Rect {
-  const at = clientToContent(f.lastClient.x, f.lastClient.y, frameOf(el, rect))
+  const at = clientToContent(f.lastClient.x, f.lastClient.y, scrollerFrame(el, rect))
   return marqueeRect({ origin: f.origin, current: at, constrain: false, fromCenter: false })
 }
 
@@ -192,7 +182,7 @@ function onPointerDown(e: PointerEvent) {
     pending = { kind: 'card', pointerId: e.pointerId, pageId, start }
     return
   }
-  const origin = clientToContent(e.clientX, e.clientY, frameOf(el, el.getBoundingClientRect()))
+  const origin = clientToContent(e.clientX, e.clientY, scrollerFrame(el, el.getBoundingClientRect()))
   pending = { kind: 'gap', pointerId: e.pointerId, origin, start }
 }
 
@@ -233,7 +223,7 @@ function updateDropLine() {
   const s = sorting
   const el = scroller.value
   if (s === null || el === null) return
-  const point = clientToContent(s.lastClient.x, s.lastClient.y, frameOf(el, el.getBoundingClientRect()))
+  const point = clientToContent(s.lastClient.x, s.lastClient.y, scrollerFrame(el, el.getBoundingClientRect()))
   s.targetIndex = insertionIndexAt(s.targetCards, point)
   const before = s.targetCards[s.targetIndex]
   if (before) {
@@ -273,7 +263,7 @@ function onPointerMove(e: PointerEvent) {
   }
   const el = scroller.value
   if (el === null) return
-  const origin = clientToContent(p.start.x, p.start.y, frameOf(el, el.getBoundingClientRect()))
+  const origin = clientToContent(p.start.x, p.start.y, scrollerFrame(el, el.getBoundingClientRect()))
   beginFraming(p.pointerId, origin, false, e)
 }
 
@@ -282,21 +272,7 @@ function frameTick(now: number) {
   const el = scroller.value
   if (f === null || el === null) return
   const rect = el.getBoundingClientRect()
-  const dt = f.lastTick === null ? 0 : now - f.lastTick
-  f.lastTick = now
-
-  const edge = scrollEdgeFor(currentRect(f, el, rect), el.scrollTop, el.scrollTop + rect.height)
-  const factor = edgeDistanceFactor(
-    edgeDistance(edge, f.lastClient.y, rect.top, rect.bottom),
-    scrollZoneDepth(rect.height),
-  )
-  if (edge !== null && factor > 0) {
-    if (f.zoneEnteredAt === null) f.zoneEnteredAt = now
-    const delta = (edgeScrollSpeed(factor, edgeTimeFactor(now - f.zoneEnteredAt)) * dt) / 1000
-    el.scrollTop += edge === 'down' ? delta : -delta
-  } else {
-    f.zoneEnteredAt = null
-  }
+  scrollAlongEdge(f, el, rect, currentRect(f, el, rect), f.lastClient.y, now)
 
   const box = currentRect(f, el, rect)
   marqueeStyle.value = {

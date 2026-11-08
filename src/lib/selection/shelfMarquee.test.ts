@@ -136,11 +136,19 @@ describe('edge auto-scroll math', () => {
 
   it('scrolls only once the clamped box is pressed against the visible edge', () => {
     // A band taller than the viewport: the box reaches the visible bottom.
-    expect(scrollEdgeFor({ x: 0, y: 0, w: 10, h: 500 }, 0, 400)).toBe('down')
+    expect(scrollEdgeFor({ x: 0, y: 0, w: 10, h: 500 }, 0, 400, 520)).toBe('down')
     // A band that fits inside the viewport: the box never gets that far,
     // even though the raw pointer might be past it.
-    expect(scrollEdgeFor({ x: 0, y: 50, w: 10, h: 200 }, 0, 400)).toBe(null)
-    expect(scrollEdgeFor({ x: 0, y: -50, w: 10, h: 50 }, 0, 400)).toBe('up')
+    expect(scrollEdgeFor({ x: 0, y: 50, w: 10, h: 200 }, 0, 400, 450)).toBe(null)
+    expect(scrollEdgeFor({ x: 0, y: -50, w: 10, h: 50 }, 0, 400, -50)).toBe('up')
+  })
+
+  it('reads the edge at the end the pointer drives once the box outgrows the view', () => {
+    // Dragged upward from below the view: the anchored bottom is past the
+    // visible bottom too, and must not turn the scroll around.
+    expect(scrollEdgeFor({ x: 0, y: 300, w: 10, h: 900 }, 310, 1200, 298)).toBe('up')
+    // Dragged downward from above the view, the mirror case.
+    expect(scrollEdgeFor({ x: 0, y: 0, w: 10, h: 900 }, 100, 880, 900)).toBe('down')
   })
 
   it('measures distance to whichever edge is in play', () => {

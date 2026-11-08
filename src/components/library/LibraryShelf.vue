@@ -193,16 +193,13 @@ import {
   clampToTerritory,
   clientToContent,
   DRAG_THRESHOLD_PX,
-  edgeDistance,
-  edgeDistanceFactor,
-  edgeScrollSpeed,
-  edgeTimeFactor,
   resolveFrame,
-  scrollEdgeFor,
-  scrollZoneDepth,
+  scrollAlongEdge,
+  scrollerFrame,
   territoryAt,
   touchedKeys,
   type CardBox,
+  type EdgeScrolling,
 } from '@/lib/selection/shelfMarquee'
 import { isTypingSurface } from '@/lib/typingSurface'
 import { useEditorStore } from '@/stores/editorStore'
@@ -332,7 +329,7 @@ interface PendingGap {
   start: Point
 }
 
-interface Framing {
+interface Framing extends EdgeScrolling {
   pointerId: number
   origin: Point
   territory: ShelfRegion
@@ -341,8 +338,6 @@ interface Framing {
   additive: boolean
   cardBoxes: CardBox[]
   lastClient: Point
-  lastTick: number | null
-  zoneEnteredAt: number | null
   raf: number
 }
 
@@ -375,10 +370,6 @@ const marqueeStyle = ref<Record<string, string> | null>(null)
 const dropLineStyle = ref<Record<string, string> | null>(null)
 /** Reactive where `sorting` is not: the empty page band lights up from it. */
 const dropping = ref(false)
-
-function scrollerFrame(el: HTMLElement, rect: DOMRect) {
-  return { left: rect.left, top: rect.top, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
-}
 
 /**
  * Where the line between the two bands sits, in content coordinates. Read
@@ -621,25 +612,7 @@ function frameTick(now: number) {
   const el = scroller.value
   if (f === null || el === null) return
   const rect = el.getBoundingClientRect()
-  const dt = f.lastTick === null ? 0 : now - f.lastTick
-  f.lastTick = now
-
-  const viewportTop = el.scrollTop
-  const viewportBottom = el.scrollTop + rect.height
-  const before = currentRect(f, el, rect)
-  const edge = scrollEdgeFor(before, viewportTop, viewportBottom)
-  const zoneDepth = scrollZoneDepth(rect.height)
-  const distance = edgeDistance(edge, f.lastClient.y, rect.top, rect.bottom)
-  const factor = edgeDistanceFactor(distance, zoneDepth)
-
-  if (edge !== null && factor > 0) {
-    if (f.zoneEnteredAt === null) f.zoneEnteredAt = now
-    const speed = edgeScrollSpeed(factor, edgeTimeFactor(now - f.zoneEnteredAt))
-    const delta = (speed * dt) / 1000
-    el.scrollTop += edge === 'down' ? delta : -delta
-  } else {
-    f.zoneEnteredAt = null
-  }
+  scrollAlongEdge(f, el, rect, currentRect(f, el, rect), f.lastClient.y, now)
 
   const clamped = currentRect(f, el, rect)
   marqueeStyle.value = {
