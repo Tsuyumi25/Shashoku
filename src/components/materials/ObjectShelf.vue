@@ -17,10 +17,21 @@
 
     <div v-else ref="bodyEl" class="relative min-h-0 flex-1 space-y-2 overflow-auto p-2">
       <div v-for="bucket in buckets" :key="bucket.key" class="cluster">
-        <div class="cluster-label">
+        <div
+          class="cluster-label"
+          :class="heapPicked(bucket) === bucket.items.length && 'cluster-label-all'"
+          :title="`選這一堆的 ${bucket.items.length} 個；Ctrl 或 Shift 補滿或整堆拿出`"
+          @click="pickHeap(bucket, $event)"
+        >
+          <span
+            class="heap-mark"
+            :class="heapPicked(bucket) === bucket.items.length ? 'heap-mark-all' : heapPicked(bucket) > 0 && 'heap-mark-some'"
+          />
           <span v-if="bucket.swatch" class="swatch" :style="{ backgroundColor: bucket.swatch }" />
           <span class="truncate">{{ bucket.label }}</span>
-          <span class="ml-auto shrink-0 tabular-nums opacity-70">{{ bucket.items.length }}</span>
+          <span class="ml-auto shrink-0 tabular-nums opacity-70">
+            {{ heapPicked(bucket) > 0 ? `${heapPicked(bucket)} / ${bucket.items.length}` : bucket.items.length }}
+          </span>
         </div>
         <div class="flex flex-wrap items-center gap-1">
           <ShelfPiece
@@ -150,6 +161,25 @@ const buckets = computed<ShelfHeap[]>((previous) => {
   }))
   return previous !== undefined && sameHeaps(previous, next) ? previous : next
 })
+
+/** How many of a heap's objects are selected — by tag, some may be selected through another heap. */
+const picked = computed(() => new Map(buckets.value.map((b) => [b.key, b.items.filter((i) => editor.isSelected(i.id)).length])))
+const heapPicked = (bucket: ShelfHeap) => picked.value.get(bucket.key) ?? 0
+
+/**
+ * A heap's title selects the heap as a press selects a piece: alone, or with
+ * Ctrl or Shift filled up or let go of whole while the rest of the selection
+ * stays. No page turns: a heap runs across pages.
+ */
+function pickHeap(bucket: ShelfHeap, e: MouseEvent) {
+  const ids = bucket.items.map((i) => i.id)
+  if (!(e.ctrlKey || e.metaKey || e.shiftKey)) editor.selectMany(ids, false)
+  else if (heapPicked(bucket) < ids.length) editor.selectMany(ids, true)
+  else {
+    const heap = new Set(ids)
+    editor.selectMany([...editor.selectedIds].filter((id) => !heap.has(id)), false)
+  }
+}
 
 /** The order a Shift press reads a range along; an object in two heaps by tag counts where it first appears. */
 const sequence = computed(() => [...new Set(buckets.value.flatMap((b) => b.items.map((i) => i.id)))])
@@ -299,6 +329,7 @@ function onPress(e: PointerEvent) {
     }
     return
   }
+  if (e.target instanceof Element && e.target.closest('.cluster-label')) return
   // A press on the scrollbar is the list being scrolled, not a sweep over it.
   const body = bodyEl.value
   if (body !== null && e.target === body && (e.offsetX >= body.clientWidth || e.offsetY >= body.clientHeight)) return
@@ -635,12 +666,51 @@ onBeforeUnmount(() => {
 }
 .cluster-label {
   display: flex;
-  width: 100%;
+  align-items: center;
+  width: calc(100% + 0.4rem);
   min-width: 0;
   gap: 0.35rem;
-  margin-bottom: 0.3rem;
+  margin: -0.2rem -0.2rem 0.1rem;
+  border-radius: 4px;
+  padding: 0.1rem 0.2rem;
   font-size: 11px;
   color: #1f1f1f;
+}
+.cluster-label:hover {
+  background: oklch(0 0 0 / 0.1);
+}
+.cluster-label-all,
+.cluster-label-all:hover {
+  background: color-mix(in oklch, var(--primary) 25%, transparent);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.heap-mark {
+  display: grid;
+  width: 0.8rem;
+  height: 0.8rem;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1.5px solid #333;
+  border-radius: 3px;
+  background: oklch(1 0 0 / 0.5);
+}
+.heap-mark-some,
+.heap-mark-all {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+.heap-mark-some::after {
+  width: 0.45rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary-foreground);
+  content: '';
+}
+.heap-mark-all::after {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--primary-foreground);
+  content: '✓';
 }
 .swatch {
   width: 0.7rem;
