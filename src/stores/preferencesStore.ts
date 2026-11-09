@@ -217,6 +217,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.markMissingGlyphs = on
   }
 
+  function setRemoveEachStroke(on: boolean) {
+    prefs.removeEachStroke = on
+  }
+
   function setSidePanel(panel: SidePanel) {
     prefs.sidePanel = panel
   }
@@ -253,6 +257,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setDefaultFontFamily,
     setMissingGlyphMode,
     setMarkMissingGlyphs,
+    setRemoveEachStroke,
     setSidePanel,
     setRetouchOpacity,
   }

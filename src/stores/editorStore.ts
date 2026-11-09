@@ -239,6 +239,7 @@ export type CanvasTool =
   | 'wand'
   | 'brush'
   | 'eraser'
+  | 'remove'
 
 /** The tools whose drag builds a selection rather than acting on objects. */
 export const SELECTION_TOOLS = [
@@ -249,6 +250,7 @@ export const SELECTION_TOOLS = [
   'wand',
   'brush',
   'eraser',
+  'remove',
 ] as const satisfies readonly CanvasTool[]
 
 export function isSelectionTool(tool: CanvasTool): boolean {
@@ -266,6 +268,8 @@ export function isSelectionTool(tool: CanvasTool): boolean {
 const MASK_BRUSH_MODES = {
   brush: 'paint',
   eraser: 'erase',
+  // Coverage laid down like the brush's, so it takes the brush's head and keys.
+  remove: 'paint',
 } as const satisfies Partial<Record<CanvasTool, MaskBrushMode>>
 
 export function maskBrushModeOf(tool: CanvasTool): MaskBrushMode | null {

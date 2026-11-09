@@ -165,6 +165,8 @@ export interface Preferences {
   missingGlyphMode: MissingGlyphMode;
   /** Outlines the characters a family cannot draw, so a box has a reason. */
   markMissingGlyphs: boolean;
+  /** Whether the remove brush repairs as each stroke lets go, or waits for Enter. */
+  removeEachStroke: boolean;
   /**
    * Folders the sidebar looks under for projects. Recorded rather than
    * configured: opening a project registers its parent, so the library fills
@@ -229,6 +231,7 @@ export function defaultPreferences(): Preferences {
     fontSampleVertical: false,
     missingGlyphMode: "tofu",
     markMissingGlyphs: true,
+    removeEachStroke: true,
     scanPoints: [],
     workspaces: [],
     recentProjects: [],

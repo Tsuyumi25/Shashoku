@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { RasterLayerEntry } from '@shared/page/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
+import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { hexToRgb } from '@/lib/color'
 import { useExplodeStore } from '@/stores/explodeStore'
 import { pressureFrom } from '@/lib/selection/brushInput'
@@ -67,6 +68,8 @@ interface Stroke {
   pageH: number
   entry: RasterLayerEntry
   mode: MaskBrushMode
+  /** Painting the area for the model to redraw, which no layer receives as ink. */
+  removing: boolean
   /** Size, hardness and opacity as they stood at the press: the rail is
    * reachable while the hand is down, and a slider dragged mid-stroke must not
    * change the head partway through it. */
@@ -107,6 +110,9 @@ interface Stroke {
  */
 let releases: Promise<void> = Promise.resolve()
 
+/** The remove brush's area on screen: a colour nothing on a page is likely to be. */
+const REMOVE_INK = '#ff2d55'
+
 /**
  * The brush and the eraser, painting the selected raster layer.
  *
@@ -136,6 +142,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   const raster = useRasterStore()
   const overlay = useStrokeOverlayStore()
   const explode = useExplodeStore()
+  const removal = useRemoveStrokes()
   const { target, refuse } = useRasterTarget()
 
   let stroke: Stroke | null = null
@@ -291,7 +298,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
 
     // In this order. The surface holds cut coverage, so a stamp raising it
     // straight in would put back whatever a feathered selection had thinned.
-    cut(s, stamped, window, segment)
+    if (!s.removing) cut(s, stamped, window, segment)
     raiseInto(s.surface, stamped, window)
     s.dirty = unionRect(s.dirty, segment)
     show(s, segment)
@@ -334,7 +341,8 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     const size = segment.w * segment.h
     if (coverageScratch.length < size) coverageScratch = new Uint8Array(size)
     const coverage = coverageWithin(s.surface, segment, coverageScratch)
-    overlay.show(inked(coverage, segment, s.color), segment)
+    // Half strength, so what is under the area still shows through it.
+    overlay.show(inked(coverage, segment, s.color, s.removing ? 0.5 : 1), segment)
   }
 
   /**
@@ -344,7 +352,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
    * The eraser paints here as well and its colour is never seen —
    * `destination-out` reads the alpha and nothing else.
    */
-  function inked(coverage: Uint8Array, at: Rect, color: string): ImageData {
+  function inked(coverage: Uint8Array, at: Rect, color: string, strength: number): ImageData {
     const { r, g, b } = hexToRgb(color) ?? { r: 0, g: 0, b: 0 }
     const size = coverage.length * 4
     if (inkScratch.length < size) inkScratch = new Uint8ClampedArray(size)
@@ -354,7 +362,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       out[p] = r
       out[p + 1] = g
       out[p + 2] = b
-      out[p + 3] = coverage[i]
+      out[p + 3] = coverage[i] * strength
     }
     // Handed over rather than copied, and drawn in the same task: the overlay
     // takes the pixels into its canvas, after which this is free to be the next
@@ -392,8 +400,16 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     }
     if (refuse(page, entry)) return true
 
+    const removing = editor.tool === 'remove'
+    if (removing && removal.working.value) {
+      notices.say('修補中…')
+      return true
+    }
+    const resumed = removing ? removal.resume(page, entry) : null
+
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    const taken = raster.take(entry, page, layersDirOf(file.pageDir), file.pageDir)
+    // The remove brush writes nothing of its own; the repair takes the layer.
+    const taken = removing ? Promise.resolve() : raster.take(entry, page, layersDirOf(file.pageDir), file.pageDir)
     // The release awaits this and sees the same rejection; this only keeps a
     // failure from being reported as an unhandled one while the stroke is out.
     void taken.catch(() => {})
@@ -406,23 +422,24 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       pageH: file.page.height,
       entry,
       mode,
+      removing,
       shape,
-      color: editor.foreground,
+      color: removing ? REMOVE_INK : editor.foreground,
       alphaLocked,
       sampler: createBrushSampler(
         shape,
         DEFAULT_BRUSH_SPACING_RATIO,
         selection.brushStabilizationFor(mode),
       ),
-      surface: EMPTY_SURFACE,
-      dirty: EMPTY_RECT,
+      surface: resumed?.surface ?? EMPTY_SURFACE,
+      dirty: resumed?.dirty ?? EMPTY_RECT,
       taken,
-      shown: overlay.begin(entry.id, operatorFor(mode, alphaLocked)),
+      shown: resumed?.shown ?? overlay.begin(entry.id, removing ? 'source-over' : operatorFor(mode, alphaLocked)),
       at,
     }
     stroke = opened
     editor.beginStroke()
-    const from = e.shiftKey ? lineStartOn(`layer:${mode}`, page, editor.historyStep) : null
+    const from = e.shiftKey && !removing ? lineStartOn(`layer:${mode}`, page, editor.historyStep) : null
     if (from === null) {
       applyDabs(opened.sampler.begin(sampleAt(at, e)))
     } else {
@@ -492,6 +509,12 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     stroke = null
     const el = e.currentTarget as HTMLElement | null
     if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+    if (s.removing) {
+      editor.finishStroke()
+      if (isEmptyRect(s.dirty)) overlay.end(s.shown)
+      else removal.hold({ page: s.page, entry: s.entry, surface: s.surface, dirty: s.dirty, shown: s.shown })
+      return true
+    }
     releases = releases.then(() => endStroke(s)).catch((err: unknown) => {
       console.error('stroke failed', err)
     })

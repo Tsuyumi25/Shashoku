@@ -116,6 +116,7 @@ import { useFontPicker } from '@/composables/useFontPicker'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useOpenProject } from '@/composables/useOpenProject'
+import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
 import { isTypingSurface, ownsKeyboard } from '@/lib/typingSurface'
 import { useConnectStore } from '@/stores/connectStore'
@@ -135,6 +136,7 @@ const editor = useEditorStore()
 const library = useLibraryStore()
 const selection = useSelectionStore()
 const connect = useConnectStore()
+const removal = useRemoveStrokes()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
@@ -398,8 +400,8 @@ useEventListener(window, 'keydown', (e) => {
     return
   }
 
-  if (e.key === 'ArrowUp' || e.key === 'k') byRow(-1)
-  else if (e.key === 'ArrowDown' || e.key === 'j') byRow(1)
+  if (e.key === 'ArrowUp') byRow(-1)
+  else if (e.key === 'ArrowDown') byRow(1)
   else if (e.key === 'ArrowLeft') editor.pageBy(-1)
   else if (e.key === 'ArrowRight') editor.pageBy(1)
   else if (e.key === 'Delete') {
@@ -445,6 +447,9 @@ useEventListener(window, 'keydown', (e) => {
   } else if (e.key === 'Escape' && connect.selected !== null) {
     e.preventDefault()
     connect.deselect()
+  } else if (e.key === 'Escape' && removal.hasPending.value) {
+    e.preventDefault()
+    removal.discard()
   } else if (e.key === 'Escape' && editor.selectedIds.size > 0) {
     e.preventDefault()
     editor.selectOnly(null)

@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import type { RasterLayerEntry } from '@shared/page/types'
 import { layersDirOf } from '@shared/ssk/constants'
 import { useRasterTarget } from '@/composables/useRasterTarget'
 import { compositeLayerAlone, context2d, encodePng } from '@/lib/pageComposite'
@@ -25,21 +26,23 @@ import { useSelectionStore } from '@/stores/selectionStore'
  */
 const CONTEXT_MARGIN = 128
 
+/** True while the model has a region, so neither entrance asks for a second one. */
+const working = ref(false)
+
 /**
- * Erasing a selection by asking the retoucher to redraw what was under it.
+ * Erasing an area by asking the retoucher to redraw what was under it, the area
+ * coming from a selection or from the remove brush.
  *
  * The same shape as filling, with the colour arriving from a model instead of
  * from the swatch: one scratch, one transaction, one swappable record. That is
  * deliberate — an erase that could not be taken back the same way as every
  * other write would be the one operation in the editor with its own history.
  *
- * Writes into the layer being worked on, which is where every other exit from a
- * selection writes. The shape this eventually wants is Photoshop's — a layer of
- * its own, with the mask and its feathering living on that layer — but layers
- * have no masks yet, and putting the pixels somewhere they cannot be masked
- * would be a different feature wearing this one's name.
+ * Writes into the layer being worked on, as Photoshop's Remove tool does: the
+ * retouch layer already sits over a locked copy of the artwork, so the original
+ * is a stroke of the eraser away.
  */
-export function useInpaintSelection() {
+export function useInpaint() {
   const project = useProjectStore()
   const editor = useEditorStore()
   const selection = useSelectionStore()
@@ -48,10 +51,7 @@ export function useInpaintSelection() {
   const raster = useRasterStore()
   const { target, refuse } = useRasterTarget()
 
-  /** True while the model has the region, so nothing asks for a second one. */
-  const working = ref(false)
-
-  const canErase = computed(
+  const canEraseSelection = computed(
     () =>
       !working.value &&
       editor.currentPageId !== null &&
@@ -60,7 +60,7 @@ export function useInpaintSelection() {
       !isEmptyRect(selection.bounds),
   )
 
-  /** The selection's box with room round it, kept inside the page. */
+  /** The area's box with room round it, kept inside the page. */
   function contextRegion(bounds: Rect, page: { width: number; height: number }): Rect {
     const x = Math.max(0, bounds.x - CONTEXT_MARGIN)
     const y = Math.max(0, bounds.y - CONTEXT_MARGIN)
@@ -78,7 +78,7 @@ export function useInpaintSelection() {
    * is a shape rather than a weighting — what a feathered rim means is settled
    * when the answer is written back, by the same mask.
    */
-  async function maskPng(coverage: Uint8ClampedArray, region: Rect): Promise<Uint8Array> {
+  async function maskPng(coverage: Uint8Array | Uint8ClampedArray, region: Rect): Promise<Uint8Array> {
     const image = new ImageData(region.w, region.h)
     for (let i = 0; i < coverage.length; i += 1) {
       const at = i * 4
@@ -92,13 +92,10 @@ export function useInpaintSelection() {
     return await encodePng(canvas)
   }
 
-  async function eraseByModel(): Promise<void> {
+  async function eraseSelection(): Promise<void> {
     const page = editor.currentPageId
-    if (page === null || working.value) return
-    const file = project.pageById(page)
-    if (!file) return
-
     const bounds = selection.bounds
+    if (page === null) return
     if (bounds === null || isEmptyRect(bounds)) {
       notices.say('沒有選區可以修補')
       return
@@ -108,11 +105,27 @@ export function useInpaintSelection() {
       notices.say('選一個點陣圖層再修補')
       return
     }
-    if (refuse(page, entry)) return
+    await eraseCovered(page, entry, bounds, (at) => selection.maskPatchOf(page, at))
+  }
+
+  /**
+   * The model's answer for every pixel `coverageOf` holds within `bounds`,
+   * written into `entry` on `page` as one step. `coverageOf` answers for any
+   * rectangle of the page, one byte a pixel.
+   */
+  async function eraseCovered(
+    page: string,
+    entry: RasterLayerEntry,
+    bounds: Rect,
+    coverageOf: (at: Rect) => Uint8Array | Uint8ClampedArray | null,
+  ): Promise<void> {
+    if (working.value) return
+    const file = project.pageById(page)
+    if (!file || refuse(page, entry)) return
 
     const region = contextRegion(bounds, file.page)
-    const wide = selection.maskPatchOf(page, region)
-    const tight = selection.maskPatchOf(page, bounds)
+    const wide = coverageOf(region)
+    const tight = coverageOf(bounds)
     if (wide === null || tight === null) return
 
     working.value = true
@@ -132,7 +145,7 @@ export function useInpaintSelection() {
         mask: await maskPng(wide, region),
       })
 
-      // Only the selection's own box comes back out of the answer. The rest of
+      // Only the area's own box comes back out of the answer. The rest of
       // it is the context, redrawn as faithfully as the model could manage and
       // still not the pixels that were there.
       const redrawn = await createImageBitmap(new Blob([answer.image as BlobPart]))
@@ -160,12 +173,12 @@ export function useInpaintSelection() {
    * is a fill: a mask, a rectangle, and bytes to lay down through it.
    */
   async function write(
-    entry: NonNullable<typeof target.value>,
+    entry: RasterLayerEntry,
     page: string,
     pageDir: string,
     layersDir: string,
     bounds: Rect,
-    mask: Uint8ClampedArray,
+    mask: Uint8Array | Uint8ClampedArray,
     rgba: Uint8ClampedArray,
   ): Promise<void> {
     await raster.take(entry, page, layersDir, pageDir)
@@ -194,7 +207,7 @@ export function useInpaintSelection() {
     }
     editor.pushCommand(
       {
-        label: `inpaint-selection ${entry.id}`,
+        label: `inpaint ${entry.id}`,
         journals: [rasterJournal(patch.journal)],
         do: swap,
         undo: swap,
@@ -204,5 +217,5 @@ export function useInpaintSelection() {
     )
   }
 
-  return { canErase, working, eraseByModel }
+  return { canEraseSelection, working, eraseSelection, eraseCovered }
 }

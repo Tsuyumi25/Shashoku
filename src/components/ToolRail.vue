@@ -70,6 +70,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
 import {
+  Bandage,
   CircleDashed,
   Contrast,
   Eraser,
@@ -124,6 +125,7 @@ const tools = computed<RailTool[]>(() => [
   { tool: 'wand', icon: Wand, title: '魔術棒（W）' },
   { tool: 'brush', icon: Paintbrush, title: '筆刷（B）' },
   { tool: 'eraser', icon: Eraser, title: '橡皮擦（E）' },
+  { tool: 'remove', icon: Bandage, title: '移除工具（J）：塗過的地方交給 LaMa 補回來' },
 ])
 </script>
 

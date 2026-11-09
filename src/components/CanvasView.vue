@@ -419,6 +419,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import { useLayerAlpha } from '@/composables/useLayerAlpha'
 import { useLayerBitmaps } from '@/composables/useLayerBitmaps'
 import { useLayerBrush } from '@/composables/useLayerBrush'
+import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { useLayerPlacement } from '@/composables/useLayerPlacement'
 import { useSelectionOverlay } from '@/composables/useSelectionOverlay'
 import { useRasterTarget } from '@/composables/useRasterTarget'
@@ -1707,6 +1708,9 @@ const selectionTool = useSelectionTool(
   () => pageReady.value,
 )
 const layerBrush = useLayerBrush(containerRef)
+const removal = useRemoveStrokes()
+// What was painted for the model belongs to the page and the tool it was painted with.
+watch([() => editor.currentPageId, () => editor.tool], () => removal.discard())
 
 useResizeObserver(containerRef, (entries) => {
   const { width, height } = entries[0].contentRect
@@ -2498,6 +2502,8 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTool('brush')
   } else if (key === 'e') {
     editor.setTool('eraser')
+  } else if (key === 'j' && !e.ctrlKey && !e.metaKey) {
+    editor.setTool('remove')
   } else if (key === 's' && e.shiftKey) {
     editor.setTextSide(editor.textSide === 'source' ? 'translation' : 'source')
   } else if (key === 'q') {
@@ -2506,6 +2512,9 @@ useEventListener(window, 'keydown', (e) => {
     // Sizes whichever mask tool is up, and nothing otherwise: the two keep
     // their own sizes, so with neither of them up there is no one to size.
     if (brushMode !== null) selection.nudgeBrushSize(brushMode, e.key === ']' ? 1 : -1)
+  } else if (e.key === 'Enter' && removal.hasPending.value) {
+    e.preventDefault()
+    void removal.commit()
   } else if (e.key === 'Enter' && selection.isDrawing) {
     e.preventDefault()
     selection.commitGesture()

@@ -109,11 +109,31 @@
       <button
         type="button"
         class="route-btn"
-        :disabled="!inpaint.canErase.value"
+        :disabled="!inpaint.canEraseSelection.value"
         title="把選區連同周邊送給 anime-manga-big-lama，回來的像素只寫進選區裡"
-        @click="inpaint.eraseByModel()"
+        @click="inpaint.eraseSelection()"
       >
         {{ inpaint.working.value ? '修補中…' : 'LaMa 修補' }}
+      </button>
+      <button
+        type="button"
+        class="route-btn"
+        :aria-pressed="preferences.prefs.removeEachStroke"
+        :class="preferences.prefs.removeEachStroke && 'route-btn-on'"
+        title="移除工具（J）：開著時每塗一筆、放開就修；關著時塗好的地方先留著，按 Enter 一起修，Esc 清掉"
+        @click="preferences.setRemoveEachStroke(!preferences.prefs.removeEachStroke)"
+      >
+        每一筆都修復
+      </button>
+      <button
+        v-if="!preferences.prefs.removeEachStroke"
+        type="button"
+        class="route-btn"
+        :disabled="!removal.hasPending.value || removal.working.value"
+        title="把移除工具塗好的地方送去修補（Enter）"
+        @click="removal.commit()"
+      >
+        ✓ 修復塗好的地方
       </button>
       <button
         type="button"
@@ -247,7 +267,8 @@ import { everyEntry } from '@shared/page/trees'
 import { computed, ref } from 'vue'
 import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
-import { useInpaintSelection } from '@/composables/useInpaintSelection'
+import { useInpaint } from '@/composables/useInpaint'
+import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { isEmptyRect } from '@/lib/selection/rect'
 import ExplodePanel from '@/components/ExplodePanel.vue'
 import { useEditorStore } from '@/stores/editorStore'
@@ -261,7 +282,8 @@ const GROW_STEPS = [1, 5] as const
 
 const editor = useEditorStore()
 const selection = useSelectionStore()
-const inpaint = useInpaintSelection()
+const inpaint = useInpaint()
+const removal = useRemoveStrokes()
 const project = useProjectStore()
 const ocr = useOcrStore()
 const preferences = usePreferencesStore()

@@ -67,6 +67,7 @@ export function parsePreferences(raw: string): Preferences {
     fontSampleVertical,
     missingGlyphMode,
     markMissingGlyphs,
+    removeEachStroke,
     scanPoints,
     workspaces,
     recentProjects,
@@ -151,6 +152,7 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof markMissingGlyphs === "boolean") {
     prefs.markMissingGlyphs = markMissingGlyphs;
   }
+  if (typeof removeEachStroke === "boolean") prefs.removeEachStroke = removeEachStroke;
   if (Array.isArray(scanPoints)) {
     prefs.scanPoints = scanPoints.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
@@ -232,6 +234,7 @@ export function serializePreferences(prefs: Preferences): string {
       fontSampleVertical: prefs.fontSampleVertical,
       missingGlyphMode: prefs.missingGlyphMode,
       markMissingGlyphs: prefs.markMissingGlyphs,
+      removeEachStroke: prefs.removeEachStroke,
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
       recentProjects: prefs.recentProjects,
