@@ -228,7 +228,9 @@ const tags = computed(() =>
 )
 
 function onDown(e: MouseEvent) {
-  if (editing.value) return
+  // The right button's pick is the menu's: picking here scrolls the row into
+  // place before the menu opens, and the menu then opens on whatever slid under.
+  if (editing.value || e.button === 2) return
   emit('pick', e)
 }
 

@@ -1387,6 +1387,28 @@ describe('layer tree edits', () => {
     expect(orderOf(project)).toEqual(['a', 'b', 'c'])
   })
 
+  it('sends the selection to the top of its folder and takes it back in one step', () => {
+    const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+    const depth = editor.canUndo
+
+    editor.cmdRestack(PAGE, ['a', 'b'], 'top')
+
+    expect(stackOf(project)).toEqual(['c', 'a', 'b'])
+    expect(orderOf(project)).toEqual(['a', 'b', 'c'])
+    editor.undo()
+    expect(stackOf(project)).toEqual(['a', 'b', 'c'])
+    expect(editor.canUndo).toBe(depth)
+  })
+
+  it('leaves a locked layer where it is when restacking', () => {
+    const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
+    editor.cmdSetLayerLocked(PAGE, 'a', true)
+
+    editor.cmdRestack(PAGE, ['a'], 'top')
+
+    expect(stackOf(project)).toEqual(['a', 'b', 'c'])
+  })
+
   it('undoes a restack back to where the entry came from', () => {
     const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
     editor.cmdMoveLayer(PAGE, 'c', [2], { parentPath: [], index: 0 })

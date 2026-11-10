@@ -17,6 +17,7 @@
         ]"
         :style="{ paddingLeft: `${row.depth * 0.75 + 0.25}rem` }"
         @click="onPick(row, $event)"
+        @contextmenu.prevent="onRowMenu(row, $event)"
         @dragstart="onDragStart(row, $event)"
         @dragover.prevent.stop="onDragOver(row, $event)"
         @drop.prevent.stop="onDrop"
@@ -216,6 +217,7 @@
         </button>
       </div>
     </div>
+    <CanvasMenu :at="rowMenuAt" :items="[LAYER_ORDER_MENU]" @pick="onRowMenuPick" @close="rowMenuAt = null" />
   </div>
 </template>
 
@@ -250,7 +252,9 @@ import type {
 import { shownCodeOf, shownLinesOf } from '@shared/page/units'
 import { plainOf } from '@shared/page/markup'
 import { layersDirOf } from '@shared/ssk/constants'
+import CanvasMenu from '@/components/CanvasMenu.vue'
 import CodeEditField from '@/components/CodeEditField.vue'
+import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { useMarkupSession } from '@/composables/useMarkupSession'
 import { textWriter } from '@/composables/useTextEditSurface'
@@ -321,6 +325,20 @@ function onPick(row: LayerTreeRow, e: MouseEvent) {
   if (e.shiftKey) editor.extendSelectionTo(row.entry.id, sequence.value)
   else if (e.ctrlKey || e.metaKey) editor.toggleSelected(row.entry.id)
   else editor.selectOnly(row.entry.id)
+}
+
+const rowMenuAt = ref<{ x: number; y: number } | null>(null)
+
+/** The row pointed at joins the selection, as an object right-clicked on the canvas does. */
+function onRowMenu(row: LayerTreeRow, e: MouseEvent) {
+  if (!isSelected(row.entry.id)) editor.selectOnly(row.entry.id)
+  rowMenuAt.value = { x: e.clientX, y: e.clientY }
+}
+
+function onRowMenuPick(id: string) {
+  rowMenuAt.value = null
+  const how = restackOf(id)
+  if (how !== null) editor.cmdRestackSelection(how)
 }
 
 function isPinned(entry: LayerEntry): boolean {

@@ -13,22 +13,42 @@
   -->
   <Teleport to="body">
   <div v-if="at" ref="menuEl" class="menu" :style="{ left: `${x}px`, top: `${y}px` }">
-    <button
-      v-for="item in items"
-      :key="item.id"
-      type="button"
-      class="menu-item"
-      :class="item.checked !== undefined && 'menu-item-state'"
-      @click="emit('pick', item.id)"
-    >
-      <span
-        v-if="item.checked !== undefined"
-        class="menu-mark"
-        :class="item.checked && 'menu-mark-on'"
-        :style="item.color ? { color: item.color } : undefined"
-      />
-      {{ item.label }}
-    </button>
+    <template v-for="item in items" :key="item.id">
+      <div v-if="item.children" class="menu-parent" @mouseenter="fitSub">
+        <div class="menu-item menu-item-state">
+          {{ item.label }}
+          <span class="menu-hint">▸</span>
+        </div>
+        <div class="menu menu-sub">
+          <button
+            v-for="child in item.children"
+            :key="child.id"
+            type="button"
+            class="menu-item menu-item-state"
+            @click="emit('pick', child.id)"
+          >
+            {{ child.label }}
+            <span v-if="child.hint" class="menu-hint">{{ child.hint }}</span>
+          </button>
+        </div>
+      </div>
+      <button
+        v-else
+        type="button"
+        class="menu-item"
+        :class="(item.checked !== undefined || item.hint) && 'menu-item-state'"
+        @click="emit('pick', item.id)"
+      >
+        <span
+          v-if="item.checked !== undefined"
+          class="menu-mark"
+          :class="item.checked && 'menu-mark-on'"
+          :style="item.color ? { color: item.color } : undefined"
+        />
+        {{ item.label }}
+        <span v-if="item.hint" class="menu-hint">{{ item.hint }}</span>
+      </button>
+    </template>
   </div>
   </Teleport>
 </template>
@@ -47,6 +67,10 @@ export interface MenuItem {
   checked?: boolean
   /** Drawn beside the label — a tag's own colour, where an item names one. */
   color?: string
+  /** Drawn at the far end, muted: the key that does the same. */
+  hint?: string
+  /** Opens beside the item on hover instead of being picked itself. */
+  children?: readonly MenuItem[]
 }
 
 const props = defineProps<{
@@ -87,6 +111,18 @@ async function place() {
 }
 
 watch(() => props.at, place, { immediate: true })
+
+/** A submenu opens to the right, or to the left where the right has no room, and rises to stay on screen. */
+function fitSub(event: MouseEvent) {
+  const sub = (event.currentTarget as HTMLElement).querySelector<HTMLElement>('.menu-sub')
+  if (sub === null) return
+  sub.classList.remove('menu-sub-left')
+  sub.style.top = ''
+  const box = sub.getBoundingClientRect()
+  if (box.right > window.innerWidth - EDGE) sub.classList.add('menu-sub-left')
+  const over = box.bottom - (window.innerHeight - EDGE)
+  if (over > 0) sub.style.top = `calc(-0.25rem - ${over}px)`
+}
 
 /**
  * ⚠️ A press inside the menu is not a press away, and saying so is what makes
@@ -138,6 +174,7 @@ onBeforeUnmount(() => listen(false))
 .menu-item {
   display: block;
   width: 100%;
+  white-space: nowrap;
   border-radius: 0.25rem;
   padding: 0.3rem 0.5rem;
   text-align: start;
@@ -163,5 +200,31 @@ onBeforeUnmount(() => listen(false))
 }
 .menu-mark-on {
   background: currentColor;
+}
+.menu-hint {
+  margin-left: auto;
+  padding-left: 1.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.menu-parent {
+  position: relative;
+}
+.menu-parent:hover > .menu-item {
+  background: var(--secondary);
+}
+.menu-sub {
+  display: none;
+  position: absolute;
+  width: max-content;
+  top: -0.25rem;
+  left: 100%;
+}
+.menu-parent:hover > .menu-sub {
+  display: block;
+}
+.menu-sub-left {
+  left: auto;
+  right: 100%;
 }
 </style>

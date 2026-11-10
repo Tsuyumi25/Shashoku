@@ -123,7 +123,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
-import CanvasMenu from '@/components/CanvasMenu.vue'
+import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
+import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
 import LabelGutterCell from '@/components/labelList/LabelGutterCell.vue'
 import LabelPageHeading from '@/components/labelList/LabelPageHeading.vue'
 import LabelRailCell from '@/components/labelList/LabelRailCell.vue'
@@ -237,14 +238,19 @@ function isRowLocked(row: ListRow): boolean {
  * enough to live here rather than on the canvas, whose right button is the
  * style fan's; once an object has a list, the list carries its own button.
  */
-const ROW_MENU = [{ id: 'add-translation', label: '新增譯文候選' }] as const
+const ROW_MENU = computed<MenuItem[]>(() => [
+  ...(editor.textSide === 'translation' ? [{ id: 'add-translation', label: '新增譯文候選' }] : []),
+  LAYER_ORDER_MENU,
+])
 const rowMenuAt = ref<{ x: number; y: number } | null>(null)
 const rowMenuFor = ref<string | null>(null)
 
 function onRowMenu(row: ListRow, e: MouseEvent) {
   // The source's candidates are the run's, and not anybody's to invent.
   const id = rowId(row)
-  if (editor.textSide !== 'translation' || id === undefined) return
+  if (id === undefined) return
+  // The order acts on the selection, so the row pointed at joins it, as on the canvas.
+  if (!editor.isSelected(id)) onRowDown(row, e)
   rowMenuFor.value = id
   rowMenuAt.value = { x: e.clientX, y: e.clientY }
 }
@@ -258,6 +264,11 @@ function onRowMenuPick(id: string) {
   const objectId = rowMenuFor.value
   const pageId = objectId === null ? null : project.pageOfEntry(objectId)
   closeRowMenu()
+  const how = restackOf(id)
+  if (how !== null) {
+    editor.cmdRestackSelection(how)
+    return
+  }
   if (id !== 'add-translation' || pageId === null || objectId === null) return
   editor.cmdAddTranslationCandidate(pageId, objectId, generateId())
 }

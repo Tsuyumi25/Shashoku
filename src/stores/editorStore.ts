@@ -24,6 +24,7 @@ import { clamp } from '@/lib/coords'
 import { blankTranslation, generateId as generateLabelId } from '@shared/page/schema'
 import { linesOf, type TextSide } from '@shared/page/text'
 import {
+  isOnView,
   blocksOf,
   chosenCandidateOf,
   facePage,
@@ -34,7 +35,8 @@ import {
 } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
 import type { TranslationTextLayerEntry } from '@shared/page/types'
-import { folderAtPath, isLocked, textObjects } from '@shared/page/tree'
+import { folderAtPath, isLocked, pathOf, textObjects } from '@shared/page/tree'
+import { restackOrder, type Restack } from '@/lib/layerOrder'
 import { draftOf, everyEntry, snapshotTrees, textOnPage, treeOf } from '@shared/page/trees'
 import { adoptSources, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { numberPage } from '@shared/page/numbers'
@@ -2165,6 +2167,62 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * The layer order menu: what is selected on the page moves within its own
+   * folder, past the siblings the layer panel lists, as one step however many
+   * folders it touches.
+   */
+  function cmdRestack(pageId: string, ids: readonly string[], how: Restack) {
+    const project = useProjectStore()
+    const file = project.pageById(pageId)
+    if (!file) return
+    const tree = () => treeOf(file.page, textSide.value, project.activeFace)
+    const movable = ids.filter((id) => !isLayerLocked(id))
+    if (movable.length < ids.length) useNoticeStore().say('鎖定的圖層沒有移動')
+    const folders = new Map<string, { parentPath: number[]; ids: Set<string> }>()
+    for (const id of movable) {
+      const path = pathOf(tree(), id)
+      if (path === null) continue
+      const parentPath = path.slice(0, -1)
+      const key = parentPath.join('/')
+      const folder = folders.get(key) ?? { parentPath, ids: new Set<string>() }
+      folder.ids.add(id)
+      folders.set(key, folder)
+    }
+    if (folders.size === 0) return
+    const childrenOf = (parentPath: number[]) =>
+      parentPath.length === 0 ? tree() : (folderAtPath(tree(), parentPath)?.children ?? [])
+    cmdReshape(`restack-${how} ${movable.length}`, pageId, () => {
+      let changed = false
+      for (const { parentPath, ids: picked } of folders.values()) {
+        const siblings = childrenOf(parentPath)
+        const order = restackOrder(
+          siblings.map((entry) => ({
+            selected: picked.has(entry.id),
+            shown: entry.kind !== 'text' || isOnView(entry, textSide.value, project.activeFace),
+          })),
+          how,
+        )
+        const wanted = order.map((i) => siblings[i]!.id)
+        for (const [to, id] of wanted.entries()) {
+          const from = childrenOf(parentPath).findIndex((entry) => entry.id === id)
+          if (from === to) continue
+          project.moveLayer(pageId, layerHome(), [...parentPath, from], { parentPath, index: to })
+          changed = true
+        }
+      }
+      return changed
+    })
+  }
+
+  /** The same, on what is selected on the page being shown. */
+  function cmdRestackSelection(how: Restack) {
+    const page = currentPageId.value
+    if (page === null) return
+    const project = useProjectStore()
+    cmdRestack(page, [...selectedIds.value].filter((id) => project.pageOfEntry(id) === page), how)
+  }
+
+  /**
    * Whether an entry refuses to be changed, its ancestors included.
    *
    * Every command that would change a node asks this, and the surfaces ask it
@@ -3217,6 +3275,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdAddFolder,
     cmdDissolveFolder,
     cmdMoveLayer,
+    cmdRestack,
+    cmdRestackSelection,
     cmdSetLayerVisible,
     cmdSetLayerLocked,
     cmdSetLayerAlphaLocked,

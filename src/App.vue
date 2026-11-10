@@ -284,6 +284,12 @@ useEventListener(window, 'keydown', (e) => {
     e.preventDefault()
     if (selection.gestureRedo() || connect.gestureRedo()) return
     editor.redo()
+  } else if (e.code === 'BracketRight' || e.code === 'BracketLeft') {
+    // By the key's place rather than its character: with Shift held a US
+    // layout reports them as braces.
+    e.preventDefault()
+    const up = e.code === 'BracketRight'
+    editor.cmdRestackSelection(e.shiftKey ? (up ? 'top' : 'bottom') : up ? 'up' : 'down')
   } else if (key === 'd') {
     e.preventDefault()
     selection.deselect()

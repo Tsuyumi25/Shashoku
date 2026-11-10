@@ -1,3 +1,4 @@
+import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
 import { computed, ref } from 'vue'
 import { refOfBlock } from '@shared/mcp/refs'
 import type { MenuItem } from '@/components/CanvasMenu.vue'
@@ -43,6 +44,7 @@ export function useObjectMenu() {
     ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
     { id: 'tags', label: '標記…' },
     { id: 'duplicate-unit', label: '製作副本（整句）' },
+    LAYER_ORDER_MENU,
     { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
   ])
 
@@ -73,6 +75,11 @@ export function useObjectMenu() {
     // so this is the Delete key's own act and takes the whole selection.
     if (choice === 'delete') {
       editor.deleteSelection()
+      return
+    }
+    const how = restackOf(choice)
+    if (how !== null) {
+      editor.cmdRestackSelection(how)
       return
     }
     if (choice === 'tags') {
