@@ -38,7 +38,7 @@ import type { TranslationTextLayerEntry } from '@shared/page/types'
 import { folderAtPath, isLocked, pathOf, textObjects } from '@shared/page/tree'
 import { restackOrder, type Restack } from '@/lib/layerOrder'
 import { draftOf, everyEntry, snapshotTrees, textOnPage, treeOf } from '@shared/page/trees'
-import { adoptSources, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
+import { adoptSources, canDetach, detach, planRelink, relink, type RelinkPlan } from '@shared/page/relink'
 import { numberPage } from '@shared/page/numbers'
 import { hasEdge, type ReadingEdge } from '@shared/page/readingGraph'
 import { flattenLayerRows } from '@/lib/layerRows'
@@ -1623,36 +1623,45 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * One regrouping as one step: the page's structure before and after, whole.
-   * The blanks a regrouping adds or removes live in that structure, so nothing
-   * it did can be left behind by an undo.
+   * A regrouping of the selection, worked out on a copy of the open page: the
+   * structure it leaves, or null when it changes nothing. The blanks a
+   * regrouping adds or removes live in that structure, so nothing it did can be
+   * left behind by an undo.
    */
-  function cmdRegroup(label: string, change: (page: FacePage) => boolean) {
+  function regrouped(change: (page: FacePage, ids: readonly string[]) => boolean) {
     const at = selectedBlocksOnPage()
-    if (!at) return
+    if (!at) return null
     commitTextEdit()
     const project = useProjectStore()
     const live = project.pageById(at.pageId)?.page
-    if (!live) return
+    if (!live) return null
     const draft = draftOf(live)
-    const before = project.structureOf(at.pageId)!
-    if (!change(facePage(draft, project.activeFace))) return
+    if (!change(facePage(draft, project.activeFace), at.ids)) return null
     adoptSources(draft, project.faceIds, generateLabelId, project.header.seedStyle)
     numberPage(draft, project.faceIds)
     project.raiseCounters(at.pageId, draft.counters)
-    const after: PageStructure = {
+    const structure: PageStructure = {
       ledgers: draft.ledgers,
       readingOrder: draft.readingOrder,
       readingEdges: draft.readingEdges,
       ...snapshotTrees(draft),
     }
+    const kept = [...selectedIds.value].filter((id) => textOnPage(draft, id))
+    return { ...at, structure, kept }
+  }
+
+  function cmdRegroup(label: string, change: (page: FacePage, ids: readonly string[]) => boolean) {
+    const project = useProjectStore()
+    const done = regrouped(change)
+    if (done === null) return
+    const before = project.structureOf(done.pageId)!
     pushCommand({
-      label: `${label} ${at.ids.length}`,
-      detail: { page: at.pageId, ids: at.ids },
-      do: () => project.setPageStructure(at.pageId, after),
-      undo: () => project.setPageStructure(at.pageId, before),
+      label: `${label} ${done.ids.length}`,
+      detail: { page: done.pageId, ids: done.ids },
+      do: () => project.setPageStructure(done.pageId, done.structure),
+      undo: () => project.setPageStructure(done.pageId, before),
     })
-    selectedIds.value = new Set([...selectedIds.value].filter((id) => textOnPage(draft, id)))
+    selectedIds.value = new Set(done.kept)
   }
 
   /**
@@ -1663,25 +1672,43 @@ export const useEditorStore = defineStore('editor', () => {
     return useProjectStore().faceIds.length > 1
   }
 
-  /** Ctrl+L. See `shared/page/relink`. */
+  const linkChange = (page: FacePage, ids: readonly string[]) =>
+    relink(page, ids, generateLabelId, useProjectStore().header.seedStyle, sharedSources())
+
+  /** Ctrl+E on text, and the menu's join. See `shared/page/relink`. */
   function cmdLinkSelection() {
-    const ids = selectedBlocksOnPage()?.ids ?? []
-    const seed = useProjectStore().header.seedStyle
-    cmdRegroup('link', (page) => relink(page, ids, generateLabelId, seed, sharedSources()))
+    cmdRegroup('link', linkChange)
   }
 
-  /** Ctrl+Shift+L. */
+  /**
+   * The same, written straight onto the page for a step that is already open
+   * there — Ctrl+E merging pixels in the same press. Answers the selected
+   * blocks still on the page, or null when there was nothing to join.
+   */
+  function linkSelectionInPlace(): string[] | null {
+    const done = regrouped(linkChange)
+    if (done === null) return null
+    useProjectStore().setPageStructure(done.pageId, done.structure)
+    return done.kept
+  }
+
+  /** The menu's take-out; it has no key. */
   function cmdDetachSelection() {
-    const ids = selectedBlocksOnPage()?.ids ?? []
     const seed = useProjectStore().header.seedStyle
-    cmdRegroup('detach', (page) => detach(page, ids, generateLabelId, seed, sharedSources()))
+    cmdRegroup('detach', (page, ids) => detach(page, ids, generateLabelId, seed, sharedSources()))
   }
 
-  /** What Ctrl+L would do with the selection right now, for showing while Ctrl is held. */
+  /** What Ctrl+E would do with the selected text right now, for showing while Ctrl is held. */
   function linkPlan(): RelinkPlan {
     const at = selectedBlocksOnPage()
     const view = at ? useProjectStore().viewOf(at.pageId) : undefined
     return at && view ? planRelink(view, at.ids) : { kind: 'none' }
+  }
+
+  function canDetachSelection(): boolean {
+    const at = selectedBlocksOnPage()
+    const view = at ? useProjectStore().viewOf(at.pageId) : undefined
+    return at !== null && view !== undefined && canDetach(view, at.ids)
   }
 
   /**
@@ -2631,11 +2658,11 @@ export const useEditorStore = defineStore('editor', () => {
   /**
    * The selection as the side on screen reaches it. A text block selected on
    * the other side stands for its sentence's blocks on this one: the selection
-   * outlives Shift+S so Ctrl+L can pair across the two sides, and a person who
+   * outlives Shift+S so Ctrl+E can pair across the two sides, and a person who
    * picked translations on the shelf and turned to the sources means to change
    * those sources, not the translations they can no longer see.
    *
-   * ⚠️ Ctrl+L and every move read the selection itself, never this.
+   * ⚠️ Ctrl+E and every move read the selection itself, never this.
    */
   const reachedIds = computed<ReadonlySet<string>>(() => {
     const project = useProjectStore()
@@ -3263,6 +3290,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdLinkSelection,
     isReached,
     cmdDetachSelection,
+    linkSelectionInPlace,
+    canDetachSelection,
     linkPlan,
     cmdReplaceLabelSource,
     cmdMoveCard,

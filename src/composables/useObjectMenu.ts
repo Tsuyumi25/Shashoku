@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { refOfBlock } from '@shared/mcp/refs'
 import type { MenuItem } from '@/components/CanvasMenu.vue'
 import { useMergeLayers } from '@/composables/useMergeLayers'
+import { useUnitMenu } from '@/composables/useUnitMenu'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -10,7 +11,7 @@ import { useProjectStore } from '@/stores/projectStore'
 /**
  * A text object's own menu, wherever the object is being pointed at. The canvas
  * is one such place and the shelf of the chapter's own objects is another, and
- * what the menu offers must not depend on which — a reader who learned 「製作副本（整句）」
+ * what the menu offers must not depend on which — a reader who learned 「製作副本（整個 Unit）」
  * on the page is owed the same item on the shelf.
  *
  * One menu per surface: each holds where it stands and which object it opened
@@ -36,6 +37,8 @@ export function useObjectMenu() {
     return id === undefined || pageId === null || !view || !face ? null : refOfBlock(pageId, face.no, view, id)
   })
 
+  const unitMenu = useUnitMenu()
+
   /**
    * A copy of the whole translation, both sides, read right after the original —
    * the copy Ctrl+J and Alt with a drag do not make, since theirs is one block.
@@ -43,7 +46,8 @@ export function useObjectMenu() {
   const items = computed<MenuItem[]>(() => [
     ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
     { id: 'tags', label: '標記…' },
-    { id: 'duplicate-unit', label: '製作副本（整句）' },
+    { id: 'duplicate-unit', label: '製作副本（整個 Unit）' },
+    ...unitMenu.items.value,
     LAYER_ORDER_MENU,
     { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
   ])
@@ -77,6 +81,7 @@ export function useObjectMenu() {
       editor.deleteSelection()
       return
     }
+    if (unitMenu.pick(choice)) return
     const how = restackOf(choice)
     if (how !== null) {
       editor.cmdRestackSelection(how)

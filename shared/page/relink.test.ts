@@ -88,7 +88,7 @@ function gasps(faces: readonly string[] = [FACE]): ManifestJson {
   return manifestOf(layers, ledgers)
 }
 
-describe('Ctrl+L', () => {
+describe('relink', () => {
   it('folds the sentences of blocks selected on one side into the first in reading order, both sides travelling', () => {
     const m = gasps()
     const page = facePage(m, FACE)
@@ -158,7 +158,7 @@ describe('Ctrl+L', () => {
   })
 })
 
-describe('Ctrl+Shift+L', () => {
+describe('detach', () => {
   it('sends the selected blocks to a sentence of their own, read right after the one they left', () => {
     const m = manifestOf([src('s', 'ドキ'), tr('a', '撲'), tr('b', '通'), src('x', 'はぁ'), tr('y', '哈')], {
       [FACE]: [unit('u', ['s', 'a', 'b']), unit('v', ['x', 'y'])],

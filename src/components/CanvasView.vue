@@ -97,7 +97,7 @@
         <OcrOverlay v-if="ocrPointedBox" :pointed-box="ocrPointedBox" />
 
         <!--
-          What Ctrl+L would do, while Ctrl is held: the sentence everything goes
+          What Ctrl+E would do, while Ctrl is held: the sentence everything goes
           into, framed, and a line from each block on this side that would move
           into it. Nothing here takes the pointer or survives letting go.
         -->
@@ -969,7 +969,7 @@ function commitLabelRotate(labelId: string, from: TurnedLabel, to: TurnedLabel) 
 
 /**
  * The sentences the selection belongs to, on either side. Selecting a block
- * selects nothing else, but the sentence it is in is what Ctrl+L works on, and
+ * selects nothing else, but the sentence it is in is what Ctrl+E works on, and
  * the selection survives Shift+S — so the other side shows which of its blocks
  * the selected one goes with, with no need to draw that side at all.
  */

@@ -125,6 +125,7 @@ import { Search, X } from '@lucide/vue'
 import Draggable from 'vuedraggable'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
+import { useUnitMenu } from '@/composables/useUnitMenu'
 import LabelGutterCell from '@/components/labelList/LabelGutterCell.vue'
 import LabelPageHeading from '@/components/labelList/LabelPageHeading.vue'
 import LabelRailCell from '@/components/labelList/LabelRailCell.vue'
@@ -233,6 +234,8 @@ function isRowLocked(row: ListRow): boolean {
     : row.blocks.some((block) => lockedIds.value.has(block.id))
 }
 
+const unitMenu = useUnitMenu()
+
 /**
  * What a right-click on a row offers. A first translation candidate is rare
  * enough to live here rather than on the canvas, whose right button is the
@@ -240,6 +243,7 @@ function isRowLocked(row: ListRow): boolean {
  */
 const ROW_MENU = computed<MenuItem[]>(() => [
   ...(editor.textSide === 'translation' ? [{ id: 'add-translation', label: '新增譯文候選' }] : []),
+  ...unitMenu.items.value,
   LAYER_ORDER_MENU,
 ])
 const rowMenuAt = ref<{ x: number; y: number } | null>(null)
@@ -264,6 +268,7 @@ function onRowMenuPick(id: string) {
   const objectId = rowMenuFor.value
   const pageId = objectId === null ? null : project.pageOfEntry(objectId)
   closeRowMenu()
+  if (unitMenu.pick(id)) return
   const how = restackOf(id)
   if (how !== null) {
     editor.cmdRestackSelection(how)

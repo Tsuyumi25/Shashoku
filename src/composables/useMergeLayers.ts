@@ -121,7 +121,8 @@ export function useMergeLayers() {
     }
   }
 
-  async function merge(parts: MergeableEntry[]): Promise<void> {
+  /** `link` joins the selected text into one sentence in the same step, as Ctrl+E does to text beside pixels. */
+  async function merge(parts: MergeableEntry[], link = false): Promise<void> {
     const open = openPage()
     const target = editor.maskTarget
     if (open === null || target === null || parts.length < 2) return
@@ -165,26 +166,34 @@ export function useMergeLayers() {
     }
 
     const below = parts.slice(0, -1).map((e) => e.id)
-    editor.cmdReshape(`merge-layers ${parts.length}`, open.page, () => {
+    let linked: string[] | null = null
+    const label = `merge-layers ${parts.length}${link ? ' link' : ''}`
+    editor.cmdReshape(label, open.page, () => {
       for (const id of below) project.removeEntry(id)
       // Read after the others are gone, so it still says where the topmost
       // sits — which is where the result belongs.
       const at = pathOf(editor.workingTree(open.page), top.id) ?? undefined
       project.removeEntry(top.id)
       project.addLayer(open.page, open.home, merged, at)
+      if (link) linked = editor.linkSelectionInPlace()
     })
     editor.selectOnly(merged.id)
+    for (const id of linked ?? []) editor.toggleSelected(id)
   }
 
   const mergeSelection = () => merge(selectionParts())
   const mergeDown = () => merge(downParts())
 
   /**
-   * Whichever of the two the selection is asking for, as Photoshop's one key
-   * does: several selected means merge those, one means merge it down.
+   * Ctrl+E. Pixels and text are two merges that do not reduce to one: one
+   * layer merges down and several merge together, as Photoshop's one key
+   * does, and the selected text joins one sentence. Both in one step.
    */
-  function mergeBySelection(): Promise<void> {
-    return editor.selectedIds.size > 1 ? mergeSelection() : mergeDown()
+  async function mergeBySelection(): Promise<void> {
+    const link = editor.linkPlan().kind !== 'none'
+    const parts = editor.selectedIds.size > 1 ? selectionParts() : downParts()
+    if (parts.length >= 2) return merge(parts, link)
+    if (link) editor.cmdLinkSelection()
   }
 
   const canMerge = computed(() =>

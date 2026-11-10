@@ -189,7 +189,7 @@ const props = defineProps<{
   /**
    * Set when not selected but in a sentence the selection is in: the colour of
    * a dashed outline worn whatever its tags say, since what it tells is only
-   * that Ctrl+L would take it along, and that reads the same for every sentence.
+   * that Ctrl+E would take it along, and that reads the same for every sentence.
    */
   member?: string
   /**

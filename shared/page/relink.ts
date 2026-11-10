@@ -8,7 +8,7 @@ import { addFaceEntry, addPageEntry, removeFromPage } from './trees'
 import { facePage, placeOfBlock, shownCodeOf, type FacePage } from './units'
 
 /**
- * What Ctrl+L does with the blocks selected on one page, worked out before
+ * What Ctrl+E does with the blocks selected on one page, worked out before
  * anything is written so the canvas can show it while Ctrl is held.
  *
  * Decided by which sides the selection holds, never by which side the canvas
@@ -122,7 +122,7 @@ function tidy(page: FacePage, unitIds: Iterable<string>, newId: () => string, se
 }
 
 /**
- * Ctrl+L, written into `page` in place. Returns false when there was nothing to
+ * Ctrl+E on text, written into `page` in place. Returns false when there was nothing to
  * do. `shared` says other faces exist, whose ledgers still hold this page's
  * source blocks.
  */
@@ -183,9 +183,17 @@ function keepPlaces(page: FacePage, places: ReadonlyMap<string, string>): void {
   }
 }
 
+/** Whether `detach` would change anything: taking every block of the one sentence they share leaves it where it was. */
+export function canDetach(page: FacePage, selected: readonly string[]): boolean {
+  const from = new Set(selected.flatMap((id) => placeOfBlock(page, id)?.unit.id ?? []))
+  if (from.size === 0) return false
+  const only = from.size === 1 ? page.units.find((u) => from.has(u.id)) : undefined
+  return !(only && only.members.every((id) => selected.includes(id)))
+}
+
 /**
- * Ctrl+Shift+L: the selected blocks leave for a sentence of their own, standing
- * where they are, read right after the first sentence they came from.
+ * The selected blocks leave for a sentence of their own, standing where they
+ * are, read right after the first sentence they came from.
  */
 export function detach(
   page: FacePage,
@@ -194,12 +202,9 @@ export function detach(
   seed: TextStyle,
   shared = false,
 ): boolean {
+  if (!canDetach(page, selected)) return false
   const places = selected.map((id) => ({ id, place: placeOfBlock(page, id) })).filter((p) => p.place)
-  if (!places.length) return false
   const from = new Set(places.map((p) => p.place!.unit.id))
-  // Taking every block of the one sentence they share leaves it where it was.
-  const only = from.size === 1 ? page.units.find((u) => from.has(u.id)) : undefined
-  if (only && only.members.every((id) => selected.includes(id))) return false
   const unit: TranslationUnit = { id: newId(), members: [] }
   const after = firstInOrder(page, from)
   const kept = placesOf(page, from)

@@ -217,7 +217,7 @@
         </button>
       </div>
     </div>
-    <CanvasMenu :at="rowMenuAt" :items="[LAYER_ORDER_MENU]" @pick="onRowMenuPick" @close="rowMenuAt = null" />
+    <CanvasMenu :at="rowMenuAt" :items="rowMenuItems" @pick="onRowMenuPick" @close="rowMenuAt = null" />
   </div>
 </template>
 
@@ -255,6 +255,7 @@ import { layersDirOf } from '@shared/ssk/constants'
 import CanvasMenu from '@/components/CanvasMenu.vue'
 import CodeEditField from '@/components/CodeEditField.vue'
 import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
+import { useUnitMenu } from '@/composables/useUnitMenu'
 import LayerThumb from '@/components/LayerThumb.vue'
 import { useMarkupSession } from '@/composables/useMarkupSession'
 import { textWriter } from '@/composables/useTextEditSurface'
@@ -335,8 +336,12 @@ function onRowMenu(row: LayerTreeRow, e: MouseEvent) {
   rowMenuAt.value = { x: e.clientX, y: e.clientY }
 }
 
+const unitMenu = useUnitMenu()
+const rowMenuItems = computed(() => [...unitMenu.items.value, LAYER_ORDER_MENU])
+
 function onRowMenuPick(id: string) {
   rowMenuAt.value = null
+  if (unitMenu.pick(id)) return
   const how = restackOf(id)
   if (how !== null) editor.cmdRestackSelection(how)
 }

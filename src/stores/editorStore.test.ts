@@ -3743,7 +3743,7 @@ describe('a material put down on the page', () => {
   })
 })
 
-describe('Ctrl+L on the selection', () => {
+describe('joining and splitting sentences from the selection', () => {
   const units = (project: ReturnType<typeof useProjectStore>) => project.viewOf(PAGE)!.units.length
 
   it('joins two sentences into one and one undo splits them again', () => {
@@ -3763,7 +3763,7 @@ describe('Ctrl+L on the selection', () => {
     expect(units(project)).toBe(2)
   })
 
-  it('takes a block out into a sentence of its own with Ctrl+Shift+L', () => {
+  it('takes a block out into a sentence of its own', () => {
     const { project, editor } = openOnePage()
     editor.cmdAddLabelsFromMaterial(PAGE, [{ at: { x: 100, y: 100 }, gives: { text: '撲', patch: {}, effects: null } }], 'translation')
     const a = [...editor.selectedIds][0]!
@@ -3810,7 +3810,7 @@ describe('the selection seen from the other side', () => {
 
     editor.setTextSide('source')
     expect(editor.selectedNodes().map((t) => t.entry.id)).toEqual([source])
-    // The selection itself is untouched, so Ctrl+L can still pair across sides.
+    // The selection itself is untouched, so Ctrl+E can still pair across sides.
     expect([...editor.selectedIds]).toEqual([translation])
 
     editor.cmdApplyStyle(editor.selectedNodes() as AppearanceTarget<TextLayerEntry>[], { color: '#123456' })
@@ -4095,7 +4095,7 @@ describe('the reading every face shares', () => {
     )
   })
 
-  /** Ctrl+Shift+L. The sentence it left is where it is read from, in every face. */
+  /** Taken out from the menu. The sentence it left is where it is read from, in every face. */
   it('reads a block sent out on its own right after the sentence it left', () => {
     const { project, editor, other } = openTwoFaces(['a', 'b', 'c'])
     editor.selectOnly('a')
