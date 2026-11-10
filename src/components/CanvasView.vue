@@ -449,7 +449,7 @@ import {
   type LineRoute,
 } from '@/lib/readingLine'
 import { marqueeRect } from '@/lib/selection/marquee'
-import { obbHoldsPoint, obbIntersectsRect, type Obb } from '@/lib/selection/obb'
+import { obbHoldsPoint, obbIntersectsRect, obbsIntersect, type Obb } from '@/lib/selection/obb'
 import { stampedBlocks } from '@/lib/tagStamps'
 import { provideObjectAt } from '@/lib/canvasHit'
 import { loadFontCatalog } from '@/lib/fontCatalog'
@@ -1453,14 +1453,28 @@ const unitBlocks = computed(() => {
 const arrivesAt = (unit: string) => unitBlocks.value.get(unit)?.[0]
 const leavesFrom = (unit: string) => unitBlocks.value.get(unit)?.at(-1)
 
-/** One sentence set in several blocks, drawn as one: each block joined to the next, with no arrow. */
-const joints = computed(() => {
-  const out: { key: string; d: string }[] = []
+/**
+ * One sentence set in several blocks, drawn as one: each block joined to the
+ * next, with no arrow — except where the two frames touch, which already reads
+ * as one piece of lettering, as it does for the tag stamp.
+ */
+const jointLegs = computed(() => {
+  const out: { key: string; from: FrameBox; to: FrameBox }[] = []
   for (const [unit, boxes] of unitBlocks.value)
     for (let at = 1; at < boxes.length; at++) {
-      const route = routes.value.byKey.get(`joint/${unit}/${at}`)
-      if (route) out.push({ key: `${unit}/${at}`, d: drawnPath(route).d })
+      const from = boxes[at - 1]!
+      const to = boxes[at]!
+      if (!obbsIntersect(from, to)) out.push({ key: `joint/${unit}/${at}`, from, to })
     }
+  return out
+})
+
+const joints = computed(() => {
+  const out: { key: string; d: string }[] = []
+  for (const leg of jointLegs.value) {
+    const route = routes.value.byKey.get(leg.key)
+    if (route) out.push({ key: leg.key, d: drawnPath(route).d })
+  }
   return out
 })
 
@@ -1566,9 +1580,7 @@ const edgeKey = (edge: ReadingEdge) => JSON.stringify([edge.from, edge.to])
  * settles it.
  */
 const routes = computed(() => {
-  const legs: { key: string; from: FrameBox; to: FrameBox }[] = []
-  for (const [unit, boxes] of unitBlocks.value)
-    for (let at = 1; at < boxes.length; at++) legs.push({ key: `joint/${unit}/${at}`, from: boxes[at - 1]!, to: boxes[at]! })
+  const legs: { key: string; from: FrameBox; to: FrameBox }[] = [...jointLegs.value]
   for (const edge of [...heldEdges.value, ...connect.links]) {
     const from = leavesFrom(edge.from)
     const to = arrivesAt(edge.to)
