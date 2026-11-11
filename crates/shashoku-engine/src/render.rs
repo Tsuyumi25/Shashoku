@@ -959,9 +959,9 @@ fn build_vertical_path(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Paint pipeline — turns a built path + fill + optional stroke into pixels.
+// Paint pipeline — turns a built path + fill + strokes into pixels.
 //
-// The stroke is a band on the distance field of the filled coverage, not an
+// Each stroke is a band on the distance field of the filled coverage, not an
 // offset of the outline. See the stroke module for why.
 
 /// The two boundaries a stroke position asks for, as signed distances from the
@@ -995,34 +995,255 @@ fn coverage_of(path: &Path, width: u32, height: u32) -> Result<Vec<f32>, String>
     Ok(mask.data().iter().map(|&v| v as f32 / 255.0).collect())
 }
 
-/// Fill over stroke, two flat colours, each bounded by its own coverage.
-///
-/// Straight alpha rather than premultiplied: the only consumer wraps these
-/// bytes in an ImageData, which is defined as non-premultiplied, and reading
-/// premultiplied bytes as though they were straight pulls every soft edge
-/// towards black — invisible on black text, a grey halo around a white stroke.
-/// Composing from coverage rather than multiplying and dividing back out also
-/// keeps the colour exact where the division would amplify its rounding.
-fn compose(layers: impl Fn(usize) -> (f32, f32), count: usize, fill: Rgba, ink: Rgba) -> Vec<u8> {
-    let mut rgba = vec![0u8; count * 4];
-    let (fr, fg, fb, fa) = unit(fill);
-    let (sr, sg, sb, sa) = unit(ink);
+/// Premultiplied, which is what adding up the pieces of one pixel is arithmetic in.
+#[derive(Clone, Copy, Default)]
+struct Ink {
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
 
-    for i in 0..count {
-        let (fill_coverage, ink_coverage) = layers(i);
-        let f = fill_coverage * fa;
-        let s = ink_coverage * sa;
-        let alpha = f + s * (1.0 - f);
-        if alpha <= 0.0 {
+impl Ink {
+    fn of(c: Rgba) -> Ink {
+        let (r, g, b, a) = unit(c);
+        Ink {
+            r: r * a,
+            g: g * a,
+            b: b * a,
+            a,
+        }
+    }
+
+    /// Straight alpha rather than premultiplied: the only consumer wraps these
+    /// bytes in an ImageData, which is defined as non-premultiplied, and
+    /// reading premultiplied bytes as though they were straight pulls every
+    /// soft edge towards black — invisible on black text, a grey halo around a
+    /// white stroke.
+    fn write(self, out: &mut [u8]) {
+        if self.a <= 0.0 {
+            return;
+        }
+        out[0] = to_u8(self.r / self.a);
+        out[1] = to_u8(self.g / self.a);
+        out[2] = to_u8(self.b / self.a);
+        out[3] = to_u8(self.a);
+    }
+}
+
+impl std::ops::Add for Ink {
+    type Output = Ink;
+    fn add(self, o: Ink) -> Ink {
+        Ink {
+            r: self.r + o.r,
+            g: self.g + o.g,
+            b: self.b + o.b,
+            a: self.a + o.a,
+        }
+    }
+}
+
+impl std::ops::Mul<f32> for Ink {
+    type Output = Ink;
+    fn mul(self, k: f32) -> Ink {
+        Ink {
+            r: self.r * k,
+            g: self.g * k,
+            b: self.b * k,
+            a: self.a * k,
+        }
+    }
+}
+
+/// A set of distances from the glyph's edge, as disjoint `(lo, hi]` runs in
+/// order. `lo` is negative infinity for a run that reaches into the glyph.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Bands(Vec<(f32, f32)>);
+
+impl Bands {
+    fn glyph(edge: f32) -> Bands {
+        Bands(vec![(f32::NEG_INFINITY, edge)])
+    }
+
+    fn of(mut runs: Vec<(f32, f32)>) -> Bands {
+        runs.retain(|(lo, hi)| hi > lo);
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut out: Vec<(f32, f32)> = Vec::with_capacity(runs.len());
+        for (lo, hi) in runs {
+            match out.last_mut() {
+                Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                _ => out.push((lo, hi)),
+            }
+        }
+        Bands(out)
+    }
+
+    /// Every run pushed out by `by` on both sides, or pulled in where it is
+    /// negative.
+    fn grown(&self, by: f32) -> Bands {
+        Bands::of(self.0.iter().map(|&(lo, hi)| (lo - by, hi + by)).collect())
+    }
+
+    fn union(&self, other: &Bands) -> Bands {
+        Bands::of(self.0.iter().chain(&other.0).copied().collect())
+    }
+
+    fn minus(&self, other: &Bands) -> Bands {
+        let mut left = self.0.clone();
+        for &(cut_lo, cut_hi) in &other.0 {
+            let mut kept = Vec::with_capacity(left.len() + 1);
+            for (lo, hi) in left {
+                if cut_hi <= lo || cut_lo >= hi {
+                    kept.push((lo, hi));
+                    continue;
+                }
+                if cut_lo > lo {
+                    kept.push((lo, cut_lo));
+                }
+                if cut_hi < hi {
+                    kept.push((cut_hi, hi));
+                }
+            }
+            left = kept;
+        }
+        Bands::of(left)
+    }
+}
+
+/// Where one stroke lays its colour.
+struct Coat {
+    bands: Bands,
+    color: Rgba,
+}
+
+/// The strokes in the order they are listed, each measured off what the ones
+/// before it left showing — the way a stroke on a folder is measured off what
+/// the folder holds. The first is measured off the glyph itself whatever the
+/// fill's alpha: a hollow letter is still the letter its first stroke traces.
+///
+/// Outside grows into what is empty, so a stroke around a hollow letter's
+/// stroke runs along both of its sides. Inside and Center lay over what is
+/// there; one with no alpha takes that much away, and the next stroke is
+/// measured off what is left.
+fn coats_of(strokes: &[StrokeSpec], edge: f32, fill_shows: bool) -> Vec<Coat> {
+    let glyph = Bands::glyph(edge);
+    let mut shown = if fill_shows {
+        glyph.clone()
+    } else {
+        Bands::default()
+    };
+    let mut coats: Vec<Coat> = Vec::new();
+    for spec in strokes.iter().filter(|spec| spec.width > 0.0) {
+        let first = coats.is_empty();
+        // Into nothing but what is empty, a transparent outside stroke changes
+        // nothing — unless it is the first around a hollow letter, where it
+        // leaves the rest nothing showing to be measured off.
+        if spec.color.3 == 0 && spec.position == StrokePosition::Outside && (!first || fill_shows) {
             continue;
         }
-        let mix = |above: f32, below: f32| (above * f + below * s * (1.0 - f)) / alpha;
-        rgba[i * 4] = to_u8(mix(fr, sr));
-        rgba[i * 4 + 1] = to_u8(mix(fg, sg));
-        rgba[i * 4 + 2] = to_u8(mix(fb, sb));
-        rgba[i * 4 + 3] = to_u8(alpha);
+        let base = if first { &glyph } else { &shown };
+        let w = spec.width;
+        let bands = match spec.position {
+            StrokePosition::Outside => base.grown(w).minus(base),
+            StrokePosition::Inside => base.minus(&base.grown(-w)),
+            StrokePosition::Center => base.grown(w * 0.5).minus(&base.grown(-w * 0.5)),
+        };
+        shown = if spec.color.3 != 0 {
+            shown.union(&bands)
+        } else {
+            shown.minus(&bands)
+        };
+        coats.push(Coat {
+            bands,
+            color: spec.color,
+        });
     }
-    rgba
+    coats
+}
+
+/// One run of distances and what the coats leave on it. `None` is the fill,
+/// whose colour the caller supplies.
+#[derive(Clone, Copy)]
+struct Piece {
+    lo: f32,
+    hi: f32,
+    ink: Option<Ink>,
+}
+
+/// What the coats leave at each distance from the glyph's edge. Each coat
+/// replaces whatever it lands on, so one with partial alpha shows the page and
+/// not the coat beneath — PDF's isolated knockout group (ISO 32000-1 §11.4.6),
+/// the composition §11.7.4.4 already asks a fill and its stroke to be painted
+/// with. A coat of full alpha comes out exactly as painted over.
+///
+/// A pixel is then the stretch of distances its footprint spans, and each
+/// piece counts for the part of that stretch it holds. That is coverage as
+/// shape and not opacity (§11.3.7.2): a fill and a stroke meeting inside one
+/// pixel split it between them rather than each claiming its own share of it.
+fn pieces_of(edge: f32, coats: &[Coat]) -> Vec<Piece> {
+    let mut pieces = vec![Piece {
+        lo: f32::NEG_INFINITY,
+        hi: edge,
+        ink: None,
+    }];
+    for coat in coats {
+        let ink = Ink::of(coat.color);
+        for &(lo, hi) in &coat.bands.0 {
+            let mut next = Vec::with_capacity(pieces.len() + 2);
+            for piece in pieces {
+                if piece.hi <= lo || piece.lo >= hi {
+                    next.push(piece);
+                    continue;
+                }
+                if piece.lo < lo {
+                    next.push(Piece { hi: lo, ..piece });
+                }
+                if piece.hi > hi {
+                    next.push(Piece { lo: hi, ..piece });
+                }
+            }
+            next.push(Piece {
+                lo,
+                hi,
+                ink: Some(ink),
+            });
+            pieces = next;
+        }
+    }
+    pieces.retain(|piece| piece.ink.is_none_or(|ink| ink.a > 0.0));
+    pieces
+}
+
+/// Whether reading the pieces needs a boundary only the field can place.
+fn reads_off_field(pieces: &[Piece]) -> bool {
+    pieces
+        .iter()
+        .flat_map(|piece| [piece.lo, piece.hi])
+        .any(|at| at.is_finite() && at != 0.0)
+}
+
+/// One pixel's share of every piece: what the coats add up to, and how much of
+/// the pixel the fill still holds. `level(at)` is how much of the pixel lies
+/// within `at` of the glyph's edge.
+fn weigh(pieces: &[Piece], level: impl Fn(f32) -> f32) -> (Ink, f32) {
+    let mut coats = Ink::default();
+    let mut fill = 0.0f32;
+    for piece in pieces {
+        let below = if piece.lo == f32::NEG_INFINITY {
+            0.0
+        } else {
+            level(piece.lo)
+        };
+        let share = (level(piece.hi) - below).max(0.0);
+        if share <= 0.0 {
+            continue;
+        }
+        match piece.ink {
+            Some(ink) => coats = coats + ink * share,
+            None => fill += share,
+        }
+    }
+    (coats, fill)
 }
 
 /// The extent an axis needs, with the float noise a right angle leaves rounded
@@ -1158,18 +1379,47 @@ fn outside_band(path: &Path, width: f32, w: u32, h: u32) -> Option<Vec<f32>> {
     Some(mask.data().iter().map(|&v| v as f32 / 255.0).collect())
 }
 
+/// How much of a pixel lies within some distance of the glyph's edge.
+///
+/// The rasterizer's own coverage beats anything read back off the field, so it
+/// stands wherever the boundary asked for is the glyph's own. A band the fast
+/// lane drew stands for its own outer boundary the same way.
+struct Levels<'a> {
+    coverage: &'a [f32],
+    field: Option<Vec<f32>>,
+    lane: Option<(f32, Vec<f32>)>,
+}
+
+impl Levels<'_> {
+    fn at(&self, at: f32, i: usize) -> f32 {
+        let f = self.coverage[i];
+        if at == 0.0 {
+            return f;
+        }
+        if let Some((reach, band)) = &self.lane
+            && at == *reach
+        {
+            return f + band[i] * (1.0 - f);
+        }
+        match &self.field {
+            Some(field) => coverage_at(field[i], at),
+            None => f,
+        }
+    }
+}
+
 /// `weight` moves the fill's own edge, in pixels, positive outward. It is the
 /// same distance-field offset a stroke band is read at, which is why thinning
 /// costs no more than thickening and needs nothing painted underneath: the
 /// glyph is rasterized once and the boundary is asked for somewhere else.
 ///
-/// A stroke's boundaries are relative to the shape's edge, so they move with
-/// it — a stroke on a thinned glyph hugs the thinned outline rather than
-/// hanging where the untouched outline used to be.
+/// The first stroke is measured off that moved edge, so a stroke on a thinned
+/// glyph hugs the thinned outline rather than hanging where the untouched
+/// outline used to be.
 fn paint_run(
-    run: BuiltRun,
+    mut run: BuiltRun,
     fill: Rgba,
-    stroke: Option<StrokeSpec>,
+    strokes: &[StrokeSpec],
     weight: f32,
 ) -> Result<TextBitmap, String> {
     // Groups that all land on the call's own fill and weight — spans that only
@@ -1180,147 +1430,124 @@ fn paint_run(
             group.color.unwrap_or(fill) == fill && group.weight.unwrap_or(weight) == weight
         })
     {
-        return paint_groups(run, fill, stroke, weight);
+        return paint_groups(run, fill, strokes, weight);
     }
 
     let count = run.width as usize * run.height as usize;
 
-    let Some(path) = run.path else {
+    let Some(path) = run.path.take() else {
         // No glyphs drew anything — return a transparent bitmap.
-        return Ok(TextBitmap {
-            width: run.width,
-            height: run.height,
-            rgba: vec![0u8; count * 4],
-            baseline: run.baseline,
-            clusters: run.clusters,
-        });
+        return Ok(bitmap_of(vec![0u8; count * 4], run));
     };
 
     let coverage = coverage_of(&path, run.width, run.height)?;
+    let coats = coats_of(strokes, weight, fill.3 != 0);
+    let pieces = pieces_of(weight, &coats);
 
-    let inked = stroke
-        .as_ref()
-        .is_some_and(|spec| spec.width > 0.0 && spec.color.3 != 0);
-
-    // An outside stroke under an opaque fill needs no distance field: a centre
+    // One band from the shape's own edge needs no distance field: a centre
     // stroke of twice the width shows exactly its outer half, and the seam
-    // pixels compose to full coverage without a mask — fill f plus stroke 1−f
-    // is 1, which is also what makes an opaque fill the condition. The identity
-    // needs the band to span the rasterizer's ~1px coverage ramp, so it holds
-    // from about a pixel of width up; a sub-pixel stroke seams either way — the
-    // field path sits on the same ramp — so the lane loses nothing there.
-    // Cheaper by 1.5–2x at label sizes (the field is O(area), the stroke
-    // O(path length)), and a shade more accurate at the seam than the field's
-    // worst pixels.
+    // pixels the fill only partly covers go to the band — fill f plus band
+    // 1−f is the whole pixel. The identity needs the band to span the
+    // rasterizer's ~1px coverage ramp, so it holds from about a pixel of width
+    // up; a sub-pixel stroke seams either way — the field path sits on the
+    // same ramp — so the lane loses nothing there. Cheaper by 1.5–2x at label
+    // sizes (the field is O(area), the stroke O(path length)), and a shade
+    // more accurate at the seam than the field's worst pixels.
     //
-    // Only a fast lane, not a replacement. A nonzero weight erodes or grows
-    // the fill through the field, and a geometric stroker has no negative pen
-    // width; Inside must mask the stroke by the fill; Center paints its band
-    // over the fill, a different composition. The field also stays the road
-    // anything reading offsets from the shape's edge — a future glow or
-    // shadow — comes back to.
-    if let Some(spec) = stroke.as_ref().filter(|spec| {
-        inked && weight == 0.0 && fill.3 == 255 && spec.position == StrokePosition::Outside
-    }) && let Some(ink) = outside_band(&path, spec.width, run.width, run.height)
-    {
-        return Ok(TextBitmap {
-            width: run.width,
-            height: run.height,
-            rgba: compose(|i| (coverage[i], ink[i]), count, fill, spec.color),
-            baseline: run.baseline,
-            clusters: run.clusters,
-        });
-    }
-
-    let field = (inked || weight != 0.0)
+    // Only a fast lane, not a replacement. A weight moves the fill through the
+    // field, and a geometric stroker has no negative pen width; a second coat
+    // is grown off the first, which no stroker pass of the outline can trace.
+    // The field also stays the road anything reading offsets from the shape's
+    // edge — a future glow or shadow — comes back to.
+    let lane = match coats.as_slice() {
+        [Coat { bands, .. }] if weight == 0.0 => match bands.0.as_slice() {
+            [(lo, hi)] if *lo == 0.0 => {
+                outside_band(&path, *hi, run.width, run.height).map(|band| (*hi, band))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let field = (lane.is_none() && reads_off_field(&pieces))
         .then(|| signed_distance_field(&coverage, run.width as usize, run.height as usize));
-
-    // The rasterizer's own coverage beats anything read back off the distance
-    // field, so it stands wherever the boundary asked for is the shape's own.
-    let layer = |offset: f32, i: usize| match &field {
-        Some(field) if offset != 0.0 => coverage_at(field[i], offset),
-        _ => coverage[i],
+    let levels = Levels {
+        coverage: &coverage,
+        field,
+        lane,
     };
 
-    let rgba = match stroke {
-        Some(spec) if inked => {
-            let (outer, inner) = band_offsets(spec.position, spec.width);
-            compose(
-                |i| (layer(inner + weight, i), layer(outer + weight, i)),
-                count,
-                fill,
-                spec.color,
-            )
-        }
-        _ => compose(|i| (layer(weight, i), 0.0), count, fill, fill),
-    };
+    let fill = Ink::of(fill);
+    let mut rgba = vec![0u8; count * 4];
+    for (i, out) in rgba.chunks_exact_mut(4).enumerate() {
+        let (coats, shown) = weigh(&pieces, |at| levels.at(at, i));
+        (coats + fill * shown).write(out);
+    }
+    Ok(bitmap_of(rgba, run))
+}
 
-    Ok(TextBitmap {
+fn bitmap_of(rgba: Vec<u8>, run: BuiltRun) -> TextBitmap {
+    TextBitmap {
         width: run.width,
         height: run.height,
         rgba,
         baseline: run.baseline,
         clusters: run.clusters,
-    })
+    }
 }
 
 /// One paint group's coverage, already read at its own weight, beside the
 /// colour it lays down.
 struct GroupLayer {
     coverage: Vec<f32>,
-    color: (f32, f32, f32, f32),
+    color: Rgba,
 }
 
 /// The run painted in several colours and weights at once.
 ///
-/// One stroke, around everything, read off the union of the glyphs at the
+/// The strokes, around everything, read off the union of the glyphs at the
 /// call's own weight — a band per group would show as seams wherever two
 /// styles meet, and a stroke is a property of the object and not of a span.
 /// Each group's fill, though, is read at its own weight off its own distance
 /// field, which is what makes a bolder stretch bolder.
+///
+/// The groups then stand where the object's fill would. A thinner stretch
+/// leaves part of that place uncovered, and the first stroke, which is grown
+/// from the letters, takes it; a bolder one reaches past it and lies over the
+/// strokes there. Whether a later stroke finds a hollow to grow into is the
+/// object's fill's to say, since the strokes are the object's.
 fn paint_groups(
-    run: BuiltRun,
+    mut run: BuiltRun,
     fill: Rgba,
-    stroke: Option<StrokeSpec>,
+    strokes: &[StrokeSpec],
     weight: f32,
 ) -> Result<TextBitmap, String> {
     let (w, h) = (run.width, run.height);
     let count = w as usize * h as usize;
 
-    let Some(path) = run.path.as_ref() else {
-        return Ok(TextBitmap {
-            width: w,
-            height: h,
-            rgba: vec![0u8; count * 4],
-            baseline: run.baseline,
-            clusters: run.clusters,
-        });
+    let Some(path) = run.path.take() else {
+        return Ok(bitmap_of(vec![0u8; count * 4], run));
     };
 
-    let inked = stroke
-        .as_ref()
-        .is_some_and(|spec| spec.width > 0.0 && spec.color.3 != 0);
-    let (outer, inner) = stroke
-        .as_ref()
-        .map_or((0.0, 0.0), |spec| band_offsets(spec.position, spec.width));
-
-    let ink = inked
-        .then(|| -> Result<Vec<f32>, String> {
-            let coverage = coverage_of(path, w, h)?;
-            let field = signed_distance_field(&coverage, w as usize, h as usize);
-            Ok(field
-                .iter()
-                .map(|&distance| coverage_at(distance, outer + weight))
-                .collect())
-        })
-        .transpose()?;
+    let coverage = coverage_of(&path, w, h)?;
+    let coats = coats_of(strokes, weight, fill.3 != 0);
+    let pieces = pieces_of(weight, &coats);
+    let field = (weight != 0.0 || reads_off_field(&pieces))
+        .then(|| signed_distance_field(&coverage, w as usize, h as usize));
+    let levels = Levels {
+        coverage: &coverage,
+        field,
+        lane: None,
+    };
+    let gap = coats
+        .first()
+        .map_or(Ink::default(), |coat| Ink::of(coat.color));
 
     let layers = run
         .groups
         .iter()
         .map(|group| -> Result<GroupLayer, String> {
             let coverage = coverage_of(&group.path, w, h)?;
-            let offset = inner + group.weight.unwrap_or(weight);
+            let offset = group.weight.unwrap_or(weight);
             // The rasterizer's own coverage beats anything read back off the
             // field, so it stands wherever the edge asked for is the glyph's.
             let coverage = if offset == 0.0 {
@@ -1333,52 +1560,49 @@ fn paint_groups(
             };
             Ok(GroupLayer {
                 coverage,
-                color: unit(group.color.unwrap_or(fill)),
+                color: group.color.unwrap_or(fill),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    let (ir, ig, ib, ia) = unit(stroke.as_ref().map_or(fill, |spec| spec.color));
     let mut rgba = vec![0u8; count * 4];
-    for i in 0..count {
+    for (i, out) in rgba.chunks_exact_mut(4).enumerate() {
         // The groups over one another, each bounded by its own coverage. They
         // share no glyph, so the order only decides the overlap two outlines
         // close enough to touch leave behind.
-        let (mut fr, mut fg, mut fb, mut fa) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut shape, mut ink) = (0.0f32, Ink::default());
         for GroupLayer { coverage, color } in &layers {
-            let (r, g, b, a) = color;
-            let a = coverage[i] * a;
-            if a <= 0.0 {
+            let c = coverage[i];
+            if c <= 0.0 {
                 continue;
             }
-            fr = r * a + fr * (1.0 - a);
-            fg = g * a + fg * (1.0 - a);
-            fb = b * a + fb * (1.0 - a);
-            fa = a + fa * (1.0 - a);
+            let coat = Ink::of(*color) * c;
+            shape = c + shape * (1.0 - c);
+            ink = ink * (1.0 - coat.a) + coat;
         }
-        let s = ink.as_ref().map_or(0.0, |ink| ink[i]) * ia;
-        let alpha = fa + s * (1.0 - fa);
-        if alpha <= 0.0 {
-            continue;
-        }
-        let under = s * (1.0 - fa);
-        rgba[i * 4] = to_u8((fr + ir * under) / alpha);
-        rgba[i * 4 + 1] = to_u8((fg + ig * under) / alpha);
-        rgba[i * 4 + 2] = to_u8((fb + ib * under) / alpha);
-        rgba[i * 4 + 3] = to_u8(alpha);
-    }
 
-    Ok(TextBitmap {
-        width: w,
-        height: h,
-        rgba,
-        baseline: run.baseline,
-        clusters: run.clusters,
-    })
+        let (coated, shown) = weigh(&pieces, |at| levels.at(at, i));
+        // Only as much of the groups as the fill still holds: an inside
+        // stroke lies over the letters, spans and all.
+        let whole = levels.at(weight, i);
+        let keep = if whole > 0.0 {
+            (shown / whole).min(1.0)
+        } else {
+            1.0
+        };
+        let (shape, ink) = (shape * keep, ink * keep);
+        let pixel = if shape <= shown {
+            coated + ink + gap * (shown - shape)
+        } else {
+            ink + coated * ((1.0 - shape) / (1.0 - shown))
+        };
+        pixel.write(out);
+    }
+    Ok(bitmap_of(rgba, run))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Public horizontal / vertical render — now with fill + stroke support
+// Public horizontal / vertical render
 
 #[expect(
     clippy::too_many_arguments,
@@ -1394,7 +1618,7 @@ pub fn render_text(
     phase: Phase,
     align: Align,
     fill: Rgba,
-    stroke: Option<StrokeSpec>,
+    strokes: &[StrokeSpec],
     weight: f32,
     spans: &[SpanStyle],
     scale: Scale,
@@ -1403,7 +1627,7 @@ pub fn render_text(
     let run = build_horizontal_path(
         font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
-    paint_run(spin(run, rotation), fill, stroke, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight)
 }
 
 #[expect(
@@ -1420,7 +1644,7 @@ pub fn render_vertical(
     phase: Phase,
     align: Align,
     fill: Rgba,
-    stroke: Option<StrokeSpec>,
+    strokes: &[StrokeSpec],
     weight: f32,
     spans: &[SpanStyle],
     scale: Scale,
@@ -1429,7 +1653,7 @@ pub fn render_vertical(
     let run = build_vertical_path(
         font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
-    paint_run(spin(run, rotation), fill, stroke, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight)
 }
 
 /// The outline was built for the metrics its glyphs settle; nothing here will
@@ -1685,11 +1909,11 @@ pub fn render_notdef(
     phase: Phase,
     align: Align,
     fill: Rgba,
-    stroke: Option<StrokeSpec>,
+    strokes: &[StrokeSpec],
     weight: f32,
 ) -> Result<TextBitmap, String> {
     let run = build_notdef_path(text, size_px, padding, vertical, phase, align);
-    paint_run(spin(run, rotation), fill, stroke, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight)
 }
 
 pub fn measure_notdef(
@@ -1785,7 +2009,7 @@ mod spin_tests {
             Phase::default(),
             Align::default(),
             FILL,
-            None,
+            &[],
             0.0,
         )
         .unwrap()
@@ -1909,7 +2133,7 @@ mod notdef_tests {
             Phase::default(),
             Align::default(),
             FILL,
-            None,
+            &[],
             0.0,
         )
         .unwrap()
@@ -2074,7 +2298,7 @@ mod notdef_tests {
             Phase { x: 2.0, y: 0.0 },
             Align::default(),
             FILL,
-            None,
+            &[],
             0.0,
         )
         .unwrap();
@@ -2098,7 +2322,7 @@ mod notdef_tests {
             Phase::default(),
             Align::default(),
             red,
-            None,
+            &[],
             0.0,
         )
         .unwrap();
@@ -2125,7 +2349,7 @@ mod notdef_tests {
             Phase::default(),
             Align::default(),
             FILL,
-            None,
+            &[],
             0.0,
         )
         .unwrap();
@@ -2155,7 +2379,7 @@ mod align_tests {
             Phase::default(),
             align,
             FILL,
-            None,
+            &[],
             0.0,
         )
         .unwrap()
@@ -2321,11 +2545,21 @@ mod stroke_tests {
     /// Alpha, and whether the pixel is stroke coloured, at a point `distance`
     /// from the disc's centre along a given angle.
     fn probe(bmp: &TextBitmap, distance: f32, degrees: f32) -> (u8, bool) {
+        let [r, _, _, a] = pixel(bmp, distance, degrees);
+        (a, r > 128)
+    }
+
+    fn pixel(bmp: &TextBitmap, distance: f32, degrees: f32) -> [u8; 4] {
         let radians = degrees.to_radians();
         let x = (CENTRE + distance * radians.cos()) as usize;
         let y = (CENTRE + distance * radians.sin()) as usize;
         let at = (y * bmp.width as usize + x) * 4;
-        (bmp.rgba[at + 3], bmp.rgba[at] > 128)
+        [
+            bmp.rgba[at],
+            bmp.rgba[at + 1],
+            bmp.rgba[at + 2],
+            bmp.rgba[at + 3],
+        ]
     }
 
     /// Angles chosen to hit axes, diagonals and directions in between, which
@@ -2346,7 +2580,7 @@ mod stroke_tests {
 
     #[test]
     fn a_light_fill_keeps_its_colour_where_the_edge_is_soft() {
-        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), None, 0.0).unwrap();
+        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), &[], 0.0).unwrap();
         let soft = soft_edge_colours(&bmp);
         assert!(soft.len() > 50, "no soft edge to look at");
         assert!(
@@ -2361,11 +2595,11 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(30.5),
             Rgba(0, 0, 0, 255),
-            Some(StrokeSpec {
+            &[StrokeSpec {
                 width: 6.0,
                 color: Rgba(255, 255, 255, 255),
                 position: StrokePosition::Outside,
-            }),
+            }],
             0.0,
         )
         .unwrap();
@@ -2387,7 +2621,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(3.0),
             FILL,
-            Some(spec(8.0, StrokePosition::Outside)),
+            &[spec(8.0, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
@@ -2405,7 +2639,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(radius),
             FILL,
-            Some(spec(pen, StrokePosition::Outside)),
+            &[spec(pen, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
@@ -2429,7 +2663,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(radius),
             FILL,
-            Some(spec(pen, StrokePosition::Inside)),
+            &[spec(pen, StrokePosition::Inside)],
             0.0,
         )
         .unwrap();
@@ -2452,7 +2686,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(radius),
             FILL,
-            Some(spec(pen, StrokePosition::Center)),
+            &[spec(pen, StrokePosition::Center)],
             0.0,
         )
         .unwrap();
@@ -2492,7 +2726,7 @@ mod stroke_tests {
             clusters: Vec::new(),
         };
 
-        let bmp = paint_run(run, FILL, Some(spec(10.0, StrokePosition::Outside)), 0.0).unwrap();
+        let bmp = paint_run(run, FILL, &[spec(10.0, StrokePosition::Outside)], 0.0).unwrap();
         for step in 0..4 {
             for angle in ANGLES {
                 let (alpha, is_ink) = probe(&bmp, step as f32, angle);
@@ -2513,7 +2747,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(radius),
             FILL,
-            Some(spec(pen, StrokePosition::Outside)),
+            &[spec(pen, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
@@ -2525,24 +2759,223 @@ mod stroke_tests {
         }
     }
 
-    /// A see-through fill is what the distance field construction is for: the
-    /// stroke has to stand under the whole shape, not just past its edge, or
-    /// the fill would have nothing to show through to.
     #[test]
-    fn a_translucent_fill_shows_the_stroke_beneath_it() {
+    fn a_translucent_fill_shows_the_page_through_its_letters() {
         let (radius, pen) = (40.0f32, 6.0f32);
         let bmp = paint_run(
             disc_run(radius),
             Rgba(0, 0, 0, 128),
-            Some(spec(pen, StrokePosition::Outside)),
+            &[spec(pen, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
         for angle in ANGLES {
-            // Deep inside, far past the band: the stroke under the fill is
-            // what tops the translucent fill up to full coverage.
-            let (alpha, _) = probe(&bmp, radius / 2.0, angle);
-            assert_eq!(alpha, 255, "stroke missing under the fill at {angle}deg");
+            assert_eq!(
+                pixel(&bmp, radius / 2.0, angle),
+                [0, 0, 0, 128],
+                "stroke under the fill at {angle}deg"
+            );
+            assert_eq!(probe(&bmp, radius + pen / 2.0, angle), (255, true));
+        }
+    }
+
+    #[test]
+    fn a_transparent_fill_leaves_the_letters_hollow_inside_their_stroke() {
+        let (radius, pen) = (40.0f32, 6.0f32);
+        for weight in [0.0f32, -2.0] {
+            let bmp = paint_run(
+                disc_run(radius),
+                Rgba(0, 0, 0, 0),
+                &[spec(pen, StrokePosition::Outside)],
+                weight,
+            )
+            .unwrap();
+            for angle in ANGLES {
+                let (inside, _) = probe(&bmp, radius + weight - 2.0, angle);
+                assert_eq!(
+                    inside, 0,
+                    "letters filled in at {angle}deg, weight {weight}"
+                );
+                let (band, is_ink) = probe(&bmp, radius + weight + pen / 2.0, angle);
+                assert_eq!((band, is_ink), (255, true), "band at {angle}deg");
+            }
+        }
+    }
+
+    const BLUE: Rgba = Rgba(0, 0, 255, 255);
+
+    fn coloured(width: f32, position: StrokePosition, color: Rgba) -> StrokeSpec {
+        StrokeSpec {
+            width,
+            color,
+            position,
+        }
+    }
+
+    #[test]
+    fn a_second_stroke_is_grown_from_the_edge_of_the_first() {
+        let radius = 40.0f32;
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            &[
+                spec(4.0, StrokePosition::Outside),
+                coloured(6.0, StrokePosition::Outside, BLUE),
+            ],
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            assert_eq!(pixel(&bmp, radius - 2.0, angle), [0, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 2.0, angle), [255, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 7.0, angle), [0, 0, 255, 255]);
+            assert_eq!(
+                pixel(&bmp, radius + 12.0, angle)[3],
+                0,
+                "past both at {angle}deg"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inside_stroke_cuts_into_the_stroke_before_it() {
+        let radius = 40.0f32;
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            &[
+                spec(6.0, StrokePosition::Outside),
+                coloured(3.0, StrokePosition::Inside, BLUE),
+            ],
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            assert_eq!(pixel(&bmp, radius - 2.0, angle), [0, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 1.5, angle), [255, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 4.5, angle), [0, 0, 255, 255]);
+            assert_eq!(
+                pixel(&bmp, radius + 8.0, angle)[3],
+                0,
+                "grew past {angle}deg"
+            );
+        }
+    }
+
+    #[test]
+    fn a_transparent_outside_stroke_leaves_nothing_to_grow_from() {
+        let radius = 40.0f32;
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            &[
+                coloured(3.0, StrokePosition::Outside, Rgba(0, 0, 0, 0)),
+                spec(4.0, StrokePosition::Outside),
+            ],
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            assert_eq!(pixel(&bmp, radius - 2.0, angle), [0, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 1.5, angle), [255, 0, 0, 255]);
+            assert_eq!(
+                pixel(&bmp, radius + 6.0, angle)[3],
+                0,
+                "grew past {angle}deg"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stroke_around_a_hollow_letter_s_stroke_runs_along_both_its_sides() {
+        let radius = 40.0f32;
+        let bmp = paint_run(
+            disc_run(radius),
+            Rgba(0, 0, 0, 0),
+            &[
+                coloured(5.0, StrokePosition::Outside, FILL),
+                coloured(5.0, StrokePosition::Outside, BLUE),
+            ],
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            assert_eq!(
+                pixel(&bmp, radius - 9.0, angle)[3],
+                0,
+                "filled in at {angle}deg"
+            );
+            assert_eq!(pixel(&bmp, radius - 2.5, angle), [0, 0, 255, 255]);
+            assert_eq!(pixel(&bmp, radius + 2.5, angle), [0, 0, 0, 255]);
+            assert_eq!(pixel(&bmp, radius + 7.5, angle), [0, 0, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn a_transparent_inside_stroke_takes_away_what_the_next_is_measured_off() {
+        let radius = 40.0f32;
+        let bmp = paint_run(
+            disc_run(radius),
+            FILL,
+            &[
+                coloured(8.0, StrokePosition::Outside, Rgba(255, 255, 255, 255)),
+                coloured(3.0, StrokePosition::Inside, Rgba(0, 0, 0, 0)),
+                coloured(2.0, StrokePosition::Outside, BLUE),
+            ],
+            0.0,
+        )
+        .unwrap();
+        for angle in ANGLES {
+            assert_eq!(pixel(&bmp, radius + 2.5, angle), [255, 255, 255, 255]);
+            assert_eq!(pixel(&bmp, radius + 6.0, angle), [0, 0, 255, 255]);
+            assert_eq!(
+                pixel(&bmp, radius + 8.5, angle)[3],
+                0,
+                "erased band back at {angle}deg"
+            );
+        }
+    }
+
+    #[test]
+    fn a_transparent_outermost_stroke_draws_nothing() {
+        let radius = 40.0f32;
+        let alone = paint_run(
+            disc_run(radius),
+            FILL,
+            &[spec(4.0, StrokePosition::Outside)],
+            0.0,
+        )
+        .unwrap();
+        let wrapped = paint_run(
+            disc_run(radius),
+            FILL,
+            &[
+                spec(4.0, StrokePosition::Outside),
+                coloured(5.0, StrokePosition::Outside, Rgba(0, 0, 255, 0)),
+            ],
+            0.0,
+        )
+        .unwrap();
+        assert!(alone.rgba == wrapped.rgba);
+    }
+
+    #[test]
+    fn a_transparent_span_is_hollow_inside_the_object_s_stroke() {
+        let radius = 40.0f32;
+        let mut run = disc_run(radius);
+        run.groups = vec![PaintGroup {
+            path: run.path.clone().unwrap(),
+            color: Some(Rgba(0, 0, 0, 0)),
+            weight: None,
+        }];
+        let bmp = paint_run(run, FILL, &[spec(4.0, StrokePosition::Outside)], 0.0).unwrap();
+        for angle in ANGLES {
+            assert_eq!(
+                pixel(&bmp, radius - 2.0, angle)[3],
+                0,
+                "filled in at {angle}deg"
+            );
+            assert_eq!(pixel(&bmp, radius + 2.0, angle), [255, 0, 0, 255]);
         }
     }
 
@@ -2555,7 +2988,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(radius),
             FILL,
-            Some(spec(pen, StrokePosition::Outside)),
+            &[spec(pen, StrokePosition::Outside)],
             weight,
         )
         .unwrap();
@@ -2582,7 +3015,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(3.0),
             FILL,
-            Some(spec(8.0, StrokePosition::Outside)),
+            &[spec(8.0, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
@@ -2600,7 +3033,7 @@ mod stroke_tests {
         let bmp = paint_run(
             disc_run(20.0),
             FILL,
-            Some(spec(0.0, StrokePosition::Outside)),
+            &[spec(0.0, StrokePosition::Outside)],
             0.0,
         )
         .unwrap();
@@ -2645,7 +3078,7 @@ mod stroke_tests {
 
             let cov = coverage_of(&path, w, h).unwrap();
             let field = signed_distance_field(&cov, w as usize, h as usize);
-            let bmp = paint_run(run, FILL, Some(ink), 0.0).unwrap();
+            let bmp = paint_run(run, FILL, &[ink], 0.0).unwrap();
 
             let mut worst = 0.0f32;
             for i in 0..(w * h) as usize {
@@ -2717,12 +3150,12 @@ mod measure_tests {
     /// A stroke and a weight on the render side, to pin down that paint options
     /// cannot move the frame — the padding that makes room for them is the
     /// caller's, and it is an input to both calls.
-    fn spec() -> Option<StrokeSpec> {
-        Some(StrokeSpec {
+    fn spec() -> [StrokeSpec; 1] {
+        [StrokeSpec {
             width: 3.0,
             color: Rgba(255, 0, 0, 255),
             position: StrokePosition::Outside,
-        })
+        }]
     }
 
     /// Across the line break and upright, so both the splitting and the
@@ -2772,7 +3205,7 @@ mod measure_tests {
                     PHASE,
                     Align::Center,
                     BLACK,
-                    spec(),
+                    &spec(),
                     -1.0,
                     spans,
                     Scale::ONE,
@@ -2813,7 +3246,7 @@ mod measure_tests {
                     PHASE,
                     Align::End,
                     BLACK,
-                    spec(),
+                    &spec(),
                     -1.0,
                     spans,
                     Scale::ONE,
@@ -2840,7 +3273,7 @@ mod measure_tests {
                     PHASE,
                     Align::Center,
                     BLACK,
-                    spec(),
+                    &spec(),
                     -1.0,
                 )
                 .unwrap();
@@ -2872,7 +3305,7 @@ mod phase_tests {
             phase,
             Align::default(),
             BLACK,
-            None,
+            &[],
             0.0,
             &[],
             Scale::ONE,
@@ -2978,7 +3411,7 @@ mod phase_tests {
             Phase::default(),
             Align::default(),
             BLACK,
-            None,
+            &[],
             0.0,
             &[],
             Scale::ONE,
@@ -2995,7 +3428,7 @@ mod phase_tests {
             Phase { x: 0.25, y: 0.5 },
             Align::default(),
             BLACK,
-            None,
+            &[],
             0.0,
             &[],
             Scale::ONE,
@@ -3036,7 +3469,7 @@ mod span_tests {
             Phase::default(),
             Align::Start,
             BLACK,
-            None,
+            &[],
             0.0,
             spans,
             Scale::ONE,
@@ -3339,7 +3772,7 @@ mod scale_tests {
             PHASE,
             Align::Center,
             BLACK,
-            None,
+            &[],
             0.0,
             &SPANS,
             Scale::ONE,
@@ -3356,7 +3789,7 @@ mod scale_tests {
             PHASE,
             Align::Center,
             BLACK,
-            None,
+            &[],
             0.0,
             &SPANS,
             Scale::ONE,

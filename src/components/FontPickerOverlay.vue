@@ -142,7 +142,7 @@
                 :fit-height="box.h"
                 :overflows="fit.floored"
                 :fill-color="fillColor"
-                :stroke="sampleStroke"
+                :strokes="sampleStrokes"
                 :vertical="vertical"
                 :weight-px="sampleWeight"
                 :mark="markMissing"
@@ -209,7 +209,7 @@
       :text="sampleText"
       :vertical="vertical"
       :fill-color="fillColor"
-      :stroke="stroke"
+      :strokes="strokes"
       :weight-px="weightPx"
       :given-at-px="objectPx || samplePx"
       :mark="markMissing"
@@ -252,7 +252,7 @@ import { shownLinesOf } from '@shared/page/units'
 import { selectionWords } from '@/lib/selectionWords'
 import type { TextStyle } from '@shared/text-style/types'
 import { sharedValue } from '@shared/batch/value'
-import { engineStrokeFor } from '@shared/effects/stroke'
+import { engineStrokesFor } from '@shared/effects/stroke'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -488,7 +488,7 @@ const currentFamily = computed(() =>
 const fillColor = computed(() => lead.value?.body.style.color ?? '#000000')
 /** The face whose whole sample is open, or null. */
 const zoomed = ref<FontEntry | null>(null)
-const stroke = computed(() => (lead.value ? engineStrokeFor(lead.value.effects) : undefined))
+const strokes = computed(() => (lead.value ? engineStrokesFor(lead.value.effects) : []))
 
 /**
  * The object's stroke and weight are pixels at its own size; the sample is set
@@ -498,8 +498,8 @@ const objectPx = computed(() => (lead.value && agreed('fontSizePx') ? lead.value
 const sizeRatio = computed(() => {
   return objectPx.value > 0 ? samplePx.value / objectPx.value : 1
 })
-const sampleStroke = computed(() =>
-  stroke.value ? { ...stroke.value, width: stroke.value.width * sizeRatio.value } : undefined,
+const sampleStrokes = computed(() =>
+  strokes.value.map((stroke) => ({ ...stroke, width: stroke.width * sizeRatio.value })),
 )
 const sampleWeight = computed(() => weightPx.value * sizeRatio.value)
 

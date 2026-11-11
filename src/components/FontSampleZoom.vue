@@ -25,7 +25,7 @@
               :fit-width="Infinity"
               :fit-height="Infinity"
               :fill-color="fillColor"
-              :stroke="stroke && { ...stroke, width: stroke.width * ratio }"
+              :strokes="strokes?.map((stroke) => ({ ...stroke, width: stroke.width * ratio }))"
               :vertical="vertical"
               :weight-px="weightPx * ratio"
               :mark="mark"
@@ -58,8 +58,8 @@ const props = defineProps<{
   text: string
   vertical: boolean
   fillColor: string
-  /** At the size the stroke and weight were given for. */
-  stroke?: EngineStrokeSpec
+  /** At the size the strokes and weight were given for. */
+  strokes?: readonly EngineStrokeSpec[]
   weightPx: number
   givenAtPx: number
   mark?: boolean

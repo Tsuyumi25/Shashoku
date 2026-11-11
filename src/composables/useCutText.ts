@@ -2,7 +2,7 @@ import type { TextLayerEntry } from '@shared/page/types'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { engineStrokeFor } from '@shared/effects/stroke'
+import { engineStrokesFor } from '@shared/effects/stroke'
 import { generateId } from '@shared/page/schema'
 import { linesOf } from '@shared/page/text'
 import { pathOf } from '@shared/page/tree'
@@ -34,7 +34,7 @@ function caretOnPage(
     text: plainOf(code),
     clusters: sample?.clusters ?? [],
     vertical,
-    padding: sample?.padding ?? samplePadding(engineStrokeFor(effects), style.weightPx),
+    padding: sample?.padding ?? samplePadding(engineStrokesFor(effects), style.weightPx),
     crossExtent: vertical ? box.w : box.h,
   })
   const r = projection.caret(index)

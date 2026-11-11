@@ -19,7 +19,7 @@ export interface SampleRequest {
   /** Device pixels, so the sample stays crisp on a HiDPI display. */
   sizePx: number
   fillColor: string
-  stroke?: EngineStrokeSpec
+  strokes?: readonly EngineStrokeSpec[]
   /** Columns running right to left instead of rows. */
   vertical?: boolean
   /** Where a line short of the longest one sits. Part of what got drawn. */
@@ -95,13 +95,14 @@ const CACHE_BYTE_LIMIT = 192 * 1024 * 1024
 const MEASURE_CACHE_LIMIT = 1024
 
 /**
- * Blank margin around a sample. An outside stroke grows the glyph past its
- * advance box; without room for it the sample comes back clipped. Thickening
- * grows it the same way, so it buys margin too — thinning does not, since it
- * only ever pulls the edge inward.
+ * Blank margin around a sample. Outside strokes grow the glyph past its
+ * advance box, each from the edge of the last; without room for them the
+ * sample comes back clipped. Thickening grows it the same way, so it buys
+ * margin too — thinning does not, since it only ever pulls the edge inward.
  */
-export function samplePadding(stroke?: EngineStrokeSpec, weightPx = 0): number {
-  return 4 + Math.ceil(stroke?.width ?? 0) + Math.ceil(Math.max(0, weightPx))
+export function samplePadding(strokes: readonly EngineStrokeSpec[] = [], weightPx = 0): number {
+  const reach = strokes.reduce((sum, stroke) => sum + stroke.width, 0)
+  return 4 + Math.ceil(reach) + Math.ceil(Math.max(0, weightPx))
 }
 
 /**
@@ -112,7 +113,7 @@ export function samplePadding(stroke?: EngineStrokeSpec, weightPx = 0): number {
 function paddingOf(req: SampleRequest): number {
   let weight = req.weightPx ?? 0
   for (const span of req.spans ?? []) weight = Math.max(weight, span.weightPx)
-  return samplePadding(req.stroke, weight)
+  return samplePadding(req.strokes, weight)
 }
 
 /**
@@ -175,16 +176,16 @@ function coverageKey(entry: FontEntry, text: string): string {
 }
 
 function keyOf(req: SampleRequest): string {
-  const stroke = req.stroke
-    ? `${req.stroke.width}/${req.stroke.color}/${req.stroke.position ?? 'outside'}`
-    : '-'
+  const strokes =
+    (req.strokes ?? []).map((s) => `${s.width}/${s.color}/${s.position ?? 'outside'}`).join(',') ||
+    '-'
   // The tag keeps the two key spaces apart, so a face that happened to be
   // named like the notdef key could not answer for it.
   return [
     req.entry ? `f${faceKey(req.entry)}` : 'n',
     req.sizePx,
     req.fillColor,
-    stroke,
+    strokes,
     req.vertical ? 'v' : 'h',
     req.align ?? 'start',
     req.rotation ?? 0,
@@ -215,13 +216,11 @@ function rasterize(req: SampleRequest): Sample {
   // Everything crossing contextBridge has to be structured-cloneable, and a
   // Vue reactive proxy is not — hence the explicit plain copy rather than
   // trusting every caller to hand over raw objects.
-  const stroke = req.stroke
-    ? {
-        width: req.stroke.width,
-        color: req.stroke.color,
-        position: req.stroke.position,
-      }
-    : undefined
+  const strokes = (req.strokes ?? []).map((s) => ({
+    width: s.width,
+    color: s.color,
+    position: s.position,
+  }))
   const spans = engineSpans(req.spans)
 
   if (!req.entry) {
@@ -232,7 +231,7 @@ function rasterize(req: SampleRequest): Sample {
       req.vertical,
       req.rotation,
       req.fillColor,
-      stroke,
+      strokes,
       req.phaseX,
       req.phaseY,
       req.align,
@@ -258,7 +257,7 @@ function rasterize(req: SampleRequest): Sample {
         padding,
         req.rotation,
         req.fillColor,
-        stroke,
+        strokes,
         req.phaseX,
         req.phaseY,
         req.align,
@@ -275,7 +274,7 @@ function rasterize(req: SampleRequest): Sample {
         padding,
         req.rotation,
         req.fillColor,
-        stroke,
+        strokes,
         req.phaseX,
         req.phaseY,
         req.align,

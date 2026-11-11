@@ -112,7 +112,7 @@ import { samplePadding } from '@/lib/fontSampleCache'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
 import { unmirrored, type Flip } from '@/lib/flip'
-import { engineStrokeFor } from '@shared/effects/stroke'
+import { engineStrokesFor } from '@shared/effects/stroke'
 import { textProjection } from '@/lib/textProjection'
 import { plainEditSurface } from '@/composables/useTextEditSurface'
 
@@ -470,7 +470,7 @@ const vertical = computed(() => props.textStyle.direction === 'vertical')
 const projection = computed(() => {
   const { sample, box } = drawn.value
   const padding =
-    sample?.padding ?? samplePadding(engineStrokeFor(props.effects), props.textStyle.weightPx)
+    sample?.padding ?? samplePadding(engineStrokesFor(props.effects), props.textStyle.weightPx)
   return textProjection({
     text: drawn.value.plain,
     clusters: sample?.clusters ?? [],

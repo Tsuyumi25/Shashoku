@@ -1,22 +1,21 @@
 import type { LayerEffect, StrokePosition } from '@shared/effects/types'
-import { strokeOf, withStroke } from '@shared/effects/stroke'
 import type { DrawnLabel } from '@/lib/labelRaster'
 
 /**
  * The effects that draw a text object's letters alone, at exactly the place
  * its stroked bitmap lands.
  *
- * The stroke is kept at its width and made transparent rather than dropped:
- * the margin the bitmap is drawn with follows the width, and with it the frame
- * and the phase — so a bitmap without the stroke would sit a fraction off the
- * one with it. Moved outside so that nothing is eroded: an inside band is
- * drawn over the object's own letters, and those letters still cover what is
- * under them.
+ * The strokes are kept at their widths and made transparent rather than
+ * dropped: the margin the bitmap is drawn with follows the widths, and with it
+ * the frame and the phase — so a bitmap without them would sit a fraction off
+ * the one with them. Moved outside so that nothing is eroded: an inside band
+ * is drawn over the object's own letters, and those letters still cover what
+ * is under them.
  */
 export function lettersOnly(effects: readonly LayerEffect[]): LayerEffect[] {
-  const stroke = strokeOf(effects)
-  if (stroke === null) return [...effects]
-  return withStroke(effects, { kind: 'stroke', width: stroke.width, color: '#00000000', position: 'outside' })
+  return effects.map((e) =>
+    e.kind === 'stroke' ? { ...e, color: '#00000000', position: 'outside' as const } : e,
+  )
 }
 
 /** Where a page column (or row) inside a bitmap's rectangle reads in the bitmap, mirrored or not. */

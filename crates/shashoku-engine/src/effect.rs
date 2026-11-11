@@ -81,9 +81,12 @@ pub fn stroked(rgba: &[u8], width: usize, height: usize, specs: &[StrokeSpec]) -
     let mut out = rgba.to_vec();
     for spec in specs {
         // Nothing to grow and nothing to grow it in: a width of zero has no band
-        // and a fully transparent colour paints none, and the field costs the
-        // whole region either way.
-        if spec.width <= 0.0 || spec.color.3 == 0 {
+        // and a transparent outside stroke paints none, and the field costs the
+        // whole region either way. A transparent stroke that reaches inside
+        // still erodes what it lands on.
+        if spec.width <= 0.0
+            || (spec.color.3 == 0 && spec.position == crate::render::StrokePosition::Outside)
+        {
             continue;
         }
         out = compose_stroke(&out, width, height, spec);

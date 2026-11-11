@@ -223,8 +223,8 @@ fn stroke_input_to_one(input: StrokeInput) -> napi::Result<StrokeSpec> {
     })
 }
 
-fn stroke_input_to_spec(input: Option<StrokeInput>) -> napi::Result<Option<StrokeSpec>> {
-    input.map(stroke_input_to_one).transpose()
+fn stroke_inputs_to_specs(inputs: Vec<StrokeInput>) -> napi::Result<Vec<StrokeSpec>> {
+    inputs.into_iter().map(stroke_input_to_one).collect()
 }
 
 /// One stretch of the text set differently from the call's own style.
@@ -396,7 +396,9 @@ pub fn render_text(
     padding: Option<u32>,
     rotation: Option<f64>,
     fill_color: Option<String>,
-    stroke: Option<StrokeInput>,
+    // In order, each measured off what the ones before it left showing; the
+    // first off the glyph itself.
+    strokes: Option<Vec<StrokeInput>>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
@@ -413,7 +415,7 @@ pub fn render_text(
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
-    let stroke_spec = stroke_input_to_spec(stroke)?;
+    let strokes = stroke_inputs_to_specs(strokes.unwrap_or_default())?;
     let bmp = render::render_text(
         data.as_slice(),
         &text,
@@ -424,7 +426,7 @@ pub fn render_text(
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
         fill,
-        stroke_spec,
+        &strokes,
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
@@ -572,10 +574,7 @@ pub fn stroke_layer(
             rgba.len()
         )));
     }
-    let specs = strokes
-        .into_iter()
-        .map(stroke_input_to_one)
-        .collect::<napi::Result<Vec<_>>>()?;
+    let specs = stroke_inputs_to_specs(strokes)?;
     Ok(effect::stroked(rgba.as_ref(), width as usize, height as usize, &specs).into())
 }
 
@@ -979,7 +978,9 @@ pub fn render_vertical(
     padding: Option<u32>,
     rotation: Option<f64>,
     fill_color: Option<String>,
-    stroke: Option<StrokeInput>,
+    // In order, each measured off what the ones before it left showing; the
+    // first off the glyph itself.
+    strokes: Option<Vec<StrokeInput>>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
@@ -994,7 +995,7 @@ pub fn render_vertical(
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
-    let stroke_spec = stroke_input_to_spec(stroke)?;
+    let strokes = stroke_inputs_to_specs(strokes.unwrap_or_default())?;
     let bmp = render::render_vertical(
         data.as_slice(),
         &text,
@@ -1005,7 +1006,7 @@ pub fn render_vertical(
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
         fill,
-        stroke_spec,
+        &strokes,
         weight_px.unwrap_or(0.0) as f32,
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
@@ -1075,7 +1076,9 @@ pub fn render_notdef(
     vertical: Option<bool>,
     rotation: Option<f64>,
     fill_color: Option<String>,
-    stroke: Option<StrokeInput>,
+    // In order, each measured off what the ones before it left showing; the
+    // first off the glyph itself.
+    strokes: Option<Vec<StrokeInput>>,
     phase_x: Option<f64>,
     phase_y: Option<f64>,
     align: Option<String>,
@@ -1084,7 +1087,7 @@ pub fn render_notdef(
     weight_px: Option<f64>,
 ) -> napi::Result<TextBitmap> {
     let fill = fill_from_opt(fill_color)?;
-    let stroke_spec = stroke_input_to_spec(stroke)?;
+    let strokes = stroke_inputs_to_specs(strokes.unwrap_or_default())?;
     let bmp = render::render_notdef(
         &text,
         size_px as f32,
@@ -1094,7 +1097,7 @@ pub fn render_notdef(
         phase_from_opt(phase_x, phase_y),
         align_from_opt(align)?,
         fill,
-        stroke_spec,
+        &strokes,
         weight_px.unwrap_or(0.0) as f32,
     )
     .map_err(napi::Error::from_reason)?;

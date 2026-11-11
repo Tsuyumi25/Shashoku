@@ -275,6 +275,13 @@ export interface ShashokuEngineApi {
    * direction the text runs. It cannot change the size that comes back: the
    * block is as wide as its longest line and that line has no slack to spend.
    *
+   * `strokes` apply in order, each measured off what the ones before it left
+   * showing — the way a stroke on a folder is measured off what it holds — and
+   * the first off the glyph itself, whatever the fill's alpha. So an outside
+   * stroke around a hollow letter's stroke runs along both of its sides. Every
+   * coat replaces what it lands on: one with less than full alpha shows the
+   * page through, and an inside or centre one with none takes that much away.
+   *
    * `spans` set stretches of the text differently from the call's own style.
    * A line is as tall as the tallest thing set in it and a column as wide as
    * the widest, so a span can change the size that comes back.
@@ -296,7 +303,7 @@ export interface ShashokuEngineApi {
     padding?: number,
     rotation?: number,
     fillColor?: string,
-    stroke?: EngineStrokeSpec,
+    strokes?: EngineStrokeSpec[],
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
@@ -313,7 +320,7 @@ export interface ShashokuEngineApi {
     padding?: number,
     rotation?: number,
     fillColor?: string,
-    stroke?: EngineStrokeSpec,
+    strokes?: EngineStrokeSpec[],
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,
@@ -384,7 +391,7 @@ export interface ShashokuEngineApi {
     vertical?: boolean,
     rotation?: number,
     fillColor?: string,
-    stroke?: EngineStrokeSpec,
+    strokes?: EngineStrokeSpec[],
     phaseX?: number,
     phaseY?: number,
     align?: TextAlign,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LayerEffect, StrokeEffect } from './types'
-import { engineStrokeFor, joinedBelow, strokeOf, withStroke } from './stroke'
+import { joinedBelow, strokeOf, withStroke } from './stroke'
 
 const STROKE: LayerEffect = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }
 
@@ -41,20 +41,6 @@ describe('joinedBelow', () => {
   it('leaves out an object whose stroke is turned down to nothing, since it has no band to keep apart', () => {
     const map = joined([item('a', white({ width: 0 })), item('b', white()), item('c', [])])
     expect(map.size).toBe(0)
-  })
-})
-
-describe('engineStrokeFor', () => {
-  it('is undefined when the node carries no stroke', () => {
-    expect(engineStrokeFor([])).toBeUndefined()
-  })
-
-  it('hands the stroke to the engine in document pixels, unscaled', () => {
-    expect(engineStrokeFor([STROKE])).toEqual({
-      width: 3,
-      color: '#ffffff',
-      position: 'outside',
-    })
   })
 })
 

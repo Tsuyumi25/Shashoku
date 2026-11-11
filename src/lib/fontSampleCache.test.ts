@@ -134,7 +134,7 @@ describe('the measure cache', () => {
       text,
       sizePx: 16,
       fillColor: '#000000',
-      stroke: { width: 3, color: '#ffffff' },
+      strokes: [{ width: 3, color: '#ffffff' }],
     })
     expect(measureCalls.filter((t) => t === text)).toHaveLength(2)
   })

@@ -65,7 +65,7 @@ const props = defineProps<{
   text: string
   sizePx: number
   fillColor: string
-  stroke?: EngineStrokeSpec
+  strokes?: readonly EngineStrokeSpec[]
   /** Columns running right to left instead of rows. */
   vertical?: boolean
   /** Signed pixels the strokes move by. */
@@ -153,7 +153,7 @@ const request = computed<SampleRequest>(() => ({
   sizePx: Math.round(props.sizePx * dpr),
   fillColor: props.fillColor,
   // Device pixels, as the size is.
-  stroke: props.stroke && { ...props.stroke, width: props.stroke.width * dpr },
+  strokes: props.strokes?.map((stroke) => ({ ...stroke, width: stroke.width * dpr })),
   vertical: props.vertical,
   // Scaled with the size: the sample is drawn at device resolution and shown
   // back down, so an unscaled offset would read thinner than it will typeset.

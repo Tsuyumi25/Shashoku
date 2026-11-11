@@ -3,7 +3,7 @@ import { parseMarkup, resolveSpans } from '@shared/page/markup'
 import { byteAt, byteOffsets } from './textProjection'
 import type { LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
-import { engineStrokeFor } from '@shared/effects/stroke'
+import { engineStrokesFor } from '@shared/effects/stroke'
 import {
   catalogByFace,
   catalogByFamily,
@@ -93,7 +93,7 @@ function requestFor(
     spans: painted.spans,
     sizePx: style.fontSizePx,
     fillColor: style.color,
-    stroke: engineStrokeFor(effects),
+    strokes: engineStrokesFor(effects),
     vertical: style.direction === 'vertical',
     align: style.align,
     weightPx: style.weightPx,
