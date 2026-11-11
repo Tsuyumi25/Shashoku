@@ -8,6 +8,7 @@
   <div
     ref="rootEl"
     class="pointer-events-auto absolute top-0 left-0 h-0 w-0"
+    :style="heldCursor ? { cursor: heldCursor } : undefined"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
@@ -627,6 +628,14 @@ function onReferenceUp(e: PointerEvent) {
 /** Whether the gesture in hand began on the frame's body rather than on a handle. */
 let pressedBody = false
 
+/**
+ * The cursor a gesture shows while it lasts. The pointer is captured on the
+ * root, and a captured pointer wears the root's cursor rather than the one of
+ * the handle that was pressed — so without this a turn or a scale shows the
+ * default arrow the moment it starts.
+ */
+const heldCursor = ref<string | null>(null)
+
 function capture(e: PointerEvent) {
   pressedBody = false
   activeBox = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-frame-box]')
@@ -634,6 +643,7 @@ function capture(e: PointerEvent) {
 }
 
 function release(e: PointerEvent) {
+  heldCursor.value = null
   const el = rootEl.value
   if (el?.hasPointerCapture(e.pointerId) === true) el.releasePointerCapture(e.pointerId)
 }
@@ -836,6 +846,7 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
   scale.from = { x: e.clientX, y: e.clientY }
   scale.client = scale.from
   scale.grab = pageAt(e.clientX, e.clientY)
+  heldCursor.value = corner.cursor.replace(/^cursor-/, '')
   emit('select', false)
 }
 
@@ -897,6 +908,8 @@ const spin = {
   /** The wrist's total travel, which snapping reads and never writes back. */
   free: 0,
   applied: 0,
+  /** The same point on screen, which the cursor bows round. */
+  around: ORIGIN as Point,
 }
 let spinning = false
 let spinEngaged = false
@@ -914,7 +927,14 @@ function onRotateDown(e: PointerEvent) {
   spin.start = props.rotation
   spin.free = props.rotation
   spin.applied = props.rotation
+  spin.around = around
+  heldCursor.value = spinCursor(spin.from)
   emit('select', false)
+}
+
+/** The turn cursor for where the pointer stands round the point the turn goes about, on screen. */
+function spinCursor(at: Point): string {
+  return rotateCursor(Math.atan2(at.y - spin.around.y, at.x - spin.around.x))
 }
 
 /**
@@ -941,6 +961,7 @@ function onRotateMove(e: PointerEvent) {
   }
   spin.client = { x: e.clientX, y: e.clientY }
   spin.snapping = e.shiftKey
+  heldCursor.value = spinCursor(spin.client)
   nextFrame(reportSpin)
 }
 
