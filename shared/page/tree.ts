@@ -336,3 +336,27 @@ export function restoreGroupAt(
   siblings.splice(index, folder.children.length, folder)
   return true
 }
+
+/**
+ * Gathers entries into `folder`, which takes the place of the topmost of them,
+ * as Photoshop's Ctrl+G does. They keep their order among themselves, and one
+ * already inside another that is gathered goes along inside it.
+ */
+export function groupEntries(
+  layers: LayerEntry[],
+  ids: ReadonlySet<string>,
+  folder: GroupLayerEntry,
+): boolean {
+  const picked = outermostEntries(layers, ids)
+  const top = picked[picked.length - 1]
+  if (top === undefined) return false
+  const topPath = pathOf(layers, top.id)!
+  const parent = folderAtPath(layers, topPath.slice(0, -1))
+  const home = parent === null ? layers : parent.children
+  const topIndex = topPath[topPath.length - 1]
+  const below = home.slice(0, topIndex).filter((e) => ids.has(e.id)).length
+  for (const entry of [...picked].reverse()) removeAtPath(layers, pathOf(layers, entry.id)!)
+  folder.children = picked
+  home.splice(topIndex - below, 0, folder)
+  return true
+}

@@ -14,6 +14,7 @@ import {
   isLocked,
   isMergeable,
   outermostEntries,
+  groupEntries,
   pathOf,
   removeAtPath,
   textObjects,
@@ -363,5 +364,40 @@ describe('outermostEntries', () => {
 
   it('has nothing to say about an empty set', () => {
     expect(outermostEntries([raster('a')], new Set())).toEqual([])
+  })
+})
+
+describe('groupEntries', () => {
+  const shape = (entries: readonly LayerEntry[]): unknown =>
+    entries.map((e) => (e.kind === 'group' ? { [e.id]: shape(e.children) } : e.id))
+
+  it('puts the folder where the topmost picked entry stood, keeping their order', () => {
+    const layers: LayerEntry[] = [raster('a'), raster('b'), raster('c'), raster('d')]
+    expect(groupEntries(layers, new Set(['d', 'b']), group('g', []))).toBe(true)
+    expect(shape(layers)).toEqual(['a', 'c', { g: ['b', 'd'] }])
+  })
+
+  it('stays below what was above the topmost picked entry', () => {
+    const layers: LayerEntry[] = [raster('a'), raster('b'), raster('c')]
+    groupEntries(layers, new Set(['a', 'b']), group('g', []))
+    expect(shape(layers)).toEqual([{ g: ['a', 'b'] }, 'c'])
+  })
+
+  it('lands in the folder that held the topmost, gathering from elsewhere too', () => {
+    const layers: LayerEntry[] = [raster('a'), group('f', [raster('b'), raster('c')]), raster('d')]
+    groupEntries(layers, new Set(['a', 'c']), group('g', []))
+    expect(shape(layers)).toEqual([{ f: ['b', { g: ['a', 'c'] }] }, 'd'])
+  })
+
+  it('carries what a picked folder holds inside it, once', () => {
+    const layers: LayerEntry[] = [group('f', [raster('a')]), raster('b')]
+    groupEntries(layers, new Set(['f', 'a', 'b']), group('g', []))
+    expect(shape(layers)).toEqual([{ g: [{ f: ['a'] }, 'b'] }])
+  })
+
+  it('refuses an empty pick and leaves the tree alone', () => {
+    const layers: LayerEntry[] = [raster('a')]
+    expect(groupEntries(layers, new Set(['missing']), group('g', []))).toBe(false)
+    expect(shape(layers)).toEqual(['a'])
   })
 })

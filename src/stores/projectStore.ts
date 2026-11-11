@@ -43,6 +43,7 @@ import { copyFace, dropFace } from '@shared/page/faces'
 import { numberPage } from '@shared/page/numbers'
 import {
   dissolveGroupAt,
+  groupEntries,
   insertAtPath,
   moveEntry,
   pathOf,
@@ -1230,6 +1231,15 @@ export const useProjectStore = defineStore('project', () => {
     return true
   }
 
+  /** See `groupEntries`; answers whether anything was gathered. */
+  function groupLayers(pageId: string, home: string | null, ids: ReadonlySet<string>, folder: GroupLayerEntry): boolean {
+    const file = pageById(pageId)
+    if (!file) return false
+    if (!groupEntries(homeTree(file.page, home), ids, folder)) return false
+    markPageDirty(pageId)
+    return true
+  }
+
   /**
    * Undoes a restack by putting an entry back at the path it left, which the
    * drop rules cannot express: their indices are read before the entry comes
@@ -1820,6 +1830,7 @@ export const useProjectStore = defineStore('project', () => {
     removeEntry,
     restoreEntry,
     moveLayer,
+    groupLayers,
     restoreLayerAt,
     addLayer,
     dissolveFolder,

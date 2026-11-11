@@ -314,6 +314,11 @@ useEventListener(window, 'keydown', (e) => {
       ? pixels.liftSelection()
       : merge.duplicateLayer({})
     void lift.catch((err: unknown) => console.error('duplicate failed', err))
+  } else if (key === 'g' && !e.shiftKey) {
+    // As Photoshop's: what is selected goes into a new folder, one per page.
+    e.preventDefault()
+    if (e.repeat) return
+    editor.cmdGroupSelection()
   }
 })
 

@@ -35,6 +35,7 @@ import {
 } from '@shared/page/units'
 import { escapeText } from '@shared/page/markup'
 import type { TranslationTextLayerEntry } from '@shared/page/types'
+import { nextAutoName } from '@/lib/autoName'
 import { folderAtPath, isLocked, pathOf, textObjects } from '@shared/page/tree'
 import { restackOrder, type Restack } from '@/lib/layerOrder'
 import { draftOf, everyEntry, snapshotTrees, textOnPage, treeOf } from '@shared/page/trees'
@@ -2118,14 +2119,8 @@ export const useEditorStore = defineStore('editor', () => {
     selectOnly(layer.id)
   }
 
-  function cmdAddFolder(pageId: string, name: string) {
-    const project = useProjectStore()
-    const home = layerHome()
-    if (home === null) {
-      useNoticeStore().say('原文模式就是 page 本身，page 不放資料夾')
-      return
-    }
-    const folder: GroupLayerEntry = {
+  function newFolder(name: string): GroupLayerEntry {
+    return {
       kind: 'group',
       id: generateLabelId(),
       name,
@@ -2136,6 +2131,16 @@ export const useEditorStore = defineStore('editor', () => {
       effects: [],
       children: [],
     }
+  }
+
+  function cmdAddFolder(pageId: string, name: string) {
+    const project = useProjectStore()
+    const home = layerHome()
+    if (home === null) {
+      useNoticeStore().say('原文模式就是 page 本身，page 不放資料夾')
+      return
+    }
+    const folder = newFolder(name)
     let path: number[] | undefined
     pushCommand({
       label: `add-folder ${folder.id}`,
@@ -2145,6 +2150,55 @@ export const useEditorStore = defineStore('editor', () => {
         path = removed?.path
       },
     })
+  }
+
+  /**
+   * Ctrl+G: the selection gathered into a new folder on each page it reaches,
+   * where the topmost of it stood. A selection spans pages and a folder cannot,
+   * so every page gets its own, all in one step.
+   */
+  function cmdGroupSelection() {
+    const project = useProjectStore()
+    const home = layerHome()
+    if (home === null) {
+      useNoticeStore().say('原文模式就是 page 本身，page 不放資料夾')
+      return
+    }
+    const byPage = new Map<string, Set<string>>()
+    let skipped = false
+    for (const id of selectedIds.value) {
+      const pageId = project.pageOfEntry(id)
+      const file = pageId === null ? undefined : project.pageById(pageId)
+      if (!file || pathOf(treeOf(file.page, textSide.value, project.activeFace), id) === null) continue
+      if (isLayerLocked(id)) {
+        skipped = true
+        continue
+      }
+      const ids = byPage.get(file.pageId) ?? new Set<string>()
+      ids.add(id)
+      byPage.set(file.pageId, ids)
+    }
+    if (skipped) useNoticeStore().say('鎖定的圖層沒有放進資料夾')
+    if (byPage.size === 0) return
+    const folders = new Map(
+      [...byPage.keys()].map((pageId) => {
+        const page = project.pageById(pageId)!.page
+        const taken = new Set(everyEntry(page).flatMap((e) => (e.kind === 'group' ? [e.name] : [])))
+        return [pageId, newFolder(nextAutoName(taken, '資料夾'))] as const
+      }),
+    )
+    const pages = [...byPage.keys()]
+    const done = cmdReshapePages(`group ${pages.length}`, pages, () => {
+      let changed = false
+      for (const [pageId, ids] of byPage) changed = project.groupLayers(pageId, home, ids, folders.get(pageId)!) || changed
+      return changed
+    })
+    if (!done) return
+    const here = currentPageId.value === null ? undefined : folders.get(currentPageId.value)
+    const lead = (here ?? folders.values().next().value!).id
+    selectedIds.value = new Set([...folders.values()].map((f) => f.id))
+    cursorId.value = lead
+    anchorId.value = lead
   }
 
   /**
@@ -3308,6 +3362,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdScaleLabel,
     cmdAddRasterLayer,
     cmdAddFolder,
+    cmdGroupSelection,
     cmdDissolveFolder,
     cmdMoveLayer,
     cmdRestack,

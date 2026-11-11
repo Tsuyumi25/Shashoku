@@ -2212,7 +2212,7 @@ describe('deleteSelection', () => {
         counters: emptyCounters(),
         ...treesOf([...p.layers, ...p.order.map(sourceFor)]),
       },
-      badge: 'ok' as const,
+      badge: 'ok',
     }))
     const editor = useEditorStore()
     editor.currentPageId = pages[0].name
@@ -2462,7 +2462,7 @@ describe('selectLayerBy', () => {
           counters: emptyCounters(),
           ...treesOf(layers),
         },
-        badge: 'ok' as const,
+        badge: 'ok',
       },
     ]
     const editor = useEditorStore()
@@ -2579,7 +2579,7 @@ describe('moveObjectsTo', () => {
         counters: emptyCounters(),
         ...treesOf([...p.layers, ...p.order.map(sourceFor)]),
       },
-      badge: 'ok' as const,
+      badge: 'ok',
     }))
     const editor = useEditorStore()
     editor.currentPageId = pages[0].name
@@ -4245,5 +4245,76 @@ describe('a page material two faces place differently', () => {
     editor.deleteSelection()
     expect(shape(faceTree(page(), FACE))).toEqual([{ sfx: ['boom'] }])
     expect(shape(faceTree(page(), OTHER))).toEqual(['bang'])
+  })
+})
+
+describe('Ctrl+G', () => {
+  const SECOND = 'p002.png'
+
+  function raster(id: string): RasterLayerEntry {
+    return { kind: 'raster', id, name: id, visible: true, locked: false, opacity: 1, blendMode: 'normal', effects: [], file: `${id}.png`, x: 0, y: 0, w: 10, h: 10, alphaLocked: false }
+  }
+
+  function pageWith(pageId: string, ids: string[]): ProjectFile {
+    return {
+      pageId,
+      pageDir: `/x/${pageId}`,
+      ocr: { schemaVersion: OCR_SCHEMA_VERSION, width: 1200, height: 1700, candidates: [] },
+      page: {
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        revision: 0,
+        name: pageId,
+        width: 1200,
+        height: 1700,
+        ledgers: { [FACE]: { units: [] } },
+        readingOrder: [],
+        readingEdges: [],
+        counters: emptyCounters(),
+        pageTree: [],
+        faceTrees: { [FACE]: ids.map(raster) },
+      },
+      badge: 'ok',
+    }
+  }
+
+  function open() {
+    const project = useProjectStore()
+    project.projectMeta.faces = [{ id: FACE, no: 1, name: '譯文' }]
+    project.projectMeta.activeFace = FACE
+    project.allFiles = [pageWith(PAGE, ['a', 'b', 'c']), pageWith(SECOND, ['x', 'y'])]
+    const editor = useEditorStore()
+    editor.currentPageId = PAGE
+    return { project, editor, tree: (pageId: string) => faceTree(project.pageById(pageId)!.page, FACE) }
+  }
+
+  const shape = (tree: readonly LayerEntry[]): unknown[] =>
+    tree.map((e) => (e.kind === 'group' ? ['group', shape(e.children)] : e.id))
+
+  it('makes one folder on each page the selection reaches, and one undo takes both back', () => {
+    const { editor, tree } = open()
+    editor.selectMany(['a', 'b', 'y'], false)
+
+    editor.cmdGroupSelection()
+
+    expect(shape(tree(PAGE))).toEqual([['group', ['a', 'b']], 'c'])
+    expect(shape(tree(SECOND))).toEqual(['x', ['group', ['y']]])
+    expect([...editor.selectedIds]).toEqual([
+      (tree(PAGE)[0] as GroupLayerEntry).id,
+      (tree(SECOND)[1] as GroupLayerEntry).id,
+    ])
+
+    editor.undo()
+    expect(shape(tree(PAGE))).toEqual(['a', 'b', 'c'])
+    expect(shape(tree(SECOND))).toEqual(['x', 'y'])
+  })
+
+  it('leaves a locked layer where it is', () => {
+    const { editor, tree } = open()
+    editor.cmdSetLayerLocked(PAGE, 'b', true)
+    editor.selectMany(['a', 'b'], false)
+
+    editor.cmdGroupSelection()
+
+    expect(shape(tree(PAGE))).toEqual([['group', ['a']], 'b', 'c'])
   })
 })
