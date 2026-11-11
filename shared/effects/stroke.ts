@@ -7,27 +7,37 @@ export function strokesOf(effects: readonly LayerEffect[]): StrokeEffect[] {
 }
 
 /**
- * The innermost stroke, the one that sits against the letters — which is the
- * one joining reads, since it is the band that would cross another's letters.
+ * The outermost stroke that shows — the last with a width and a colour with
+ * any alpha — and where it sits in the list. It is the band a neighbour's
+ * letters meet, so it is the one joining reads; the strokes inside it stay on
+ * their own letters wherever the object is stacked.
  */
-export function strokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
-  return strokesOf(effects)[0] ?? null
+export function outerStrokeOf(effects: readonly LayerEffect[]): { stroke: StrokeEffect; at: number } | null {
+  for (let at = effects.length - 1; at >= 0; at--) {
+    const e = effects[at]!
+    if (e.kind === 'stroke' && e.width > 0 && !/^#[0-9a-f]{6}00$/i.test(e.color)) return { stroke: e, at }
+  }
+  return null
 }
 
 /**
- * The stroke as it shows: one turned down to no width is held for its colour
- * and position, and draws as nothing — so anything counting looks counts it
- * with the objects that have none.
+ * The list with joining let go of or taken back, on every stroke at once. The
+ * outermost is the one read, and which stroke is outermost changes as they
+ * are reordered, added or turned down — so the choice is the object's, kept
+ * the same on all of them.
  */
-export function visibleStrokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
-  const stroke = strokeOf(effects)
-  return stroke && stroke.width > 0 ? stroke : null
+export function withJoins(effects: readonly LayerEffect[], joins: boolean): LayerEffect[] {
+  return effects.map((e) => {
+    if (e.kind !== 'stroke') return e
+    const { joins: _was, ...rest } = e
+    return joins ? rest : { ...rest, joins: false }
+  })
 }
 
 /**
- * For each text object, the ones under it whose letters its stroke stays off:
- * both carry a visible stroke of one colour and neither has let go of joining.
- * `ordered` is drawing order, bottom first.
+ * For each text object, the ones under it whose letters its outermost stroke
+ * stays off: both outermost strokes are of one colour and neither object has
+ * let go of joining. `ordered` is drawing order, bottom first.
  *
  * Widths and positions are not compared. A band over a band of its own colour
  * cannot be seen whatever their widths, so a band crossing a letter is all
@@ -40,8 +50,8 @@ export function joinedBelow<T extends { id: string }>(
   const byColor = new Map<string, T[]>()
   const out = new Map<string, T[]>()
   for (const item of ordered) {
-    const stroke = visibleStrokeOf(effectsOf(item))
-    if (stroke === null || stroke.joins === false) continue
+    const stroke = outerStrokeOf(effectsOf(item))?.stroke
+    if (stroke === undefined || stroke.joins === false) continue
     const color = stroke.color.toLowerCase()
     const below = byColor.get(color)
     if (below === undefined) {

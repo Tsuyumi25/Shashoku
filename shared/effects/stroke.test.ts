@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LayerEffect, StrokeEffect } from './types'
-import { joinedBelow, withStrokes } from './stroke'
+import { joinedBelow, withJoins, withStrokes } from './stroke'
 
 const STROKE: LayerEffect = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }
 
@@ -41,6 +41,30 @@ describe('joinedBelow', () => {
   it('leaves out an object whose stroke is turned down to nothing, since it has no band to keep apart', () => {
     const map = joined([item('a', white({ width: 0 })), item('b', white()), item('c', [])])
     expect(map.size).toBe(0)
+  })
+
+  it('compares the outermost stroke, the band a neighbour meets, whatever is inside it', () => {
+    const black = { ...STROKE, color: '#000000' }
+    const map = joined([item('a', [black, STROKE]), item('b', [{ ...STROKE, color: '#ff0000' }, STROKE])])
+    expect(ids(map, 'b')).toEqual(['a'])
+    expect(joined([item('a', [STROKE, black]), item('b', [black, STROKE])]).size).toBe(0)
+  })
+
+  it('reads past an outermost stroke that cannot be seen', () => {
+    const clear = { ...STROKE, color: '#ff000000' }
+    const map = joined([item('a', [STROKE, clear]), item('b', [STROKE, { ...STROKE, width: 0, color: '#ff0000' }])])
+    expect(ids(map, 'b')).toEqual(['a'])
+  })
+})
+
+describe('withJoins', () => {
+  it('lets go of joining on every stroke, so reordering cannot bring it back', () => {
+    const next = withJoins([STROKE, { ...STROKE, color: '#000000' }], false)
+    expect(next.every((e) => e.kind === 'stroke' && e.joins === false)).toBe(true)
+  })
+
+  it('takes joining back by leaving the flag off', () => {
+    expect(withJoins([{ ...STROKE, joins: false } as LayerEffect], true)).toEqual([STROKE])
   })
 })
 

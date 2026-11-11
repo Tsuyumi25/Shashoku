@@ -52,7 +52,7 @@ import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { withStrokes } from '@shared/effects/stroke'
+import { withJoins, withStrokes } from '@shared/effects/stroke'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -2929,6 +2929,24 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * Joining let go of or taken back on each object, over its own strokes — a
+   * selection that disagrees about its strokes still agrees to this, and one
+   * list written to them all would make their strokes the same too.
+   */
+  function cmdSetJoins(targets: readonly AppearanceTarget[], joins: boolean) {
+    endEffectsPreview()
+    if (targets.length === 0) return
+    const before = effectsOf(targets)
+    const after = before.map((entry) => ({ ...entry, effects: withJoins(entry.effects, joins) }))
+    if (JSON.stringify(before) === JSON.stringify(after)) return
+    pushCommand({
+      label: `joins ${targets.length}`,
+      do: () => writeEffects(after),
+      undo: () => writeEffects(before),
+    })
+  }
+
+  /**
    * A saved look given in one act. Its style and its effects land together and
    * leave together: an undo that took back the font and kept the stroke would
    * leave a look nobody saved. Whatever was being tried is put back first, so
@@ -3391,6 +3409,7 @@ export const useEditorStore = defineStore('editor', () => {
     previewStyle,
     endStylePreview,
     cmdApplyEffects,
+    cmdSetJoins,
     cmdApplyLook,
     previewEffects,
     endEffectsPreview,

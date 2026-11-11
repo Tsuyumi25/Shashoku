@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DrawnLabel } from '@/lib/labelRaster'
-import { joinedPixels } from './joinedStroke'
+import { joinedPixels, withoutOuterBand } from './joinedStroke'
 
 class StubImageData {
   constructor(
@@ -105,5 +105,19 @@ describe('joinedPixels', () => {
   it('draws as it is when nothing under it reaches it', () => {
     const under = label(10, 0, 2, 1, () => INK)
     expect(joinedPixels(own, ownLetters, 'outside', [under])).toBeNull()
+  })
+})
+
+describe('withoutOuterBand', () => {
+  const black = { kind: 'stroke', width: 4, color: '#000000', position: 'outside' } as const
+  const white = { kind: 'stroke', width: 5, color: '#ffffff', position: 'center' } as const
+
+  it('takes off only the outermost band that shows, keeping the ones on its own letters', () => {
+    const clear = { ...white, color: '#ffffff00' }
+    expect(withoutOuterBand([black, white, clear])).toEqual([
+      black,
+      { ...white, color: '#00000000', position: 'outside' },
+      clear,
+    ])
   })
 })

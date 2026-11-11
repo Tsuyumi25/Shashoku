@@ -1,12 +1,13 @@
 <template>
   <div class="col-span-2 flex min-w-0 flex-col">
-    <div class="flex h-6 items-center justify-between">
-      <span class="text-muted-foreground">{{ title ?? '描邊' }}</span>
+    <div class="flex h-6 items-center gap-1">
+      <span class="mr-auto text-muted-foreground">{{ title ?? '描邊' }}</span>
+      <StrokeJoinOptions v-if="joins !== undefined" :state="joins" @change="(on) => emit('joins', on)" />
       <button
         v-if="!mixed"
         type="button"
         class="h-6 rounded border border-input px-1.5 text-muted-foreground hover:border-primary hover:text-foreground"
-        @click="emit('patch', withStrokes(effects, [...strokes, { ...DEFAULT_STROKE }]))"
+        @click="add"
       >
         + 新增
       </button>
@@ -46,17 +47,7 @@
           @input="(color) => emit('preview', withStrokes(effects, listWith(index, { ...row, color })))"
           @update:model-value="(color) => put(index, { ...row, color })"
           @clear="put(index, null)"
-        >
-          <label v-if="joinable && index === 0" class="join-toggle">
-            <input
-              type="checkbox"
-              :checked="row.joins !== false"
-              :indeterminate="mixed"
-              @change="onJoins(row, ($event.target as HTMLInputElement).checked)"
-            />
-            同色描邊不壓到彼此的字
-          </label>
-        </ColorField>
+        />
         <NumberStepper
           :model-value="mixed ? null : row.width"
           label="描邊寬度"
@@ -88,6 +79,7 @@ import { computed, ref, useTemplateRef } from 'vue'
 import { GripVertical, X } from '@lucide/vue'
 import ColorField from '@/components/ColorField.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
+import StrokeJoinOptions, { type JoinState } from '@/components/appearance/StrokeJoinOptions.vue'
 import type { LayerEffect, StrokeEffect, StrokePosition } from '@shared/effects/types'
 import { DEFAULT_STROKE } from '@shared/effects/types'
 import { strokesOf, withStrokes } from '@shared/effects/stroke'
@@ -119,8 +111,11 @@ const props = defineProps<{
   effects: readonly LayerEffect[]
   /** Whether the selection disagrees about them. */
   mixed?: boolean
-  /** Whether the selection is text, which is the only kind whose stroke joins others of its colour. */
-  joinable?: boolean
+  /**
+   * Whether the outermost strokes join others of their colour, for text, which
+   * is the only kind that joins; absent offers no such control.
+   */
+  joins?: JoinState
   /** The heading; 描邊 when absent. */
   title?: string
 }>()
@@ -134,6 +129,8 @@ const emit = defineEmits<{
   /** A step of a gesture still under way; nothing for history yet. */
   preview: [effects: LayerEffect[]]
   patch: [effects: LayerEffect[]]
+  /** Joining let go of or taken back, on each object over its own strokes. */
+  joins: [on: boolean]
 }>()
 
 const POSITION_LABELS: Record<StrokePosition, string> = {
@@ -173,9 +170,11 @@ function onPosition(index: number, row: StrokeEffect, e: Event) {
   put(index, { ...row, position: v })
 }
 
-function onJoins(row: StrokeEffect, joins: boolean) {
-  const { joins: _was, ...rest } = row
-  put(0, joins ? rest : { ...rest, joins: false })
+/** A new outermost stroke, joining as the object's strokes already do. */
+function add() {
+  const off = strokes.value.some((stroke) => stroke.joins === false)
+  const added: StrokeEffect = off ? { ...DEFAULT_STROKE, joins: false } : { ...DEFAULT_STROKE }
+  emit('patch', withStrokes(props.effects, [...strokes.value, added]))
 }
 
 const list = useTemplateRef<HTMLElement>('list')
@@ -267,11 +266,5 @@ function endDrag() {
   margin-top: -1px;
   background: var(--primary);
   pointer-events: none;
-}
-.join-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
 }
 </style>

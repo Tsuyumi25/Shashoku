@@ -1,9 +1,9 @@
 import type { LayerEffect } from '@shared/effects/types'
-import { strokeOf } from '@shared/effects/stroke'
+import { outerStrokeOf } from '@shared/effects/stroke'
 import type { TextLayerEntry } from '@shared/page/types'
 import { shownCodeOf } from '@shared/page/units'
 import { previewedStyle } from '@/composables/useFontPicker'
-import { lettersOnly, withJoinedBands } from '@/lib/joinedStroke'
+import { withJoinedBands, withoutOuterBand } from '@/lib/joinedStroke'
 import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { sourceLook } from '@/lib/sourceLook'
 import { useEditorStore } from '@/stores/editorStore'
@@ -54,10 +54,10 @@ export function useCanvasLabel(): CanvasLabels {
     return editor.textSide === 'source' ? sourceLook(style) : { style, effects: entry.effects }
   }
 
-  function drawn(entry: TextLayerEntry, lettersAlone: boolean): DrawnLabel {
+  function drawn(entry: TextLayerEntry, outerBandOff: boolean): DrawnLabel {
     const { style, effects } = lookOf(entry)
     const body = entry.body
-    const used = lettersAlone ? lettersOnly(effects) : effects
+    const used = outerBandOff ? withoutOuterBand(effects) : effects
     return drawnLabel(codeShown(entry), style, used, { x: body.x, y: body.y }, body.rotation, flipOf(body))
   }
 
@@ -72,7 +72,7 @@ export function useCanvasLabel(): CanvasLabels {
     effectsOf: (entry) => lookOf(entry).effects,
     labelOf: (entry) => drawn(entry, false),
     joinedOf: (entry, under) => {
-      const position = strokeOf(lookOf(entry).effects)?.position
+      const position = outerStrokeOf(lookOf(entry).effects)?.stroke.position
       if (!position) return null
       const own = drawn(entry, false)
       if (!own.sample) return null

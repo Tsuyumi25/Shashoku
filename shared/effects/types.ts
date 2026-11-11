@@ -25,12 +25,13 @@ export interface StrokeEffect {
   position: StrokePosition
 
   /**
-   * Absent: this text object's stroke is not drawn over the letters of the
-   * text objects under it that carry a stroke of the same colour, and theirs
-   * stays off its letters too. Two bands of one colour overlapping cannot be
-   * told apart, so a band crossing a letter is the only way the two can be
-   * seen to fight. `false` lets them, for the depth an overlap is sometimes
-   * meant to show.
+   * Absent: this text object's outermost stroke is not drawn over the text
+   * objects under it whose outermost stroke is of the same colour, and theirs
+   * stays off it too. Two bands of one colour overlapping cannot be told
+   * apart, so a band crossing a letter is the only way the two can be seen to
+   * fight. `false` lets them, for the depth an overlap is sometimes meant to
+   * show. Set on every stroke of the object alike, since which one is
+   * outermost moves as they are edited.
    */
   joins?: false
 }

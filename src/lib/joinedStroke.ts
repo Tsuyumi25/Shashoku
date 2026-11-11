@@ -1,20 +1,24 @@
+import { outerStrokeOf } from '@shared/effects/stroke'
 import type { LayerEffect, StrokePosition } from '@shared/effects/types'
 import type { DrawnLabel } from '@/lib/labelRaster'
 
 /**
- * The effects that draw a text object's letters alone, at exactly the place
- * its stroked bitmap lands.
+ * The effects that draw a text object without its outermost band — the one a
+ * joined neighbour's letters keep it off — at exactly the place its whole
+ * bitmap lands. The strokes inside that band stay: they are on the object's
+ * own letters, and stay over a neighbour's wherever the object is stacked.
  *
- * The strokes are kept at their widths and made transparent rather than
- * dropped: the margin the bitmap is drawn with follows the widths, and with it
- * the frame and the phase — so a bitmap without them would sit a fraction off
- * the one with them. Moved outside so that nothing is eroded: an inside band
- * is drawn over the object's own letters, and those letters still cover what
- * is under them.
+ * The band is kept at its width and made transparent rather than dropped: the
+ * margin the bitmap is drawn with follows the widths, and with it the frame
+ * and the phase — so a bitmap without it would sit a fraction off the one with
+ * it. Moved outside so that nothing is eroded: an inside band is drawn over
+ * what is inside it, and that still covers what is under the object.
  */
-export function lettersOnly(effects: readonly LayerEffect[]): LayerEffect[] {
-  return effects.map((e) =>
-    e.kind === 'stroke' ? { ...e, color: '#00000000', position: 'outside' as const } : e,
+export function withoutOuterBand(effects: readonly LayerEffect[]): LayerEffect[] {
+  const outer = outerStrokeOf(effects)
+  if (outer === null) return [...effects]
+  return effects.map((e, i) =>
+    i === outer.at && e.kind === 'stroke' ? { ...e, color: '#00000000', position: 'outside' as const } : e,
   )
 }
 
@@ -30,23 +34,25 @@ function cornerOf(label: DrawnLabel): { x: number; y: number; w: number; h: numb
 }
 
 /**
- * A text object's bitmap with its band kept off the letters of the objects
- * under it it joins, or null when it draws as it is.
+ * A text object's bitmap with its outermost band kept off what is solid in the
+ * objects under it it joins, or null when it draws as it is.
  *
  * Changed in its own copy rather than drawn under the others: what lies between
  * the two in the stack stays where the tree put it, because the only thing that
  * changes is how far this one's band reaches.
  *
- * Wherever an object under it is solid — its letters, or its band of this same
- * colour — the bitmap is swapped for this object as it looks inside its own
- * letters, and left alone everywhere else. Solid and nothing else, because a
- * coverage is not a transparency: erasing by the alpha of an antialiased edge
- * takes the band off the half of the pixel the letter does not cover too, and
- * the band's colour shows as a fringe along every letter it meets. Under a solid
- * pixel of the same colour, a band laid or not is the same picture, so the swap
- * has no edge to show.
+ * Wherever an object under it is solid — its letters, the strokes inside its
+ * band, or its band of this same colour — the bitmap is swapped for this
+ * object as it looks without its outermost band (`withoutOuterBand`), and left
+ * alone everywhere else. Solid and nothing else, because a coverage is not a
+ * transparency: erasing by the alpha of an antialiased edge takes the band off
+ * the half of the pixel the letter does not cover too, and the band's colour
+ * shows as a fringe along every letter it meets. Under a solid pixel of the
+ * same colour, a band laid or not is the same picture, so the swap has no edge
+ * to show.
  *
- * `under` is the objects as drawn, band and all.
+ * `ownLetters` is this object drawn without its outermost band, `position`
+ * that band's, and `under` the objects as drawn, band and all.
  */
 export function joinedPixels(
   own: DrawnLabel,
@@ -84,9 +90,9 @@ export function joinedPixels(
   }
   if (!any) return null
 
-  // Inside its letters, an outside band is not there at all and a centred one
-  // is: the letters alone are the first, the bitmap cut to the letters the
-  // second.
+  // Where it is taken off, an outside band is not there at all and a centred
+  // one is over what it lies on: the bitmap without the band is the first,
+  // the bitmap cut to that the second.
   const src = own.sample.image.data
   const letters = ownLetters.sample.image.data
   const lw = self.w

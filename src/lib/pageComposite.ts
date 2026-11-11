@@ -1,6 +1,6 @@
 import type { ManifestJson, RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import type { LayerEffect } from '@shared/effects/types'
-import { joinedBelow, strokeOf } from '@shared/effects/stroke'
+import { joinedBelow, outerStrokeOf } from '@shared/effects/stroke'
 import {
   pageStack,
   stackedTextNodes,
@@ -13,7 +13,7 @@ import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
 import { drawnLabel, paintLabel } from '@/lib/labelRaster'
 import { flipOf } from '@/lib/flip'
-import { lettersOnly, withJoinedBands } from '@/lib/joinedStroke'
+import { withJoinedBands, withoutOuterBand } from '@/lib/joinedStroke'
 import { layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { StrokeOverlay } from '@/stores/strokeOverlayStore'
@@ -149,13 +149,13 @@ function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
     if (!drawn.sample) throw new CompositeError(`字型目錄尚未就緒，無法匯出標籤「${drawn.plain}」`)
 
     const under = joined.get(label.id)
-    const position = strokeOf(label.effects)?.position
+    const position = outerStrokeOf(label.effects)?.stroke.position
     const picture =
       (under &&
         position &&
         withJoinedBands(
           drawn,
-          labelOf(label, lettersOnly(label.effects)),
+          labelOf(label, withoutOuterBand(label.effects)),
           position,
           under.map((entry) => labelOf(entry, entry.effects)),
         )) ??
