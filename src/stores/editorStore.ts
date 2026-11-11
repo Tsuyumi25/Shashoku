@@ -1967,14 +1967,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (ids.length === 0) return
 
     const shift = (by: { x: number; y: number }) => {
-      for (const id of ids) {
-        const entry = project.entryById(id)
-        if (entry?.kind === 'text') {
-          project.moveLabel(page, id, entry.body.x + by.x, entry.body.y + by.y)
-        } else if (entry?.kind === 'raster' && entry.w > 0) {
-          project.placeLayer(page, id, { ...entry, x: entry.x + by.x, y: entry.y + by.y })
-        }
-      }
+      for (const id of ids) shiftEntry(page, id, by)
     }
 
     const key = `${page}|${ids.join(',')}`
@@ -1995,6 +1988,41 @@ export const useEditorStore = defineStore('editor', () => {
     }
     if (!pushCommand(cmd)) return
     lastNudge = { key, cmd, total }
+  }
+
+  /** One object moved by `by`, text by any amount and a raster by whole pixels it already has. */
+  function shiftEntry(page: string, id: string, by: { x: number; y: number }) {
+    const project = useProjectStore()
+    const entry = project.entryById(id)
+    if (entry?.kind === 'text') {
+      project.moveLabel(page, id, entry.body.x + by.x, entry.body.y + by.y)
+    } else if (entry?.kind === 'raster' && entry.w > 0) {
+      project.placeLayer(page, id, { ...entry, x: entry.x + by.x, y: entry.y + by.y })
+    }
+  }
+
+  /**
+   * Each object moved by its own amount, in one step — what aligning several
+   * objects to one selection asks, since each travels from where it is. A
+   * raster's amount is rounded, because a layer lands on the page grid.
+   * Locked objects and ones on another page stay where they are.
+   */
+  function cmdShiftObjects(page: string, moves: readonly { id: string; x: number; y: number }[], label: string) {
+    const project = useProjectStore()
+    const kept = moves
+      .filter((m) => !isLayerLocked(m.id) && project.pageOfEntry(m.id) === page)
+      .map((m) => {
+        const raster = project.entryById(m.id)?.kind === 'raster'
+        return raster ? { ...m, x: Math.round(m.x), y: Math.round(m.y) } : m
+      })
+      .filter((m) => m.x !== 0 || m.y !== 0)
+    if (kept.length === 0) return
+    pushCommand({
+      label: `${label} ${kept.length}`,
+      detail: { moves: kept },
+      do: () => kept.forEach((m) => shiftEntry(page, m.id, m)),
+      undo: () => kept.forEach((m) => shiftEntry(page, m.id, { x: -m.x, y: -m.y })),
+    })
   }
 
   /**
@@ -3376,6 +3404,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdMoveLabel,
     cmdPlaceObjects,
     cmdNudge,
+    cmdShiftObjects,
     cmdRotateLabel,
     cmdScaleLabel,
     cmdAddRasterLayer,

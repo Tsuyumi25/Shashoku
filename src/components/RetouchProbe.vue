@@ -107,6 +107,18 @@
         選區 +{{ px }}px
       </button>
       <button
+        v-for="choice in ALIGN_CHOICES"
+        :key="choice.axes"
+        type="button"
+        class="route-btn"
+        :disabled="!aligner.ready.value"
+        :title="choice.title"
+        @click="aligner.align(choice.axes)"
+      >
+        <component :is="choice.icon" :size="12" />
+        <span>{{ choice.text }}</span>
+      </button>
+      <button
         type="button"
         class="route-btn"
         :disabled="!inpaint.canEraseSelection.value"
@@ -265,8 +277,17 @@
 <script setup lang="ts">
 import { everyEntry } from '@shared/page/trees'
 import { computed, ref } from 'vue'
-import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
+import {
+  AlignHorizontalJustifyCenter,
+  AlignVerticalJustifyCenter,
+  LoaderCircle,
+  ScanText,
+  SquareDashed,
+  SquareDot,
+  Trash2,
+} from '@lucide/vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
+import { useAlignToSelection } from '@/composables/useAlignToSelection'
 import { useInpaint } from '@/composables/useInpaint'
 import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { isEmptyRect } from '@/lib/selection/rect'
@@ -280,9 +301,17 @@ import { useSelectionStore } from '@/stores/selectionStore'
 /** Five is the amount the notes settled on; one is for the edge that is nearly there. */
 const GROW_STEPS = [1, 5] as const
 
+/** Photoshop's two centre buttons, and the pair pressed together. */
+const ALIGN_CHOICES = [
+  { axes: 'x', text: '水平置中', icon: AlignHorizontalJustifyCenter, title: '把選中的物件左右移到選區的中間，上下不動；每個物件各自對齊' },
+  { axes: 'y', text: '垂直置中', icon: AlignVerticalJustifyCenter, title: '把選中的物件上下移到選區的中間，左右不動；每個物件各自對齊' },
+  { axes: 'both', text: '置中', icon: SquareDot, title: '把選中的物件移到選區的正中間；對齊的是看得到的字和像素，不是文字框' },
+] as const
+
 const editor = useEditorStore()
 const selection = useSelectionStore()
 const inpaint = useInpaint()
+const aligner = useAlignToSelection()
 const removal = useRemoveStrokes()
 const project = useProjectStore()
 const ocr = useOcrStore()

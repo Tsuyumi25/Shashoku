@@ -1402,6 +1402,31 @@ describe('layer tree edits', () => {
     expect(orderOf(project)).toEqual(['a', 'b', 'c'])
   })
 
+  it('moves each object by its own amount in one step, a raster by whole pixels, and puts them all back', () => {
+    const locked = { ...label('c'), locked: true }
+    const { project, editor } = openTree([label('a'), raster('r'), locked], ['a', 'c'])
+    const at = (id: string) => {
+      const entry = project.entryById(id)!
+      return entry.kind === 'raster' ? [entry.x, entry.y] : entry.kind === 'text' ? [entry.body.x, entry.body.y] : []
+    }
+    const [ax, ay] = at('a')
+    const [cx, cy] = at('c')
+
+    editor.cmdShiftObjects(PAGE, [
+      { id: 'a', x: 2.5, y: -1.25 },
+      { id: 'r', x: 2.5, y: 0.4 },
+      { id: 'c', x: 9, y: 9 },
+    ], 'align')
+
+    expect(at('a')).toEqual([ax! + 2.5, ay! - 1.25])
+    expect(at('r')).toEqual([3, 0])
+    expect(at('c')).toEqual([cx, cy])
+
+    editor.undo()
+    expect(at('a')).toEqual([ax, ay])
+    expect(at('r')).toEqual([0, 0])
+  })
+
   it('sends the selection to the top of its folder and takes it back in one step', () => {
     const { project, editor } = openTree([label('a'), label('b'), label('c')], ['a', 'b', 'c'])
     const depth = editor.canUndo
