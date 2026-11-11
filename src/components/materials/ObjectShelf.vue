@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onBeforeUnmount, ref, shallowRef, useTemplateRef, watchEffect } from 'vue'
 import { useElementSize, useEventListener } from '@vueuse/core'
-import { strokeOf } from '@shared/effects/stroke'
+import { strokesOf } from '@shared/effects/stroke'
 import type { StrokeEffect } from '@shared/effects/types'
 import { plainOf } from '@shared/page/markup'
 import type { TextLayerEntry } from '@shared/page/types'
@@ -526,12 +526,12 @@ function planFor(x: number, y: number, held: Carried): Plan {
   return { kind: 'create', targets: [] }
 }
 
-/** The font, the colour and the stroke the piece under the hand is lending. */
-function lentLook(held: Carried): { patch: Partial<TextStyle>; stroke: StrokeEffect | null } | null {
+/** The font, the colour and the strokes the piece under the hand is lending. */
+function lentLook(held: Carried): { patch: Partial<TextStyle>; strokes: StrokeEffect[] } | null {
   const lead = pieces.value.find((p) => p.id === held.lead)
   if (!lead) return null
   const { fontFamily, fontFace, fontStyleName, color } = lead.style
-  return { patch: { fontFamily, fontFace, fontStyleName, color }, stroke: strokeOf(lead.effects) }
+  return { patch: { fontFamily, fontFace, fontStyleName, color }, strokes: strokesOf(lead.effects) }
 }
 
 const planKey = (p: Plan) => `${p.kind}|${p.targets.map((t) => t.entry.id).join(',')}`
@@ -558,7 +558,7 @@ function showPlan(held: Carried, x: number, y: number) {
     trialFrame = rect && next.over !== undefined ? { id: next.over, rect } : null
   }
   editor.previewStyle(next.targets, look.patch)
-  editor.previewStroke(next.targets, look.stroke)
+  editor.previewStrokes(next.targets, look.strokes)
 }
 
 function endPreview() {
@@ -629,7 +629,7 @@ useEventListener(window, 'pointerup', (e: PointerEvent) => {
   trialFrame = null
   frozen.value = null
   if (landing.kind === 'style' && look !== null) {
-    editor.cmdApplyLentLook(landing.targets, look.patch, look.stroke)
+    editor.cmdApplyLentLook(landing.targets, look.patch, look.strokes)
     return
   }
   endPreview()

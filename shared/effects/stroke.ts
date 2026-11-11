@@ -1,14 +1,17 @@
 import type { EngineStrokeSpec } from '../engine/types'
 import type { LayerEffect, StrokeEffect } from './types'
 
+/** The strokes, innermost first: each is grown from the edge of the ones before it. */
+export function strokesOf(effects: readonly LayerEffect[]): StrokeEffect[] {
+  return effects.filter((e): e is StrokeEffect => e.kind === 'stroke')
+}
+
 /**
- * At most one per node. A second stroke would have nowhere to sit that the
- * first does not already occupy, and the interface offers no order to put them
- * in — so the list holds one and the rest of the array is for effects that are
- * not strokes.
+ * The innermost stroke, the one that sits against the letters — which is the
+ * one joining reads, since it is the band that would cross another's letters.
  */
 export function strokeOf(effects: readonly LayerEffect[]): StrokeEffect | null {
-  return effects.find((e) => e.kind === 'stroke') ?? null
+  return strokesOf(effects)[0] ?? null
 }
 
 /**
@@ -57,18 +60,16 @@ function specOf(stroke: StrokeEffect): EngineStrokeSpec {
 
 /** Every stroke, in the order they are applied. */
 export function engineStrokesFor(effects: readonly LayerEffect[]): EngineStrokeSpec[] {
-  return effects.filter((e) => e.kind === 'stroke').map(specOf)
+  return strokesOf(effects).map(specOf)
 }
 
 /**
- * The list with its stroke replaced, or taken out. Everything that is not a
- * stroke keeps its place, so turning the stroke off cannot quietly drop a
- * neighbour.
+ * The list with its strokes replaced. Everything that is not a stroke keeps
+ * its place, so taking the strokes off cannot quietly drop a neighbour.
  */
-export function withStroke(
+export function withStrokes(
   effects: readonly LayerEffect[],
-  stroke: StrokeEffect | null,
+  strokes: readonly StrokeEffect[],
 ): LayerEffect[] {
-  const others = effects.filter((e) => e.kind !== 'stroke')
-  return stroke === null ? others : [stroke, ...others]
+  return [...strokes, ...effects.filter((e) => e.kind !== 'stroke')]
 }

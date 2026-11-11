@@ -3,12 +3,14 @@
     <PopoverRoot v-model:open="open">
       <PopoverTrigger
         class="color-swatch"
+        :class="mixed && 'is-mixed'"
         :style="{ '--swatch': mixed ? 'transparent' : modelValue }"
-        :title="label"
+        :title="mixed ? `${label}：${MIXED_TEXT}` : label"
+        :aria-label="label"
       />
       <PopoverPortal>
         <PopoverContent class="color-popover" side="bottom" align="start" :side-offset="6">
-          <hex-color-picker
+          <hex-alpha-color-picker
             class="color-picker"
             :color="picking"
             @color-changed="onPicked"
@@ -49,18 +51,6 @@
         </PopoverContent>
       </PopoverPortal>
     </PopoverRoot>
-    <input
-      class="color-hex"
-      type="text"
-      maxlength="7"
-      spellcheck="false"
-      autocomplete="off"
-      :aria-label="label"
-      :placeholder="mixed ? MIXED_TEXT : undefined"
-      :value="mixed ? '' : modelValue"
-      @change="onOuterHex"
-      @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
-    />
   </span>
 </template>
 
@@ -69,13 +59,14 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useClipboard, useEventListener } from '@vueuse/core'
 import { Check, Copy, X } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
-import 'vanilla-colorful/hex-color-picker.js'
+import 'vanilla-colorful/hex-alpha-color-picker.js'
 import { MIXED_TEXT } from '@/lib/appearanceText'
+import { normalHex } from '@/lib/color'
 
 /**
- * A swatch that opens a picker, beside the hex it stands for. Every step of a
- * drag goes out as `input` so the page follows it live; letting go settles it
- * as `update:modelValue`, so one drag is one undo.
+ * A swatch that opens a picker; the hex it stands for lives in the picker.
+ * Every step of a drag goes out as `input` so the page follows it live;
+ * letting go settles it as `update:modelValue`, so one drag is one undo.
  */
 const props = defineProps<{
   modelValue: string
@@ -145,18 +136,18 @@ function clear() {
 }
 
 function write(hex: string) {
-  const changed = moving || props.mixed || hex !== props.modelValue.toLowerCase()
+  const changed = moving || props.mixed || hex !== (normalHex(props.modelValue) ?? props.modelValue)
   moving = false
   if (changed) emit('update:modelValue', hex)
   else show(props.modelValue)
 }
 
 function commit() {
-  write(picking.value.toLowerCase())
+  write(normalHex(picking.value) ?? picking.value.toLowerCase())
 }
 
 function commitHex() {
-  const hex = parseHex(hexText.value)
+  const hex = normalHex(hexText.value)
   if (hex) write(hex)
   else show(props.modelValue)
 }
@@ -167,33 +158,23 @@ function commitRgb() {
   else show(props.modelValue)
 }
 
-function onOuterHex(e: Event) {
-  const input = e.target as HTMLInputElement
-  const hex = parseHex(input.value)
-  if (hex) write(hex)
-  else input.value = props.mixed ? '' : props.modelValue
-}
-
-function parseHex(raw: string): string | null {
-  const text = raw.trim().replace(/^#?/, '#').toLowerCase()
-  if (/^#[0-9a-f]{6}$/.test(text)) return text
-  if (/^#[0-9a-f]{3}$/.test(text)) return `#${[...text.slice(1)].map((c) => c + c).join('')}`
-  return null
-}
-
+/** `rgb(r, g, b)`, or `rgba(r, g, b, a)` with the alpha as a fraction, as CSS writes it. */
 function parseRgb(raw: string): string | null {
-  const parts = raw.match(/\d+(\.\d+)?/g)
-  if (!parts || parts.length !== 3) return null
-  const channels = parts.map(Number)
-  if (channels.some((c) => c > 255)) return null
-  return `#${channels.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('')}`
+  const parts = raw.match(/\d*\.?\d+/g)
+  if (!parts || (parts.length !== 3 && parts.length !== 4)) return null
+  const [r, g, b, a = 1] = parts.map(Number)
+  if ([r, g, b].some((c) => c! > 255) || a > 1) return null
+  const bytes = [r!, g!, b!, a * 255].map((c) => Math.round(c).toString(16).padStart(2, '0'))
+  return normalHex(bytes.join(''))
 }
 
-function rgbOf(hex: string): string {
-  const parsed = parseHex(hex)
-  if (!parsed) return ''
-  const n = Number.parseInt(parsed.slice(1), 16)
-  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+function rgbOf(color: string): string {
+  const hex = normalHex(color)
+  if (!hex) return ''
+  const [r, g, b] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16))
+  if (hex.length === 7) return `rgb(${r}, ${g}, ${b})`
+  const a = Math.round(Number.parseInt(hex.slice(7), 16) / 2.55) / 100
+  return `rgba(${r}, ${g}, ${b}, ${a})`
 }
 </script>
 
@@ -217,18 +198,11 @@ function rgbOf(hex: string): string {
 .color-swatch[data-state='open'] {
   border-color: var(--muted-foreground);
 }
-.color-hex {
-  width: 5.5rem;
-  height: 1.5rem;
-  padding: 0 0.375rem;
-  border: 1px solid var(--input);
-  border-radius: 0.25rem;
-  background: var(--background);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  outline: none;
-}
-.color-hex:focus-visible {
-  border-color: var(--ring);
+/* No single colour: a slash across the swatch, distinct from a transparent one. */
+.color-swatch.is-mixed {
+  background:
+    linear-gradient(to top right, transparent 46%, var(--muted-foreground) 46% 54%, transparent 54%),
+    repeating-conic-gradient(#ffffff 0 25%, #cccccc 0 50%) 0 0 / 0.5rem 0.5rem;
 }
 </style>
 

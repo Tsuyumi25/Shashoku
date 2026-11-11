@@ -1,5 +1,5 @@
 import type { LayerEffect } from '@shared/effects/types'
-import { visibleStrokeOf } from '@shared/effects/stroke'
+import { strokesOf } from '@shared/effects/stroke'
 import { tagsInRegistryOrder } from '@shared/tags/set'
 import type { TagRegistry } from '@shared/tags/types'
 import type { TextStyle } from '@shared/text-style/types'
@@ -103,13 +103,10 @@ export function valueOf(object: ShelfObject, attribute: Exclude<ShelfAttribute, 
       return { key: `${s.fontFamily}|${s.fontStyleName}`, label: named ? `${family} ${s.fontStyleName}` : family }
     }
     case 'stroke': {
-      const stroke = visibleStrokeOf(object.effects)
-      if (!stroke) return { key: 'none', label: '無描邊' }
-      return {
-        key: `${stroke.color}|${stroke.width}`,
-        label: `${stroke.color} ${stroke.width}px`,
-        swatch: stroke.color,
-      }
+      const strokes = strokesOf(object.effects).filter((stroke) => stroke.width > 0)
+      if (strokes.length === 0) return { key: 'none', label: '無描邊' }
+      const each = strokes.map((stroke) => `${stroke.color} ${stroke.width}px`)
+      return { key: each.join('|'), label: each.join(' + '), swatch: strokes[0]!.color }
     }
     case 'size': {
       const band = Math.floor(Math.log(s.fontSizePx) / Math.log(1.1))

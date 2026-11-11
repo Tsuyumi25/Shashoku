@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LayerEffect, StrokeEffect } from './types'
-import { joinedBelow, strokeOf, withStroke } from './stroke'
+import { joinedBelow, withStrokes } from './stroke'
 
 const STROKE: LayerEffect = { kind: 'stroke', width: 3, color: '#ffffff', position: 'outside' }
 
@@ -44,17 +44,14 @@ describe('joinedBelow', () => {
   })
 })
 
-describe('withStroke', () => {
-  it('replaces the stroke that was there rather than adding a second', () => {
-    const next = withStroke([STROKE], { ...STROKE, width: 8 })
-    expect(next).toEqual([{ ...STROKE, width: 8 }])
+describe('withStrokes', () => {
+  it('replaces the strokes that were there with the ones given, in their order', () => {
+    const inner = { ...STROKE, width: 8 }
+    const outer = { ...STROKE, color: '#000000' }
+    expect(withStrokes([STROKE, STROKE], [inner, outer])).toEqual([inner, outer])
   })
 
-  it('leaves the list without one when the stroke is taken off', () => {
-    expect(withStroke([STROKE], null)).toEqual([])
-  })
-
-  it('reads back what it wrote', () => {
-    expect(strokeOf(withStroke([], STROKE))).toEqual(STROKE)
+  it('leaves the list without any when the strokes are taken off', () => {
+    expect(withStrokes([STROKE, STROKE], [])).toEqual([])
   })
 })

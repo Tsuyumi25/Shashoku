@@ -4,9 +4,12 @@
     :effects="representativeEffects"
     :mixed="effectsMixed"
     :joinable="joinable"
+    :title="title"
     @preview="(effects) => editor.previewEffects(targets, effects)"
     @patch="onEffects"
-  />
+  >
+    <template v-if="$slots.lead" #lead><slot name="lead" /></template>
+  </StrokeEditor>
 </template>
 
 <script setup lang="ts">
@@ -21,7 +24,12 @@ import { useEditorStore } from '@/stores/editorStore'
  * What a selection carries on top of itself. Text and raster layers carry the
  * same effects, so one tab answers for both.
  */
-const props = defineProps<{ targets: readonly AppearanceTarget[] }>()
+const props = defineProps<{ targets: readonly AppearanceTarget[]; title?: string }>()
+
+defineSlots<{
+  /** Passed through to the strokes: a pinned row above them. */
+  lead?: () => unknown
+}>()
 
 const editor = useEditorStore()
 

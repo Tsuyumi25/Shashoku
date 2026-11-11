@@ -2084,7 +2084,7 @@ describe('layer tree edits', () => {
       const editor = twoLabels()
       const sizeBefore = textOf('a').body.style.fontSizePx
 
-      editor.cmdApplyLentLook(held(), { color: '#ff0000', fontFamily: 'Lent Sans', fontStyleName: 'Bold' }, WHITE)
+      editor.cmdApplyLentLook(held(), { color: '#ff0000', fontFamily: 'Lent Sans', fontStyleName: 'Bold' }, [WHITE])
 
       for (const id of ['a', 'b']) {
         expect(textOf(id).effects).toEqual([WHITE])
@@ -2096,7 +2096,7 @@ describe('layer tree edits', () => {
     it('takes the stroke away where the object lending the look has none', () => {
       const editor = twoLabels()
 
-      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, [])
 
       expect(textOf('a').effects).toEqual([])
       expect(textOf('b').effects).toEqual([])
@@ -2106,7 +2106,7 @@ describe('layer tree edits', () => {
       const editor = twoLabels()
       const colorBefore = textOf('a').body.style.color
 
-      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, [])
       editor.undo()
 
       expect(textOf('a').effects).toEqual([BLACK])
@@ -2118,8 +2118,8 @@ describe('layer tree edits', () => {
       const editor = twoLabels()
 
       editor.previewStyle(held(), { color: '#00ff00' })
-      editor.previewStroke(held(), WHITE)
-      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, null)
+      editor.previewStrokes(held(), [WHITE])
+      editor.cmdApplyLentLook(held(), { color: '#ff0000' }, [])
       editor.undo()
 
       expect(textOf('a').effects).toEqual([BLACK])
@@ -2129,7 +2129,7 @@ describe('layer tree edits', () => {
     it('tries a stroke on each object over its own effects and lets it go again', () => {
       const editor = twoLabels()
 
-      editor.previewStroke(held(), BLACK)
+      editor.previewStrokes(held(), [BLACK])
       expect(textOf('b').effects).toEqual([BLACK])
       editor.endEffectsPreview()
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hexToRgb, pixelHexAt, rgbToHex } from './color'
+import { hexToRgb, normalHex, pixelHexAt, rgbToHex } from './color'
 
 describe('rgbToHex', () => {
   it('pads every channel to two digits', () => {
@@ -57,5 +57,23 @@ describe('pixelHexAt', () => {
     expect(pixelHexAt(pixels, 2, 2, -0.5, 0)).toBeNull()
     expect(pixelHexAt(pixels, 2, 2, 0, 2)).toBeNull()
     expect(pixelHexAt(pixels, 2, 2, 2, 0)).toBeNull()
+  })
+})
+
+describe('normalHex', () => {
+  it('stores an opaque colour without its alpha, however it was typed', () => {
+    expect(normalHex('#FF0000FF')).toBe('#ff0000')
+    expect(normalHex('f00')).toBe('#ff0000')
+    expect(normalHex('#f00f')).toBe('#ff0000')
+  })
+
+  it('keeps an alpha short of full', () => {
+    expect(normalHex('#FF000080')).toBe('#ff000080')
+    expect(normalHex('#f008')).toBe('#ff000088')
+  })
+
+  it('refuses anything that is not a hex colour', () => {
+    expect(normalHex('#ff000')).toBeNull()
+    expect(normalHex('red')).toBeNull()
   })
 })

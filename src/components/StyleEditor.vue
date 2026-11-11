@@ -82,17 +82,8 @@
     </ToggleGroupItem>
   </ToggleGroupRoot>
 
-  <label class="text-muted-foreground">文字色</label>
-  <ColorField
-    :model-value="value.color"
-    label="文字色"
-    :mixed="isMixed('color')"
-    @input="(color) => emit('preview', { color })"
-    @update:model-value="(color) => emit('patch', { color })"
-  />
-
-  <!-- The stroke, seated with the colour it is read against. -->
-  <slot name="after-color" />
+  <!-- The letters' own colour and weight, seated at the head of the strokes they are read against. -->
+  <slot name="look" />
 
   <label class="text-muted-foreground">行距</label>
   <div class="flex items-center gap-1">
@@ -106,27 +97,6 @@
       @change="onNumber('leadingPercent', $event)"
     />
     <span class="text-muted-foreground">%</span>
-  </div>
-
-  <label class="text-muted-foreground">字粗</label>
-  <div class="flex items-center gap-1">
-    <NumberStepper
-      :model-value="isMixed('weightPx') ? null : value.weightPx"
-      label="字粗"
-      :min="WEIGHT_MIN"
-      :max="WEIGHT_MAX"
-      :step="0.25"
-      :placeholder="isMixed('weightPx') ? MIXED_TEXT : ''"
-      @update:model-value="onWeight"
-    />
-    <span class="text-muted-foreground">px</span>
-    <button
-      type="button"
-      class="ml-auto h-6 rounded border border-input px-1.5 hover:border-primary disabled:opacity-40 disabled:hover:border-input"
-      :disabled="!isMixed('weightPx') && value.weightPx === 0"
-      title="字粗回到 0"
-      @click="onWeight(0)"
-    >0</button>
   </div>
 
   <label class="text-muted-foreground">水平</label>
@@ -174,7 +144,6 @@ import {
   MIN_SCALE_PERCENT,
   type TextStyle,
 } from '@shared/text-style/types'
-import ColorField from '@/components/ColorField.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { catalogByFamily, representativeOf } from '@/lib/fontCatalog'
@@ -183,7 +152,8 @@ import { ALIGN_LABELS } from '@/lib/textStyleFields'
 
 /**
  * How the text is set — everything about typesetting and nothing about what is
- * laid on top of it, which a node carries and `StrokeEditor` adjusts.
+ * laid on top of it, which a node carries and `StrokeEditor` adjusts. The
+ * colour and weight of the letters sit with the strokes, in `TextFillRow`.
  *
  * Rows only: the caller owns the grid these land in, so a section can put its
  * own heading above them and another consumer's controls below.
@@ -295,19 +265,6 @@ function onAlign(v: unknown) {
   if (v !== 'start' && v !== 'center' && v !== 'end') return
   if (!isMixed('align') && v === props.value.align) return
   emit('patch', { align: v })
-}
-
-/**
- * Asymmetric on purpose. Thinning holds its shape as far down as the strokes
- * survive, while thickening welds neighbouring strokes into a blob early on
- * CJK, so the control is given less room in the direction that stops behaving.
- */
-const WEIGHT_MIN = -6
-const WEIGHT_MAX = 3
-
-function onWeight(px: number) {
-  if (!isMixed('weightPx') && px === props.value.weightPx) return
-  emit('patch', { weightPx: px })
 }
 
 function onScalePercent(key: 'scaleXPercent' | 'scaleYPercent', raw: number) {

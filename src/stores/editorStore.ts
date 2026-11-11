@@ -52,7 +52,7 @@ import type { DropTarget } from '@shared/page/tree'
 import type { TextStyle } from '@shared/text-style/types'
 import type { LayerEffect, StrokeEffect } from '@shared/effects/types'
 import { cloneEffects } from '@shared/effects/clone'
-import { withStroke } from '@shared/effects/stroke'
+import { withStrokes } from '@shared/effects/stroke'
 import { sameTagSet, withTag, withoutTag } from '@shared/tags/set'
 import type { Typography, Verdict } from '@shared/ocr/decide'
 import { drawnLabel } from '@/lib/labelRaster'
@@ -2970,29 +2970,29 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
-   * A stroke tried on each object over its own effects, rather than one list
-   * written to them all: what is being offered is a stroke, and an object's
-   * shadow is none of its business.
+   * Strokes tried on each object over its own effects, rather than one list
+   * written to them all: what is being offered is strokes, and an object's
+   * shadow is none of their business.
    */
-  function previewStroke(targets: readonly AppearanceTarget[], stroke: StrokeEffect | null) {
+  function previewStrokes(targets: readonly AppearanceTarget[], strokes: readonly StrokeEffect[]) {
     if (previewedFrom !== null && !sameNodes(previewedFrom, targets)) {
       writeEffects(previewedFrom)
       previewedFrom = null
     }
     previewedFrom ??= effectsOf(targets)
-    writeEffects(previewedFrom.map((s) => ({ ...s, effects: withStroke(s.effects, stroke) })))
+    writeEffects(previewedFrom.map((s) => ({ ...s, effects: withStrokes(s.effects, strokes) })))
   }
 
   /**
    * Part of one object's look lent to others: the style fields in `patch`, and
-   * its stroke. Each keeps the rest of what it carries — only its stroke is
+   * its strokes. Each keeps the rest of what it carries — only its strokes are
    * replaced, or taken away where the lender has none — and it all lands in a
    * single step, since what was asked for was one look.
    */
   function cmdApplyLentLook(
     targets: readonly AppearanceTarget<TextLayerEntry>[],
     patch: Partial<TextStyle>,
-    stroke: StrokeEffect | null,
+    strokes: readonly StrokeEffect[],
   ) {
     endStylePreview()
     endEffectsPreview()
@@ -3002,7 +3002,7 @@ export const useEditorStore = defineStore('editor', () => {
     const effectsBefore = effectsOf(targets)
     const effectsAfter = effectsBefore.map((entry) => ({
       ...entry,
-      effects: withStroke(entry.effects, stroke && { ...stroke }),
+      effects: withStrokes(entry.effects, strokes.map((stroke) => ({ ...stroke }))),
     }))
     if (
       JSON.stringify(stylesBefore) === JSON.stringify(stylesAfter) &&
@@ -3394,7 +3394,7 @@ export const useEditorStore = defineStore('editor', () => {
     cmdApplyLook,
     previewEffects,
     endEffectsPreview,
-    previewStroke,
+    previewStrokes,
     cmdApplyLentLook,
     cmdReorderMembers,
     cmdDrawReadingEdges,

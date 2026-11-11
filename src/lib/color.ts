@@ -1,11 +1,11 @@
 /**
  * Colour as the interface carries it: a `#rrggbb` string, which is what CSS
- * takes and what a swatch stores.
+ * takes and what a swatch stores, or `#rrggbbaa` where it is see-through.
  *
- * Alpha is dropped on the way in. What is sampled is the page as it looks, so
- * anything transparent has already been resolved against what is behind it —
- * carrying a channel that says otherwise would let a colour be picked that the
- * eye never saw.
+ * Alpha is dropped where a colour is sampled. What is sampled is the page as
+ * it looks, so anything transparent has already been resolved against what is
+ * behind it — carrying a channel that says otherwise would let a colour be
+ * picked that the eye never saw.
  */
 
 function hex2(n: number): string {
@@ -14,6 +14,21 @@ function hex2(n: number): string {
 
 export function rgbToHex(r: number, g: number, b: number): string {
   return `#${hex2(r)}${hex2(g)}${hex2(b)}`
+}
+
+/**
+ * `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, hash or not, as the one spelling
+ * a colour is stored in: lower case, with a full alpha left off — so an opaque
+ * colour reads the same however it was typed, and the same as every colour
+ * stored before alpha could be set. Null for anything else.
+ */
+export function normalHex(raw: string): string | null {
+  const body = raw.trim().replace(/^#/, '').toLowerCase()
+  if (!/^[0-9a-f]+$/.test(body)) return null
+  const long = body.length === 3 || body.length === 4 ? [...body].map((c) => c + c).join('') : body
+  if (long.length === 6) return `#${long}`
+  if (long.length !== 8) return null
+  return long.endsWith('ff') ? `#${long.slice(0, 6)}` : `#${long}`
 }
 
 export interface Rgb {

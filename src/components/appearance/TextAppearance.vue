@@ -24,8 +24,17 @@
       @preview="(patch) => editor.previewStyle(targets, patch)"
       @patch="onPatch"
     >
-      <template #after-color>
-        <EffectsAppearance :targets="targets" />
+      <template #look>
+        <EffectsAppearance :targets="targets" title="文字色和描邊">
+          <template #lead>
+            <TextFillRow
+              :value="representative"
+              :mixed="mixedFields"
+              @preview="(patch) => editor.previewStyle(targets, patch)"
+              @patch="onPatch"
+            />
+          </template>
+        </EffectsAppearance>
       </template>
     </StyleEditor>
   </div>
@@ -40,6 +49,7 @@ import { sharedValue } from '@shared/batch/value'
 import { tagColor } from '@shared/tags/set'
 import StyleEditor from '@/components/StyleEditor.vue'
 import EffectsAppearance from '@/components/appearance/EffectsAppearance.vue'
+import TextFillRow from '@/components/appearance/TextFillRow.vue'
 import { useSelectionTags } from '@/composables/useSelectionTags'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { useEditorStore } from '@/stores/editorStore'
