@@ -66,6 +66,18 @@ describe('frameCenter', () => {
     expect(turned.x).toBeCloseTo(100 - 10, 9)
     expect(turned.y).toBeCloseTo(60 + 20, 9)
   })
+
+  /**
+   * Mirrored about the point named, so that point stays put and the text it
+   * anchors grows the other way — typing into a flipped balloon does not walk
+   * its first character across the page.
+   */
+  it('mirrors the frame about the point named, along the object own axes', () => {
+    expect(frameCenter(AT, BOX, { x: 0, y: 0 }, 0, { x: true, y: false })).toEqual({ x: 80, y: 70 })
+    const turned = frameCenter(AT, BOX, { x: 0, y: 0 }, Math.PI / 2, { x: true, y: false })
+    expect(turned.x).toBeCloseTo(100 - 10, 9)
+    expect(turned.y).toBeCloseTo(60 - 20, 9)
+  })
 })
 
 describe('labelBoxSize', () => {
@@ -221,6 +233,10 @@ describe('uniformScaleRatio', () => {
 
   it('holds at 1 when the drag began on the centre, where there is no distance to scale', () => {
     expect(uniformScaleRatio(CENTER, CENTER, { x: 180, y: 180 })).toBe(1)
+  })
+
+  it('turns negative once the pointer is past the pivot, which mirrors both axes', () => {
+    expect(uniformScaleRatio(CENTER, { x: 140, y: 130 }, { x: 60, y: 70 })).toBeCloseTo(-1, 6)
   })
 })
 

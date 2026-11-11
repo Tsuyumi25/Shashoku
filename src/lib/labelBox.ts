@@ -1,5 +1,6 @@
 import type { TextAlign, TextStyle } from '@shared/text-style/types'
 import { framePoint, turnedAround } from './coords'
+import { NO_FLIP, type Flip } from '@/lib/flip'
 
 export interface Point {
   x: number
@@ -39,8 +40,9 @@ export function frameCenter(
   box: { w: number; h: number },
   origin: Point,
   rotation = 0,
+  flip: Flip = NO_FLIP,
 ): Point {
-  return framePoint(at, box, origin, FRAME_CENTER, rotation)
+  return framePoint(at, box, origin, FRAME_CENTER, rotation, flip)
 }
 
 /**
@@ -205,7 +207,10 @@ export const MAX_FONT_SIZE_PX = 1000
 export function uniformScaleRatio(pivot: Point, from: Point, to: Point): number {
   const started = Math.hypot(from.x - pivot.x, from.y - pivot.y)
   if (started < 1e-6) return 1
-  return Math.hypot(to.x - pivot.x, to.y - pivot.y) / started
+  // Negative once the pointer has crossed to the far side of the pivot, which
+  // is the drag asking for the object mirrored on both axes.
+  const ahead = (to.x - pivot.x) * (from.x - pivot.x) + (to.y - pivot.y) * (from.y - pivot.y)
+  return (ahead < 0 ? -1 : 1) * (Math.hypot(to.x - pivot.x, to.y - pivot.y) / started)
 }
 
 /**

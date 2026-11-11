@@ -11,7 +11,8 @@ import {
 import { shownCodeOf } from '@shared/page/units'
 import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
-import { drawnLabel } from '@/lib/labelRaster'
+import { drawnLabel, paintLabel } from '@/lib/labelRaster'
+import { flipOf } from '@/lib/flip'
 import { lettersOnly, withJoinedBands } from '@/lib/joinedStroke'
 import { layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
@@ -125,7 +126,14 @@ export async function decodeLayerBitmaps(
 
 function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
   const labelOf = (entry: TextLayerEntry, effects: readonly LayerEffect[]) =>
-    drawnLabel(shownCodeOf(entry), entry.body.style, effects, { x: entry.body.x, y: entry.body.y }, entry.body.rotation)
+    drawnLabel(
+      shownCodeOf(entry),
+      entry.body.style,
+      effects,
+      { x: entry.body.x, y: entry.body.y },
+      entry.body.rotation,
+      flipOf(entry.body),
+    )
   const joined = joinedBelow(
     stackedTextNodes(stack).map((node) => node.entry),
     (entry) => entry.effects,
@@ -155,11 +163,9 @@ function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
 
     // The engine already turned the outline, so there is nothing left to rotate
     // here and nothing to resample: the bitmap lands one pixel per pixel.
-    const { width, height } = drawn.sample.image
-    ctx.translate(drawn.center.x, drawn.center.y)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = smoothingQualityFor(1)
-    ctx.drawImage(picture, -width / 2, -height / 2)
+    paintLabel(ctx, drawn, picture)
   }
 }
 

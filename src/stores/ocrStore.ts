@@ -14,6 +14,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { drawnLabel } from '@/lib/labelRaster'
+import { flipOf } from '@/lib/flip'
 
 /**
  * Part of a reading's identity: rewording one turns every reading it made into
@@ -104,6 +105,7 @@ function labelCentre(object: SourceTextLayerEntry) {
     object.effects,
     { x: body.x, y: body.y },
     body.rotation,
+    flipOf(body),
   ).center
 }
 

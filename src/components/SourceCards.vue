@@ -212,6 +212,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { OWN_CONFIDENCE_SCALE, useOcrStore } from '@/stores/ocrStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useExplodeStore, WHOLE_PAGE } from '@/stores/explodeStore'
+import { flipOf } from '@/lib/flip'
 
 const editor = useEditorStore()
 const project = useProjectStore()
@@ -256,6 +257,7 @@ const objectTargets = computed(() =>
       look.effects,
       { x: body.x, y: body.y },
       body.rotation,
+      flipOf(body),
     )
     return {
       id: entry.id,

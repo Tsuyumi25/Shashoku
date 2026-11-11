@@ -258,6 +258,9 @@ function parseTextBody(v: unknown, at: string): { body: TextBody; raw: Record<st
       fail(`${at}.rotation 必須是數字(弧度)`)
     rotation = v.rotation
   }
+  for (const key of ['flipX', 'flipY'] as const) {
+    if (v[key] !== undefined && typeof v[key] !== 'boolean') fail(`${at}.${key} 必須是 true 或 false`)
+  }
 
   return {
     raw: v,
@@ -266,6 +269,8 @@ function parseTextBody(v: unknown, at: string): { body: TextBody; raw: Record<st
       x,
       y,
       rotation,
+      ...(v.flipX === true ? { flipX: true } : {}),
+      ...(v.flipY === true ? { flipY: true } : {}),
       style: parseTextStyle(v.style, `${at}.style`, fail),
     },
   }
@@ -936,6 +941,8 @@ function serializeLedger(ledger: Ledger): Record<string, unknown> {
 function serializeBody(body: TextBody): Record<string, unknown> {
   const out: Record<string, unknown> = { x: body.x, y: body.y, lines: body.lines }
   if (body.rotation) out.rotation = body.rotation
+  if (body.flipX) out.flipX = true
+  if (body.flipY) out.flipY = true
   out.style = serializeTextStyle(body.style)
   return out
 }

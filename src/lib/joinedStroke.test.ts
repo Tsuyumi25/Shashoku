@@ -17,7 +17,14 @@ beforeAll(() => {
 type Pixel = [number, number, number, number]
 
 /** A label whose bitmap is one colour, `w`×`h`, with its corner at `x`,`y`. */
-function label(x: number, y: number, w: number, h: number, at: (px: number, py: number) => Pixel): DrawnLabel {
+function label(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  at: (px: number, py: number) => Pixel,
+  mirror: DrawnLabel['mirror'] = { x: 1, y: 1 },
+): DrawnLabel {
   const data = new Uint8ClampedArray(w * h * 4)
   for (let py = 0; py < h; py++)
     for (let px = 0; px < w; px++) data.set(at(px, py), (py * w + px) * 4)
@@ -26,6 +33,7 @@ function label(x: number, y: number, w: number, h: number, at: (px: number, py: 
     missingFamily: null,
     box: { w, h },
     center: { x: x + w / 2, y: y + h / 2 },
+    mirror,
     plain: '',
   }
 }
@@ -72,6 +80,26 @@ describe('joinedPixels', () => {
   it('has nothing to keep off for an inside band, which never leaves its letters', () => {
     const under = label(0, 0, 4, 1, () => INK)
     expect(joinedPixels(own, ownLetters, 'inside', [under])).toBeNull()
+  })
+
+  /** A mirrored bitmap lands the other way round, so its stored columns are read from the far side. */
+  it('reads a mirrored object under it where it lands', () => {
+    // Solid only in its stored column 0, which lands on page column 3.
+    const under = label(2, 0, 2, 1, (x) => (x === 0 ? INK : [0, 0, 0, 0]), { x: -1, y: 1 })
+    const out = joinedPixels(own, ownLetters, 'outside', [under])!
+    expect(pixelAt(out, 3, 0)).toEqual([0, 0, 0, 0])
+    expect(pixelAt(out, 2, 0)).toEqual(BAND)
+  })
+
+  it('writes its own band where its mirrored pixels land', () => {
+    const flipped = { x: -1, y: 1 } as const
+    const mirroredOwn = label(0, 0, 4, 1, (x) => (x === 0 ? INK : BAND), flipped)
+    const mirroredLetters = label(0, 0, 4, 1, (x) => (x === 0 ? INK : [0, 0, 0, 0]), flipped)
+    const under = label(1, 0, 1, 1, () => INK)
+    const out = joinedPixels(mirroredOwn, mirroredLetters, 'outside', [under])!
+    // Page column 1 is the stored column 2.
+    expect(pixelAt(out, 2, 0)).toEqual([0, 0, 0, 0])
+    expect(pixelAt(out, 1, 0)).toEqual(BAND)
   })
 
   it('draws as it is when nothing under it reaches it', () => {

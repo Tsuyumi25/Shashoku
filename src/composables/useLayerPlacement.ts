@@ -18,7 +18,6 @@ import {
   isMoved,
   isTranslation,
   placedFrame,
-  placementTurn,
   similarity,
   type LayerPlace,
   type LayerPlacement,
@@ -112,21 +111,30 @@ export function useLayerPlacement(
    * walking that middle back by as much as the pinned corner would otherwise
    * have travelled — which is what the displacement carries.
    */
-  function scaleTo(id: string, ratio: number, pin: { x: number; y: number }): void {
+  function scaleTo(id: string, ratio: { x: number; y: number }, pin: { x: number; y: number }, turn: number): void {
     const box = frameHeldBy(id)
     const page = editor.maskTarget
     if (box === null) return
-    const floor = Math.max(1 / box.w, 1 / box.h)
-    const ceiling =
-      page === null ? Infinity : Math.max(floor, Math.min(page.w / box.w, page.h / box.h))
-    const scale = clamp(ratio, floor, ceiling)
+    // The sign is which side of the pin the pointer is on, the size is the
+    // rest; taken apart before the bounds, which would otherwise eat the sign.
+    const along = (r: number, extent: number, room: number) => {
+      const floor = 1 / extent
+      const ceiling = page === null ? Infinity : Math.max(floor, room / extent)
+      return (r < 0 ? -1 : 1) * clamp(Math.abs(r), floor, ceiling)
+    }
+    const sx = along(ratio.x, box.w, page?.w ?? Infinity)
+    const sy = along(ratio.y, box.h, page?.h ?? Infinity)
 
+    // The pinned point stands still; a mirrored axis lays the frame out on the
+    // far side of it, which is the same point read from the other edge.
     const was = { w: box.w, h: box.h }
-    const rotation = placementTurn(placementOf(id))
     const center = frameCenter(box)
-    const held = framePoint(center, was, MIDDLE, pin, rotation)
-    const moved = positionHolding(held, { w: was.w * scale, h: was.h * scale }, MIDDLE, pin, rotation)
-    set(id, similarity(scale, rotation, moved.x - center.x, moved.y - center.y))
+    const held = framePoint(center, was, MIDDLE, pin, turn)
+    const lands = { x: sx < 0 ? 1 - pin.x : pin.x, y: sy < 0 ? 1 - pin.y : pin.y }
+    const moved = positionHolding(held, { w: was.w * Math.abs(sx), h: was.h * Math.abs(sy) }, MIDDLE, lands, turn)
+    const cos = Math.cos(turn)
+    const sin = Math.sin(turn)
+    set(id, { dx: moved.x - center.x, dy: moved.y - center.y, a: cos * sx, b: sin * sx, c: -sin * sy, d: cos * sy })
   }
 
   /**

@@ -912,6 +912,21 @@ describe('text object rotation', () => {
   })
 })
 
+describe('text object flip', () => {
+  it('round trips a mirrored object and writes nothing for one that is not', () => {
+    const flipped = textEntry()
+    flipped.body.flipX = true
+    const out = serializeManifest(manifestWith(flipped))
+    const back = firstText(parseManifest(out, FACE)).body
+    expect([back.flipX, back.flipY]).toEqual([true, undefined])
+    expect(written(manifestWith(textEntry())).body).not.toHaveProperty('flipX')
+  })
+
+  it('refuses a flip that is not true or false', () => {
+    expect(() => parseManifest(raw(withTranslation({ flipY: 'yes' })), FACE)).toThrow(PageParseError)
+  })
+})
+
 describe('a text object stands where it was put', () => {
   it('keeps a position between two pixels, which is what a rasterizer resolves', () => {
     const parsed = firstText(parseManifest(raw(withTranslation({ x: 512.37, y: 300.5 })), FACE))

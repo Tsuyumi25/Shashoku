@@ -38,6 +38,7 @@
         ref="surfaceEl"
         class="text-surface"
         :class="takesPointer && 'editing'"
+        :style="surfaceMirror"
         @pointerdown="onTextDown"
         @pointermove="onTextMove"
         @pointerup="onTextUp"
@@ -110,6 +111,7 @@ import type { TurnedLabel } from '@/stores/editorStore'
 import { samplePadding } from '@/lib/fontSampleCache'
 import { layoutOrigin, MAX_FONT_SIZE_PX, MIN_FONT_SIZE_PX, type Point } from '@/lib/labelBox'
 import { drawnLabel, missingFamilyLabel } from '@/lib/labelRaster'
+import { unmirrored, type Flip } from '@/lib/flip'
 import { engineStrokeFor } from '@shared/effects/stroke'
 import { textProjection } from '@/lib/textProjection'
 import { plainEditSurface } from '@/composables/useTextEditSurface'
@@ -144,6 +146,8 @@ const props = defineProps<{
   y: number
   /** The object's own turn on the page, in radians. */
   rotation: number
+  /** Which of its own axes it is mirrored along, about the point `x`,`y` names. */
+  flip: Flip
   /** Where this frame is drawn, once per piece of a split page. See `ObjectFrame`. */
   copies: readonly FrameCopy[]
   /**
@@ -209,9 +213,9 @@ const emit = defineEmits<{
   move: [from: Anchor, to: Anchor]
   moveEnd: [from: Anchor, to: Anchor]
   scaleStart: []
-  scale: [fontSizePx: number, at: Anchor]
+  scale: [fontSizePx: number, at: Anchor, flip: Flip]
   /** The Shift reading of the same drag: the two character scales, in percent. */
-  scaleAxes: [scaleXPercent: number, scaleYPercent: number, at: Anchor]
+  scaleAxes: [scaleXPercent: number, scaleYPercent: number, at: Anchor, flip: Flip]
   scaleEnd: []
   rotate: [radians: number, at: Anchor]
   rotateEnd: [from: TurnedLabel, to: TurnedLabel]
@@ -232,7 +236,7 @@ const emit = defineEmits<{
 // Turned, because where the frame's middle sits follows the object round once
 // the position names a point other than that middle.
 const drawn = computed(() =>
-  drawnLabel(props.code, props.textStyle, props.effects, { x: props.x, y: props.y }, props.rotation),
+  drawnLabel(props.code, props.textStyle, props.effects, { x: props.x, y: props.y }, props.rotation, props.flip),
 )
 
 /**
@@ -311,22 +315,35 @@ function onDragEnd() {
  * instead of leaving half of a gesture nobody finished.
  */
 let scaleFrom: TextStyle = props.textStyle
+let flipFrom: Flip = props.flip
 
-/** Which point of the frame the drag is holding still, and where it stands. */
+/**
+ * Which point of the frame the drag is holding still, read in the frame before
+ * it was mirrored, and where it stands. Read that way it is the same point
+ * however often the drag crosses over: crossing mirrors the frame about the
+ * pin, which turns the handle the pointer holds into the one across from it.
+ */
 let scalePin: Point = { x: 0, y: 0 }
 let scaleHeld: Point = { x: 0, y: 0 }
 
 function onScaleStart(pin: Point) {
   scaleFrom = props.textStyle
-  scalePin = pin
+  flipFrom = props.flip
+  scalePin = unmirrored(pin, props.flip)
   scaleHeld = framePoint(
     { x: props.x, y: props.y },
     drawn.value.box,
     layoutOrigin(props.textStyle),
-    pin,
+    scalePin,
     props.rotation,
+    props.flip,
   )
   emit('scaleStart')
+}
+
+/** The flip a drag leaves: an axis it has carried across the pin is mirrored once more. */
+function flipAfter(ratio: Point): Flip {
+  return { x: flipFrom.x !== ratio.x < 0, y: flipFrom.y !== ratio.y < 0 }
 }
 
 /**
@@ -335,15 +352,16 @@ function onScaleStart(pin: Point) {
  * ratio the drag asked for — a clamped or rounded value is not the one the
  * pointer described, and the corner has to hold against what was actually set.
  */
-function heldAt(style: TextStyle): Anchor {
+function heldAt(style: TextStyle, flip: Flip): Anchor {
   const grown = drawnLabel(
     props.code,
     style,
     props.effects,
     { x: props.x, y: props.y },
     props.rotation,
+    flip,
   )
-  return positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation)
+  return positionHolding(scaleHeld, grown.box, layoutOrigin(style), scalePin, props.rotation, flip)
 }
 
 /**
@@ -352,8 +370,9 @@ function heldAt(style: TextStyle): Anchor {
  * cache on every frame.
  */
 function onScale(ratio: number) {
-  const fontSizePx = clamp(Math.round(scaleFrom.fontSizePx * ratio), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
-  emit('scale', fontSizePx, heldAt({ ...scaleFrom, fontSizePx }))
+  const fontSizePx = clamp(Math.round(scaleFrom.fontSizePx * Math.abs(ratio)), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
+  const flip = flipAfter({ x: ratio, y: ratio })
+  emit('scale', fontSizePx, heldAt({ ...scaleFrom, fontSizePx }, flip), flip)
 }
 
 /**
@@ -363,18 +382,21 @@ function onScale(ratio: number) {
  * anywhere the panel could not put it.
  */
 function onScaleAxes(ratio: Point) {
+  // The sign is the flip and the size is the rest, taken apart before the
+  // clamp — clamping first would eat the flip.
   const scaleXPercent = clamp(
-    Math.round(scaleFrom.scaleXPercent * ratio.x),
+    Math.round(scaleFrom.scaleXPercent * Math.abs(ratio.x)),
     MIN_SCALE_PERCENT,
     MAX_SCALE_PERCENT,
   )
   const scaleYPercent = clamp(
-    Math.round(scaleFrom.scaleYPercent * ratio.y),
+    Math.round(scaleFrom.scaleYPercent * Math.abs(ratio.y)),
     MIN_SCALE_PERCENT,
     MAX_SCALE_PERCENT,
   )
   const style = { ...scaleFrom, scaleXPercent, scaleYPercent }
-  emit('scaleAxes', scaleXPercent, scaleYPercent, heldAt(style))
+  const flip = flipAfter(ratio)
+  emit('scaleAxes', scaleXPercent, scaleYPercent, heldAt(style, flip), flip)
 }
 
 /**
@@ -397,8 +419,9 @@ function onRotateStart(pivot: Point) {
     { x: props.x, y: props.y },
     drawn.value.box,
     layoutOrigin(props.textStyle),
-    pivot,
+    unmirrored(pivot, props.flip),
     props.rotation,
+    props.flip,
   )
 }
 
@@ -505,7 +528,12 @@ const barAt = computed(() => {
   if (!props.editing || !at || isCollapsed(at)) return null
   const { from, to } = spanOf(at)
   const last = projection.value.selection(from, to).at(-1)
-  return last ? { x: last.x + last.width, y: last.y + last.height } : null
+  if (!last) return null
+  // The selection is drawn mirrored with the text, so its far corner is too.
+  const box = drawn.value.box
+  const x = last.x + last.width
+  const y = last.y + last.height
+  return { x: props.flip.x ? box.w - x : x, y: props.flip.y ? box.h - y : y }
 })
 
 /** Cutting needs a selection that leaves something on either side of it. */
@@ -531,6 +559,11 @@ function barStyle(counterTurn: number): Record<string, string> {
     transformOrigin: 'top left',
   }
 }
+
+/** The caret and the selection lie on the letters, so they are mirrored with them. */
+const surfaceMirror = computed(() =>
+  props.flip.x || props.flip.y ? { transform: `scale(${props.flip.x ? -1 : 1}, ${props.flip.y ? -1 : 1})` } : undefined,
+)
 
 /** The frame's turn on screen: the view's and the object's, as drawn. */
 const turn = computed(() => props.view.rotate + props.rotation)
@@ -615,12 +648,14 @@ function indexAtPointer(e: { clientX: number; clientY: number }): number | null 
     props.view.scale,
     turn.value,
   )
-  return projection.value.indexAt(at.x, at.y)
+  const box = drawn.value.box
+  return projection.value.indexAt(props.flip.x ? box.w - at.x : at.x, props.flip.y ? box.h - at.y : at.y)
 }
 
 function onDoubleClick(at: Point) {
   const box = drawn.value.box
-  emit('editAt', projection.value.indexAt(at.x * box.w, at.y * box.h))
+  const read = unmirrored(at, props.flip)
+  emit('editAt', projection.value.indexAt(read.x * box.w, read.y * box.h))
 }
 
 /**

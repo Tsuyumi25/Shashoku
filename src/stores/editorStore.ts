@@ -154,6 +154,8 @@ export interface ScaledLabel {
   style: TextStyle
   x: number
   y: number
+  flipX: boolean
+  flipY: boolean
 }
 
 /** Everything a gesture on a multiple selection can leave changed about one member. */
@@ -162,6 +164,8 @@ export interface PlacedLabel {
   x: number
   y: number
   rotation: number
+  flipX: boolean
+  flipY: boolean
 }
 
 /** Everything the rotation handle leaves changed about one label. */
@@ -2042,6 +2046,7 @@ export const useEditorStore = defineStore('editor', () => {
     const project = useProjectStore()
     const apply = (state: ScaledLabel) => {
       project.setLabelStyle(pageId, labelId, state.style)
+      project.flipLabel(pageId, labelId, { x: state.flipX, y: state.flipY })
       project.moveLabel(pageId, labelId, state.x, state.y)
     }
     pushCommand(
@@ -2088,6 +2093,7 @@ export const useEditorStore = defineStore('editor', () => {
         if (!state) continue
         project.setLabelStyle(pageId, id, state.style)
         project.rotateLabel(pageId, id, state.rotation)
+        project.flipLabel(pageId, id, { x: state.flipX, y: state.flipY })
         project.moveLabel(pageId, id, state.x, state.y)
       }
       for (const move of layers) {

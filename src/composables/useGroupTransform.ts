@@ -15,11 +15,21 @@ import type { Rect } from '@/lib/selection/rect'
 import type { LayerMove } from '@/composables/useLayerPlacement'
 import { type PlacedLabel, useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import type { Flip } from '@/lib/flip'
 
 const MIDDLE: Point = { x: 0.5, y: 0.5 }
 
 /** A side dragged past the one across from it stops here rather than turning the set inside out. */
 const MIN_RATIO = 0.01
+
+/** The floor on how far a set shrinks, kept on whichever side of the pivot the pointer is. */
+function signedFloor(ratio: number): number {
+  return (ratio < 0 ? -1 : 1) * Math.max(Math.abs(ratio), MIN_RATIO)
+}
+
+function flipOfState(state: PlacedLabel): Flip {
+  return { x: state.flipX, y: state.flipY }
+}
 
 /** A linear map about the pivot, as canvas's `transform(a, b, c, d)` takes one. */
 type Linear = Pick<LayerPlacement, 'a' | 'b' | 'c' | 'd'>
@@ -74,7 +84,7 @@ export function useGroupTransform(options: {
     const block = page === null ? undefined : project.blockById(page, id)
     if (!block) return null
     const { style, x, y, rotation } = block.body
-    return { style: { ...style }, x, y, rotation }
+    return { style: { ...style }, x, y, rotation, flipX: block.body.flipX === true, flipY: block.body.flipY === true }
   }
 
   function boxOf(id: string, state: PlacedLabel): { w: number; h: number } | null {
@@ -82,7 +92,7 @@ export function useGroupTransform(options: {
     const block = page === null ? undefined : project.blockById(page, id)
     const code = options.codeOf(id)
     if (!block || code === null) return null
-    return drawnLabel(code, state.style, block.effects, { x: state.x, y: state.y }, state.rotation).box
+    return drawnLabel(code, state.style, block.effects, { x: state.x, y: state.y }, state.rotation, flipOfState(state)).box
   }
 
   function frameOf(id: string, state: PlacedLabel): MemberFrame | null {
@@ -90,7 +100,7 @@ export function useGroupTransform(options: {
     if (!box) return null
     const at = { x: state.x, y: state.y }
     return {
-      center: frameCenter(at, box, layoutOrigin(state.style), state.rotation),
+      center: frameCenter(at, box, layoutOrigin(state.style), state.rotation, flipOfState(state)),
       w: box.w,
       h: box.h,
       rotation: state.rotation,
@@ -153,9 +163,11 @@ export function useGroupTransform(options: {
   function put(page: string, id: string, state: PlacedLabel, center: Point): void {
     const size = boxOf(id, state)
     if (!size) return
-    const at = positionHolding(center, size, layoutOrigin(state.style), MIDDLE, state.rotation)
+    const flip = flipOfState(state)
+    const at = positionHolding(center, size, layoutOrigin(state.style), MIDDLE, state.rotation, flip)
     project.setLabelStyle(page, id, state.style)
     project.rotateLabel(page, id, state.rotation)
+    project.flipLabel(page, id, flip)
     project.moveLabel(page, id, at.x, at.y)
   }
 
@@ -179,11 +191,17 @@ export function useGroupTransform(options: {
   function scaleTo(ratio: number): void {
     const page = options.pageId()
     if (!from || page === null) return
-    const s = Math.max(ratio, MIN_RATIO)
+    const s = signedFloor(ratio)
     for (const [id, was] of from.labels) {
       if (editor.isLayerLocked(id)) continue
-      const fontSizePx = clamp(Math.round(was.state.style.fontSizePx * s), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
-      const state = { ...was.state, style: { ...was.state.style, fontSizePx } }
+      const fontSizePx = clamp(Math.round(was.state.style.fontSizePx * Math.abs(s)), MIN_FONT_SIZE_PX, MAX_FONT_SIZE_PX)
+      // Past the pivot the set is mirrored on both axes, and so is each member.
+      const state = {
+        ...was.state,
+        style: { ...was.state.style, fontSizePx },
+        flipX: was.state.flipX !== s < 0,
+        flipY: was.state.flipY !== s < 0,
+      }
       put(page, id, state, carried(was.center, pivot, 0, s))
     }
     holdRasters(from, { a: s, b: 0, c: 0, d: s })
@@ -198,7 +216,7 @@ export function useGroupTransform(options: {
   function scaleAxesTo(ratio: Point): void {
     const page = options.pageId()
     if (!from || page === null) return
-    const r = { x: Math.max(ratio.x, MIN_RATIO), y: Math.max(ratio.y, MIN_RATIO) }
+    const r = { x: signedFloor(ratio.x), y: signedFloor(ratio.y) }
     for (const [id, was] of from.labels) {
       if (editor.isLayerLocked(id)) continue
       const s = stretched(was.center, was.state.rotation, pivot, turn.value, r)
@@ -207,7 +225,8 @@ export function useGroupTransform(options: {
         scaleXPercent: clamp(Math.round(was.state.style.scaleXPercent * s.scaleX), MIN_SCALE_PERCENT, MAX_SCALE_PERCENT),
         scaleYPercent: clamp(Math.round(was.state.style.scaleYPercent * s.scaleY), MIN_SCALE_PERCENT, MAX_SCALE_PERCENT),
       }
-      put(page, id, { ...was.state, style, rotation: s.rotation }, s.center)
+      const flipX = was.state.flipX !== s.mirrored
+      put(page, id, { ...was.state, style, rotation: s.rotation, flipX }, s.center)
     }
     const cos = Math.cos(turn.value)
     const sin = Math.sin(turn.value)

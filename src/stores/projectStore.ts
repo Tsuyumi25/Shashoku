@@ -1285,6 +1285,17 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /** Absent rather than false where an axis is not mirrored, as the file writes it. */
+  function flipLabel(pageId: string, blockId: string, flip: { x: boolean; y: boolean }) {
+    const body = bodyOf(pageId, blockId)
+    if (!body || (body.flipX === true) === flip.x && (body.flipY === true) === flip.y) return
+    if (flip.x) body.flipX = true
+    else delete body.flipX
+    if (flip.y) body.flipY = true
+    else delete body.flipY
+    markPageDirty(pageId)
+  }
+
   /**
    * Typing into one block, wherever what it currently reads as lives — while a
    * candidate is chosen the block is a view of its pool, not a copy. ⚠️ This
@@ -1765,6 +1776,7 @@ export const useProjectStore = defineStore('project', () => {
     renamePage,
     moveLabel,
     rotateLabel,
+    flipLabel,
     updateLabelText,
     addMemberAfter,
     reorderMembers,

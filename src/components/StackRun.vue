@@ -11,7 +11,7 @@ import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
-import type { DrawnLabel } from '@/lib/labelRaster'
+import { paintLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { RasterStackNode } from '@shared/page/stack'
@@ -250,11 +250,7 @@ function drawNodes(ctx: CanvasRenderingContext2D, view: ViewTransform, dpr: numb
 function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
   const drawn = drawnTexts.value.get(entry.id)
   if (!drawn?.sample) return
-  const { width, height } = drawn.sample.image
-  ctx.save()
-  ctx.translate(drawn.center.x, drawn.center.y)
-  ctx.drawImage(joinedTexts.value.get(entry.id) ?? sampleSource(drawn.sample), -width / 2, -height / 2)
-  ctx.restore()
+  paintLabel(ctx, drawn, joinedTexts.value.get(entry.id) ?? sampleSource(drawn.sample))
 }
 
 let frame: number | null = null

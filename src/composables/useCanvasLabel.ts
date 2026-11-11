@@ -8,6 +8,7 @@ import { drawnLabel, type DrawnLabel } from '@/lib/labelRaster'
 import { sourceLook } from '@/lib/sourceLook'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { flipOf } from '@/lib/flip'
 
 export interface CanvasLabels {
   /** The effects the canvas draws an object with, which on the source side are the reference halo. */
@@ -57,7 +58,7 @@ export function useCanvasLabel(): CanvasLabels {
     const { style, effects } = lookOf(entry)
     const body = entry.body
     const used = lettersAlone ? lettersOnly(effects) : effects
-    return drawnLabel(codeShown(entry), style, used, { x: body.x, y: body.y }, body.rotation)
+    return drawnLabel(codeShown(entry), style, used, { x: body.x, y: body.y }, body.rotation, flipOf(body))
   }
 
   /**

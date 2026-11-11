@@ -124,6 +124,7 @@ import { useCardStore } from '@/stores/cardStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useExplodeStore } from '@/stores/explodeStore'
+import { flipOf } from '@/lib/flip'
 
 const props = defineProps<{
   /**
@@ -203,6 +204,7 @@ function frameOf(entry: TextLayerEntry): Box {
     entry.effects,
     { x: body.x, y: body.y },
     body.rotation,
+    flipOf(body),
   )
   return {
     x: drawn.center.x - drawn.box.w / 2,

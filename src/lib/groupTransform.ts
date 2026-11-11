@@ -96,6 +96,12 @@ export interface Stretched {
   /** How much longer each of the member's own axes came out. */
   scaleX: number
   scaleY: number
+  /**
+   * Whether the stretch mirrored the member, which it does when the box was
+   * pulled across its pivot along one axis. Read as the member's own
+   * horizontal mirrored once more; its turn is the one that goes with that.
+   */
+  mirrored: boolean
 }
 
 /**
@@ -121,14 +127,22 @@ export function stretched(
     turn,
   )
   const rel = rotation - turn
-  const ux = ratio.x * Math.cos(rel)
-  const uy = ratio.y * Math.sin(rel)
+  let ux = ratio.x * Math.cos(rel)
+  let uy = ratio.y * Math.sin(rel)
   const vx = -ratio.x * Math.sin(rel)
   const vy = ratio.y * Math.cos(rel)
+  // A mirror is not a turn: with the member's horizontal reversed the two axes
+  // stand the right way round again, and only then can the turn be read off.
+  const mirrored = ux * vy - uy * vx < 0
+  if (mirrored) {
+    ux = -ux
+    uy = -uy
+  }
   return {
     center: reached,
     rotation: rotation + angleDelta(rel, Math.atan2(uy, ux)),
     scaleX: Math.hypot(ux, uy),
     scaleY: Math.hypot(vx, vy),
+    mirrored,
   }
 }

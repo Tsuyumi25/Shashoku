@@ -187,7 +187,8 @@
               :pointer="framesTakePointer ? 'handles' : 'none'"
               :place="placement.placementOf(layer.id)"
               @select="onSelectObject(layer.id, $event)"
-              @scale="(ratio, pin) => placement.scaleTo(layer.id, ratio, pin)"
+              @scale="(ratio, pin, turn) => placement.scaleTo(layer.id, { x: ratio, y: ratio }, pin, turn)"
+              @scale-axes="(ratio, pin, turn) => placement.scaleTo(layer.id, ratio, pin, turn)"
               @rotate="(radians, pivot) => placement.rotateTo(layer.id, radians, pivot)"
               @commit="onLayerCommit(layer)"
             />
@@ -205,6 +206,7 @@
             :x="object.x"
             :y="object.y"
             :rotation="object.rotation"
+            :flip="object.flip"
             :accent="object.accent"
             :member="object.member"
             :tags="object.tags"
@@ -232,10 +234,10 @@
             @move="(from, to) => moveLabelTo(object.id, from, to)"
             @move-end="(from, to) => commitLabelMove(object.id, from, to)"
             @scale-start="beginLabelScale(object.id)"
-            @scale="(fontSizePx, at) => scaleLabelTo(object.id, { fontSizePx }, at)"
+            @scale="(fontSizePx, at, flip) => scaleLabelTo(object.id, { fontSizePx }, at, flip)"
             @scale-axes="
-              (scaleXPercent, scaleYPercent, at) =>
-                scaleLabelTo(object.id, { scaleXPercent, scaleYPercent }, at)
+              (scaleXPercent, scaleYPercent, at, flip) =>
+                scaleLabelTo(object.id, { scaleXPercent, scaleYPercent }, at, flip)
             "
             @scale-end="commitLabelScale(object.id)"
             @rotate="(radians, at) => rotateLabelTo(object.id, radians, at)"
@@ -438,6 +440,7 @@ import { drawnLabel } from '@/lib/labelRaster'
 import { SOURCE_COLOR, sourceLook } from '@/lib/sourceLook'
 import { framedLayers, layerAt } from '@/lib/layerHit'
 import { placementTurn } from '@/lib/layerTransform'
+import { flipOf, type Flip } from '@/lib/flip'
 import { artworkSignature, compositeArtwork, compositeLayerAlone } from '@/lib/pageComposite'
 import {
   chainsOf,
@@ -644,6 +647,7 @@ const objects = computed(() => {
     x: body.x,
     y: body.y,
     rotation: body.rotation,
+    flip: flipOf(body),
     accent: accentOf(tags),
     member: isMember(view, label.id) ? memberColor.value : undefined,
     style: look.style,
@@ -662,7 +666,7 @@ const stamped = computed<ReadonlySet<string>>(() => {
   if (!editor.tagsShown || !file) return new Set()
   const frames = new Map(
     objects.value.map((o) => {
-      const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
+      const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation, o.flip)
       return [o.id, { center: d.center, w: d.box.w, h: d.box.h, rotation: o.rotation }]
     }),
   )
@@ -917,7 +921,7 @@ let scaledFrom: ScaledLabel | null = null
 
 function scaledState(label: TextLayerEntry): ScaledLabel {
   const body = label.body
-  return { style: { ...body.style }, x: body.x, y: body.y }
+  return { style: { ...body.style }, x: body.x, y: body.y, flipX: body.flipX === true, flipY: body.flipY === true }
 }
 
 function beginLabelScale(labelId: string) {
@@ -935,11 +939,12 @@ function beginLabelScale(labelId: string) {
  * object, so a gesture that switches between the two readings mid-drag takes
  * back whichever of them it had been writing.
  */
-function scaleLabelTo(labelId: string, patch: Partial<TextStyle>, at: Anchor) {
+function scaleLabelTo(labelId: string, patch: Partial<TextStyle>, at: Anchor, flip: Flip) {
   const label = labelById(labelId)
   if (!label || !editor.currentPageId || editor.isLayerLocked(labelId)) return
   const style = { ...(scaledFrom?.style ?? label.body.style), ...patch }
   project.setLabelStyle(editor.currentPageId, labelId, style)
+  project.flipLabel(editor.currentPageId, labelId, flip)
   project.moveLabel(editor.currentPageId, labelId, at.x, at.y)
 }
 
@@ -1025,7 +1030,7 @@ const foretold = computed(() => {
   const centre = (id: string) => {
     const o = shown.get(id)
     if (!o) return null
-    const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation)
+    const d = drawnLabel(o.code, o.style, o.effects, { x: o.x, y: o.y }, o.rotation, o.flip)
     const offset = offsetOfObject(id)
     return { x: d.center.x + offset.x, y: d.center.y + offset.y, w: d.box.w, h: d.box.h }
   }
@@ -1166,6 +1171,7 @@ function sweepObjects() {
       object.effects,
       { x: object.x, y: object.y },
       object.rotation,
+      object.flip,
     )
     const box: Obb = {
       center: drawn.center,
@@ -1264,6 +1270,7 @@ const objectBoxes = computed(() => {
       object.effects,
       { x: object.x, y: object.y },
       object.rotation,
+      object.flip,
     )
     out.set(object.id, {
       center: drawn.center,

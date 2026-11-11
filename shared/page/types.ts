@@ -114,6 +114,14 @@ export interface TextBody {
   rotation: number
 
   /**
+   * Mirrored along the frame's own horizontal or vertical, about the point the
+   * position names — so the text that point anchors stays put while the rest
+   * of it grows the other way. Absent is not mirrored.
+   */
+  flipX?: boolean
+  flipY?: boolean
+
+  /**
    * The whole style, held by value — no group to inherit from and no override
    * layered on top. Two bodies that look alike are two bodies that hold the
    * same nine fields, and nothing changes what one of them looks like except

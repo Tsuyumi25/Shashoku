@@ -12,6 +12,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
+import { paintLabel } from '@/lib/labelRaster'
 import type { EffectedLayer } from '@/lib/layerEffects'
 import { pictureWithEffects } from '@/lib/layerEffects'
 import type { LayerPlacement } from '@/lib/layerTransform'
@@ -78,9 +79,7 @@ const picture = computed<EffectedLayer>(() => {
       const drawn = labels.labelOf(node.entry)
       if (!drawn.sample) return
       const under = props.joined.get(node.entry.id)
-      const picture = (under && labels.joinedOf(node.entry, under)) ?? sampleSource(drawn.sample)
-      const { width, height } = drawn.sample.image
-      ctx.drawImage(picture, drawn.center.x - width / 2, drawn.center.y - height / 2)
+      paintLabel(ctx, drawn, (under && labels.joinedOf(node.entry, under)) ?? sampleSource(drawn.sample))
     },
   })
   return pictureWithEffects(buffer, props.node.entry.effects) ?? { canvas: buffer, frame: { x: 0, y: 0, w, h } }

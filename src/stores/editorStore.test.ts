@@ -1212,7 +1212,7 @@ describe('cmdRotateLabel', () => {
 
 describe('cmdScaleLabel', () => {
   /** Where `label('a')` stands, so a gesture can be said to have moved it. */
-  const PUT = { x: 200, y: 150 }
+  const PUT = { x: 200, y: 150, flipX: false, flipY: false }
 
   const sized = (fontSizePx: number): TextStyle => ({ ...DEFAULT_TEXT_STYLE, fontSizePx })
 
@@ -1258,13 +1258,28 @@ describe('cmdScaleLabel', () => {
       PAGE,
       'a',
       { style: sized(24), ...PUT },
-      { style: sized(48), x: 260, y: 190 },
+      { style: sized(48), ...PUT, x: 260, y: 190 },
     )
 
     editor.undo()
     const back = labelsOf(project)[0]
     expect([back.body.x, back.body.y]).toEqual([PUT.x, PUT.y])
     expect(editor.canUndo).toBe(false)
+  })
+
+  /** Dragged across the pin, the object is mirrored, and undo has to unmirror it with the rest. */
+  it('takes back a flip with the size and the position in one step', () => {
+    const { project, editor } = openOnePage([label('a')])
+    project.setLabelStyle(PAGE, 'a', sized(48))
+    project.flipLabel(PAGE, 'a', { x: true, y: false })
+    project.moveLabel(PAGE, 'a', 260, 190)
+    editor.cmdScaleLabel(PAGE, 'a', { style: sized(24), ...PUT }, { style: sized(48), x: 260, y: 190, flipX: true, flipY: false })
+
+    editor.undo()
+    const back = labelsOf(project)[0].body
+    expect([back.flipX, back.style.fontSizePx, back.x]).toEqual([undefined, 24, PUT.x])
+    editor.redo()
+    expect(labelsOf(project)[0].body.flipX).toBe(true)
   })
 
   /**
@@ -1285,7 +1300,7 @@ describe('cmdScaleLabel', () => {
       PAGE,
       'a',
       { style: DEFAULT_TEXT_STYLE, ...PUT },
-      { style: squashed, x: 260, y: 190 },
+      { style: squashed, ...PUT, x: 260, y: 190 },
     )
 
     editor.undo()
@@ -1519,8 +1534,8 @@ describe('layer tree edits', () => {
       editor.cmdScaleLabel(
         PAGE,
         'a',
-        { style: { ...DEFAULT_TEXT_STYLE }, x: 200, y: 150 },
-        { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 }, x: 200, y: 150 },
+        { style: { ...DEFAULT_TEXT_STYLE }, x: 200, y: 150, flipX: false, flipY: false },
+        { style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 40 }, x: 200, y: 150, flipX: false, flipY: false },
       )
 
       expect(editor.canUndo).toBe(false)

@@ -8,11 +8,13 @@
     :in-selection="inSelection"
     :locked="false"
     :handles="selected"
+    per-axis
     :pointed="pointed"
     :pointer="pointer"
     @select="emit('select', $event)"
     @scale-start="onScaleStart"
     @scale="onScale"
+    @scale-axes="onScaleAxes"
     @scale-end="emit('commit')"
     @rotate-start="onRotateStart"
     @rotate="onRotate"
@@ -69,8 +71,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [additive: boolean]
-  /** The ratio, and which fractional point of the frame the drag is pinning. */
-  scale: [ratio: number, pin: { x: number; y: number }]
+  /**
+   * The ratio — negative past the pin, mirroring the layer — which fractional
+   * point of the frame the drag is pinning, and the turn it started at.
+   */
+  scale: [ratio: number, pin: { x: number; y: number }, turn: number]
+  /** The same, one ratio along each of the frame's own axes. */
+  scaleAxes: [ratio: { x: number; y: number }, pin: { x: number; y: number }, turn: number]
   /** The angle, and which fractional point of the frame the turn goes round. */
   rotate: [radians: number, pivot: { x: number; y: number }]
   /** Whichever gesture it was has been let go, and now owes the pixels a pass. */
@@ -79,14 +86,20 @@ const emit = defineEmits<{
 
 /** Which point of the frame the gesture in progress is working around. */
 let scalePin = { x: 0.5, y: 0.5 }
+let scaleTurn = 0
 let spinPivot = { x: 0.5, y: 0.5 }
 
 function onScaleStart(pin: { x: number; y: number }) {
   scalePin = pin
+  scaleTurn = placementTurn(props.place)
 }
 
 function onScale(ratio: number) {
-  emit('scale', ratio, scalePin)
+  emit('scale', ratio, scalePin, scaleTurn)
+}
+
+function onScaleAxes(ratio: { x: number; y: number }) {
+  emit('scaleAxes', ratio, scalePin, scaleTurn)
 }
 
 function onRotateStart(pivot: { x: number; y: number }) {

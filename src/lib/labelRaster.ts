@@ -12,6 +12,7 @@ import {
   representativeOf,
 } from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
+import { drawnTurn, NO_FLIP, type Flip } from './flip'
 import {
   frameCenter,
   labelBoxSize,
@@ -265,6 +266,11 @@ export interface DrawnLabel {
   /** Where the bitmap's centre goes, so its corner lands on the page grid. */
   center: Point
   /**
+   * How the bitmap is mirrored where it lands, in the page's own axes: -1 on
+   * an axis it is flipped across. See `drawnTurn`.
+   */
+  mirror: { x: 1 | -1; y: 1 | -1 }
+  /**
    * The text the bitmap shows — the code's own words with its tags taken out.
    *
    * Published because every caret, click and selection on a drawn label is an
@@ -306,6 +312,7 @@ export function drawnLabel(
   effects: readonly LayerEffect[],
   at: Point,
   rotation = 0,
+  flip: Flip = NO_FLIP,
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
   const painted = paintedText(code, style)
@@ -314,14 +321,37 @@ export function drawnLabel(
   const box = labelBoxSize(style, upright)
   // The turned bitmap holds the run at its own middle, so both rectangles share
   // one centre and the frame is the same point as the ink.
-  const middle = frameCenter(at, box, layoutOrigin(style), turn)
+  const middle = frameCenter(at, box, layoutOrigin(style), turn, flip)
+  const drawing = drawnTurn(turn, flip)
+  const spin = quantizeRotation(drawing.turn)
+  const mirror = drawing.mirror
   if (!upright) {
-    const center = placeLabel(middle, box, turn).center
-    return { sample: null, missingFamily: null, box, center, plain: painted.plain }
+    const center = placeLabel(middle, box, spin).center
+    return { sample: null, missingFamily: null, box, center, mirror, plain: painted.plain }
   }
 
-  const spun = turn === 0 ? upright : measured(painted, style, effects, turn)
+  const spun = spin === 0 ? upright : measured(painted, style, effects, spin)
   const blit = spun ? { w: spun.width, h: spun.height } : box
-  const { center, phase } = placeLabel(middle, blit, turn)
-  return { ...rasterFor(painted, style, effects, phase, turn), box, center, plain: painted.plain }
+  const { center, phase } = placeLabel(middle, blit, spin)
+  return { ...rasterFor(painted, style, effects, phase, spin), box, center, mirror, plain: painted.plain }
+}
+
+/**
+ * A label's bitmap put where it goes: centred on its frame, mirrored in the
+ * page's axes as `mirror` says, one pixel per pixel. The one place every
+ * surface draws a label from, so the canvas, a folder's picture and the export
+ * cannot come to disagree about which way round it lands.
+ */
+export function paintLabel(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  drawn: DrawnLabel,
+  picture: CanvasImageSource,
+): void {
+  if (!drawn.sample) return
+  const { width, height } = drawn.sample.image
+  ctx.save()
+  ctx.translate(drawn.center.x, drawn.center.y)
+  ctx.scale(drawn.mirror.x, drawn.mirror.y)
+  ctx.drawImage(picture, -width / 2, -height / 2)
+  ctx.restore()
 }

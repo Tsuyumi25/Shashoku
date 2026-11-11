@@ -1,3 +1,5 @@
+import { NO_FLIP, signsOf, type Flip } from '@/lib/flip'
+
 /**
  * The one place screen ↔ content px conversion lives. The view transform is
  * `translate(tx,ty) ∘ scale(s) ∘ rotate(θ)` with a `0 0` origin, matching the
@@ -241,10 +243,12 @@ function frameOffset(
   from: { x: number; y: number },
   to: { x: number; y: number },
   rotation: number,
+  flip: Flip,
 ): Anchor {
+  const sign = signsOf(flip)
   return turnedAround(
     NOWHERE,
-    { x: box.w * (to.x - from.x), y: box.h * (to.y - from.y) },
+    { x: sign.x * box.w * (to.x - from.x), y: sign.y * box.h * (to.y - from.y) },
     rotation,
   )
 }
@@ -256,8 +260,9 @@ export function framePoint(
   origin: { x: number; y: number },
   ratio: { x: number; y: number },
   rotation = 0,
+  flip: Flip = NO_FLIP,
 ): Anchor {
-  const d = frameOffset(box, origin, ratio, rotation)
+  const d = frameOffset(box, origin, ratio, rotation, flip)
   return { x: at.x + d.x, y: at.y + d.y }
 }
 
@@ -277,7 +282,8 @@ export function positionHolding(
   origin: { x: number; y: number },
   ratio: { x: number; y: number },
   rotation = 0,
+  flip: Flip = NO_FLIP,
 ): Anchor {
-  const d = frameOffset(box, origin, ratio, rotation)
+  const d = frameOffset(box, origin, ratio, rotation, flip)
   return { x: held.x - d.x, y: held.y - d.y }
 }

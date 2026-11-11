@@ -12,6 +12,7 @@ import { turnedAround, type Anchor } from '@/lib/coords'
 import { cutText, type CutText } from '@/lib/cutText'
 import { samplePadding } from '@/lib/fontSampleCache'
 import { drawnLabel } from '@/lib/labelRaster'
+import { flipOf, signsOf, type Flip } from '@/lib/flip'
 import { textProjection } from '@/lib/textProjection'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
@@ -24,9 +25,10 @@ function caretOnPage(
   effects: readonly LayerEffect[],
   at: Anchor,
   rotation: number,
+  flip: Flip,
   index: number,
 ): Anchor {
-  const { sample, box, center } = drawnLabel(code, style, effects, at, rotation)
+  const { sample, box, center } = drawnLabel(code, style, effects, at, rotation, flip)
   const vertical = style.direction === 'vertical'
   const projection = textProjection({
     text: plainOf(code),
@@ -36,7 +38,9 @@ function caretOnPage(
     crossExtent: vertical ? box.w : box.h,
   })
   const r = projection.caret(index)
-  const out = turnedAround({ x: 0, y: 0 }, { x: r.x - box.w / 2, y: r.y - box.h / 2 }, rotation)
+  // The bitmap is mirrored about its own middle where it lands, and the caret with it.
+  const sign = signsOf(flip)
+  const out = turnedAround({ x: 0, y: 0 }, { x: sign.x * (r.x - box.w / 2), y: sign.y * (r.y - box.h / 2) }, rotation)
   return { x: center.x + out.x, y: center.y + out.y }
 }
 
@@ -91,9 +95,10 @@ export function useCutText() {
 
     const codePieces = codeOfPieces(code, text.length, cut)
     const { style, x, y, rotation } = block.body
+    const flip = flipOf(block.body)
     const copies: TextLayerEntry[] = codePieces.slice(1).map((piece, i) => {
-      const want = caretOnPage(code, style, block.effects, { x, y }, rotation, cut.offsets[i + 1]!)
-      const has = caretOnPage(piece, style, block.effects, { x, y }, rotation, 0)
+      const want = caretOnPage(code, style, block.effects, { x, y }, rotation, flip, cut.offsets[i + 1]!)
+      const has = caretOnPage(piece, style, block.effects, { x, y }, rotation, flip, 0)
       const placed = {
         lines: linesOf(piece),
         style: { ...style },

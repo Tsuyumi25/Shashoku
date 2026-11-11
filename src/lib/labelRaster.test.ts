@@ -212,6 +212,16 @@ describe('drawnLabel', () => {
     expect(calls.at(-1)?.phaseX).toBe(0.75)
   })
 
+  /** R(θ)·S(−1, 1) is S(−1, 1)·R(−θ): the engine turns it the other way and the page mirrors it. */
+  it('asks the engine for the mirrored turn and mirrors the bitmap where it lands', () => {
+    const one = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 }, 0.5, { x: true, y: false })
+    expect(calls.at(-1)?.rotation).toBeCloseTo(-0.5, 2)
+    expect(one.mirror).toEqual({ x: -1, y: 1 })
+    const both = drawnLabel(uniqueText(), styleWith(), NONE, { x: 100, y: 60 }, 0.5, { x: true, y: true })
+    expect(calls.at(-1)?.rotation).toBeCloseTo(0.5 + Math.PI, 2)
+    expect(both.mirror).toEqual({ x: 1, y: 1 })
+  })
+
   it('asks the engine to set the text the way the style says', () => {
     drawnLabel(uniqueText(), styleWith({ align: 'end' }), NONE, { x: 100, y: 60 })
     expect(calls.at(-1)?.align).toBe('end')

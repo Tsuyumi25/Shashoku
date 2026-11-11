@@ -246,7 +246,7 @@ describe('a gesture in progress', () => {
 
     // Half of the frame on screen. Against the entry's 40 it would be clamped
     // up to a floor of 1/40 and come out as a different picture entirely.
-    placement.scaleTo('r', 0.5, { x: 0, y: 0 })
+    placement.scaleTo('r', { x: 0.5, y: 0.5 }, { x: 0, y: 0 }, 0)
 
     expect(placement.placementOf('r').a).toBe(0.5)
     // Pinned at the top-left corner, so the middle walks in by a quarter of the

@@ -817,6 +817,12 @@ const scale = {
    * mid-drag and leave the object exactly where letting go of it would.
    */
   perAxis: false,
+  /**
+   * The frame's turn when the drag took hold. A layer mirrored on one axis
+   * reports its turn half a revolution round, so reading it afresh each frame
+   * would flip the ratio's sign back the moment it crossed.
+   */
+  turn: 0,
 }
 let scaling = false
 let scaleEngaged = false
@@ -837,11 +843,11 @@ function reportScale() {
   const now = pageAt(scale.client.x, scale.client.y)
   const axes = axesOf(scale.corner)
   if (!axes.x || !axes.y) {
-    const ratio = axisScaleRatio(scale.pivot, scale.grab, now, props.rotation)
+    const ratio = axisScaleRatio(scale.pivot, scale.grab, now, scale.turn)
     emit('scaleAxes', { x: axes.x ? ratio.x : 1, y: axes.y ? ratio.y : 1 })
     return
   }
-  if (scale.perAxis) emit('scaleAxes', axisScaleRatio(scale.pivot, scale.grab, now, props.rotation))
+  if (scale.perAxis) emit('scaleAxes', axisScaleRatio(scale.pivot, scale.grab, now, scale.turn))
   else emit('scale', uniformScaleRatio(scale.pivot, scale.grab, now))
 }
 
@@ -858,6 +864,7 @@ function onScaleMove(e: PointerEvent) {
     scale.pin = e.altKey ? reference.value : opposite(scale.corner)
     const held = pointOnScreen(scale.pin)
     scale.pivot = pageAt(held.x, held.y)
+    scale.turn = props.rotation
     emit('scaleStart', scale.pin)
   }
   scale.client = { x: e.clientX, y: e.clientY }

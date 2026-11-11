@@ -91,6 +91,28 @@ describe('stretched', () => {
     close(s.rotation, turn)
   })
 
+  /** A mirror is not a turn: read as one it came out as the member spun round, still readable. */
+  it('mirrors a member pulled across the pivot rather than turning it', () => {
+    const s = stretched({ x: 10, y: 0 }, 0, pivot, 0, { x: -1, y: 1 })
+    close(s.center.x, -10)
+    expect(s.mirrored).toBe(true)
+    close(s.rotation, 0)
+    close(s.scaleX, 1)
+  })
+
+  it('mirrors a turned member across the box, its turn reflected with it', () => {
+    const turn = Math.PI / 6
+    const s = stretched({ x: 10, y: 0 }, turn, pivot, 0, { x: -1, y: 1 })
+    expect(s.mirrored).toBe(true)
+    close(s.rotation, -turn)
+  })
+
+  it('does not call pulling both axes across a mirror, which is half a turn', () => {
+    const s = stretched({ x: 10, y: 0 }, 0, pivot, 0, { x: -1, y: -1 })
+    expect(s.mirrored).toBe(false)
+    close(Math.abs(s.rotation), Math.PI)
+  })
+
   it('leaves everything as it was at a ratio of one', () => {
     const s = stretched({ x: 7, y: -3 }, 0.4, pivot, 0.1, { x: 1, y: 1 })
     close(s.center.x, 7)

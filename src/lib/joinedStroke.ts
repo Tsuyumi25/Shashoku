@@ -19,6 +19,11 @@ export function lettersOnly(effects: readonly LayerEffect[]): LayerEffect[] {
   return withStroke(effects, { kind: 'stroke', width: stroke.width, color: '#00000000', position: 'outside' })
 }
 
+/** Where a page column (or row) inside a bitmap's rectangle reads in the bitmap, mirrored or not. */
+function along(at: number, extent: number, sign: 1 | -1): number {
+  return sign < 0 ? extent - 1 - at : at
+}
+
 function cornerOf(label: DrawnLabel): { x: number; y: number; w: number; h: number } | null {
   if (!label.sample) return null
   const { width: w, height: h } = label.sample.image
@@ -70,9 +75,9 @@ export function joinedPixels(
     const y1 = Math.min(h, dy + r.h)
     const px = label.sample.image.data
     for (let y = y0; y < y1; y++) {
-      const from = (y - dy) * r.w - dx
+      const by = along(y - dy, r.h, label.mirror.y)
       for (let x = x0; x < x1; x++) {
-        if (px[(from + x) * 4 + 3]! < SOLID) continue
+        if (px[(by * r.w + along(x - dx, r.w, label.mirror.x)) * 4 + 3]! < SOLID) continue
         solid[y * w + x] = 1
         any = true
       }
@@ -90,13 +95,21 @@ export function joinedPixels(
   const ly = Math.round(self.y - at.y)
   const out = new ImageData(new Uint8ClampedArray(src), w, h)
   const dst = out.data
+  // The output is this label's own bitmap, mirrored where it lands like the
+  // letters are; the mask and the letters' frame are read on the page.
+  const mirror = own.mirror
   for (let y = 0; y < h; y++) {
+    const py = along(y, h, mirror.y)
     for (let x = 0; x < w; x++) {
       const i = y * w + x
-      if (solid[i] === 0) continue
-      const sx = x - lx
-      const sy = y - ly
-      const j = sx >= 0 && sx < lw && sy >= 0 && sy < self.h ? (sy * lw + sx) * 4 : -1
+      const px = along(x, w, mirror.x)
+      if (solid[py * w + px] === 0) continue
+      const sx = px - lx
+      const sy = py - ly
+      const j =
+        sx >= 0 && sx < lw && sy >= 0 && sy < self.h
+          ? (along(sy, self.h, mirror.y) * lw + along(sx, lw, mirror.x)) * 4
+          : -1
       const a = j < 0 ? 0 : letters[j + 3]!
       const o = i * 4
       if (position === 'outside') {
