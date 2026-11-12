@@ -221,6 +221,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.removeEachStroke = on
   }
 
+  function setWandSamplesAll(on: boolean) {
+    prefs.wandSamplesAll = on
+  }
+
   function setSidePanel(panel: SidePanel) {
     prefs.sidePanel = panel
   }
@@ -258,6 +262,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMissingGlyphMode,
     setMarkMissingGlyphs,
     setRemoveEachStroke,
+    setWandSamplesAll,
     setSidePanel,
     setRetouchOpacity,
   }

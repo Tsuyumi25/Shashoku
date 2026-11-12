@@ -167,6 +167,8 @@ export interface Preferences {
   markMissingGlyphs: boolean;
   /** Whether the remove brush repairs as each stroke lets go, or waits for Enter. */
   removeEachStroke: boolean;
+  /** Whether the wand reads every visible layer rather than the one being worked on. */
+  wandSamplesAll: boolean;
   /**
    * Folders the sidebar looks under for projects. Recorded rather than
    * configured: opening a project registers its parent, so the library fills
@@ -232,6 +234,7 @@ export function defaultPreferences(): Preferences {
     missingGlyphMode: "tofu",
     markMissingGlyphs: true,
     removeEachStroke: true,
+    wandSamplesAll: false,
     scanPoints: [],
     workspaces: [],
     recentProjects: [],

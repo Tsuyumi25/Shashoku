@@ -1723,7 +1723,10 @@ const selectionOverlay = useSelectionOverlay(overlayCanvasRef, () => pageReady.v
 const { target: wandTarget } = useRasterTarget()
 const selectionTool = useSelectionTool(
   containerRef,
-  { wand: () => wandLayer.value, colour: () => artwork.value },
+  {
+    wand: () => (preferences.prefs.wandSamplesAll ? artwork.value : wandLayer.value),
+    colour: () => artwork.value,
+  },
   () => pageReady.value,
 )
 const layerBrush = useLayerBrush(containerRef)
@@ -1770,8 +1773,9 @@ watch(
  * layer is the artwork" has no answer, while "what is at this point" always
  * does.
  *
- * Typesetting is left out of it, as it is out of the wand: a translation is
- * something written onto the page, not part of the page's colour.
+ * Typesetting is left out of it: a translation is something written onto the
+ * page, not part of the page's colour. The wand reads this picture too when it
+ * samples every layer, so a balloon is still one region around its text.
  */
 const artwork = ref<OffscreenCanvas | null>(null)
 /** Which composite the result being awaited belongs to. */
@@ -1779,7 +1783,7 @@ let artworkRequest = 0
 
 /**
  * The layer being worked on, alone, on the page's own grid — what the wand
- * reads.
+ * reads unless it samples every layer.
  *
  * One layer rather than the page because a selection is made in order to be
  * filled, erased or handed to a model, and every one of those lands on this
@@ -1826,6 +1830,7 @@ watch(
   async ([pageDir]) => {
     artwork.value = null
     selectionTool.dropSample('colour')
+    if (preferences.prefs.wandSamplesAll) selectionTool.dropSample('wand')
     const mine = ++artworkRequest
     const file = currentFile.value
     if (!pageDir || !file) return
@@ -1890,6 +1895,15 @@ watch(
     }
   },
   { immediate: true },
+)
+
+// The wand's picture is another one once it is told to read one layer or all.
+watch(
+  () => preferences.prefs.wandSamplesAll,
+  () => {
+    selection.cancelGesture()
+    selectionTool.dropSample('wand')
+  },
 )
 
 /**

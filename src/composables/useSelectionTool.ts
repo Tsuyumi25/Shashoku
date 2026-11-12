@@ -43,11 +43,12 @@ export function useSelectionTool(
    *
    * Two rather than one because the tools that read them answer different
    * questions, which is Photoshop's split as well. `wand` is the layer being
-   * worked on: a selection is made to be filled or erased, and it would be a
-   * lie for it to follow an edge that lives on some other layer. `colour` is
-   * everything, because picking a colour is picking one you can see — off the
-   * layer alone, an eyedropper on a fresh empty layer could only ever answer
-   * transparent.
+   * worked on, since a selection made to be filled or erased should follow
+   * that layer's edges — or every visible layer when the user asks for
+   * Photoshop's Sample All Layers, for a selection wanted only for its shape.
+   * `colour` is everything, because picking a colour is picking one you can
+   * see — off the layer alone, an eyedropper on a fresh empty layer could only
+   * ever answer transparent.
    */
   sources: {
     wand: () => CanvasImageSource | null

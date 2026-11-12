@@ -107,6 +107,16 @@
         選區 +{{ px }}px
       </button>
       <button
+        type="button"
+        class="route-btn"
+        :aria-pressed="preferences.prefs.wandSamplesAll"
+        :class="preferences.prefs.wandSamplesAll && 'route-btn-on'"
+        title="魔術棒（W）：開著時讀所有看得到的點陣圖層，選著文字也能點；關著時只讀選中的那一層。文字不算進去"
+        @click="preferences.setWandSamplesAll(!preferences.prefs.wandSamplesAll)"
+      >
+        取樣全部圖層
+      </button>
+      <button
         v-for="choice in ALIGN_CHOICES"
         :key="choice.axes"
         type="button"

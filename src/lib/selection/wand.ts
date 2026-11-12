@@ -5,10 +5,10 @@ import type { Point } from '@/lib/selection/rect'
 export const DEFAULT_WAND_TOLERANCE = 32
 
 /**
- * Everything of one colour reachable from where you clicked, sampled off one
- * layer's own pixels — Photoshop's Sample All Layers, off, which is where it
- * ships. What you are pointing at is the layer you are working on, and a
- * translation typeset over a balloon has never been part of that balloon.
+ * Everything of one colour reachable from where you clicked in `pixels` — one
+ * layer's own, or every visible layer's when the wand samples them all, as
+ * Photoshop's Sample All Layers does. Either way a translation typeset over a
+ * balloon is not part of that balloon.
  *
  * Contiguous, as Photoshop is by default: a flood rather than a colour range,
  * so clicking one balloon does not select every balloon on the page.

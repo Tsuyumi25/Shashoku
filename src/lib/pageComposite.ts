@@ -307,10 +307,11 @@ export async function compositePage(input: CompositeInput): Promise<OffscreenCan
  * The same page with the typesetting left off — every raster in its own place,
  * in stacking order, with nothing written on top.
  *
- * This is what the wand reads. It is there to find a shape in the artwork, and
- * a translation sitting inside a balloon is not part of that balloon, so text
- * is skipped rather than sampled around. Skipping it invents nothing: `text`
- * and `raster` are already two kinds in the stack.
+ * What the eyedropper reads, and the wand when it samples every layer. It is
+ * there to find a colour or a shape in the artwork, and a translation sitting
+ * inside a balloon is not part of that balloon, so text is skipped rather than
+ * sampled around. Skipping it invents nothing: `text` and `raster` are already
+ * two kinds in the stack.
  *
  * Compositing rather than picking a layer is the whole point. The base map has
  * no type of its own — it can be unlocked, reordered, dropped into a folder —
