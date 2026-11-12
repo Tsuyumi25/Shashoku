@@ -64,15 +64,6 @@
         -->
         <button
           class="tb-lib no-drag"
-          :class="ui.view === 'library' && 'tb-lib-on'"
-          title="切換到書庫"
-          @click="ui.setView('library')"
-        >
-          <LibraryBig :size="14" />
-          <span>書庫</span>
-        </button>
-        <button
-          class="tb-lib no-drag ml-1"
           :class="ui.view === 'fonts' && 'tb-lib-on'"
           title="切換到字體庫"
           @click="ui.setView('fonts')"
@@ -80,6 +71,21 @@
           <Type :size="14" />
           <span>字體庫</span>
         </button>
+        <!-- Beside the pill, since this book is the one taken off that shelf. -->
+        <button
+          class="tb-lib no-drag ml-1"
+          :class="ui.view === 'library' && 'tb-lib-on'"
+          title="切換到書庫"
+          @click="ui.setView('library')"
+        >
+          <LibraryBig :size="14" />
+          <span>書庫</span>
+        </button>
+        <!--
+          A breadcrumb's mark: the shelf, then the book taken off it. In the
+          flank rather than the pill so the pill keeps the window's centre.
+        -->
+        <ChevronRight :size="14" class="ml-1.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </div>
 
       <div class="tb-pill no-drag">
@@ -95,17 +101,8 @@
         </button>
       </div>
 
-      <div class="tb-center-side">
-        <button
-          class="tb-lib no-drag"
-          :class="ui.view === 'topology' && 'tb-lib-on'"
-          title="切換到拓樸：每一頁的閱讀線，跟 agent 拿到的 mermaid 一樣"
-          @click="ui.setView('topology')"
-        >
-          <Workflow :size="14" />
-          <span>拓樸</span>
-        </button>
-      </div>
+      <!-- Empty, and kept: the grid's third column is what holds the pill on the window's centre. -->
+      <div class="tb-center-side" />
     </div>
 
     <!--
@@ -123,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { LibraryBig, Menu, Save, Settings, Type, Workflow } from '@lucide/vue'
+import { ChevronRight, LibraryBig, Menu, Save, Settings, Type } from '@lucide/vue'
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -142,6 +139,7 @@ const ui = useUiStore()
 const isMac = navigator.platform.startsWith('Mac')
 
 const FACES: { view: AppView; title: string }[] = [
+  { view: 'book', title: '此書' },
   { view: 'editor', title: '編輯器' },
   { view: 'export', title: '匯出' },
 ]

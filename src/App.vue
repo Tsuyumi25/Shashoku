@@ -15,10 +15,10 @@
       </div>
 
       <!--
-        Kept mounted under the topology view, which takes the whole width for
-        its charts and its strip of pages: the editor is to be found as it was.
+        Kept mounted under the book view, which takes the whole width for its
+        charts and its strip of pages: the editor is to be found as it was.
       -->
-      <SplitterGroup v-show="ui.view !== 'topology'" direction="horizontal" class="min-w-0 flex-1">
+      <SplitterGroup v-show="ui.view !== 'book'" direction="horizontal" class="min-w-0 flex-1">
         <SplitterPanel
           :order="1"
           :default-size="20"
@@ -94,7 +94,7 @@
           </div>
         </SplitterPanel>
       </SplitterGroup>
-      <div v-if="ui.view === 'topology'" class="min-w-0 flex-1">
+      <div v-if="ui.view === 'book'" class="min-w-0 flex-1">
         <TopologyMode />
       </div>
     </div>
