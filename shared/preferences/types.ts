@@ -178,6 +178,8 @@ export interface Preferences {
   snapping: boolean;
   /** Whether a held snap draws its smart guide; snapping goes on either way. */
   smartGuides: boolean;
+  /** Whether frames, handles and the canvas's other marks stay up while an object is dragged. */
+  framesWhileMoving: boolean;
   /**
    * Folders the sidebar looks under for projects. Recorded rather than
    * configured: opening a project registers its parent, so the library fills
@@ -247,6 +249,7 @@ export function defaultPreferences(): Preferences {
     rulersShown: false,
     snapping: false,
     smartGuides: true,
+    framesWhileMoving: false,
     scanPoints: [],
     workspaces: [],
     recentProjects: [],

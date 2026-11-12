@@ -40,6 +40,24 @@
         </span>
       </label>
     </section>
+
+    <section class="mt-3 rounded border border-border p-3">
+      <label class="flex cursor-pointer items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          :checked="preferences.prefs.framesWhileMoving"
+          @change="preferences.prefs.framesWhileMoving = ($event.target as HTMLInputElement).checked"
+        />
+        <span>
+          移動時顯示外框
+          <span class="block text-muted-foreground">
+            關著時，在物件上按下滑鼠的那一刻起，只留下圖本身、游標、參考線與智慧型參考線：外框、把手、
+            多選的大框、閱讀線、OCR 框和卡片都先隱藏，放開就回來。拉把手縮放、旋轉時不隱藏。
+          </span>
+        </span>
+      </label>
+    </section>
   </div>
 </template>
 

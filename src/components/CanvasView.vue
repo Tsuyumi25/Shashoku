@@ -90,7 +90,12 @@
         transform says, rather than every element saying it separately and
         everyone hoping they agree.
       -->
-      <div :style="stageStyle">
+      <!--
+        Faded out rather than taken down while an object is dragged: a frame
+        under the hand holds the pointer, and only the artwork, the cursor and
+        the guides are left to judge the placing by.
+      -->
+      <div :style="stageStyle" :class="bareMove && 'opacity-0'">
         <!--
           Where the reading being pointed at in the list was read. Nothing here
           is an object — it is a mark that lasts as long as the pointer rests.
@@ -844,6 +849,16 @@ function otherInkFor(ids: readonly string[]) {
   dragBoxes = { carried, boxes }
   return boxes
 }
+
+/**
+ * Whether the button is down on an object's body — from the press, as
+ * Photoshop takes its frame away, rather than once the drag gets going, by
+ * which time the frame has already been in the way.
+ */
+const holding = ref(false)
+
+/** Everything drawn over the artwork goes while an object is dragged, unless the setting keeps it. */
+const bareMove = computed(() => (holding.value || layerDrag.value !== null) && !preferences.prefs.framesWhileMoving)
 
 /** The smart guides a drag shows while it holds to another object or to the page; a guide shows itself. */
 const snapShown = ref<Segment[]>([])
@@ -2452,6 +2467,9 @@ function onPressCapture(e: PointerEvent): void {
     }
   }
   if (e.button === 0) rulersRef.value?.clearSelection()
+  // A frame's body, not its handles: scaling and turning keep the frame they work on.
+  const target = e.target as Element | null
+  if (e.button === 0 && target?.closest('[data-frame-box]') && !target.closest('[data-frame-handle]')) holding.value = true
   const rect = containerRef.value?.getBoundingClientRect()
   if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
   onAltPress(e)
@@ -2771,12 +2789,15 @@ function trackModifiers(e: KeyboardEvent | PointerEvent): void {
 }
 
 useEventListener(window, 'keydown', trackModifiers)
+useEventListener(window, 'pointerup', () => (holding.value = false), { capture: true })
+useEventListener(window, 'pointercancel', () => (holding.value = false), { capture: true })
 useEventListener(window, 'keyup', trackModifiers)
 // Alt-Tab hands the window away without ever sending the release, which would
 // otherwise leave the eyedropper armed for the rest of the session.
 useEventListener(window, 'blur', () => {
   altDown.value = false
   ctrlDown.value = false
+  holding.value = false
 })
 </script>
 

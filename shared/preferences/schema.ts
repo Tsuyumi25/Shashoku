@@ -72,6 +72,7 @@ export function parsePreferences(raw: string): Preferences {
     rulersShown,
     snapping,
     smartGuides,
+    framesWhileMoving,
     scanPoints,
     workspaces,
     recentProjects,
@@ -161,6 +162,7 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof rulersShown === "boolean") prefs.rulersShown = rulersShown;
   if (typeof snapping === "boolean") prefs.snapping = snapping;
   if (typeof smartGuides === "boolean") prefs.smartGuides = smartGuides;
+  if (typeof framesWhileMoving === "boolean") prefs.framesWhileMoving = framesWhileMoving;
   if (Array.isArray(scanPoints)) {
     prefs.scanPoints = scanPoints.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
@@ -247,6 +249,7 @@ export function serializePreferences(prefs: Preferences): string {
       rulersShown: prefs.rulersShown,
       snapping: prefs.snapping,
       smartGuides: prefs.smartGuides,
+      framesWhileMoving: prefs.framesWhileMoving,
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
       recentProjects: prefs.recentProjects,
