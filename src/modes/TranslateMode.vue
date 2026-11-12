@@ -1,14 +1,5 @@
 <template>
   <div class="flex h-full min-w-0">
-    <!--
-      Against the canvas rather than against the window: what is armed here
-      acts there, and a rail across the room from the thing it points at makes
-      that a longer trip than it is.
-    -->
-    <div class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
-      <ToolRail class="min-h-0 flex-1" />
-    </div>
-
     <SplitterGroup
       direction="horizontal"
       class="min-w-0 flex-1"
@@ -167,7 +158,6 @@ import CanvasView from '@/components/CanvasView.vue'
 import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
-import ToolRail from '@/components/ToolRail.vue'
 import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useFillSelection } from '@/composables/useFillSelection'
 import { useMergeLayers } from '@/composables/useMergeLayers'

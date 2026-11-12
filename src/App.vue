@@ -4,6 +4,16 @@
 
     <div class="flex min-h-0 flex-1">
       <!--
+        Against the window's edge, where editors keep their tools, and only in
+        the editor: every tool on it acts on the canvas, which no other view
+        has. Its settings button rides along as a shortcut — the title bar's
+        menu is the way in from everywhere else.
+      -->
+      <div v-show="ui.view === 'editor'" class="flex w-9 shrink-0 flex-col border-r border-border bg-card">
+        <ToolRail class="min-h-0 flex-1" />
+      </div>
+
+      <!--
         Kept mounted under the topology view, which takes the whole width for
         its charts and its strip of pages: the editor is to be found as it was.
       -->
@@ -109,6 +119,7 @@ import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import ToolRail from '@/components/ToolRail.vue'
 import { useActivityLog } from '@/composables/useActivityLog'
 import { useCloseSettle } from '@/composables/useCloseSettle'
 import { useFillSelection } from '@/composables/useFillSelection'
