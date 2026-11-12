@@ -1,6 +1,7 @@
 <template>
   <div class="flex h-full flex-col">
     <TitleBar />
+    <ToolOptionsBar v-show="ui.view === 'editor'" />
 
     <div class="flex min-h-0 flex-1">
       <!--
@@ -119,6 +120,7 @@ import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import ToolOptionsBar from '@/components/ToolOptionsBar.vue'
 import ToolRail from '@/components/ToolRail.vue'
 import { useActivityLog } from '@/composables/useActivityLog'
 import { useCloseSettle } from '@/composables/useCloseSettle'

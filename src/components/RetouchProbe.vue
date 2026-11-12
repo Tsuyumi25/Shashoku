@@ -109,53 +109,11 @@
       <button
         type="button"
         class="route-btn"
-        :aria-pressed="preferences.prefs.wandSamplesAll"
-        :class="preferences.prefs.wandSamplesAll && 'route-btn-on'"
-        title="魔術棒（W）：開著時讀所有看得到的點陣圖層，選著文字也能點；關著時只讀選中的那一層。文字不算進去"
-        @click="preferences.setWandSamplesAll(!preferences.prefs.wandSamplesAll)"
-      >
-        取樣全部圖層
-      </button>
-      <button
-        v-for="choice in ALIGN_CHOICES"
-        :key="choice.axes"
-        type="button"
-        class="route-btn"
-        :disabled="!aligner.ready.value"
-        :title="choice.title"
-        @click="aligner.align(choice.axes)"
-      >
-        <component :is="choice.icon" :size="12" />
-        <span>{{ choice.text }}</span>
-      </button>
-      <button
-        type="button"
-        class="route-btn"
         :disabled="!inpaint.canEraseSelection.value"
         title="把選區連同周邊送給 anime-manga-big-lama，回來的像素只寫進選區裡"
         @click="inpaint.eraseSelection()"
       >
         {{ inpaint.working.value ? '修補中…' : 'LaMa 修補' }}
-      </button>
-      <button
-        type="button"
-        class="route-btn"
-        :aria-pressed="preferences.prefs.removeEachStroke"
-        :class="preferences.prefs.removeEachStroke && 'route-btn-on'"
-        title="移除工具（J）：開著時每塗一筆、放開就修；關著時塗好的地方先留著，按 Enter 一起修，Esc 清掉"
-        @click="preferences.setRemoveEachStroke(!preferences.prefs.removeEachStroke)"
-      >
-        每一筆都修復
-      </button>
-      <button
-        v-if="!preferences.prefs.removeEachStroke"
-        type="button"
-        class="route-btn"
-        :disabled="!removal.hasPending.value || removal.working.value"
-        title="把移除工具塗好的地方送去修補（Enter）"
-        @click="removal.commit()"
-      >
-        ✓ 修復塗好的地方
       </button>
       <button
         type="button"
@@ -287,19 +245,9 @@
 <script setup lang="ts">
 import { everyEntry } from '@shared/page/trees'
 import { computed, ref } from 'vue'
-import {
-  AlignHorizontalJustifyCenter,
-  AlignVerticalJustifyCenter,
-  LoaderCircle,
-  ScanText,
-  SquareDashed,
-  SquareDot,
-  Trash2,
-} from '@lucide/vue'
+import { LoaderCircle, ScanText, SquareDashed, Trash2 } from '@lucide/vue'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
-import { useAlignToSelection } from '@/composables/useAlignToSelection'
 import { useInpaint } from '@/composables/useInpaint'
-import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { isEmptyRect } from '@/lib/selection/rect'
 import ExplodePanel from '@/components/ExplodePanel.vue'
 import { useEditorStore } from '@/stores/editorStore'
@@ -311,18 +259,9 @@ import { useSelectionStore } from '@/stores/selectionStore'
 /** Five is the amount the notes settled on; one is for the edge that is nearly there. */
 const GROW_STEPS = [1, 5] as const
 
-/** Photoshop's two centre buttons, and the pair pressed together. */
-const ALIGN_CHOICES = [
-  { axes: 'x', text: '水平置中', icon: AlignHorizontalJustifyCenter, title: '把選中的物件左右移到選區的中間，上下不動；每個物件各自對齊' },
-  { axes: 'y', text: '垂直置中', icon: AlignVerticalJustifyCenter, title: '把選中的物件上下移到選區的中間，左右不動；每個物件各自對齊' },
-  { axes: 'both', text: '置中', icon: SquareDot, title: '把選中的物件移到選區的正中間；對齊的是看得到的字和像素，不是文字框' },
-] as const
-
 const editor = useEditorStore()
 const selection = useSelectionStore()
 const inpaint = useInpaint()
-const aligner = useAlignToSelection()
-const removal = useRemoveStrokes()
 const project = useProjectStore()
 const ocr = useOcrStore()
 const preferences = usePreferencesStore()
