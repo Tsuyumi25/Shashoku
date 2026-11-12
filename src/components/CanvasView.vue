@@ -329,7 +329,7 @@
         </div>
       </template>
 
-      <CanvasRulers ref="rulersRef" :pointer="cursorPos" :snap-lines="guideTargets" />
+      <CanvasRulers ref="rulersRef" :pointer="cursorPos" :snap-lines="guideTargets" :held="snapShown" />
     </template>
 
     <div v-else class="flex h-full items-center justify-center select-none">
@@ -387,6 +387,7 @@ import CanvasMenu from '@/components/CanvasMenu.vue'
 import CanvasRulers from '@/components/CanvasRulers.vue'
 import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
 import { inkOfLabel } from '@/lib/alignToSelection'
+import { linesOfBox, linesOfGuides, smartSegments, snapBox, SNAP_PX, type Segment } from '@/lib/rulers'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useObjectMenu } from '@/composables/useObjectMenu'
@@ -776,7 +777,7 @@ onMounted(() => {
  */
 function moveLabelTo(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId || editor.isLayerLocked(labelId)) return
-  const landed = landedAnchor(from, to)
+  const landed = onSnaps(labelId, landedAnchor(from, to))
   if (groupIds.value.includes(labelId)) {
     moveGroupWith(labelId, landed)
     return
@@ -787,14 +788,112 @@ function moveLabelTo(labelId: string, from: Anchor, to: Anchor) {
 function commitLabelMove(labelId: string, from: Anchor, to: Anchor) {
   if (!editor.currentPageId) return
   if (groupIds.value.includes(labelId)) {
+    endSnaps()
     finishGroup()
     return
   }
-  const landed = landedAnchor(from, to)
+  const landed = onSnaps(labelId, landedAnchor(from, to))
+  endSnaps()
   editor.cmdMoveLabel(editor.currentPageId, labelId, from, landed)
 }
 
+/**
+ * Where everything a drag carries stands now, as one box around its ink: text
+ * as the canvas draws it — so a turned object is its upright bounding box — and
+ * a raster layer by its frame, carried by the move it is being held at.
+ */
+function inkBoxOf(ids: readonly string[]): { x: number; y: number; w: number; h: number } | null {
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const id of ids) {
+    const entry = project.entryById(id)
+    let box: { x: number; y: number; w: number; h: number } | null = null
+    if (entry?.kind === 'text') box = inkOfLabel(canvasLabels.labelOf(entry))
+    else if (entry?.kind === 'raster') {
+      const frame = raster.frameOf(entry)
+      const held = placement.placementOf(id)
+      box = { x: frame.x + held.dx, y: frame.y + held.dy, w: frame.w, h: frame.h }
+    }
+    if (!box) continue
+    x0 = Math.min(x0, box.x)
+    y0 = Math.min(y0, box.y)
+    x1 = Math.max(x1, box.x + box.w)
+    y1 = Math.max(y1, box.y + box.h)
+  }
+  return x0 === Infinity ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+}
 
+/**
+ * The other text objects' ink a drag can take hold of — every drawn text not
+ * being carried — read once when the drag starts, since nothing but the
+ * carried objects moves while it lasts.
+ */
+let dragBoxes: { carried: string; boxes: { x: number; y: number; w: number; h: number }[] } | null = null
+
+function otherInkFor(ids: readonly string[]) {
+  const carried = ids.join('\n')
+  if (dragBoxes?.carried === carried) return dragBoxes.boxes
+  const skip = new Set(ids)
+  const boxes = stackedTextNodes(stack.value).flatMap((node) => {
+    if (skip.has(node.entry.id)) return []
+    const ink = inkOfLabel(canvasLabels.labelOf(node.entry))
+    return ink ? [ink] : []
+  })
+  dragBoxes = { carried, boxes }
+  return boxes
+}
+
+/** The smart guides a drag shows while it holds to another object or to the page; a guide shows itself. */
+const snapShown = ref<Segment[]>([])
+
+function endSnaps() {
+  dragBoxes = null
+  snapShown.value = []
+}
+
+/**
+ * How much further a box carried by a drag has to go to sit on a guide, on
+ * another text object's ink lines or on the page's edges and middle: its own
+ * edges and middle onto the nearest line in reach on each axis. Nothing while
+ * Ctrl is held, which lets an object go anywhere.
+ */
+function snapPull(box: { x: number; y: number; w: number; h: number } | null, ids: readonly string[]): { dx: number; dy: number } {
+  const page = editor.currentPageId
+  if (box === null || page === null || ctrlDown.value) {
+    snapShown.value = []
+    return { dx: 0, dy: 0 }
+  }
+  const guides = linesOfGuides(project.guidesOf(page))
+  const others = otherInkFor(ids)
+  const sheet = linesOfBox({ x: 0, y: 0, ...pageSize.value })
+  const x = [...guides.x, ...sheet.x]
+  const y = [...guides.y, ...sheet.y]
+  for (const other of others) {
+    const own = linesOfBox(other)
+    x.push(...own.x)
+    y.push(...own.y)
+  }
+  const pull = snapBox(box, { x, y }, SNAP_PX / view.scale)
+  const held = {
+    x: pull.x !== null && !guides.x.includes(pull.x) ? pull.x : null,
+    y: pull.y !== null && !guides.y.includes(pull.y) ? pull.y : null,
+  }
+  snapShown.value = smartSegments({ ...box, x: box.x + pull.dx, y: box.y + pull.dy }, held, others, pageSize.value)
+  return pull
+}
+
+/** A text object's next stand, pulled onto the guides and the other text with the rest of its set. */
+function onSnaps(labelId: string, landed: Anchor): Anchor {
+  const page = editor.currentPageId
+  const body = page === null ? null : (project.blockById(page, labelId)?.body ?? null)
+  if (!body) return landed
+  const ids = groupIds.value.includes(labelId) ? groupIds.value : [labelId]
+  const box = inkBoxOf(ids)
+  const pull = snapPull(box && { ...box, x: box.x + landed.x - body.x, y: box.y + landed.y - body.y }, ids)
+  return { x: landed.x + pull.dx, y: landed.y + pull.dy }
+}
 
 /**
  * Shift adds, as it does on any canvas. There is no Ctrl here: a page has no
@@ -1943,6 +2042,8 @@ const panning = ref(false)
 const cursorPos = ref<{ x: number; y: number } | null>(null)
 const capsLock = ref(false)
 const altDown = ref(false)
+/** Held while dragging, an object goes where it is put rather than onto a guide. */
+const ctrlDown = ref(false)
 
 const {
   gesture: hudGesture,
@@ -2333,17 +2434,20 @@ function onPressCapture(e: PointerEvent): void {
     panLast = { x: e.clientX, y: e.clientY }
     return
   }
-  // A guide under the select tool's press is picked up before anything under it.
-  if (e.button === 0 && editor.tool === 'select' && !spaceDown.value && !rDown.value) {
+  // A guide under the select tool's press is taken before anything under it:
+  // the left button picks it up, the right opens its menu.
+  if ((e.button === 0 || e.button === 2) && editor.tool === 'select' && !spaceDown.value && !rDown.value) {
     const guide = rulersRef.value?.hitAt(e.clientX, e.clientY) ?? null
     if (guide) {
       e.preventDefault()
       e.stopImmediatePropagation()
       guideHover.value = null
-      rulersRef.value?.beginMove(e, guide)
+      if (e.button === 0) rulersRef.value?.beginMove(e, guide)
+      else rulersRef.value?.openMenu(e, guide)
       return
     }
   }
+  if (e.button === 0) rulersRef.value?.clearSelection()
   const rect = containerRef.value?.getBoundingClientRect()
   if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
   onAltPress(e)
@@ -2381,8 +2485,14 @@ function reportLayerDrag(): void {
   const rect = containerRef.value.getBoundingClientRect()
   const travel = travelSinceGrab(drag.grab, drag.client.x, drag.client.y, rect, heldView.value)
   const d = landedTravel(travel)
-  if (groupIds.value.includes(drag.id)) moveGroupBy(d.dx, d.dy)
-  else placement.moveBy(drag.id, d)
+  // The layer stands at the travel it was last given; the guides pull from where it started.
+  const ids = groupIds.value.includes(drag.id) ? groupIds.value : [drag.id]
+  const given = placement.placementOf(drag.id)
+  const box = inkBoxOf(ids)
+  const pull = snapPull(box && { ...box, x: box.x - given.dx + d.dx, y: box.y - given.dy + d.dy }, ids)
+  const pulled = { dx: d.dx + pull.dx, dy: d.dy + pull.dy }
+  if (groupIds.value.includes(drag.id)) moveGroupBy(pulled.dx, pulled.dy)
+  else placement.moveBy(drag.id, pulled)
 }
 
 function trackLayerDrag(e: PointerEvent): void {
@@ -2422,6 +2532,7 @@ function endLayerDrag(): void {
     layerDragFrame = null
   }
   reportLayerDrag()
+  endSnaps()
   const drag = layerDrag.value
   layerDrag.value = null
   if (drag === null || !drag.engaged) return
@@ -2652,6 +2763,7 @@ useEventListener(window, 'keyup', (e) => {
 function trackModifiers(e: KeyboardEvent | PointerEvent): void {
   capsLock.value = e.getModifierState('CapsLock')
   altDown.value = e.altKey
+  ctrlDown.value = e.ctrlKey || e.metaKey
 }
 
 useEventListener(window, 'keydown', trackModifiers)
@@ -2660,6 +2772,7 @@ useEventListener(window, 'keyup', trackModifiers)
 // otherwise leave the eyedropper armed for the rest of the session.
 useEventListener(window, 'blur', () => {
   altDown.value = false
+  ctrlDown.value = false
 })
 </script>
 

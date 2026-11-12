@@ -49,7 +49,7 @@ import type { PageGuide } from '@shared/page/types'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import { applyViewTransform, type Anchor, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
-import { levelView, nearestWithin, RULER_PX, rulerSteps, SNAP_PX } from '@/lib/rulers'
+import { levelView, nearestWithin, RULER_PX, rulerSteps, SNAP_PX, type Segment } from '@/lib/rulers'
 import { ownsKeyboard } from '@/lib/typingSurface'
 import { useEditorStore } from '@/stores/editorStore'
 import { useExplodeStore, WHOLE_PAGE } from '@/stores/explodeStore'
@@ -62,6 +62,8 @@ const props = defineProps<{
   pointer: { x: number; y: number } | null
   /** Lines a guide being dragged takes hold of, in page pixels: `x` for vertical guides, `y` for horizontal. */
   snapLines: () => { x: number[]; y: number[] }
+  /** Smart guides a dragged object shows while it holds to another object or the page, in page pixels. */
+  held: readonly Segment[]
 }>()
 
 const editor = useEditorStore()
@@ -287,6 +289,7 @@ function onKey(e: KeyboardEvent) {
 onBeforeUnmount(finish)
 
 const GUIDE_COLOUR = 'rgb(0, 190, 255)'
+const SMART_COLOUR = 'rgb(255, 0, 170)'
 const SELECTED_COLOUR = 'rgb(0, 90, 190)'
 
 /** Sizes a canvas to its box at the device's pixel density; false while it has none. */
@@ -320,13 +323,14 @@ watchEffect(() => {
       selected: d.id !== null && d.id === picked,
     })
   }
+  const smart = props.held
   if (!canvas) return
   const ctx = fit(canvas)
   if (!ctx) return
   const dpr = window.devicePixelRatio || 1
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  if (shown.length === 0) return
+  if (shown.length === 0 && smart.length === 0) return
   const pieces = explode.piecesOf(view)
   paintPieces(ctx, view, pieces, dpr, (pieceView: ViewTransform) => {
     applyViewTransform(ctx, pieceView, dpr)
@@ -346,6 +350,13 @@ watchEffect(() => {
       ctx.stroke()
     }
     ctx.globalAlpha = 1
+    ctx.strokeStyle = SMART_COLOUR
+    for (const s of smart) {
+      ctx.beginPath()
+      ctx.moveTo(s.x1, s.y1)
+      ctx.lineTo(s.x2, s.y2)
+      ctx.stroke()
+    }
   })
 })
 
