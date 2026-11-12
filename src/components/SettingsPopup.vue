@@ -33,6 +33,8 @@
 
           <InterfaceSettings v-else-if="active === 'interface'" />
 
+          <DisplaySettings v-else-if="active === 'display'" />
+
           <ExportSettings v-else-if="active === 'export'" />
 
           <OcrSettings v-else-if="active === 'ocr'" />
@@ -64,7 +66,8 @@ import {
   DialogRoot,
   DialogTitle,
 } from 'reka-ui'
-import { FolderOutput, Info, Monitor, ScanText, Type, X } from '@lucide/vue'
+import { Eye, FolderOutput, Info, Monitor, ScanText, Type, X } from '@lucide/vue'
+import DisplaySettings from '@/components/DisplaySettings.vue'
 import ExportSettings from '@/components/ExportSettings.vue'
 import FontSettings from '@/components/FontSettings.vue'
 import InterfaceSettings from '@/components/InterfaceSettings.vue'
@@ -74,11 +77,12 @@ import { version as VERSION } from '../../package.json'
 
 const ui = useUiStore()
 
-type TabKey = 'fonts' | 'interface' | 'export' | 'ocr' | 'about'
+type TabKey = 'fonts' | 'interface' | 'display' | 'export' | 'ocr' | 'about'
 
 const TABS: { key: TabKey; title: string; icon: Component }[] = [
   { key: 'fonts', title: '字體', icon: Type },
   { key: 'interface', title: '介面', icon: Monitor },
+  { key: 'display', title: '顯示', icon: Eye },
   { key: 'export', title: '匯出配置', icon: FolderOutput },
   { key: 'ocr', title: '文字辨識', icon: ScanText },
   { key: 'about', title: '關於', icon: Info },

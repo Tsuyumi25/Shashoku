@@ -856,12 +856,14 @@ function endSnaps() {
 /**
  * How much further a box carried by a drag has to go to sit on a guide, on
  * another text object's ink lines or on the page's edges and middle: its own
- * edges and middle onto the nearest line in reach on each axis. Nothing while
- * Ctrl is held, which lets an object go anywhere.
+ * edges and middle onto the nearest line in reach on each axis. Ctrl held
+ * turns snapping the other way for the drag — on when it is off, which is how
+ * it ships, and off when it is on — and with it off the object goes wherever
+ * it is put and no smart guide shows.
  */
 function snapPull(box: { x: number; y: number; w: number; h: number } | null, ids: readonly string[]): { dx: number; dy: number } {
   const page = editor.currentPageId
-  if (box === null || page === null || ctrlDown.value) {
+  if (box === null || page === null || ctrlDown.value === preferences.prefs.snapping) {
     snapShown.value = []
     return { dx: 0, dy: 0 }
   }
@@ -880,7 +882,9 @@ function snapPull(box: { x: number; y: number; w: number; h: number } | null, id
     x: pull.x !== null && !guides.x.includes(pull.x) ? pull.x : null,
     y: pull.y !== null && !guides.y.includes(pull.y) ? pull.y : null,
   }
-  snapShown.value = smartSegments({ ...box, x: box.x + pull.dx, y: box.y + pull.dy }, held, others, pageSize.value)
+  snapShown.value = preferences.prefs.smartGuides
+    ? smartSegments({ ...box, x: box.x + pull.dx, y: box.y + pull.dy }, held, others, pageSize.value)
+    : []
   return pull
 }
 
@@ -2042,7 +2046,7 @@ const panning = ref(false)
 const cursorPos = ref<{ x: number; y: number } | null>(null)
 const capsLock = ref(false)
 const altDown = ref(false)
-/** Held while dragging, an object goes where it is put rather than onto a guide. */
+/** Held while dragging, snapping is turned the other way for that drag. */
 const ctrlDown = ref(false)
 
 const {

@@ -230,7 +230,7 @@ function beginMove(e: PointerEvent, guide: PageGuide) {
   start(e, { id: guide.id, orientation: guide.orientation, position: guide.position, moved: false })
 }
 
-/** The guide runs through the pointer, and takes hold of a target in reach unless Ctrl is down. */
+/** The guide runs through the pointer, and takes hold of a target in reach while snapping is on — Ctrl turns it the other way. */
 function follow(e: PointerEvent) {
   const d = drag.value
   const box = rect()
@@ -239,8 +239,8 @@ function follow(e: PointerEvent) {
   if (!moved) return
   const { at, region } = pageAt(e.clientX, e.clientY, box, d.region)
   const raw = d.orientation === 'vertical' ? at.x : at.y
-  const held = e.ctrlKey || e.metaKey
-  const snapped = held
+  const free = (e.ctrlKey || e.metaKey) === preferences.prefs.snapping
+  const snapped = free
     ? null
     : nearestWithin(raw, d.orientation === 'vertical' ? d.targets.x : d.targets.y, SNAP_PX / editor.view.scale)
   drag.value = { ...d, moved, region, position: snapped ?? raw, away: onRuler(e.clientX, e.clientY, box) }

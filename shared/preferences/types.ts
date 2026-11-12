@@ -172,6 +172,13 @@ export interface Preferences {
   /** Whether the canvas shows its rulers (Ctrl+R). */
   rulersShown: boolean;
   /**
+   * Whether a dragged object or guide takes hold of guides, the page and other
+   * objects. Ctrl held while dragging turns it the other way for that drag.
+   */
+  snapping: boolean;
+  /** Whether a held snap draws its smart guide; snapping goes on either way. */
+  smartGuides: boolean;
+  /**
    * Folders the sidebar looks under for projects. Recorded rather than
    * configured: opening a project registers its parent, so the library fills
    * itself in as it is used. Nothing here says a project exists — the sentinel
@@ -238,6 +245,8 @@ export function defaultPreferences(): Preferences {
     removeEachStroke: true,
     wandSamplesAll: false,
     rulersShown: false,
+    snapping: false,
+    smartGuides: true,
     scanPoints: [],
     workspaces: [],
     recentProjects: [],

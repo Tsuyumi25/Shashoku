@@ -70,6 +70,8 @@ export function parsePreferences(raw: string): Preferences {
     removeEachStroke,
     wandSamplesAll,
     rulersShown,
+    snapping,
+    smartGuides,
     scanPoints,
     workspaces,
     recentProjects,
@@ -157,6 +159,8 @@ export function parsePreferences(raw: string): Preferences {
   if (typeof removeEachStroke === "boolean") prefs.removeEachStroke = removeEachStroke;
   if (typeof wandSamplesAll === "boolean") prefs.wandSamplesAll = wandSamplesAll;
   if (typeof rulersShown === "boolean") prefs.rulersShown = rulersShown;
+  if (typeof snapping === "boolean") prefs.snapping = snapping;
+  if (typeof smartGuides === "boolean") prefs.smartGuides = smartGuides;
   if (Array.isArray(scanPoints)) {
     prefs.scanPoints = scanPoints.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
@@ -241,6 +245,8 @@ export function serializePreferences(prefs: Preferences): string {
       removeEachStroke: prefs.removeEachStroke,
       wandSamplesAll: prefs.wandSamplesAll,
       rulersShown: prefs.rulersShown,
+      snapping: prefs.snapping,
+      smartGuides: prefs.smartGuides,
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
       recentProjects: prefs.recentProjects,
