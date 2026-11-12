@@ -76,9 +76,9 @@ import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /** Photoshop's two centre buttons, and the pair pressed together — where Photoshop keeps them, on the move tool. */
 const ALIGN_CHOICES = [
-  { axes: 'x', text: '水平置中', icon: AlignHorizontalJustifyCenter, title: '把選中的物件左右移到選區的中間，上下不動；每個物件各自對齊' },
-  { axes: 'y', text: '垂直置中', icon: AlignVerticalJustifyCenter, title: '把選中的物件上下移到選區的中間，左右不動；每個物件各自對齊' },
-  { axes: 'both', text: '置中', icon: SquareDot, title: '把選中的物件移到選區的正中間；對齊的是看得到的字和像素，不是文字框' },
+  { axes: 'x', text: '水平置中', icon: AlignHorizontalJustifyCenter, title: '把選中的物件左右移到選區的中間，上下不動；沒有選區時，選中兩個以上的物件彼此對齊' },
+  { axes: 'y', text: '垂直置中', icon: AlignVerticalJustifyCenter, title: '把選中的物件上下移到選區的中間，左右不動；沒有選區時，選中兩個以上的物件彼此對齊' },
+  { axes: 'both', text: '置中', icon: SquareDot, title: '把選中的物件移到選區的正中間；沒有選區時，選中兩個以上的物件彼此對齊。對齊的是看得到的字和像素，不是文字框' },
 ] as const
 
 const editor = useEditorStore()
