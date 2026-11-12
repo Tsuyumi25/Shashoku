@@ -11,6 +11,7 @@ import type {
   NumberCounters,
   OcrCandidatePersisted,
   OcrJson,
+  PageGuide,
   SourceBody,
   TextLayerEntry,
   TranslationCandidate,
@@ -1183,6 +1184,20 @@ export const useProjectStore = defineStore('project', () => {
     markPageDirty(pageId)
   }
 
+  /** A page's ruler guides, in the order they were drawn. */
+  function guidesOf(pageId: string): readonly PageGuide[] {
+    return pageById(pageId)?.page.guides ?? []
+  }
+
+  /** Every edit to a page's guides, and its undo, writes the whole list back. */
+  function setGuides(pageId: string, guides: readonly PageGuide[]): void {
+    const file = pageById(pageId)
+    if (!file) return
+    if (guides.length > 0) file.page.guides = guides.map((g) => ({ ...g }))
+    else delete file.page.guides
+    markPageDirty(pageId)
+  }
+
   /** On top of everything, which is where an object arriving on a page belongs. */
   function appendEntry(pageId: string, home: string | null, entry: LayerEntry) {
     addLayer(pageId, home, entry)
@@ -1825,6 +1840,8 @@ export const useProjectStore = defineStore('project', () => {
     addReadingEdges,
     removeReadingEdges,
     addSourceEdges,
+    guidesOf,
+    setGuides,
     removeSourceEdges,
     appendEntry,
     removeEntry,

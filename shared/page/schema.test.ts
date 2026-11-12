@@ -4,6 +4,7 @@ import {
   RETOUCH_LAYER_NAME,
   blankSourceBlock,
   blankTranslationBlock,
+  defaultManifest,
   parseManifest,
   parseOcr,
   serializeDrawnLayers,
@@ -1696,5 +1697,33 @@ describe('the short numbers everything on a page wears', () => {
       blocks: { 'u-a': 2 },
       candidates: { t1: 3 },
     })
+  })
+})
+
+describe('the ruler guides', () => {
+  const bare = () => defaultManifest('p', 100, 200)
+  const withGuides = (): ManifestJson => ({
+    ...bare(),
+    guides: [
+      { id: 'g1', orientation: 'horizontal' as const, position: 120.5 },
+      { id: 'g2', orientation: 'vertical' as const, position: 40 },
+    ],
+  })
+
+  it('round trips the guides in the order they were drawn', () => {
+    const m = withGuides()
+    expect(parseManifest(serializeManifest(m), FACE)).toEqual(m)
+  })
+
+  it('writes no key for a page without guides, and reads its absence as none', () => {
+    const m = bare()
+    expect(JSON.parse(serializeManifest(m))).not.toHaveProperty('guides')
+    expect(parseManifest(serializeManifest(m), FACE).guides).toBeUndefined()
+  })
+
+  it('refuses a guide that is neither horizontal nor vertical', () => {
+    const page = JSON.parse(serializeManifest(withGuides()))
+    page.guides[0].orientation = 'diagonal'
+    expect(() => parseManifest(JSON.stringify(page), FACE)).toThrow(PageParseError)
   })
 })

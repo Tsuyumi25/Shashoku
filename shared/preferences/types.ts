@@ -169,6 +169,8 @@ export interface Preferences {
   removeEachStroke: boolean;
   /** Whether the wand reads every visible layer rather than the one being worked on. */
   wandSamplesAll: boolean;
+  /** Whether the canvas shows its rulers (Ctrl+R). */
+  rulersShown: boolean;
   /**
    * Folders the sidebar looks under for projects. Recorded rather than
    * configured: opening a project registers its parent, so the library fills
@@ -235,6 +237,7 @@ export function defaultPreferences(): Preferences {
     markMissingGlyphs: true,
     removeEachStroke: true,
     wandSamplesAll: false,
+    rulersShown: false,
     scanPoints: [],
     workspaces: [],
     recentProjects: [],

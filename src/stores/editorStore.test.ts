@@ -4343,3 +4343,28 @@ describe('Ctrl+G', () => {
     expect(shape(tree(PAGE))).toEqual([['group', ['a']], 'b', 'c'])
   })
 })
+
+describe('ruler guides', () => {
+  it('adds, moves and deletes a guide, each one undo step', () => {
+    const { project, editor } = openOnePage()
+    const id = editor.cmdAddGuide(PAGE, 'horizontal', 120)
+    editor.cmdMoveGuide(PAGE, id, 300.5)
+    expect(project.guidesOf(PAGE)).toEqual([{ id, orientation: 'horizontal', position: 300.5 }])
+    editor.cmdDeleteGuide(PAGE, id)
+    expect(project.guidesOf(PAGE)).toEqual([])
+    editor.undo()
+    expect(project.guidesOf(PAGE)).toEqual([{ id, orientation: 'horizontal', position: 300.5 }])
+    editor.undo()
+    expect(project.guidesOf(PAGE)).toEqual([{ id, orientation: 'horizontal', position: 120 }])
+    editor.undo()
+    expect(project.guidesOf(PAGE)).toEqual([])
+  })
+
+  it('puts nothing on the stack for a guide dropped where it already was', () => {
+    const { project, editor } = openOnePage()
+    const id = editor.cmdAddGuide(PAGE, 'vertical', 40)
+    editor.cmdMoveGuide(PAGE, id, 40)
+    editor.undo()
+    expect(project.guidesOf(PAGE)).toEqual([])
+  })
+})

@@ -225,6 +225,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.wandSamplesAll = on
   }
 
+  function setRulersShown(on: boolean) {
+    prefs.rulersShown = on
+  }
+
   function setSidePanel(panel: SidePanel) {
     prefs.sidePanel = panel
   }
@@ -263,6 +267,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMarkMissingGlyphs,
     setRemoveEachStroke,
     setWandSamplesAll,
+    setRulersShown,
     setSidePanel,
     setRetouchOpacity,
   }

@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type {
   GroupLayerEntry,
   LayerEntry,
+  PageGuide,
   RasterLayerEntry,
   SourceBody,
   TextLayerEntry,
@@ -3125,6 +3126,42 @@ export const useEditorStore = defineStore('editor', () => {
     )
   }
 
+  /** Writes a page's guides as `next`, one undo step back to how they were. */
+  function cmdGuides(pageId: string, next: readonly PageGuide[], label: string) {
+    const project = useProjectStore()
+    const was = project.guidesOf(pageId).map((g) => ({ ...g }))
+    const now = next.map((g) => ({ ...g }))
+    pushCommand({
+      label,
+      do: () => project.setGuides(pageId, now),
+      undo: () => project.setGuides(pageId, was),
+    })
+  }
+
+  /** A guide dragged out of a ruler, `position` page pixels down or across. */
+  function cmdAddGuide(pageId: string, orientation: PageGuide['orientation'], position: number): string {
+    const project = useProjectStore()
+    const id = generateLabelId()
+    cmdGuides(pageId, [...project.guidesOf(pageId), { id, orientation, position }], `add-guide ${orientation}`)
+    return id
+  }
+
+  function cmdMoveGuide(pageId: string, id: string, position: number) {
+    const project = useProjectStore()
+    const guides = project.guidesOf(pageId)
+    const guide = guides.find((g) => g.id === id)
+    if (!guide || guide.position === position) return
+    cmdGuides(pageId, guides.map((g) => (g.id === id ? { ...g, position } : g)), `move-guide ${guide.orientation}`)
+  }
+
+  function cmdDeleteGuide(pageId: string, id: string) {
+    const project = useProjectStore()
+    const guides = project.guidesOf(pageId)
+    const guide = guides.find((g) => g.id === id)
+    if (!guide) return
+    cmdGuides(pageId, guides.filter((g) => g.id !== id), `delete-guide ${guide.orientation}`)
+  }
+
   function cmdEraseReadingEdges(pageId: string, edges: readonly ReadingEdge[]) {
     const project = useProjectStore()
     const held = project.readingEdgesOf(pageId)
@@ -3447,6 +3484,9 @@ export const useEditorStore = defineStore('editor', () => {
     cmdReorderMembers,
     cmdDrawReadingEdges,
     cmdEraseReadingEdges,
+    cmdAddGuide,
+    cmdMoveGuide,
+    cmdDeleteGuide,
     sentencesOf,
     cmdTagSentences,
     cmdReshape,

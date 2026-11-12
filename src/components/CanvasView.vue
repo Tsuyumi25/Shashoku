@@ -3,10 +3,11 @@
     ref="containerRef"
     data-region="canvas"
     class="relative h-full min-h-0 w-full touch-none overflow-hidden bg-muted select-none"
-    :class="[canvasCursor]"
+    :class="[canvasCursor, guideCursor]"
     @wheel.prevent="onWheel"
     @pointerdown="onPointerDown"
     @pointerdown.capture="onPressCapture"
+    @pointermove.capture="onHoverCapture"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
@@ -327,6 +328,8 @@
           不透明度 {{ Math.round(hudBrush.opacity * 100) }}%
         </div>
       </template>
+
+      <CanvasRulers ref="rulersRef" :pointer="cursorPos" :snap-lines="guideTargets" />
     </template>
 
     <div v-else class="flex h-full items-center justify-center select-none">
@@ -381,7 +384,9 @@ import type { FacePage } from '@shared/page/units'
 import { useDevicePixelRatio, useEventListener, useResizeObserver } from '@vueuse/core'
 import Notice from '@/components/Notice.vue'
 import CanvasMenu from '@/components/CanvasMenu.vue'
+import CanvasRulers from '@/components/CanvasRulers.vue'
 import CanvasTagPicker from '@/components/CanvasTagPicker.vue'
+import { inkOfLabel } from '@/lib/alignToSelection'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useObjectMenu } from '@/composables/useObjectMenu'
@@ -2071,6 +2076,48 @@ const framesShow = computed(() => editor.tool === 'select')
  */
 const picking = computed(() => framesTakePointer.value && editor.tool === 'select')
 
+const rulersRef = ref<InstanceType<typeof CanvasRulers> | null>(null)
+
+/** Which way the guide under the select tool's pointer runs, which is the way it would be dragged. */
+const guideHover = ref<'horizontal' | 'vertical' | null>(null)
+
+// The operating system's own two-lines-and-arrows cursors, upright however the
+// view is turned, as Photoshop has it.
+const guideCursor = computed(() => {
+  const way = rulersRef.value?.dragging ?? guideHover.value
+  return way === 'vertical' ? 'guide-cursor-across' : way === 'horizontal' ? 'guide-cursor-down' : ''
+})
+
+/** Read on the way down, so a frame under the pointer does not hide the guide over it. */
+function onHoverCapture(e: PointerEvent): void {
+  if (e.buttons !== 0 || editor.tool !== 'select' || spaceDown.value || rDown.value) {
+    guideHover.value = null
+    return
+  }
+  guideHover.value = rulersRef.value?.hitAt(e.clientX, e.clientY)?.orientation ?? null
+}
+
+/**
+ * What a guide being dragged takes hold of: the page's edges and middle, and
+ * the edges and middle of every drawn object's ink — text as the canvas draws
+ * it, a raster layer by its frame.
+ */
+function guideTargets(): { x: number[]; y: number[] } {
+  const { w, h } = pageSize.value
+  const x = [0, w / 2, w]
+  const y = [0, h / 2, h]
+  const add = (box: { x: number; y: number; w: number; h: number }) => {
+    x.push(box.x, box.x + box.w / 2, box.x + box.w)
+    y.push(box.y, box.y + box.h / 2, box.y + box.h)
+  }
+  for (const node of stackedTextNodes(stack.value)) {
+    const ink = inkOfLabel(canvasLabels.labelOf(node.entry))
+    if (ink) add(ink)
+  }
+  for (const node of stackedRasterNodes(stack.value)) add(raster.frameOf(node.entry))
+  return { x, y }
+}
+
 const canvasCursor = computed(() => {
   // Kept visible through the display's drag: the brush lands where the pointer
   // is when it is let go, so that has to stay in sight the whole way.
@@ -2276,6 +2323,8 @@ function onAltPress(e: PointerEvent): void {
  * is taken here before any of them can stop it.
  */
 function onPressCapture(e: PointerEvent): void {
+  // A ruler takes its own press, to pull a guide out of.
+  if ((e.target as Element | null)?.closest('[data-ruler]')) return
   if (e.button === 1 && pageReady.value) {
     e.preventDefault()
     e.stopImmediatePropagation()
@@ -2283,6 +2332,17 @@ function onPressCapture(e: PointerEvent): void {
     panning.value = true
     panLast = { x: e.clientX, y: e.clientY }
     return
+  }
+  // A guide under the select tool's press is picked up before anything under it.
+  if (e.button === 0 && editor.tool === 'select' && !spaceDown.value && !rDown.value) {
+    const guide = rulersRef.value?.hitAt(e.clientX, e.clientY) ?? null
+    if (guide) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      guideHover.value = null
+      rulersRef.value?.beginMove(e, guide)
+      return
+    }
   }
   const rect = containerRef.value?.getBoundingClientRect()
   if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
@@ -2441,6 +2501,7 @@ function onPointerMove(e: PointerEvent) {
 
 function onPointerLeave() {
   cursorPos.value = null
+  guideHover.value = null
   pointedLayerId.value = null
   // The chain's loose end stays where the pointer left it rather than snapping
   // back to its source, so stepping off the canvas for the tool rail or a panel
@@ -2488,6 +2549,11 @@ useEventListener(window, 'keydown', (e) => {
   // before the guard below turns every other key off.
   if (e.key === 'Escape' && hudGesture.value !== null) {
     cancelBrushHud()
+    return
+  }
+  if (e.key.toLowerCase() === 'r' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+    preferences.setRulersShown(!preferences.prefs.rulersShown)
+    e.preventDefault()
     return
   }
   // Zoom to fit needs a way in that a painting tool cannot take from it: with
@@ -2706,5 +2772,14 @@ useEventListener(window, 'blur', () => {
     url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'%3e%3cg stroke='white' stroke-width='5'%3e%3cpath d='M3 7v6h6'/%3e%3cpath d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/%3e%3c/g%3e%3cg stroke='black' stroke-width='2'%3e%3cpath d='M3 7v6h6'/%3e%3cpath d='M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13'/%3e%3c/g%3e%3c/svg%3e")
       14 14,
     grab;
+}
+/* Over every frame under the pointer too: a guide is picked up before what lies beneath it. */
+.guide-cursor-across,
+.guide-cursor-across :deep(*) {
+  cursor: col-resize !important;
+}
+.guide-cursor-down,
+.guide-cursor-down :deep(*) {
+  cursor: row-resize !important;
 }
 </style>

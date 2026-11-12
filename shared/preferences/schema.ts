@@ -69,6 +69,7 @@ export function parsePreferences(raw: string): Preferences {
     markMissingGlyphs,
     removeEachStroke,
     wandSamplesAll,
+    rulersShown,
     scanPoints,
     workspaces,
     recentProjects,
@@ -155,6 +156,7 @@ export function parsePreferences(raw: string): Preferences {
   }
   if (typeof removeEachStroke === "boolean") prefs.removeEachStroke = removeEachStroke;
   if (typeof wandSamplesAll === "boolean") prefs.wandSamplesAll = wandSamplesAll;
+  if (typeof rulersShown === "boolean") prefs.rulersShown = rulersShown;
   if (Array.isArray(scanPoints)) {
     prefs.scanPoints = scanPoints.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
@@ -238,6 +240,7 @@ export function serializePreferences(prefs: Preferences): string {
       markMissingGlyphs: prefs.markMissingGlyphs,
       removeEachStroke: prefs.removeEachStroke,
       wandSamplesAll: prefs.wandSamplesAll,
+      rulersShown: prefs.rulersShown,
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
       recentProjects: prefs.recentProjects,

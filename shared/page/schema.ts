@@ -7,6 +7,7 @@ import type {
   NumberCounters,
   OcrCandidatePersisted,
   OcrJson,
+  PageGuide,
   RasterLayerEntry,
   SourceBody,
   SourceTextLayerEntry,
@@ -65,7 +66,7 @@ const PLAIN_TEXT_VERSION = 13
  * style parser already does with a key that is not there — a character scale
  * absent means the face's own proportions — except for the escaping below.
  */
-const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, 17, 18, MANIFEST_SCHEMA_VERSION]
+const READABLE_VERSIONS: readonly unknown[] = [PLAIN_TEXT_VERSION, 14, 15, 16, 17, 18, 19, MANIFEST_SCHEMA_VERSION]
 
 /** The last version that held one ledger for the page, with candidates on the unit. */
 const ONE_LEDGER_VERSION = 15
@@ -759,6 +760,20 @@ function parseReadingEdges(v: unknown, where: string): ReadingEdge[] {
   )
 }
 
+function parseGuides(v: unknown): PageGuide[] {
+  if (v === undefined) return []
+  if (!Array.isArray(v)) fail('manifest.json.guides 必須是陣列')
+  return v.map((entry, i) => {
+    const at = `manifest.json.guides[${i}]`
+    if (!isRecord(entry)) fail(`${at} 必須是物件`)
+    const { id, orientation, position } = entry
+    if (typeof id !== 'string' || id.length === 0) fail(`${at}.id 必須是非空字串`)
+    if (orientation !== 'horizontal' && orientation !== 'vertical') fail(`${at}.orientation 必須是 horizontal 或 vertical`)
+    if (typeof position !== 'number' || !Number.isFinite(position)) fail(`${at}.position 必須是有限數字`)
+    return { id, orientation, position }
+  })
+}
+
 /**
  * Required, because nothing on the page means anything without it: every
  * position is in page pixels, and there is no image underneath to measure
@@ -873,6 +888,7 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
 
   const counters = parseCounters(data.counters)
   trees ??= treesFromOneTree(layers, Object.keys(ledgers), legacyFace)
+  const guides = parseGuides(data.guides)
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     revision,
@@ -882,6 +898,7 @@ export function parseManifest(raw: string, legacyFace: string): ManifestJson {
     ...reading,
     counters,
     ...trees,
+    ...(guides.length > 0 ? { guides } : {}),
   }
 }
 
@@ -995,6 +1012,7 @@ export function serializeManifest(m: ManifestJson): string {
   out.faceTrees = Object.fromEntries(
     Object.entries(m.faceTrees).map(([face, tree]) => [face, placedTree(m, tree).map(serializePlacedEntry)]),
   )
+  if (m.guides && m.guides.length > 0) out.guides = m.guides.map(({ id, orientation, position }) => ({ id, orientation, position }))
   return `${JSON.stringify(out, null, 2)}\n`
 }
 

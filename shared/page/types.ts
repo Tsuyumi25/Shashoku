@@ -3,7 +3,7 @@ import type { TextStyle } from '../text-style/types'
 import type { ReadingEdge } from './readingGraph'
 
 
-export const MANIFEST_SCHEMA_VERSION = 19
+export const MANIFEST_SCHEMA_VERSION = 20
 
 export const OCR_SCHEMA_VERSION = 2
 
@@ -377,6 +377,25 @@ export interface ManifestJson {
    * nothing else about them. See `trees.ts`.
    */
   faceTrees: Record<string, LayerEntry[]>
+
+  /**
+   * Lines across the page to place things against, dragged out of the rulers.
+   * The page's rather than any face's: they mark where the artwork is, which
+   * every face letters against. Absent means none.
+   */
+  guides?: PageGuide[]
+}
+
+/**
+ * A ruler guide: a horizontal line `position` pixels down the page, or a
+ * vertical one `position` pixels across it. Always square to the page — a view
+ * turned on screen turns the page and its guides together, so a guide dragged
+ * out of the top ruler is horizontal on the page however the view stands.
+ */
+export interface PageGuide {
+  id: string
+  orientation: 'horizontal' | 'vertical'
+  position: number
 }
 
 /**
