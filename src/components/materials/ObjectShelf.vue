@@ -5,7 +5,15 @@
     @contextmenu.prevent="onMenu"
   >
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-card px-2 text-xs">
-      <span class="font-medium">{{ isGlobal ? '全域素材' : `這一話的${sideName}` }}</span>
+      <select
+        class="h-5 max-w-40 min-w-0 shrink-0 rounded border border-input bg-background px-1 text-xs font-medium"
+        title="這個素材架列出誰的文字物件"
+        :value="shelfScope"
+        @change="chooseScope"
+      >
+        <option value="book">此書的{{ sideName }}</option>
+        <option value="global">全域</option>
+      </select>
       <span class="truncate text-muted-foreground tabular-nums">
         {{ pieces.length }} 個 · {{ buckets.length }} 堆 · 按照{{ attributeLabel }}
       </span>
@@ -221,33 +229,17 @@ const fit = computed(() => {
 
 const arrangeAt = ref<{ x: number; y: number } | null>(null)
 
-const SCOPES: { id: string; scope: ShelfScope; label: string }[] = [
-  { id: 'scope-book', scope: 'book', label: '此書' },
-  { id: 'scope-global', scope: 'global', label: '全域' },
-]
-
-/** At the top of the menu the ground between pieces opens; a piece's own menu is about the piece. */
-const scopeItems = computed<MenuItem[]>(() =>
-  SCOPES.map((s) => ({ id: s.id, label: s.label, checked: s.scope === shelfScope.value })),
+const arrangeItems = computed<MenuItem[]>(() =>
+  SHELF_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
 )
-
-/** True when the pick was a scope, which it has then switched to. */
-function pickScope(id: string): boolean {
-  const scope = SCOPES.find((s) => s.id === id)?.scope
-  if (scope === undefined) return false
-  shelfScope.value = scope
-  return true
-}
-
-const arrangeItems = computed<MenuItem[]>(() => [
-  ...scopeItems.value,
-  ...SHELF_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
-])
 
 function chooseArrangement(id: string) {
   arrangeAt.value = null
-  if (pickScope(id)) return
   shelfAttribute.value = id as ShelfAttribute
+}
+
+function chooseScope(e: Event) {
+  shelfScope.value = (e.target as HTMLSelectElement).value as ShelfScope
 }
 
 /** A kept material's own menu: it is on no page, so the canvas's acts have nothing to act on. */
