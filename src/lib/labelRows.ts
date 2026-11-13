@@ -42,9 +42,7 @@ export interface LabelRow {
    * position the row is sitting at.
    */
   index: number
-  /** The beat, absent while no line touches the unit: the gutter stays blank. */
-  depth: number | undefined
-  /** Which column of the rail the dot stands in, absent for the same reason. */
+  /** Which column of the rail the dot stands in, absent while no line touches the unit. */
   lane: number | undefined
   /** The units a line arrives from, for the rail to draw what joins where. */
   parents: readonly string[]
@@ -164,7 +162,6 @@ export function buildLabelRows(
         opposite: projectionCodeOf(page, row.unit, other),
         tags: tagsOfUnit(page, row.unit),
         index,
-        depth: row.depth,
         lane: row.lane,
         parents: row.parents,
         carries: row.carries,

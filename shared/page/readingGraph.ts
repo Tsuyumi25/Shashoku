@@ -110,8 +110,8 @@ export function wouldCycle(edges: readonly ReadingEdge[], edge: ReadingEdge): bo
  * The number is derived and never stored. Storing it would put a second truth
  * beside the lines, free to disagree with them.
  *
- * Objects the lines never touch are absent rather than numbered, which is what
- * an empty gutter says: nobody has maintained the semantics of that stretch.
+ * Objects the lines never touch are absent rather than numbered: nobody has
+ * maintained the semantics of that stretch.
  * Objects caught in a ring are absent too — the lines cannot make one, and
  * repair drops one that arrives from elsewhere, so this only decides what a
  * broken file looks like, and unnumbered is the honest answer.
@@ -156,7 +156,7 @@ export function readingDepths(edges: readonly ReadingEdge[]): Map<string, number
 /**
  * One row of the list: an object, and where the rail holds it.
  *
- * A row the rail does not hold carries none of the rail — no lane, no beat, no
+ * A row the rail does not hold carries none of the rail — no lane, no
  * parents. That absence is the whole of the boundary between the stretch
  * somebody has maintained and the stretch nobody has: there is no second
  * section and no heading, the rail simply stops.
@@ -165,8 +165,6 @@ export interface ReadingRow {
   id: string
   /** Which column of the rail the dot stands in, 0 being the line the reading runs down. */
   lane: number | undefined
-  /** The beat, counted the way `readingDepths` counts it. */
-  depth: number | undefined
   /** The objects a line arrives from, in the order the page lists them. */
   parents: readonly string[]
   /**
@@ -220,8 +218,7 @@ export function flattenReading(
   // does not hold is repair's business, not a reason to invent a row for it.
   const live = edges.filter((edge) => rank.has(edge.from) && rank.has(edge.to))
 
-  const depths = readingDepths(live)
-  // The same walk run backwards: how far the reading still has to go from here,
+  // `readingDepths` run backwards: how far the reading still has to go from here,
   // which is what says which way out of a split it carries on along.
   const heights = readingDepths(live.map((edge) => ({ from: edge.to, to: edge.from })))
 
@@ -278,7 +275,7 @@ export function flattenReading(
     for (let at = 0; at < held.length; at += 1) {
       if (held[at] !== undefined) carries.push(at)
     }
-    rows.push({ id, lane, depth: depths.get(id), parents: parentsOf.get(id) ?? [], carries })
+    rows.push({ id, lane, parents: parentsOf.get(id) ?? [], carries })
 
     for (const child of childrenOf.get(id) ?? []) {
       const owed = (waysIn.get(child) as number) - 1
@@ -299,7 +296,7 @@ export function flattenReading(
   // a ring ever survives both the canvas and repair — the ones caught in it.
   for (const id of order) {
     if (!laneOf.has(id)) {
-      rows.push({ id, lane: undefined, depth: undefined, parents: [], carries: [] })
+      rows.push({ id, lane: undefined, parents: [], carries: [] })
     }
   }
   return rows

@@ -284,7 +284,7 @@ function onBlur(e: FocusEvent) {
 
 <style scoped>
 .row-content {
-  grid-column: 3;
+  grid-column: 2;
 }
 
 /*

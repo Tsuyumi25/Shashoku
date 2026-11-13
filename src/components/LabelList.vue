@@ -48,8 +48,8 @@
 
       <!--
         Two columns that are not two subtrees pretending to line up: both the
-        gutter and the list disappear from the layout, so their children become
-        cells of this one grid and the nth number shares a row with the nth
+        rail and the list disappear from the layout, so their children become
+        cells of this one grid and the nth rail cell shares a row with the nth
         translation. Row height then follows the translation, as it must, and
         nothing has to be measured for the two to agree.
       -->
@@ -68,10 +68,6 @@
             :mark="group.marks[at]"
             :rail="group.rail"
           />
-        </div>
-
-        <div class="gutter">
-          <LabelGutterCell v-for="row in group.rows" :key="row.key" :row="row" />
         </div>
 
         <!--
@@ -126,7 +122,6 @@ import Draggable from 'vuedraggable'
 import CanvasMenu, { type MenuItem } from '@/components/CanvasMenu.vue'
 import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
 import { useUnitMenu } from '@/composables/useUnitMenu'
-import LabelGutterCell from '@/components/labelList/LabelGutterCell.vue'
 import LabelPageHeading from '@/components/labelList/LabelPageHeading.vue'
 import LabelRailCell from '@/components/labelList/LabelRailCell.vue'
 import LabelRowBody from '@/components/labelList/LabelRowBody.vue'
@@ -515,21 +510,20 @@ function reveal(el: HTMLElement): void {
 
 <style scoped>
 /*
- * The gutter and the list both vanish from the layout, so their children are
+ * The rail and the list both vanish from the layout, so their children are
  * cells of this grid rather than of two separate boxes — which is what makes a
- * number and a translation share a row without either being measured.
+ * rail cell and a translation share a row without either being measured.
  *
- * Dense packing because every number is laid down before the first translation:
- * the sparse cursor only ever moves forward, so each translation would land
- * below the last number instead of beside the first.
+ * Dense packing because every rail cell is laid down before the first
+ * translation: the sparse cursor only ever moves forward, so each translation
+ * would land below the last rail cell instead of beside the first.
  */
 .page-body {
   display: grid;
-  grid-template-columns: var(--rail, 0px) 1.5rem 1fr;
+  grid-template-columns: var(--rail, 0px) 1fr;
   grid-auto-flow: row dense;
 }
 .rail,
-.gutter,
 .page-body :deep(.rows) {
   display: contents;
 }
@@ -539,7 +533,7 @@ function reveal(el: HTMLElement): void {
  * so this one keeps a box of its own.
  */
 .page-body :deep(.rows-empty) {
-  grid-column: 3;
+  grid-column: 2;
   min-height: 1.5rem;
 }
 </style>

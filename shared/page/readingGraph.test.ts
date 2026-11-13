@@ -26,10 +26,6 @@ function rail(rows: readonly ReadingRow[]): string {
   return rows.map((row) => (row.lane === undefined ? `${row.id}-` : `${row.id}@${row.lane}`)).join(' ')
 }
 
-function beats(rows: readonly ReadingRow[]): (number | undefined)[] {
-  return rows.map((row) => row.depth)
-}
-
 describe('normalizeEdges', () => {
   it('drops a repeat of an edge already there', () => {
     expect(normalizeEdges(edges('a>b', 'a>b'))).toEqual(edges('a>b'))
@@ -145,19 +141,16 @@ describe('flattenReading', () => {
   it('leaves a page with no lines in the order it was typed', () => {
     const rows = flattenReading([], order('a b c'))
     expect(rail(rows)).toBe('a- b- c-')
-    expect(beats(rows)).toEqual([undefined, undefined, undefined])
   })
 
-  it('keeps a plain chain in one lane and numbers it from one', () => {
+  it('keeps a plain chain in one lane', () => {
     const rows = flattenReading(edges('a>b', 'b>c'), order('a b c'))
     expect(rail(rows)).toBe('a@0 b@0 c@0')
-    expect(beats(rows)).toEqual([1, 2, 3])
   })
 
   it('puts a branch directly under what it hangs off', () => {
     const rows = flattenReading(edges('a>b', 'b>c', 'a>d'), order('a b c d'))
     expect(rail(rows)).toBe('a@0 d@1 b@0 c@0')
-    expect(beats(rows)).toEqual([1, 2, 2, 3])
   })
 
   it('breaks a tie between two branches on the typing order', () => {
@@ -178,23 +171,17 @@ describe('flattenReading', () => {
   it('holds a meeting point back until every way into it has been laid', () => {
     const rows = flattenReading(edges('a>c', 'b>c', 'c>d'), order('a b c d'))
     expect(rail(rows)).toBe('a@0 b@1 c@0 d@0')
-    expect(beats(rows)).toEqual([1, 1, 2, 3])
   })
 
-  /**
-   * The shape a page ends on when something joins the last line from the side —
-   * it is a start, so its beat is 1 even though it is read near the end.
-   */
+  /** The shape a page ends on when something joins the last line from the side. */
   it('lands a start that only meets the chain just before the meeting', () => {
     const rows = flattenReading(edges('a>b', 'b>c', 'z>c'), order('a b c z'))
     expect(rail(rows)).toBe('a@0 b@0 z@1 c@0')
-    expect(beats(rows)).toEqual([1, 2, 1, 3])
   })
 
   it('draws the objects a line touches up above the ones it does not', () => {
     const rows = flattenReading(edges('a>b'), order('x a b y'))
     expect(rail(rows)).toBe('a@0 b@0 x- y-')
-    expect(beats(rows)).toEqual([1, 2, undefined, undefined])
   })
 
   it('answers with the objects the page holds, not the ones an edge names', () => {

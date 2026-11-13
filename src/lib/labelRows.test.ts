@@ -116,9 +116,8 @@ describe('buildLabelRows', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('leaves the gutter blank while no line touches the object', () => {
+  it('leaves the rail empty while no line touches the object', () => {
     const rows = labels(buildLabelRows([file('001.png', ['a', 'b'], ['a', 'b'])], 'translation', FACE))
-    expect(rows.map((row) => row.depth)).toEqual([undefined, undefined])
     expect(rows.map((row) => row.lane)).toEqual([undefined, undefined])
   })
 
@@ -127,7 +126,6 @@ describe('buildLabelRows', () => {
       buildLabelRows([file('001.png', ['a', 'b', 'c'], ['a', 'b', 'c'], ['c>b'])], 'translation', FACE),
     )
     expect(rows.map((row) => row.unit.id)).toEqual(['c', 'b', 'a'])
-    expect(rows.map((row) => row.depth)).toEqual([1, 2, undefined])
   })
 
   it('lifts each page from its own lines', () => {
