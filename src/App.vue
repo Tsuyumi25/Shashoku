@@ -61,6 +61,7 @@
             <div v-show="ui.view === 'editor'" class="absolute inset-0">
               <TranslateMode />
             </div>
+            <ActionSearchProbe v-if="project.isOpen" />
             <div v-if="ui.view === 'library'" class="absolute inset-0">
               <SplitterGroup direction="horizontal" class="h-full">
                 <SplitterPanel :order="1" :default-size="70" :min-size="40" class="flex min-w-0 flex-col">
@@ -107,6 +108,7 @@
 import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
+import ActionSearchProbe from '@/components/ActionSearchProbe.vue'
 import ExportPanel from '@/components/ExportPanel.vue'
 import ExportPreview from '@/components/ExportPreview.vue'
 import LibraryTabs from '@/components/materials/LibraryTabs.vue'
