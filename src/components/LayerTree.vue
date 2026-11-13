@@ -9,7 +9,7 @@
         v-for="row in rows"
         :key="row.entry.id"
         :draggable="renaming?.id !== row.entry.id && !isEditingText(row) && !isRowLocked(row)"
-        class="group/row relative flex min-h-7 items-center gap-1 border-b border-border/40 pr-1"
+        class="relative flex min-h-7 items-center gap-1 border-b border-border/40 pr-1"
         :class="[
           isSelected(row.entry.id) ? 'bg-accent/50' : 'hover:bg-secondary/40',
           row.hiddenByAncestor && 'opacity-40',
@@ -64,7 +64,6 @@
             row.lockedByAncestor
               ? 'cursor-not-allowed text-muted-foreground/40'
               : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            !row.entry.locked && !row.lockedByAncestor && 'opacity-0 group-hover/row:opacity-100',
           ]"
           :title="lockTitle(row)"
           :disabled="row.lockedByAncestor"
@@ -77,26 +76,22 @@
         <!--
           Rasters only: the artwork's words are the page's and lettering is its
           face's, by what they are. On the source side every raster is the page's
-          and there is no face to take one into, so the column stands empty there.
+          and there is no face to take one into, so there is no switch there.
         -->
         <button
           v-if="row.entry.kind === 'raster' && editor.textSide === 'translation'"
           type="button"
           class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-          :class="!isLinked(row.entry) && 'opacity-0 group-hover/row:opacity-100'"
           :title="isLinked(row.entry) ? '共用素材：每個翻譯面都有它。點一下只留在這一面' : '只屬於這一面。點一下變成每個翻譯面共用的素材'"
           @click.stop="onToggleLinked(row.entry)"
         >
           <Link2 v-if="isLinked(row.entry)" :size="12" />
           <Link2Off v-else :size="12" />
         </button>
-        <span v-else class="w-5 shrink-0" />
 
         <!--
           A checkerboard, which is what transparency looks like everywhere: the
-          switch says the empty squares are spoken for. Only a raster has any,
-          and the column is held open on the rows without one so the names below
-          it stay in a line.
+          switch says the empty squares are spoken for. Only a raster has any.
         -->
         <button
           v-if="row.entry.kind === 'raster'"
@@ -106,7 +101,6 @@
             isRowLocked(row)
               ? 'cursor-not-allowed text-muted-foreground/40'
               : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-            !row.entry.alphaLocked && !isRowLocked(row) && 'opacity-0 group-hover/row:opacity-100',
           ]"
           :title="alphaLockTitle(row)"
           :disabled="isRowLocked(row)"
@@ -115,7 +109,6 @@
           <Grid2x2Check v-if="row.entry.alphaLocked" :size="12" />
           <Grid2x2 v-else :size="12" />
         </button>
-        <span v-else class="w-5 shrink-0" />
 
         <LayerThumb
           v-if="row.entry.kind === 'raster' && layersDir"
@@ -187,8 +180,8 @@
         <button
           v-if="row.entry.kind !== 'text'"
           type="button"
-          class="h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
-          :class="isPinned(row.entry) ? 'flex text-primary' : 'hidden text-muted-foreground group-hover/row:flex'"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
+          :class="isPinned(row.entry) ? 'text-primary' : 'text-muted-foreground'"
           :title="isPinned(row.entry) ? `「${row.entry.name}」不再顯示在標籤清單的頁列` : `把叫「${row.entry.name}」的圖層顯示在標籤清單的頁列（這本書的每一頁）`"
           @click.stop="project.togglePinnedLayerName(row.entry.name)"
         >
@@ -198,8 +191,8 @@
         <button
           v-if="row.entry.kind === 'raster'"
           type="button"
-          class="h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
-          :class="isRetouchLayer(row.entry) ? 'flex text-primary' : 'hidden text-muted-foreground group-hover/row:flex'"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
+          :class="isRetouchLayer(row.entry) ? 'text-primary' : 'text-muted-foreground'"
           :title="isRetouchLayer(row.entry) ? `修圖按鈕不再改叫「${row.entry.name}」的圖層` : `修圖按鈕也改叫「${row.entry.name}」的圖層的不透明度（這本書的每一頁）`"
           @click.stop="project.toggleRetouchLayerName(row.entry.name)"
         >
@@ -209,7 +202,7 @@
         <button
           v-if="row.entry.kind === 'group' && !isRowLocked(row)"
           type="button"
-          class="hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/row:flex hover:bg-secondary hover:text-foreground"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
           title="解散資料夾（內容留在原地）"
           @click.stop="onDissolve(row.entry.id)"
         >
