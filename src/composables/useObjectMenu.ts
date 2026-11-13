@@ -94,7 +94,8 @@ export function useObjectMenu() {
     if (unitMenu.pick(choice)) return
     const how = restackOf(choice)
     if (how !== null) {
-      editor.cmdRestackSelection(how)
+      // The page of what was pointed at, which the shelf can open on without turning to it.
+      editor.cmdRestackSelection(how, project.pageOfEntry(on.id))
       return
     }
     if (choice === 'tags') {

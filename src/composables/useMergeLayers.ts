@@ -49,9 +49,8 @@ export function useMergeLayers() {
   const project = useProjectStore()
   const editor = useEditorStore()
 
-  /** The open page and the tree it is worked in, with where something new made there belongs. */
-  function openPage(): { page: string; pageDir: string; layers: readonly LayerEntry[]; home: string | null } | null {
-    const page = editor.currentPageId
+  /** A page and the tree it is worked in, with where something new made there belongs; the open one unless named. */
+  function openPage(page = editor.currentPageId): { page: string; pageDir: string; layers: readonly LayerEntry[]; home: string | null } | null {
     if (page === null) return null
     const file = project.pageById(page)
     return file ? { page, pageDir: file.pageDir, layers: editor.workingTree(page), home: editor.layerHome() } : null
@@ -311,8 +310,9 @@ export function useMergeLayers() {
   async function duplicateLayer(
     opts: { id?: string; keepSelection?: boolean; wholeUnit?: boolean } = {},
   ): Promise<void> {
-    const open = openPage()
     const id = opts.id ?? editor.cursorId
+    // Where the object named lives, which an object's menu on the shelf can be opened on from another page.
+    const open = openPage(opts.id === undefined ? editor.currentPageId : project.pageOfEntry(opts.id))
     if (open === null || id === null) return
     const path = pathOf(open.layers, id)
     const source = project.entryById(id)

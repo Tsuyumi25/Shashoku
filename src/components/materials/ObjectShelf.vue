@@ -3,6 +3,7 @@
     class="flex h-full min-h-0 flex-col bg-background text-sm select-none"
     @pointerdown="onPress"
     @contextmenu.prevent="onMenu"
+    @dblclick="onDouble"
   >
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-card px-2 text-xs">
       <select
@@ -254,14 +255,20 @@ function pickOnMaterial(id: string) {
   if (id === 'forget') preferences.forgetGlobalMaterial(on.id)
 }
 
+/** The piece an event landed on — its element, and the piece it draws if the shelf still lists it — or null off every piece. */
+function pieceAt(target: EventTarget | null): { el: HTMLElement; piece: ShelfItem | undefined } | null {
+  const el = target instanceof Element ? target.closest<HTMLElement>('[data-piece-id]') : null
+  const id = el?.dataset.pieceId
+  return el && id !== undefined ? { el, piece: pieces.value.find((p) => p.id === id) } : null
+}
+
 /**
  * One listener for every piece and the ground between them. A handler bound on
  * each piece would be a new function on every render of the shelf, and a new
  * listener is a changed prop — every piece would be patched each time.
  */
 function onMenu(e: MouseEvent) {
-  const id = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-piece-id]')?.dataset.pieceId : undefined
-  const piece = id === undefined ? undefined : pieces.value.find((p) => p.id === id)
+  const piece = pieceAt(e.target)?.piece
   if (piece) {
     onPieceMenu(piece, e)
     return
@@ -272,9 +279,9 @@ function onMenu(e: MouseEvent) {
 }
 
 /**
- * A piece's own menu is the canvas's. Its acts are the open page's, so the
- * chapter turns to the piece first — right-clicking something three pages away
- * and deleting it elsewhere would be a menu lying about what it is for.
+ * A piece's own menu is the canvas's, and holds the piece as a press would: the
+ * page stays where it is. Its acts follow the selection across pages, which is
+ * what lets something three pages away be dealt with from here.
  */
 function onPieceMenu(item: ShelfItem, e: MouseEvent) {
   arrangeAt.value = null
@@ -284,9 +291,14 @@ function onPieceMenu(item: ShelfItem, e: MouseEvent) {
     return
   }
   materialMenuOn.value = null
-  if (editor.isSelected(item.id)) editor.showPage(item.pageId)
-  else editor.revealLabel(item.pageId, item.id)
   objectMenu.open(item.id, { x: e.clientX, y: e.clientY })
+}
+
+/** Two presses on a piece go to its page, which one press leaves where it is. */
+function onDouble(e: MouseEvent) {
+  if (isGlobal.value) return
+  const piece = pieceAt(e.target)?.piece
+  if (piece) editor.revealLabel(piece.pageId, piece.id)
 }
 
 // ── Pressing, sweeping, carrying ───────────────────────────────────────────
@@ -360,16 +372,15 @@ const ShelfOverlay = defineComponent(() => () => {
 
 function onPress(e: PointerEvent) {
   if (e.button !== 0) return
-  const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-piece-id]') : null
-  const id = el?.dataset.pieceId
-  if (el && id !== undefined) {
-    const piece = pieces.value.find((p) => p.id === id)
+  const hit = pieceAt(e.target)
+  if (hit) {
+    const { el, piece } = hit
     if (!piece) return
     e.preventDefault()
     const box = el.getBoundingClientRect()
     pressed = {
       kind: 'piece',
-      id,
+      id: piece.id,
       pageId: piece.pageId,
       x: e.clientX,
       y: e.clientY,
@@ -623,7 +634,7 @@ function click(at: Pressed & { kind: 'piece' }) {
   if (isGlobal.value) return
   if (at.shift) editor.extendSelectionTo(at.id, sequence.value)
   else if (at.toggle) editor.toggleSelected(at.id)
-  else editor.revealLabel(at.pageId, at.id)
+  else editor.selectOnly(at.id)
 }
 
 /**

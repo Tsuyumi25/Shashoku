@@ -2330,9 +2330,8 @@ export const useEditorStore = defineStore('editor', () => {
     })
   }
 
-  /** The same, on what is selected on the page being shown. */
-  function cmdRestackSelection(how: Restack) {
-    const page = currentPageId.value
+  /** The same, on what is selected on one page — the one being shown, unless another is named. */
+  function cmdRestackSelection(how: Restack, page = currentPageId.value) {
     if (page === null) return
     const project = useProjectStore()
     cmdRestack(page, [...selectedIds.value].filter((id) => project.pageOfEntry(id) === page), how)
