@@ -7,13 +7,13 @@
     :style="{ width: `${w}px`, height: `${h}px` }"
     :title="title"
   >
-    <canvas ref="canvasEl" :width="cw" :height="ch" :style="{ width: `${w}px`, height: `${h}px` }" />
+    <img v-if="url" :src="url" alt="" draggable="false" class="block" :style="{ width: `${w}px`, height: `${h}px` }" />
     <span v-if="item.missing" class="badge">缺</span>
   </button>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { shelfDrawingOf, type ShelfItem } from '@/lib/objectShelf'
 import { whenSeen } from '@/lib/whenSeen'
@@ -25,6 +25,12 @@ import { whenSeen } from '@/lib/whenSeen'
  *
  * Laid out from the measured size at once and drawn only once it comes near the
  * view, so a chapter of pieces costs its first screenful to open.
+ *
+ * ⚠️ Shown as an image rather than a canvas. A drawn canvas can be given a
+ * compositor layer of its own, and a scrolled-through chapter left hundreds of
+ * them standing: every pan of the page then laid out the whole window's layers
+ * again, a tenth of a second a frame in a virtual machine. An image is painted
+ * into the shelf's own layer however many there are.
  */
 const props = defineProps<{
   item: ShelfItem
@@ -35,24 +41,40 @@ const props = defineProps<{
 }>()
 
 const rootEl = useTemplateRef<HTMLElement>('rootEl')
-const canvasEl = useTemplateRef<HTMLCanvasElement>('canvasEl')
 const dpr = window.devicePixelRatio || 1
 const seen = ref(false)
+const url = shallowRef<string | null>(null)
 
 const w = computed(() => Math.max(8, props.item.width * props.scale))
 const h = computed(() => Math.max(8, props.item.height * props.scale))
 const cw = computed(() => Math.ceil(w.value * dpr))
 const ch = computed(() => Math.ceil(h.value * dpr))
 
-function paint() {
-  const el = canvasEl.value
-  const ctx = el?.getContext('2d')
-  if (!seen.value || !el || !ctx) return
-  ctx.clearRect(0, 0, el.width, el.height)
+/** Bumped by every draw, so an encoding that finishes after a newer one began is thrown away. */
+let drawing = 0
+let gone = false
+
+function show(next: string | null) {
+  if (url.value) URL.revokeObjectURL(url.value)
+  url.value = next
+}
+
+async function paint() {
+  if (!seen.value) return
+  const turn = ++drawing
   const sample = shelfDrawingOf(props.item)
-  if (!sample) return
+  if (!sample) {
+    show(null)
+    return
+  }
+  const off = new OffscreenCanvas(cw.value, ch.value)
+  const ctx = off.getContext('2d')
+  if (!ctx) return
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(sampleSource(sample), 0, 0, el.width, el.height)
+  ctx.drawImage(sampleSource(sample), 0, 0, off.width, off.height)
+  const blob = await off.convertToBlob()
+  if (gone || turn !== drawing) return
+  show(URL.createObjectURL(blob))
 }
 
 let stopWatching: (() => void) | null = null
@@ -61,8 +83,12 @@ onMounted(() => {
     seen.value = true
   })
 })
-onBeforeUnmount(() => stopWatching?.())
-watch([seen, () => props.item, cw, ch], paint, { flush: 'post' })
+onBeforeUnmount(() => {
+  gone = true
+  stopWatching?.()
+  show(null)
+})
+watch([seen, () => props.item, cw, ch], () => void paint().catch((err: unknown) => console.error('shelf piece draw failed', err)))
 </script>
 
 <style scoped>
