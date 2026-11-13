@@ -80,7 +80,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, ref, shallowRef, useTemplateRef, watchEffect } from 'vue'
+import {
+  computed,
+  defineComponent,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  useTemplateRef,
+  watch,
+  watchEffect,
+} from 'vue'
 import { useElementSize, useEventListener } from '@vueuse/core'
 import { strokesOf } from '@shared/effects/stroke'
 import type { StrokeEffect } from '@shared/effects/types'
@@ -225,6 +236,24 @@ const fit = computed(() => {
   const room = bodyW.value > 0 ? bodyW.value / 2 : Infinity
   return Math.min(1, room / widest)
 })
+
+/**
+ * An object picked on its own anywhere — the canvas, the list — is brought into
+ * view here too, so the shelf shows where the look in hand sits among the rest.
+ * Only as far as needed: a piece already in view stays put, which is what keeps
+ * a press on the shelf itself from moving it.
+ */
+watch(
+  () => editor.selectedIds,
+  async (ids) => {
+    if (isGlobal.value || ids.size !== 1 || sweep !== null || carrying.value !== null) return
+    const [id] = ids
+    await nextTick()
+    bodyEl.value
+      ?.querySelector(`[data-piece-id="${CSS.escape(id!)}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  },
+)
 
 // ── The arrangement ────────────────────────────────────────────────────────
 
