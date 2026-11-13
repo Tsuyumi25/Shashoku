@@ -5,14 +5,14 @@
     @contextmenu.prevent="onMenu"
   >
     <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-card px-2 text-xs">
-      <span class="font-medium">這一話的{{ sideName }}</span>
+      <span class="font-medium">{{ isGlobal ? '全域素材' : `這一話的${sideName}` }}</span>
       <span class="truncate text-muted-foreground tabular-nums">
         {{ pieces.length }} 個 · {{ buckets.length }} 堆 · 按照{{ attributeLabel }}
       </span>
     </div>
 
     <p v-if="pieces.length === 0" class="p-3 text-xs leading-relaxed text-muted-foreground">
-      這一話還沒有{{ sideName }}。
+      {{ isGlobal ? '還沒有全域素材。對文字物件按右鍵，選「收錄進全域素材」。' : `這一話還沒有${sideName}。` }}
     </p>
 
     <div v-else ref="bodyEl" class="relative min-h-0 flex-1 space-y-2 overflow-auto p-2">
@@ -20,10 +20,11 @@
         <div
           class="cluster-label"
           :class="heapPicked(bucket) === bucket.items.length && 'cluster-label-all'"
-          :title="`選這一堆的 ${bucket.items.length} 個；Ctrl 或 Shift 補滿或整堆拿出`"
+          :title="isGlobal ? bucket.label : `選這一堆的 ${bucket.items.length} 個；Ctrl 或 Shift 補滿或整堆拿出`"
           @click="pickHeap(bucket, $event)"
         >
           <span
+            v-if="!isGlobal"
             class="heap-mark"
             :class="heapPicked(bucket) === bucket.items.length ? 'heap-mark-all' : heapPicked(bucket) > 0 && 'heap-mark-some'"
           />
@@ -48,12 +49,18 @@
       <ShelfMarquee />
     </div>
 
-    <CanvasMenu :at="arrangeAt" :items="ARRANGEMENTS" @pick="chooseArrangement" @close="arrangeAt = null" />
+    <CanvasMenu :at="arrangeAt" :items="arrangeItems" @pick="chooseArrangement" @close="arrangeAt = null" />
     <CanvasMenu
       :at="objectMenu.openOn.value?.at ?? null"
       :items="objectMenu.items.value"
       @pick="objectMenu.pick"
       @close="objectMenu.close"
+    />
+    <CanvasMenu
+      :at="materialMenuOn?.at ?? null"
+      :items="MATERIAL_ITEMS"
+      @pick="pickOnMaterial"
+      @close="materialMenuOn = null"
     />
     <CanvasTagPicker :at="objectMenu.tagPickerAt.value" @close="objectMenu.tagPickerAt.value = null" />
 
@@ -83,6 +90,9 @@ import {
   shelfAttribute,
   shelfEntriesOf,
   shelfPieceOf,
+  shelfScope,
+  globalShelfEntriesOf,
+  type ShelfScope,
   type ShelfEntry,
   type ShelfHeap,
   type ShelfItem,
@@ -103,22 +113,28 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useExplodeStore } from '@/stores/explodeStore'
 import { objectAtPage } from '@/lib/canvasHit'
 import { useProjectStore } from '@/stores/projectStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /**
- * The chapter's own text objects as the shelf of materials. Every object of the
- * side being worked on, drawn as its page draws it and gathered into heaps by
- * one arrangement at a time — so the look a line already has is something to
- * reach for rather than something to rebuild.
+ * Text objects as the shelf of materials: this book's own, every object of the
+ * side being worked on, or the ones kept for every book. Each is drawn as its
+ * page draws it and gathered into heaps by one arrangement at a time — so the
+ * look a line already has is something to reach for rather than something to
+ * rebuild.
  *
- * What is selected here is what is selected on the page: there is one selection,
- * and a heap picked apart on the shelf is the same set the canvas and the list
- * are holding.
+ * This book's pieces are its objects: what is selected here is what is selected
+ * on the page, and a heap picked apart on the shelf is the same set the canvas
+ * and the list are holding. The kept ones stand on no page and can only be
+ * carried.
  */
 const editor = useEditorStore()
 const explode = useExplodeStore()
 const project = useProjectStore()
+const preferences = usePreferencesStore()
 const objectMenu = useObjectMenu()
 
+/** The kept materials stand on no page: nothing of theirs is selected, revealed or swept. */
+const isGlobal = computed(() => shelfScope.value === 'global')
 
 const sideName = computed(() => (editor.textSide === 'source' ? '原文' : '譯文'))
 const attributeLabel = computed(
@@ -127,7 +143,9 @@ const attributeLabel = computed(
 
 /** The whole chapter, which is why no page is named: turning one changes nothing here. */
 const shown = computed<ShelfEntry[]>(() =>
-  shelfEntriesOf(project.files, editor.textSide, project.activeFace, project.tagsOf),
+  isGlobal.value
+    ? globalShelfEntriesOf(preferences.prefs.globalMaterials)
+    : shelfEntriesOf(project.files, editor.textSide, project.activeFace, project.tagsOf),
 )
 
 /**
@@ -172,6 +190,7 @@ const heapPicked = (bucket: ShelfHeap) => picked.value.get(bucket.key) ?? 0
  * stays. No page turns: a heap runs across pages.
  */
 function pickHeap(bucket: ShelfHeap, e: MouseEvent) {
+  if (isGlobal.value) return
   const ids = bucket.items.map((i) => i.id)
   if (!(e.ctrlKey || e.metaKey || e.shiftKey)) editor.selectMany(ids, false)
   else if (heapPicked(bucket) < ids.length) editor.selectMany(ids, true)
@@ -202,13 +221,45 @@ const fit = computed(() => {
 
 const arrangeAt = ref<{ x: number; y: number } | null>(null)
 
-const ARRANGEMENTS = computed<MenuItem[]>(() =>
-  SHELF_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
+const SCOPES: { id: string; scope: ShelfScope; label: string }[] = [
+  { id: 'scope-book', scope: 'book', label: '此書' },
+  { id: 'scope-global', scope: 'global', label: '全域' },
+]
+
+/** At the top of the menu the ground between pieces opens; a piece's own menu is about the piece. */
+const scopeItems = computed<MenuItem[]>(() =>
+  SCOPES.map((s) => ({ id: s.id, label: s.label, checked: s.scope === shelfScope.value })),
 )
+
+/** True when the pick was a scope, which it has then switched to. */
+function pickScope(id: string): boolean {
+  const scope = SCOPES.find((s) => s.id === id)?.scope
+  if (scope === undefined) return false
+  shelfScope.value = scope
+  return true
+}
+
+const arrangeItems = computed<MenuItem[]>(() => [
+  ...scopeItems.value,
+  ...SHELF_ATTRIBUTES.map((a) => ({ id: a.id, label: `按照${a.label}`, checked: a.id === shelfAttribute.value })),
+])
 
 function chooseArrangement(id: string) {
   arrangeAt.value = null
+  if (pickScope(id)) return
   shelfAttribute.value = id as ShelfAttribute
+}
+
+/** A kept material's own menu: it is on no page, so the canvas's acts have nothing to act on. */
+const materialMenuOn = ref<{ id: string; at: { x: number; y: number } } | null>(null)
+
+const MATERIAL_ITEMS: MenuItem[] = [{ id: 'forget', label: '從全域素材移除' }]
+
+function pickOnMaterial(id: string) {
+  const on = materialMenuOn.value
+  materialMenuOn.value = null
+  if (on === null) return
+  if (id === 'forget') preferences.forgetGlobalMaterial(on.id)
 }
 
 /**
@@ -224,6 +275,7 @@ function onMenu(e: MouseEvent) {
     return
   }
   objectMenu.close()
+  materialMenuOn.value = null
   arrangeAt.value = { x: e.clientX, y: e.clientY }
 }
 
@@ -234,6 +286,12 @@ function onMenu(e: MouseEvent) {
  */
 function onPieceMenu(item: ShelfItem, e: MouseEvent) {
   arrangeAt.value = null
+  if (isGlobal.value) {
+    objectMenu.close()
+    materialMenuOn.value = { id: item.id, at: { x: e.clientX, y: e.clientY } }
+    return
+  }
+  materialMenuOn.value = null
   if (editor.isSelected(item.id)) editor.showPage(item.pageId)
   else editor.revealLabel(item.pageId, item.id)
   objectMenu.open(item.id, { x: e.clientX, y: e.clientY })
@@ -329,7 +387,7 @@ function onPress(e: PointerEvent) {
     }
     return
   }
-  if (e.target instanceof Element && e.target.closest('.cluster-label')) return
+  if (isGlobal.value || (e.target instanceof Element && e.target.closest('.cluster-label'))) return
   // A press on the scrollbar is the list being scrolled, not a sweep over it.
   const body = bodyEl.value
   if (body !== null && e.target === body && (e.offsetX >= body.clientWidth || e.offsetY >= body.clientHeight)) return
@@ -570,6 +628,7 @@ function endPreview() {
 // ── Letting go ─────────────────────────────────────────────────────────────
 
 function click(at: Pressed & { kind: 'piece' }) {
+  if (isGlobal.value) return
   if (at.shift) editor.extendSelectionTo(at.id, sequence.value)
   else if (at.toggle) editor.toggleSelected(at.id)
   else editor.revealLabel(at.pageId, at.id)
@@ -587,6 +646,16 @@ function drop(x: number, y: number, held: Carried) {
   // the gap between two there is no page to land on.
   const at = pagePointAt(x, y)
   if (at === null) return
+  if (isGlobal.value) {
+    const piece = pieces.value.find((p) => p.id === held.lead)
+    if (!piece) return
+    editor.cmdAddLabelsFromMaterial(
+      page,
+      [{ at, gives: { text: plainOf(piece.code), patch: { ...piece.style }, effects: piece.effects } }],
+      editor.textSide,
+    )
+    return
+  }
   const lead = project.entryById(held.lead)
   if (lead?.kind !== 'text') return
   const byId = new Map(pieces.value.map((p) => [p.id, p]))

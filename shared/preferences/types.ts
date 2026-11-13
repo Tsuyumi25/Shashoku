@@ -1,4 +1,6 @@
 import { defaultExportProfile, type ExportProfile } from "../export/types";
+import type { LayerEffect } from "../effects/types";
+import type { TextStyle } from "../text-style/types";
 
 export const MIN_FONT_PICKER_BOX_PX = 60;
 export const MAX_FONT_PICKER_BOX_PX = 240;
@@ -223,6 +225,20 @@ export interface Preferences {
   undoPixelBytes: number;
   ocr: OcrPreference;
   retouchOpacity: RetouchOpacityPreference;
+  /**
+   * Text objects kept for every book: copies taken from a page, linked to
+   * nothing, in the order they were collected.
+   */
+  globalMaterials: GlobalMaterial[];
+}
+
+/** What a text object looks like and says, without the page it came from. */
+export interface GlobalMaterial {
+  id: string;
+  /** The words with their markup, as the object held them. */
+  code: string;
+  style: TextStyle;
+  effects: LayerEffect[];
 }
 
 /**
@@ -264,5 +280,6 @@ export function defaultPreferences(): Preferences {
     undoPixelBytes: 512 * 1024 * 1024,
     ocr: defaultOcrPreference(),
     retouchOpacity: defaultRetouchOpacityPreference(),
+    globalMaterials: [],
   };
 }

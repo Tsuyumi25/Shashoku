@@ -1,5 +1,7 @@
 import { freeGroupName } from "./fontGroups";
 import { parseProfileList, serializeProfile } from "../export/schema";
+import { parseEffects, serializeEffects } from "../effects/schema";
+import { parseTextStyle, serializeTextStyle } from "../text-style/schema";
 import {
   MAX_FONT_PICKER_BOX_PX,
   MAX_UI_ZOOM_LEVEL,
@@ -10,6 +12,7 @@ import {
   defaultOcrPreference,
   defaultPreferences,
   defaultRetouchOpacityPreference,
+  type GlobalMaterial,
   type OcrPreference,
   type Preferences,
   type RetouchOpacityPreference,
@@ -82,6 +85,7 @@ export function parsePreferences(raw: string): Preferences {
     undoPixelBytes,
     ocr,
     retouchOpacity,
+    globalMaterials,
   } = parsed;
 
   if (Array.isArray(fontFavorites)) {
@@ -217,7 +221,37 @@ export function parsePreferences(raw: string): Preferences {
     if (typeof retouchOpacity.undoable === "boolean") kept.undoable = retouchOpacity.undoable;
     prefs.retouchOpacity = { ...defaultRetouchOpacityPreference(), ...kept };
   }
+  if (Array.isArray(globalMaterials)) prefs.globalMaterials = parseGlobalMaterials(globalMaterials);
   return prefs;
+}
+
+/** Thrown by a material that no longer reads, and caught for that one alone. */
+class UnreadableMaterial extends Error {}
+
+/** Each one on its own: one that no longer reads is dropped and the rest are kept. */
+function parseGlobalMaterials(list: unknown[]): GlobalMaterial[] {
+  const fail = (message: string): never => {
+    throw new UnreadableMaterial(message);
+  };
+  const ids = new Set<string>();
+  const kept: GlobalMaterial[] = [];
+  for (const [i, item] of list.entries()) {
+    if (!isRecord(item)) continue;
+    const { id, code, style, effects } = item;
+    if (typeof id !== "string" || id.length === 0 || ids.has(id) || typeof code !== "string") continue;
+    try {
+      kept.push({
+        id,
+        code,
+        style: parseTextStyle(style, `globalMaterials[${i}].style`, fail),
+        effects: parseEffects(effects, `globalMaterials[${i}].effects`, fail),
+      });
+      ids.add(id);
+    } catch (err) {
+      if (!(err instanceof UnreadableMaterial)) throw err;
+    }
+  }
+  return kept;
 }
 
 export function clampOpacity(opacity: number): number {
@@ -259,6 +293,12 @@ export function serializePreferences(prefs: Preferences): string {
       undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,
       retouchOpacity: prefs.retouchOpacity,
+      globalMaterials: prefs.globalMaterials.map((m) => ({
+        id: m.id,
+        code: m.code,
+        style: serializeTextStyle(m.style),
+        effects: serializeEffects(m.effects),
+      })),
     },
     null,
     2,

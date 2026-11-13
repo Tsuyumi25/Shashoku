@@ -1,11 +1,13 @@
 import { LAYER_ORDER_MENU, restackOf } from '@/lib/layerOrderMenu'
 import { computed, ref } from 'vue'
 import { refOfBlock } from '@shared/mcp/refs'
+import { shownCodeOf } from '@shared/page/units'
 import type { MenuItem } from '@/components/CanvasMenu.vue'
 import { useMergeLayers } from '@/composables/useMergeLayers'
 import { useUnitMenu } from '@/composables/useUnitMenu'
 import { useEditorStore } from '@/stores/editorStore'
 import { useNoticeStore } from '@/stores/noticeStore'
+import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 
 /**
@@ -47,6 +49,14 @@ export function useObjectMenu() {
     ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
     { id: 'tags', label: '標記…' },
     { id: 'duplicate-unit', label: '製作副本（整個 Unit）' },
+    ...(collectable.value.length === 0
+      ? []
+      : [
+          {
+            id: 'collect-global',
+            label: collectable.value.length > 1 ? `收錄進全域素材（${collectable.value.length} 個）` : '收錄進全域素材',
+          },
+        ]),
     ...unitMenu.items.value,
     LAYER_ORDER_MENU,
     { id: 'delete', label: editor.selectedIds.size > 1 ? `刪除（${editor.selectedIds.size} 個）` : '刪除' },
@@ -91,11 +101,35 @@ export function useObjectMenu() {
       tagPickerAt.value = on.at
       return
     }
+    if (choice === 'collect-global') {
+      collectGlobal()
+      return
+    }
     if (choice === 'duplicate-unit') {
       void merge.duplicateLayer({ id: on.id, wholeUnit: true }).catch((err: unknown) =>
         console.error('duplicate failed', err),
       )
     }
+  }
+
+  /**
+   * The selection's text objects with words in them, as they look now. A lock
+   * holds an object still on its page; copying how it looks does not move it.
+   */
+  const collectable = computed(() =>
+    [...editor.selectedIds].flatMap((id) => {
+      const entry = project.entryById(id)
+      if (entry?.kind !== 'text') return []
+      const code = shownCodeOf(entry)
+      return code.trim() ? [{ code, style: entry.body.style, effects: entry.effects }] : []
+    }),
+  )
+
+  function collectGlobal() {
+    const items = collectable.value
+    if (items.length === 0) return
+    usePreferencesStore().collectGlobalMaterials(items)
+    useNoticeStore().say(`已收錄 ${items.length} 個到全域素材`)
   }
 
   return { openOn, tagPickerAt, items, open, close, pick }

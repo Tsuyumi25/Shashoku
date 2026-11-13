@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import type { GlobalMaterial } from '@shared/preferences/types'
 import type { LayerEffect } from '@shared/effects/types'
 import { faceTree } from '@shared/page/trees'
 import { blocksOnSide, shownCodeOf } from '@shared/page/units'
@@ -16,6 +17,24 @@ import type { ProjectFile } from '@/types/project'
  * is asked for.
  */
 export const shelfAttribute = ref<ShelfAttribute>('font')
+
+/** Whose objects the shelf holds: this book's own, or the ones kept for every book. */
+export type ShelfScope = 'book' | 'global'
+
+export const shelfScope = ref<ShelfScope>('book')
+
+/** The kept materials in the shelf's shape. They stand on no page, which `pageNumber` 0 says. */
+export function globalShelfEntriesOf(materials: readonly GlobalMaterial[]): ShelfEntry[] {
+  return materials.map((m) => ({
+    id: m.id,
+    pageId: '',
+    pageNumber: 0,
+    code: m.code,
+    style: m.style,
+    effects: m.effects,
+    tags: [],
+  }))
+}
 
 export interface ShelfEntry {
   id: string
@@ -110,7 +129,7 @@ export function shelfPieceOf(entry: ShelfEntry): ShelfItem {
     // The square root keeps the order of sizes while pulling a 368px shout
     // and a 47px aside within reach of one column.
     scale: 3.6 / Math.sqrt(entry.style.fontSizePx),
-    title: `第 ${entry.pageNumber} 頁 · ${font} ${entry.style.fontStyleName} · ${entry.style.fontSizePx}px`,
+    title: `${entry.pageNumber > 0 ? `第 ${entry.pageNumber} 頁` : '全域素材'} · ${font} ${entry.style.fontStyleName} · ${entry.style.fontSizePx}px`,
     key,
   }
   pieces.set(entry.id, piece)

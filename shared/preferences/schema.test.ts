@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_STROKE } from "../effects/types";
+import { DEFAULT_TEXT_STYLE } from "../text-style/types";
 import { parsePreferences, serializePreferences } from "./schema";
 import {
   MIN_UNDO_PIXEL_BYTES,
@@ -139,6 +141,21 @@ describe("how the 修圖 toggle writes", () => {
 
     const off = JSON.stringify({ retouchOpacity: { low: -1, high: 7, mode: "tap", undoable: true } });
     expect(parsePreferences(off).retouchOpacity).toEqual({ low: 0, high: 1, mode: "toggle", wholeBook: false, undoable: true });
+  });
+});
+
+describe("the materials kept for every book", () => {
+  it("come back as collected, and one that no longer reads is dropped without the rest", () => {
+    const prefs = defaultPreferences();
+    prefs.globalMaterials = [
+      { id: "a", code: "ドン", style: { ...DEFAULT_TEXT_STYLE, fontSizePx: 64, color: "#ff0000" }, effects: [{ ...DEFAULT_STROKE, width: 5 }] },
+      { id: "b", code: "はぁ", style: { ...DEFAULT_TEXT_STYLE }, effects: [] },
+    ];
+    expect(parsePreferences(serializePreferences(prefs)).globalMaterials).toEqual(prefs.globalMaterials);
+
+    const written = JSON.parse(serializePreferences(prefs));
+    written.globalMaterials[0].style = "not a style";
+    expect(parsePreferences(JSON.stringify(written)).globalMaterials.map((m) => m.id)).toEqual(["b"]);
   });
 });
 

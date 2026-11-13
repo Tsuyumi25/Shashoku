@@ -1,6 +1,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { SplitterGroupProps } from 'reka-ui'
+import { cloneEffects } from '@shared/effects/clone'
+import { generateId } from '@shared/page/schema'
 import {
   clampOpacity,
   clampUiZoomLevel,
@@ -11,6 +13,7 @@ import {
   MAX_FONT_PICKER_BOX_PX,
   MIN_FONT_PICKER_BOX_PX,
   defaultPreferences,
+  type GlobalMaterial,
   type MissingGlyphMode,
   type RetouchOpacityPreference,
   type SidePanel,
@@ -238,6 +241,22 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.retouchOpacity = { ...next, low: clampOpacity(next.low), high: clampOpacity(next.high) }
   }
 
+  /** Copies, so editing the object on its page later leaves what was collected as it was. */
+  function collectGlobalMaterials(items: readonly Omit<GlobalMaterial, 'id'>[]) {
+    for (const item of items) {
+      prefs.globalMaterials.push({
+        id: generateId(),
+        code: item.code,
+        style: { ...item.style },
+        effects: cloneEffects(item.effects),
+      })
+    }
+  }
+
+  function forgetGlobalMaterial(id: string) {
+    prefs.globalMaterials = prefs.globalMaterials.filter((m) => m.id !== id)
+  }
+
   return {
     prefs,
     hydrate,
@@ -270,5 +289,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setRulersShown,
     setSidePanel,
     setRetouchOpacity,
+    collectGlobalMaterials,
+    forgetGlobalMaterial,
   }
 })
