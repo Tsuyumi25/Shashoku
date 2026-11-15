@@ -757,7 +757,7 @@ function workspaceRowFocused(): boolean {
 }
 
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
-  if (ui.settingsOpen || ui.view !== 'library') return
+  if (ui.panelOpen || ui.view !== 'library') return
   if (isTypingSurface(document.activeElement)) return
 
   const action = routeShelfKey(e, workspaceRowFocused())

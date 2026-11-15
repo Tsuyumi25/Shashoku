@@ -101,6 +101,7 @@
     </div>
 
     <SettingsPopup />
+    <PageManager />
   </div>
 </template>
 
@@ -120,6 +121,7 @@ import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
 import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
+import PageManager from '@/components/pageManager/PageManager.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import ToolOptionsBar from '@/components/ToolOptionsBar.vue'
@@ -224,7 +226,7 @@ useEventListener(
 )
 
 useEventListener(window, 'keydown', (e) => {
-  if (ui.settingsOpen) return
+  if (ui.panelOpen) return
   if (!e.ctrlKey && !e.metaKey) return
   const key = e.key.toLowerCase()
 
@@ -343,7 +345,7 @@ useEventListener(window, 'keydown', (e) => {
  * whether Ctrl is held, and this key is held by neither side.
  */
 useEventListener(window, 'keydown', (e) => {
-  if (ui.settingsOpen) return
+  if (ui.panelOpen) return
   if (ui.view !== 'editor' || e.key !== 'Backspace') return
   if (!e.altKey || e.ctrlKey || e.metaKey) return
   if (ownsKeyboard(document.activeElement)) return
@@ -390,7 +392,7 @@ useEventListener(
 )
 
 useEventListener(window, 'keydown', (e) => {
-  if (ui.settingsOpen) return
+  if (ui.panelOpen) return
   if (ui.view !== 'editor') return
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (ownsKeyboard(document.activeElement)) return

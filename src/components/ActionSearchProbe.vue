@@ -285,7 +285,7 @@ function close() {
 
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (e.code !== 'Backquote' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
-  if (ui.view !== 'editor' || ui.settingsOpen || !project.isOpen) return
+  if (ui.view !== 'editor' || ui.panelOpen || !project.isOpen) return
   if (isTypingSurface(document.activeElement)) return
   e.preventDefault()
   if (open.value) close()

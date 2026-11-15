@@ -2676,7 +2676,7 @@ function onLostPointerCapture(e: PointerEvent) {
 const ESCAPE_DOUBLE_MS = 400
 
 useEventListener(window, 'keydown', (e) => {
-  if (ui.view !== 'editor' || ui.settingsOpen) return
+  if (ui.view !== 'editor' || ui.panelOpen) return
   if (ownsKeyboard(document.activeElement)) return
   // The display's drag is held under Alt, so its way out has to be reached
   // before the guard below turns every other key off.

@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
 /**
@@ -22,6 +22,8 @@ export const useUiStore = defineStore("ui", () => {
    * were stays under it, untouched.
    */
   const settingsOpen = ref(false);
+  const pageManagerOpen = ref(false);
+  const panelOpen = computed(() => settingsOpen.value || pageManagerOpen.value);
 
-  return { view, setView, settingsOpen };
+  return { view, setView, settingsOpen, pageManagerOpen, panelOpen };
 });

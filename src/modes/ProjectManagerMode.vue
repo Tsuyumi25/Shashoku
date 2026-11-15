@@ -334,7 +334,7 @@ function cards(): HTMLElement[] {
 }
 
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
-  if (ui.settingsOpen || ui.view !== 'export' || e.defaultPrevented) return
+  if (ui.panelOpen || ui.view !== 'export' || e.defaultPrevented) return
   if (e.ctrlKey || e.metaKey || e.altKey || ownsKeyboard(document.activeElement)) return
   const arrow = ARROWS[e.key]
   if (!arrow) return
