@@ -42,7 +42,7 @@
             </div>
             <ObjectShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
           </div>
-          <LibraryWorkspaces v-show="ui.view === 'library'" />
+          <LibraryWorkspaces v-show="ui.view === 'library'" @dragover="drop.onDragOver" @drop="drop.onDrop" />
           <FontLibrarySidebar v-if="ui.view === 'fonts'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -62,7 +62,7 @@
               <TranslateMode />
             </div>
             <ActionSearchProbe v-if="project.isOpen" />
-            <div v-if="ui.view === 'library'" class="absolute inset-0">
+            <div v-if="ui.view === 'library'" class="absolute inset-0" @dragover="drop.onDragOver" @drop="drop.onDrop">
               <SplitterGroup direction="horizontal" class="h-full">
                 <SplitterPanel :order="1" :default-size="70" :min-size="40" class="flex min-w-0 flex-col">
                   <LibraryShelf />
@@ -134,6 +134,7 @@ import { useFillSelection } from '@/composables/useFillSelection'
 import { useFontPicker } from '@/composables/useFontPicker'
 import { useLeftColumn } from '@/composables/useLeftColumn'
 import { useMergeLayers } from '@/composables/useMergeLayers'
+import { useNewProjectDrop } from '@/composables/useNewProjectDrop'
 import { useOpenProject } from '@/composables/useOpenProject'
 import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { useSelectionPixels } from '@/composables/useSelectionPixels'
@@ -159,6 +160,7 @@ const removal = useRemoveStrokes()
 const preferences = usePreferencesStore()
 const exportSelection = useExportStore()
 const ui = useUiStore()
+const drop = useNewProjectDrop()
 const fontPicker = useFontPicker()
 const column = useLeftColumn()
 // The font picker's own "open" follows the column, and "choose a font" from
