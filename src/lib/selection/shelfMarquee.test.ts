@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  bandBoundary,
-  clampToTerritory,
   clientToContent,
   edgeDistance,
   edgeDistanceFactor,
@@ -9,7 +7,6 @@ import {
   resolveFrame,
   scrollEdgeFor,
   scrollZoneDepth,
-  territoryAt,
   touchedKeys,
   type CardBox,
 } from '@/lib/selection/shelfMarquee'
@@ -26,44 +23,6 @@ describe('clientToContent', () => {
   it('folds in horizontal scroll the same way', () => {
     const frame = { left: 0, top: 0, scrollLeft: 30, scrollTop: 0 }
     expect(clientToContent(5, 5, frame)).toEqual({ x: 35, y: 5 })
-  })
-})
-
-describe('bandBoundary and territoryAt', () => {
-  it('sits at the midpoint of the gap between the two bands', () => {
-    const boundary = bandBoundary(200, 220)
-    expect(boundary).toBe(210)
-    expect(territoryAt(209, boundary)).toBe('project')
-    expect(territoryAt(210, boundary)).toBe('file')
-  })
-
-  it('gives the whole scroller to the file band when there is no project band', () => {
-    const boundary = bandBoundary(null, 40)
-    expect(territoryAt(-1000, boundary)).toBe('file')
-  })
-
-  it('gives the whole scroller to the project band when there is no file band', () => {
-    const boundary = bandBoundary(300, null)
-    expect(territoryAt(100_000, boundary)).toBe('project')
-  })
-})
-
-describe('clampToTerritory', () => {
-  const boundary = 200
-
-  it('cuts a project-territory rect flat at the boundary rather than crossing it', () => {
-    const dragged = clampToTerritory({ x: 0, y: 100, w: 50, h: 150 }, 'project', boundary)
-    expect(dragged).toEqual({ x: 0, y: 100, w: 50, h: 100 })
-  })
-
-  it('cuts a file-territory rect flat at the boundary from the other side', () => {
-    const dragged = clampToTerritory({ x: 0, y: 150, w: 50, h: 100 }, 'file', boundary)
-    expect(dragged).toEqual({ x: 0, y: 200, w: 50, h: 50 })
-  })
-
-  it('leaves a rect already inside its own territory untouched', () => {
-    const inside = { x: 0, y: 0, w: 50, h: 50 }
-    expect(clampToTerritory(inside, 'project', boundary)).toEqual(inside)
   })
 })
 

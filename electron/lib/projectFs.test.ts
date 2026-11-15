@@ -9,7 +9,7 @@ import {
   createPage,
   createProject,
   deleteLayerParts,
-  describeFolders,
+  describeProjects,
   openProject,
   readProjectMeta,
   writePage,
@@ -22,6 +22,7 @@ import {
   DIR_PAGES,
   PAGE_MANIFEST_FILENAME,
   PROJECT_JSON_FILENAME,
+  SENTINEL_FILENAME,
   SHASHOKU_DIR,
 } from "@shared/ssk/constants";
 
@@ -443,9 +444,27 @@ describe.skipIf(!haveEngine)("a folder described as a shelf card", () => {
     await createProject(inner);
     await createPage(inner, "001.png");
 
-    const [card] = await describeFolders([inner]);
+    const [card] = await describeProjects([inner]);
 
-    expect(card).toMatchObject({ name: "chapter", path: inner, book: true, pageCount: 1 });
+    expect(card).toMatchObject({ name: "chapter", path: inner, found: true, pageCount: 1 });
     expect(card.cover).not.toBeNull();
+  });
+
+  it("carries the id its sentinel was given when it was made", async () => {
+    await createProject(root);
+    const sentinel = await readFile(join(root, SHASHOKU_DIR, SENTINEL_FILENAME), "utf8");
+
+    const [card] = await describeProjects([root]);
+
+    expect(card.id).not.toBeNull();
+    expect(sentinel).toContain(`id=${card.id}`);
+  });
+
+  it("answers for a path that holds no project instead of leaving it out", async () => {
+    const gone = join(root, "moved-away");
+
+    const cards = await describeProjects([gone]);
+
+    expect(cards).toEqual([{ path: gone, name: "moved-away", found: false, id: null, cover: null, pageCount: 0 }]);
   });
 });

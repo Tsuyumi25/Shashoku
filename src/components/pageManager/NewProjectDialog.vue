@@ -205,6 +205,7 @@ watch(
       return
     }
     generation += 1
+    ui.newProjectFavorite = null
     source.value = null
     kind.value = null
     images.value = []
@@ -237,7 +238,7 @@ async function useSource(path: string) {
     }
     const contents = await window.api.listInside(path)
     if (mine !== generation) return
-    images.value = contents.entries.filter((e) => !e.folder && e.cover !== null)
+    images.value = contents.filter((e) => !e.folder && e.cover !== null)
     picked.value = new Set(images.value.map((e) => e.name))
     kind.value = 'folder'
   } catch (err) {
@@ -321,6 +322,8 @@ async function create() {
     await importFilesAt(book, chosen.value.map((e) => e.name), 0, true)
     const scan = await window.api.scanRoot(book)
     if (!scan.hasSentinel) return
+    const favorite = ui.newProjectFavorite
+    if (favorite !== null) await library.addPathToFavorite(favorite, book)
     void library.refresh()
     await open(book)
   } finally {

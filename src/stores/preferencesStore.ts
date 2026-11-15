@@ -19,12 +19,10 @@ import {
   type SidePanel,
 } from '@shared/preferences/types'
 import { freeGroupName } from '@shared/preferences/fontGroups'
+import type { FavoriteMember } from '@shared/project/favorites'
 import { chosenDefaultFamily } from '@/lib/fontCatalog'
 
 const PERSIST_DEBOUNCE_MS = 250
-
-/** How many opened projects the library's 最近 page remembers. */
-const RECENT_PROJECTS_KEPT = 30
 
 /** reka-ui does not export this type, but it is reachable through the props. */
 type PanelGroupStorage = NonNullable<SplitterGroupProps['storage']>
@@ -182,10 +180,27 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   function noteRecentProject(path: string) {
-    prefs.recentProjects = [path, ...prefs.recentProjects.filter((p) => p !== path)].slice(
-      0,
-      RECENT_PROJECTS_KEPT,
-    )
+    prefs.recentProjects = [path, ...prefs.recentProjects.filter((p) => p !== path)]
+  }
+
+  function addFavorite(name: string): string {
+    const id = crypto.randomUUID()
+    prefs.favorites.push({ id, name, members: [] })
+    return id
+  }
+
+  function renameFavorite(id: string, name: string) {
+    const favorite = prefs.favorites.find((f) => f.id === id)
+    if (favorite && name.trim()) favorite.name = name.trim()
+  }
+
+  function removeFavorite(id: string) {
+    prefs.favorites = prefs.favorites.filter((f) => f.id !== id)
+  }
+
+  function setFavoriteMembers(id: string, members: FavoriteMember[]) {
+    const favorite = prefs.favorites.find((f) => f.id === id)
+    if (favorite) favorite.members = members
   }
 
   function setFontSampleVertical(vertical: boolean) {
@@ -281,6 +296,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     addWorkspace,
     removeWorkspace,
     noteRecentProject,
+    addFavorite,
+    renameFavorite,
+    removeFavorite,
+    setFavoriteMembers,
     setDefaultFontFamily,
     setMissingGlyphMode,
     setMarkMissingGlyphs,

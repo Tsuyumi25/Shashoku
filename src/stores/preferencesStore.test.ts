@@ -12,12 +12,4 @@ describe('noting a project as opened', () => {
     preferences.noteRecentProject('/a')
     expect(preferences.prefs.recentProjects).toEqual(['/a', '/b'])
   })
-
-  it('forgets the oldest past what it keeps', () => {
-    const preferences = usePreferencesStore()
-    for (let n = 0; n < 40; n++) preferences.noteRecentProject(`/p${n}`)
-    expect(preferences.prefs.recentProjects).toHaveLength(30)
-    expect(preferences.prefs.recentProjects[0]).toBe('/p39')
-    expect(preferences.prefs.recentProjects.at(-1)).toBe('/p10')
-  })
 })

@@ -2,9 +2,6 @@ import { clamp } from '@/lib/coords'
 import { obbIntersectsRect } from '@/lib/selection/obb'
 import type { Point, Rect } from '@/lib/selection/rect'
 
-/** Which of the shelf's two bands a point or a drag belongs to. */
-export type Territory = 'project' | 'file'
-
 /** What `getBoundingClientRect` and `scrollTop`/`scrollLeft` give a scroller. */
 export interface ScrollerFrame {
   left: number
@@ -29,37 +26,6 @@ export function clientToContent(clientX: number, clientY: number, frame: Scrolle
     x: clientX - frame.left + frame.scrollLeft,
     y: clientY - frame.top + frame.scrollTop,
   }
-}
-
-/**
- * The line between the two bands' territories, in content coordinates —
- * the midpoint of the gap between them, so the scroller has no dead strip
- * that belongs to neither. A missing band gives its side of the scroller
- * away entirely: no project band means every point is `file` territory, and
- * the reverse.
- */
-export function bandBoundary(projectBottom: number | null, fileTop: number | null): number {
-  if (projectBottom === null) return -Infinity
-  if (fileTop === null) return Infinity
-  return (projectBottom + fileTop) / 2
-}
-
-export function territoryAt(y: number, boundary: number): Territory {
-  return y < boundary ? 'project' : 'file'
-}
-
-/**
- * The marquee's own geometry, cut down to the territory it started in. The
- * same rectangle is drawn and hit-tested, so a drag that reaches for the
- * other band stops flat at the line instead of sliding across it.
- */
-export function clampToTerritory(rect: Rect, territory: Territory, boundary: number): Rect {
-  if (territory === 'project') {
-    const y1 = Math.min(boundary, rect.y + rect.h)
-    return { x: rect.x, y: rect.y, w: rect.w, h: Math.max(0, y1 - rect.y) }
-  }
-  const y0 = Math.max(boundary, rect.y)
-  return { x: rect.x, y: y0, w: rect.w, h: Math.max(0, rect.y + rect.h - y0) }
 }
 
 export interface CardBox {
@@ -145,11 +111,10 @@ export function edgeScrollSpeed(distanceFactor: number, timeFactor: number): num
 export type ScrollEdge = 'up' | 'down' | null
 
 /**
- * Whether the clamped marquee is pressed against the scroller's visible top
- * or bottom. Because the marquee cannot cross into the other territory, this
- * one check already covers both of the cases scrolling has to tell apart: a
- * band taller than the viewport lets the box reach the edge and this fires,
- * a band that fits does not and it stays still.
+ * Whether the marquee is pressed against the scroller's visible top or bottom.
+ * This one check covers both of the cases scrolling has to tell apart: a grid
+ * taller than the viewport lets the box reach the edge and this fires, a grid
+ * that fits does not and it stays still.
  *
  * Only the end the pointer drives counts: a box taller than the view has its
  * anchored end past an edge too, and reading that one would stall the scroll

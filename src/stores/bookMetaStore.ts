@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { defaultProjectJson, parseProjectJson, serializeProjectJson } from '@shared/project/schema'
 import type { ProjectJson } from '@shared/project/types'
 import { SHASHOKU_DIR } from '@shared/ssk/constants'
-import { applyPageOrderSnapshot, reconcilePages } from '@shared/project/pages'
+import { applyPageOrderSnapshot } from '@shared/project/pages'
 import { createAutosave, type Autosave } from '@/lib/autosave'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -158,27 +158,6 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   }
 
   /**
-   * Takes in page directories `found` on disk that the handle's list does not
-   * name yet, at the end, by `reconcilePages`' own rule.
-   *
-   * The list a book was opened with is reconciled against its directories by
-   * the main process; a handle is the raw `pages` field and is not. That gap
-   * is what let the shelf draw a card the drag gestures could not see — and a
-   * gesture cannot move a page the list it is rewriting has never heard of, so
-   * this runs before one measures anything.
-   */
-  function adopt(rootPath: string, found: readonly string[]): void {
-    if (useProjectStore().isOpenRoot(rootPath)) return
-    const handle = handles.get(rootPath)
-    if (!handle) return
-    const { order } = reconcilePages(handle.order, found)
-    if (order.length === handle.order.length) return
-    handle.order = order
-    handle.dirty = true
-    writerFor(rootPath).mark()
-  }
-
-  /**
    * Puts the pages `snapshot` covers back into its order and schedules the
    * write, every page it does not cover holding its own slot. Answers `false`
    * without touching anything for a book the editor has open, one `handleFor`
@@ -328,7 +307,6 @@ export const useBookMetaStore = defineStore('bookMeta', () => {
   return {
     handleFor,
     orderOf,
-    adopt,
     applyOrderSnapshot,
     placePages,
     tagDeleted,

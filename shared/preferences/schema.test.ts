@@ -175,6 +175,28 @@ describe("the projects opened lately", () => {
   });
 });
 
+describe("the 收藏夾", () => {
+  it("comes back with its members and their ids", () => {
+    const prefs = defaultPreferences();
+    prefs.favorites = [
+      { id: "f1", name: "本週", members: [{ path: "/w/a", projectId: "A" }, { path: "/w/b", projectId: null }] },
+    ];
+    expect(parsePreferences(serializePreferences(prefs)).favorites).toEqual(prefs.favorites);
+  });
+
+  it("drops a member that names no path and a list with no id", () => {
+    const raw = JSON.stringify({
+      favorites: [
+        { id: "f1", name: "本週", members: [{ path: "/w/a" }, { path: "" }, 3] },
+        { name: "no id", members: [] },
+      ],
+    });
+    expect(parsePreferences(raw).favorites).toEqual([
+      { id: "f1", name: "本週", members: [{ path: "/w/a", projectId: null }] },
+    ]);
+  });
+});
+
 describe("how big the font picker's boxes are", () => {
   it("comes back with what was written", () => {
     const prefs = defaultPreferences();

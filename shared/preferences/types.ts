@@ -1,5 +1,6 @@
 import { defaultExportProfile, type ExportProfile } from "../export/types";
 import type { LayerEffect } from "../effects/types";
+import type { Favorite } from "../project/favorites";
 import type { TextStyle } from "../text-style/types";
 
 export const MIN_FONT_PICKER_BOX_PX = 60;
@@ -194,10 +195,13 @@ export interface Preferences {
    */
   workspaces: string[];
   /**
-   * Projects opened, most recent first. A path only: whether it is still a
-   * project is asked of the disk when the list is drawn.
+   * Every project created or opened here, most recent first — the library's
+   * 全部 and 最近 are this one list in two orders. A path only: whether it is
+   * still a project is asked of the disk when the list is drawn.
    */
   recentProjects: string[];
+  /** The library's 收藏夾: lists the user files projects into, one project in as many as they like. */
+  favorites: Favorite[];
   /**
    * Splitter geometry, one entry per group keyed by its autoSaveId. reka-ui
    * owns both the keys and the serialized values; we only provide storage.
@@ -269,6 +273,7 @@ export function defaultPreferences(): Preferences {
     scanPoints: [],
     workspaces: [],
     recentProjects: [],
+    favorites: [],
     panelLayout: {},
     // The reading, because a page is framed and typed before it is stacked.
     sidePanel: "labels",

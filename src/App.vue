@@ -42,7 +42,7 @@
             </div>
             <ObjectShelf v-if="column.shown.value === 'materials'" class="min-h-0 flex-1" />
           </div>
-          <LibraryWorkspaces v-show="ui.view === 'library'" @dragover="drop.onDragOver" @drop="drop.onDrop" />
+          <LibrarySidebar v-show="ui.view === 'library'" @dragover="drop.onDragOver" @drop="drop.onDrop" />
           <FontLibrarySidebar v-if="ui.view === 'fonts'" />
           <ExportPanel v-if="ui.view === 'export'" />
         </SplitterPanel>
@@ -120,7 +120,7 @@ import FontLibraryList from '@/components/fontLibrary/FontLibraryList.vue'
 import FontLibrarySidebar from '@/components/fontLibrary/FontLibrarySidebar.vue'
 import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
-import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
+import LibrarySidebar from '@/components/library/LibrarySidebar.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import NewProjectDialog from '@/components/pageManager/NewProjectDialog.vue'
 import PageManager from '@/components/pageManager/PageManager.vue'
@@ -145,7 +145,6 @@ import ProjectManagerMode from '@/modes/ProjectManagerMode.vue'
 import TopologyMode from '@/modes/TopologyMode.vue'
 import TranslateMode from '@/modes/TranslateMode.vue'
 import { useEditorStore } from '@/stores/editorStore'
-import { useLibraryStore } from '@/stores/libraryStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -153,7 +152,6 @@ import { useUiStore } from '@/stores/uiStore'
 
 const project = useProjectStore()
 const editor = useEditorStore()
-const library = useLibraryStore()
 const selection = useSelectionStore()
 const connect = useConnectStore()
 const removal = useRemoveStrokes()
@@ -273,20 +271,6 @@ useEventListener(window, 'keydown', (e) => {
     } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
       e.preventDefault()
       editor.redo()
-    }
-    return
-  }
-
-  // A shelf gesture pushes into whichever book it is standing on, open or
-  // not, so the undo it takes back is that book's too — not whatever the
-  // editor happens to have loaded.
-  if (ui.view === 'library') {
-    if (key === 'z' && !e.shiftKey) {
-      e.preventDefault()
-      editor.undo(library.standingAt)
-    } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
-      e.preventDefault()
-      editor.redo(library.standingAt)
     }
     return
   }

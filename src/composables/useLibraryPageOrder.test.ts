@@ -79,54 +79,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('reordering a book nobody has open', () => {
-  it('moves a whole batch in one step, and undo restores the exact order it replaced', async () => {
-    seed('/book-a', ['a', 'b', 'c', 'd'])
-    const order = useLibraryPageOrder()
-    const editor = useEditorStore()
-    const bookMeta = useBookMetaStore()
-
-    await order.reorderPagesTo('/book-a', ['b', 'd'], 0)
-    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['b', 'd', 'a', 'c'])
-
-    editor.undo('/book-a')
-    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['a', 'b', 'c', 'd'])
-  })
-
-  it('does not land in whichever book happens to be open in the editor', async () => {
-    seed('/book-a', ['a', 'b'])
-    const order = useLibraryPageOrder()
-    const project = useProjectStore()
-    const editor = useEditorStore()
-
-    // Nothing open at all while the shelf reorders a book.
-    expect(project.rootPath).toBeNull()
-    await order.reorderPagesTo('/book-a', ['a'], 2)
-
-    // The book the editor would undo by default has no such command.
-    expect(editor.canUndo).toBe(false)
-  })
-
-  /**
-   * A gesture reads the order, works the next one out from it, and pushes a
-   * command carrying both ends. Two of them left to overlap each read the
-   * order that stood before either ran, so the second writes an `after` — and
-   * an undo that restores a `before` — measured against an order already gone.
-   */
-  it('takes a second drag against what the first one left, not against what it started from', async () => {
-    seed('/book-a', ['a', 'b', 'c'])
-    const order = useLibraryPageOrder()
-    const bookMeta = useBookMetaStore()
-
-    await Promise.all([
-      order.reorderPagesTo('/book-a', ['b'], 0),
-      order.reorderPagesTo('/book-a', ['c'], 0),
-    ])
-
-    expect((await bookMeta.handleFor('/book-a'))?.order).toEqual(['c', 'b', 'a'])
-  })
-})
-
 describe('importing files onto a book nobody has open', () => {
   it('creates one page per file and inserts the batch as one step', async () => {
     seed('/book-b', ['x'])
@@ -159,49 +111,7 @@ describe('importing files onto a book nobody has open', () => {
   })
 })
 
-/**
- * `[a,b] → [b,a] → import p → undo the import → undo the reorder`. The last
- * step applies a snapshot taken before `p` existed, and `p` is tombstoned by
- * then but still named in `pages`. Both writers have to reach the same answer:
- * the pages the snapshot covers go back, `p` holds the slot it landed in.
- */
-describe('undoing a reorder that an import has since widened', () => {
-  it('leaves the tombstoned import in its own slot, on a book nobody has open', async () => {
-    seed('/book-c', ['a', 'b'])
-    const order = useLibraryPageOrder()
-    const editor = useEditorStore()
-    const bookMeta = useBookMetaStore()
-
-    await order.reorderPagesTo('/book-c', ['b'], 0)
-    await order.importFilesAt('/book-c', ['p.png'], 1)
-    expect((await bookMeta.handleFor('/book-c'))?.order).toEqual(['b', 'p1', 'a'])
-
-    editor.undo('/book-c') // the import
-    editor.undo('/book-c') // the reorder
-
-    const handle = await bookMeta.handleFor('/book-c')
-    expect(handle?.order).toEqual(['a', 'p1', 'b'])
-    expect(handle?.meta.deletedPages).toEqual(['p1'])
-  })
-
-  it('reaches the same order on the book the editor has open', async () => {
-    const project = useProjectStore()
-    const editor = useEditorStore()
-    project.rootPath = '/open-book-3'
-    project.allFiles = [pageOf('a'), pageOf('b')]
-
-    const order = useLibraryPageOrder()
-    await order.reorderPagesTo('/open-book-3', ['b'], 0)
-    await order.importFilesAt('/open-book-3', ['p.png'], 1)
-    expect(project.allFiles.map((f) => f.pageId)).toEqual(['b', 'p1', 'a'])
-
-    editor.undo()
-    editor.undo()
-
-    expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'p1', 'b'])
-    expect(project.projectMeta.deletedPages).toEqual(['p1'])
-  })
-
+describe('redoing an import', () => {
   /**
    * A redo lifts the tombstone and nothing else. Re-applying the order it was
    * imported under would speak for `q`, a page that landed afterwards and was
@@ -227,22 +137,7 @@ describe('undoing a reorder that an import has since widened', () => {
   })
 })
 
-describe('the same gestures on the book open in the editor', () => {
-  it('reorders projectStore.allFiles instead of a book-meta session, and undoes through the editor', async () => {
-    const project = useProjectStore()
-    const editor = useEditorStore()
-    project.rootPath = '/open-book'
-    project.allFiles = [pageOf('a'), pageOf('b'), pageOf('c')]
-
-    const order = useLibraryPageOrder()
-    await order.reorderPagesTo('/open-book', ['a'], 2)
-    expect(project.allFiles.map((f) => f.pageId)).toEqual(['b', 'c', 'a'])
-    expect(editor.canUndo).toBe(true)
-
-    editor.undo()
-    expect(project.allFiles.map((f) => f.pageId)).toEqual(['a', 'b', 'c'])
-  })
-
+describe('importing onto the book open in the editor', () => {
   it('reads the new page off disk and adds it to allFiles, tombstoning it on undo', async () => {
     const project = useProjectStore()
     const editor = useEditorStore()
@@ -310,28 +205,6 @@ describe('a write that did not land', () => {
     expect(useNoticeStore().notice?.text).toBeTruthy()
   })
 
-  /**
-   * The shelf lets go of the promise these return, so a rejection would reach
-   * nobody at all. The reorder itself stands; what is said is that the disk
-   * does not have it yet.
-   */
-  it('tells the user when the order changed but the write did not land', async () => {
-    seed('/book-g', ['a', 'b'])
-    vi.stubGlobal('window', {
-      api: {
-        ...window.api,
-        writeProjectMeta: async () => {
-          throw new Error('read-only file system')
-        },
-      },
-    })
-
-    await expect(
-      useLibraryPageOrder().reorderPagesTo('/book-g', ['b'], 0),
-    ).resolves.toBeUndefined()
-
-    expect(useNoticeStore().notice?.text).toBeTruthy()
-  })
 })
 
 describe('a drop that has to make the project first', () => {

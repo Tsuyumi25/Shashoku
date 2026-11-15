@@ -25,12 +25,15 @@ export const useUiStore = defineStore("ui", () => {
   const pageManagerOpen = ref(false);
   const newProjectOpen = ref(false);
   const newProjectSource = ref<string | null>(null);
+  /** The 收藏夾 the new project goes into once it is made. */
+  const newProjectFavorite = ref<string | null>(null);
   const panelOpen = computed(
     () => settingsOpen.value || pageManagerOpen.value || newProjectOpen.value,
   );
 
-  function openNewProject(source: string | null = null) {
+  function openNewProject(source: string | null = null, favorite: string | null = null) {
     newProjectSource.value = source;
+    newProjectFavorite.value = favorite;
     newProjectOpen.value = true;
   }
 
@@ -41,6 +44,7 @@ export const useUiStore = defineStore("ui", () => {
     pageManagerOpen,
     newProjectOpen,
     newProjectSource,
+    newProjectFavorite,
     openNewProject,
     panelOpen,
   };

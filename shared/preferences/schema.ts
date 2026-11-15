@@ -79,6 +79,7 @@ export function parsePreferences(raw: string): Preferences {
     scanPoints,
     workspaces,
     recentProjects,
+    favorites,
     panelLayout,
     sidePanel,
     undoPixelSteps,
@@ -181,6 +182,21 @@ export function parsePreferences(raw: string): Preferences {
     prefs.recentProjects = recentProjects.filter(
       (f): f is string => typeof f === "string" && f.length > 0,
     );
+  }
+  if (Array.isArray(favorites)) {
+    for (const entry of favorites) {
+      if (!isRecord(entry) || typeof entry.id !== "string" || typeof entry.name !== "string") continue;
+      const members = Array.isArray(entry.members) ? entry.members : [];
+      prefs.favorites.push({
+        id: entry.id,
+        name: entry.name,
+        members: members.flatMap((m) =>
+          isRecord(m) && typeof m.path === "string" && m.path.length > 0
+            ? [{ path: m.path, projectId: typeof m.projectId === "string" ? m.projectId : null }]
+            : [],
+        ),
+      });
+    }
   }
   if (isRecord(panelLayout)) {
     for (const [key, value] of Object.entries(panelLayout)) {
@@ -287,6 +303,7 @@ export function serializePreferences(prefs: Preferences): string {
       scanPoints: prefs.scanPoints,
       workspaces: prefs.workspaces,
       recentProjects: prefs.recentProjects,
+      favorites: prefs.favorites,
       panelLayout: prefs.panelLayout,
       sidePanel: prefs.sidePanel,
       undoPixelSteps: prefs.undoPixelSteps,

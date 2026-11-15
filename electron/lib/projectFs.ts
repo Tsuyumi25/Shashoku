@@ -8,12 +8,9 @@ import { basename, extname, join, resolve } from "node:path";
 import type { ScannedProject, ScannedScanPoint } from "@shared/project/library";
 import type {
   DirEntry,
-  FolderContents,
+  ProjectCard,
   RootScan,
-  ScannedBook,
   ScannedCover,
-  ScannedFolder,
-  ShelfLeaf,
   WorkspaceScan,
 } from "@shared/project/workspace";
 import type {
@@ -159,7 +156,7 @@ function artworkPath(pageId: string, file: string): string {
   return `${SHASHOKU_DIR}/${DIR_PAGES}/${pageId}/${DIR_LAYERS}/${file}`;
 }
 
-async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
+async function readBook(rootPath: string): Promise<{ cover: ScannedCover | null; pageCount: number }> {
   const { pagesRoot, live } = await livePages(rootPath);
   for (const pageId of live) {
     let layers;
@@ -178,13 +175,8 @@ async function readBook(rootPath: string): Promise<Omit<ScannedBook, "path">> {
   return { cover: null, pageCount: live.length };
 }
 
-export async function listInside(path: string): Promise<FolderContents> {
-  const book = await isProject(path);
-  const [pages, entries] = await Promise.all([
-    book ? pagesInside(path) : Promise.resolve<ShelfLeaf[]>([]),
-    entriesInside(path),
-  ]);
-  return { book, pages, entries };
+export async function listInside(path: string): Promise<DirEntry[]> {
+  return await entriesInside(path);
 }
 
 async function entriesInside(path: string): Promise<DirEntry[]> {
@@ -234,13 +226,29 @@ async function folderEntry(path: string, name: string): Promise<DirEntry> {
   };
 }
 
+async function sentinelId(rootPath: string): Promise<string | null> {
+  try {
+    const raw = await readFile(join(rootPath, SHASHOKU_DIR, SENTINEL_FILENAME), "utf8");
+    return /^id=(.+)$/m.exec(raw)?.[1]?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function readProject(path: string): Promise<ProjectCard> {
+  const name = basename(path);
+  if (!(await isProject(path))) return { path, name, found: false, id: null, cover: null, pageCount: 0 };
+  const [id, book] = await Promise.all([sentinelId(path), readBook(path)]);
+  return { path, name, found: true, id, ...book };
+}
+
 /**
- * Named folders as shelf cards, read where they stand rather than looked up in
- * the workspace walk — which stops at the first book it meets and so never sees
- * a book filed inside another.
+ * Named projects as library cards, each read where it stands rather than looked
+ * up in a workspace walk — which stops at the first project it meets and so
+ * never sees one filed inside another.
  */
-export async function describeFolders(paths: readonly string[]): Promise<DirEntry[]> {
-  return await Promise.all(paths.map((path) => folderEntry(path, basename(path))));
+export async function describeProjects(paths: readonly string[]): Promise<ProjectCard[]> {
+  return await Promise.all(paths.map(readProject));
 }
 
 async function firstPictureIn(dir: string): Promise<ScannedCover | null> {
@@ -268,27 +276,6 @@ async function firstPictureIn(dir: string): Promise<ScannedCover | null> {
   return null;
 }
 
-async function pagesInside(rootPath: string): Promise<ShelfLeaf[]> {
-  const { pagesRoot, live } = await livePages(rootPath);
-  return await Promise.all(
-    live.map(async (pageId): Promise<ShelfLeaf> => {
-      try {
-        const raw = await readFile(join(pagesRoot, pageId, PAGE_MANIFEST_FILENAME), "utf8");
-        const manifest = parseManifest(raw, LAYERS_ONLY);
-        const bottom = pageArtwork(manifest.pageTree);
-        return {
-          id: pageId,
-          name: manifest.name,
-          cover: bottom ? await coverAt(rootPath, artworkPath(pageId, bottom.file)) : null,
-          page: true,
-        };
-      } catch {
-        return { id: pageId, name: pageId, cover: null, page: true };
-      }
-    }),
-  );
-}
-
 /**
  * ⚠️ `Dirent.isDirectory` answers false for a link to a directory, so the
  * filter below is what keeps the walk out of a cycle.
@@ -300,60 +287,32 @@ export async function scanWorkspaces(roots: readonly string[]): Promise<Workspac
     const path = resolve(root);
     if (declared.has(path)) continue;
     declared.add(path);
-    const folders: ScannedFolder[] = [];
-    const books: ScannedBook[] = [];
-    // A walk of its own: the map guards this one against cycles, and an entry
+    const projects: ProjectCard[] = [];
+    // A walk of its own: the set guards this one against cycles, and an entry
     // point inside another one has to answer with its own subtree rather than
     // find it already taken.
-    await walkInto(path, new Map(), folders, books);
-    scans.push({ root: path, folders, books });
+    await walkInto(path, new Set(), projects);
+    scans.push({ root: path, projects });
   }
   return { roots: scans };
 }
 
-async function walkInto(
-  path: string,
-  seen: Map<string, ScannedCover | null>,
-  folders: ScannedFolder[],
-  books: ScannedBook[],
-): Promise<ScannedCover | null> {
-  const already = seen.get(path);
-  if (already !== undefined) return already;
-  seen.set(path, null);
-
+async function walkInto(path: string, seen: Set<string>, projects: ProjectCard[]): Promise<void> {
+  if (seen.has(path)) return;
+  seen.add(path);
   if (await isProject(path)) {
-    const book: ScannedBook = { path, ...(await readBook(path)) };
-    books.push(book);
-    seen.set(path, book.cover);
-    return book.cover;
+    projects.push(await readProject(path));
+    return;
   }
-
   let entries: Dirent[];
   try {
     entries = await readdir(path, { withFileTypes: true });
   } catch {
-    folders.push({ path, cover: null });
-    return null;
+    return;
   }
-
-  const images = entries
-    .filter((e) => e.isFile() && IMAGE_EXTENSIONS.includes(extname(e.name).toLowerCase()))
-    .map((e) => e.name)
-    .sort(collator.compare);
-  let cover = images.length > 0 ? await coverAt(path, images[0]) : null;
-
-  const below = entries
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort(collator.compare);
-  const covers = await Promise.all(
-    below.map((name) => walkInto(join(path, name), seen, folders, books)),
+  await Promise.all(
+    entries.filter((e) => e.isDirectory()).map((e) => walkInto(join(path, e.name), seen, projects)),
   );
-  if (cover === null) cover = covers.find((c) => c !== null) ?? null;
-
-  folders.push({ path, cover });
-  seen.set(path, cover);
-  return cover;
 }
 
 export async function scanRoot(rootPath: string): Promise<ScanRootResult> {

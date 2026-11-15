@@ -1,8 +1,7 @@
-import { insertPagesAt, reorderPages } from '@shared/project/pages'
+import { insertPagesAt } from '@shared/project/pages'
 import { DIR_PAGES, SHASHOKU_DIR } from '@shared/ssk/constants'
 import { useBookMetaStore } from '@/stores/bookMetaStore'
 import { useEditorStore } from '@/stores/editorStore'
-import { useLibraryStore } from '@/stores/libraryStore'
 import { useNoticeStore } from '@/stores/noticeStore'
 import { useProjectStore } from '@/stores/projectStore'
 
@@ -12,15 +11,12 @@ interface BookOrder {
 }
 
 /**
- * Lands the write on disk before the gesture is considered done, and says so
- * when it does not. The shelf shows the result from the store rather than
- * from the folder, so this is not what makes the cards move — it is what
- * makes the answer survive the next open, which reads `project.json` off disk
- * and would otherwise find the order from before the drag.
+ * Lands the write on disk before the import is considered done, and says so
+ * when it does not: the next open reads `project.json` off disk and would
+ * otherwise find the order from before the import.
  *
- * ⛔ Neither gesture below may reject. The shelf lets go of the promise they
- * return, so a rejection would go unhandled and the user would be told
- * nothing at all — which is the failure this is here to end.
+ * ⛔ The import below may not reject. Its caller lets go of the promise, so a
+ * rejection would go unhandled and the user would be told nothing at all.
  */
 async function settleBook(book: string): Promise<void> {
   const project = useProjectStore()
@@ -33,28 +29,10 @@ async function settleBook(book: string): Promise<void> {
   }
 }
 
-/**
- * A book's full page order and its tombstones, loading the handle first if
- * this is the first gesture to reach that book.
- *
- * ⭐ Every card the shelf drew is taken in before anything is measured. A
- * page directory the list does not name yet is one the shelf shows and a
- * gesture could not see, so it could be picked up and not moved; and the
- * order this gesture is about to write has to name it, or the write would
- * quietly leave it out of the chapter altogether.
- */
+/** A book's full page order and its tombstones, loading the handle first if this is the first import to reach it. */
 async function readBookOrder(book: string): Promise<BookOrder> {
   const bookMeta = useBookMetaStore()
   await bookMeta.handleFor(book)
-  const library = useLibraryStore()
-  // Only the book the shelf is actually standing in: `bandPages` describes
-  // that one folder, and it is the only book a gesture can start from.
-  if (library.standingAt === book) {
-    bookMeta.adopt(
-      book,
-      library.bandPages.map((leaf) => leaf.id),
-    )
-  }
   const order = bookMeta.orderOf(book)
   if (order !== null) return order
   const project = useProjectStore()
@@ -65,9 +43,9 @@ async function readBookOrder(book: string): Promise<BookOrder> {
 }
 
 /**
- * One gesture per book at a time.
+ * One import per book at a time.
  *
- * Both gestures read the book's order, work the next one out from it, and push
+ * An import reads the book's order, works the next one out from it, and pushes
  * a command carrying both ends. Two of them overlapping would each read the
  * order that stood before either ran, so the second would compute its `after`
  * — and the `before` its own undo restores — against an order already gone.
@@ -87,40 +65,13 @@ function inTurn<T>(book: string, work: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The two gestures Ctrl+Drag makes on the page band: reordering pages
- * already in the chapter, and turning dropped files into new ones inserted
- * where the pointer let go. Both end in one call to `editorStore` — the
- * store that owns every book's history, not only the one open right now —
- * so `Ctrl+Z` from the shelf and `Ctrl+Z` from the editor are the same
- * mechanism reaching two different books.
+ * Turning image files into new pages inserted at a given place. It ends in one
+ * call to `editorStore` — the store that owns every book's history, not only
+ * the one open right now — so the import is undone with the same `Ctrl+Z` as
+ * anything else done to that book.
  */
 export function useLibraryPageOrder() {
   const editor = useEditorStore()
-
-  /**
-   * `movedIds` land at `targetIndex`, measured with those same pages already
-   * excluded — the coordinate system a drop point is read against once the
-   * cards being dragged are read out of the grid.
-   */
-  function reorderPagesTo(
-    book: string,
-    movedIds: readonly string[],
-    targetIndex: number,
-  ): Promise<void> {
-    if (movedIds.length === 0) return Promise.resolve()
-    return inTurn(book, async () => {
-      try {
-        const { pages, deletedPages } = await readBookOrder(book)
-        const after = reorderPages(pages, deletedPages, movedIds, targetIndex)
-        editor.cmdSetPageOrder(book, pages, after)
-      } catch (err) {
-        console.error('reorder failed', err)
-        useNoticeStore().say('頁面順序沒有改成功')
-        return
-      }
-      await settleBook(book)
-    })
-  }
 
   /**
    * One page per dropped file, made before this ever reaches `editorStore` —
@@ -213,5 +164,5 @@ export function useLibraryPageOrder() {
     useNoticeStore().say(placed > 0 ? `只有前 ${placed} 個檔案匯入成功` : '這些檔案沒有匯入成功')
   }
 
-  return { reorderPagesTo, importFilesAt }
+  return { importFilesAt }
 }

@@ -1,5 +1,5 @@
 import type { ScannedScanPoint } from "../project/library";
-import type { DirEntry, FolderContents, WorkspaceScan } from "../project/workspace";
+import type { DirEntry, ProjectCard, WorkspaceScan } from "../project/workspace";
 import type { McpQuery, McpReply } from "../mcp/types";
 
 export const CHANNELS = {
@@ -10,7 +10,7 @@ export const CHANNELS = {
   scanLibrary: "shashoku:scan-library",
   scanWorkspaces: "shashoku:scan-workspaces",
   listInside: "shashoku:list-inside",
-  describeFolders: "shashoku:describe-folders",
+  describeProjects: "shashoku:describe-projects",
   createProject: "shashoku:create-project",
   createPage: "shashoku:create-page",
   openProject: "shashoku:open-project",
@@ -89,11 +89,11 @@ export interface ShashokuApi {
   /** What each scan point holds today, sentinel-bearing children only. */
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;
-  listInside(path: string): Promise<FolderContents>;
+  listInside(path: string): Promise<DirEntry[]>;
   /** Where a file or folder dropped onto the window lives on disk. */
   pathForFile(file: File): string;
-  /** Each folder as a shelf card, in the order given. */
-  describeFolders(paths: string[]): Promise<DirEntry[]>;
+  /** Each path as a library card, in the order given, found or not. */
+  describeProjects(paths: string[]): Promise<ProjectCard[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;
   /**
    * One page, from one image in the project root. Answers with the name it
