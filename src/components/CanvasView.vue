@@ -2467,9 +2467,18 @@ function onPressCapture(e: PointerEvent): void {
     }
   }
   if (e.button === 0) rulersRef.value?.clearSelection()
-  // A frame's body, not its handles: scaling and turning keep the frame they work on.
+  // A frame's body, not its handles: scaling and turning keep the frame they work on,
+  // and the text being edited keeps it while a press drags out a text selection.
   const target = e.target as Element | null
-  if (e.button === 0 && target?.closest('[data-frame-box]') && !target.closest('[data-frame-handle]')) holding.value = true
+  const pressedId = target?.closest<HTMLElement>('[data-object-id]')?.dataset.objectId
+  if (
+    e.button === 0 &&
+    target?.closest('[data-frame-box]') &&
+    !target.closest('[data-frame-handle]') &&
+    pressedId !== textEditingId.value
+  ) {
+    holding.value = true
+  }
   const rect = containerRef.value?.getBoundingClientRect()
   if (rect) pressedOnPage = takeRegion(e.clientX, e.clientY, rect)
   onAltPress(e)
