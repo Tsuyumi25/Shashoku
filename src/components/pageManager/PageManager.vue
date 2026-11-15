@@ -2,12 +2,12 @@
   <DialogRoot :open="ui.pageManagerOpen" @update:open="(v) => (ui.pageManagerOpen = v)">
     <DialogPortal>
       <DialogOverlay class="dialog-overlay" />
-      <DialogContent class="page-manager" :aria-describedby="undefined" @open-auto-focus="onOpened">
+      <DialogContent class="sheet-panel" :aria-describedby="undefined" @open-auto-focus="onOpened">
         <header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
           <DialogTitle class="text-sm font-medium">頁面</DialogTitle>
           <span class="text-xs text-muted-foreground tabular-nums">{{ project.files.length }}</span>
           <div class="flex-1" />
-          <DialogClose class="close-btn" title="關閉">
+          <DialogClose class="sheet-close" title="關閉">
             <X :size="14" />
           </DialogClose>
         </header>
@@ -75,32 +75,3 @@ watch(
   () => (ui.pageManagerOpen = false),
 )
 </script>
-
-<style scoped>
-.page-manager {
-  position: fixed;
-  z-index: 50;
-  inset: 3rem;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 0.5rem;
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
-}
-.close-btn {
-  display: flex;
-  height: 1.5rem;
-  width: 1.5rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.25rem;
-  color: var(--muted-foreground);
-}
-.close-btn:hover {
-  background: var(--secondary);
-  color: var(--foreground);
-}
-</style>

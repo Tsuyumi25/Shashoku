@@ -23,7 +23,25 @@ export const useUiStore = defineStore("ui", () => {
    */
   const settingsOpen = ref(false);
   const pageManagerOpen = ref(false);
-  const panelOpen = computed(() => settingsOpen.value || pageManagerOpen.value);
+  const newProjectOpen = ref(false);
+  const newProjectSource = ref<string | null>(null);
+  const panelOpen = computed(
+    () => settingsOpen.value || pageManagerOpen.value || newProjectOpen.value,
+  );
 
-  return { view, setView, settingsOpen, pageManagerOpen, panelOpen };
+  function openNewProject(source: string | null = null) {
+    newProjectSource.value = source;
+    newProjectOpen.value = true;
+  }
+
+  return {
+    view,
+    setView,
+    settingsOpen,
+    pageManagerOpen,
+    newProjectOpen,
+    newProjectSource,
+    openNewProject,
+    panelOpen,
+  };
 });

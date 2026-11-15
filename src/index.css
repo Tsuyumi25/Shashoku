@@ -398,6 +398,36 @@ html, body, #app {
   background: rgb(0 0 0 / 0.5);
 }
 
+/* The large panel the page grid and the new-project picker share: inset
+   from the window on every side, so the editor stays in view around it.
+   Global for the same portal reason as the overlay above. */
+.sheet-panel {
+  position: fixed;
+  z-index: 50;
+  inset: 3rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+}
+.sheet-close {
+  display: flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: var(--muted-foreground);
+}
+.sheet-close:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
 /*
  * vue-toastification ships a saturated block of its own colours and a web
  * page's worth of padding. Restated here so a toast belongs to the same window

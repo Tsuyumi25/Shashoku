@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webFrame } from "electron";
+import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import type { EngineSpan, ShashokuEngineApi } from "@shared/engine/types";
 import type { ShashokuInpaintApi } from "@shared/inpaint/types";
 import type { OcrProgress, OcrStatus, ShashokuOcrApi } from "@shared/ocr/types";
@@ -34,6 +34,7 @@ const api: ShashokuApi = {
   scanLibrary: (scanPoints) => ipcRenderer.invoke(CHANNELS.scanLibrary, scanPoints),
   scanWorkspaces: (roots) => ipcRenderer.invoke(CHANNELS.scanWorkspaces, roots),
   listInside: (path) => ipcRenderer.invoke(CHANNELS.listInside, path),
+  pathForFile: (file) => webUtils.getPathForFile(file),
   describeFolders: (paths) => ipcRenderer.invoke(CHANNELS.describeFolders, paths),
   createProject: (rootPath) => ipcRenderer.invoke(CHANNELS.createProject, rootPath),
   createPage: (rootPath, sourceName) =>

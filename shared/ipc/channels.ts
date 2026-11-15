@@ -90,6 +90,8 @@ export interface ShashokuApi {
   scanLibrary(scanPoints: string[]): Promise<ScannedScanPoint[]>;
   scanWorkspaces(roots: string[]): Promise<WorkspaceScan>;
   listInside(path: string): Promise<FolderContents>;
+  /** Where a file or folder dropped onto the window lives on disk. */
+  pathForFile(file: File): string;
   /** Each folder as a shelf card, in the order given. */
   describeFolders(paths: string[]): Promise<DirEntry[]>;
   createProject(rootPath: string): Promise<OpenProjectResult>;

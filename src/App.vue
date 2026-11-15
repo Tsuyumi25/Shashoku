@@ -102,6 +102,7 @@
 
     <SettingsPopup />
     <PageManager />
+    <NewProjectDialog />
   </div>
 </template>
 
@@ -121,6 +122,7 @@ import LibraryInfo from '@/components/library/LibraryInfo.vue'
 import LibraryShelf from '@/components/library/LibraryShelf.vue'
 import LibraryWorkspaces from '@/components/library/LibraryWorkspaces.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
+import NewProjectDialog from '@/components/pageManager/NewProjectDialog.vue'
 import PageManager from '@/components/pageManager/PageManager.vue'
 import SettingsPopup from '@/components/SettingsPopup.vue'
 import TitleBar from '@/components/TitleBar.vue'

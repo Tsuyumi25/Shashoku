@@ -1,6 +1,10 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <div class="flex shrink-0 items-center gap-1 border-b border-border p-1">
+      <button class="lib-entry" title="從一個裝著原圖的資料夾建立專案；也可以直接把資料夾拖進書庫" @click="ui.openNewProject()">
+        <SquarePlus :size="13" />
+        <span>新增專案</span>
+      </button>
       <button class="lib-entry" title="把一個資料夾加進書庫" @click="library.addWorkspace()">
         <FolderPlus :size="13" />
         <span>加入工作區</span>
@@ -99,6 +103,7 @@ import {
   History,
   LibraryBig,
   RefreshCw,
+  SquarePlus,
 } from '@lucide/vue'
 import {
   ContextMenuContent,
@@ -112,10 +117,12 @@ import { useToast } from 'vue-toastification'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const library = useLibraryStore()
 const preferences = usePreferencesStore()
 const project = useProjectStore()
+const ui = useUiStore()
 const toast = useToast()
 
 async function reveal(path: string) {
