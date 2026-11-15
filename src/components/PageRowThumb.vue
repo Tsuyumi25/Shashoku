@@ -2,7 +2,7 @@
   <span
     ref="cellRef"
     class="relative block shrink-0 overflow-hidden rounded-xs bg-muted/40"
-    :class="fill ? 'w-full' : 'w-1/2'"
+    :class="fill ? 'w-full' : 'w-16'"
     :style="{ aspectRatio: `${file.page.width} / ${file.page.height}` }"
   >
     <img
@@ -28,7 +28,7 @@ import { usePageThumbnail } from '@/composables/usePageThumbnail'
 
 const props = defineProps<{
   file: ProjectFile
-  /** The whole width it is given, rather than the half a list row leaves it. */
+  /** The whole width it is given, rather than the narrow column a list row leaves it. */
   fill?: boolean
 }>()
 
