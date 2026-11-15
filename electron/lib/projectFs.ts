@@ -1,6 +1,7 @@
 
 
 
+import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
@@ -473,7 +474,7 @@ export async function createProject(rootPath: string): Promise<OpenProjectResult
 
   await mkdir(join(shashokuDir, DIR_PAGES), { recursive: true });
 
-  await writeFileAtomic(join(shashokuDir, SENTINEL_FILENAME), "shashoku\n");
+  await writeFileAtomic(join(shashokuDir, SENTINEL_FILENAME), `shashoku\nid=${randomUUID()}\n`);
   await writeFileAtomic(
     join(shashokuDir, PROJECT_JSON_FILENAME),
     serializeProjectJson(defaultProjectJson()),
