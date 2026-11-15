@@ -51,7 +51,6 @@
             v-for="corner in CORNERS"
             :key="corner.key"
             class="absolute border border-primary bg-background"
-            :class="corner.cursor"
             :style="cornerStyle(corner)"
             data-frame-handle
             @pointerdown="ownPress($event) && onScaleDown($event, corner)"
@@ -62,7 +61,6 @@
               v-for="edge in EDGES"
               :key="edge.key"
               class="absolute border border-primary bg-background"
-              :class="edge.cursor"
               :style="cornerStyle(edge)"
               data-frame-handle
               @pointerdown="ownPress($event) && onScaleDown($event, edge)"
@@ -99,6 +97,7 @@ import {
   type ViewTransform,
 } from '@/lib/coords'
 import { angleAround, angleDelta, axisScaleRatio, uniformScaleRatio, type Point } from '@/lib/labelBox'
+import { resizeCursor } from '@/lib/resizeCursor'
 import { rotateCursor } from '@/lib/rotateCursor'
 import type { FrameCopy } from '@/lib/explode/frames'
 import { useViewportOrigin } from '@/composables/useCanvasStage'
@@ -383,14 +382,13 @@ interface Corner {
   key: string
   kx: 0 | 0.5 | 1
   ky: 0 | 0.5 | 1
-  cursor: string
 }
 
 const CORNERS: Corner[] = [
-  { key: 'tl', kx: 0, ky: 0, cursor: 'cursor-nwse-resize' },
-  { key: 'tr', kx: 1, ky: 0, cursor: 'cursor-nesw-resize' },
-  { key: 'br', kx: 1, ky: 1, cursor: 'cursor-nwse-resize' },
-  { key: 'bl', kx: 0, ky: 1, cursor: 'cursor-nesw-resize' },
+  { key: 'tl', kx: 0, ky: 0 },
+  { key: 'tr', kx: 1, ky: 0 },
+  { key: 'br', kx: 1, ky: 1 },
+  { key: 'bl', kx: 0, ky: 1 },
 ]
 
 /**
@@ -400,15 +398,25 @@ const CORNERS: Corner[] = [
  * before 2019 — with no modifier to hold.
  */
 const EDGES: Corner[] = [
-  { key: 't', kx: 0.5, ky: 0, cursor: 'cursor-ns-resize' },
-  { key: 'r', kx: 1, ky: 0.5, cursor: 'cursor-ew-resize' },
-  { key: 'b', kx: 0.5, ky: 1, cursor: 'cursor-ns-resize' },
-  { key: 'l', kx: 0, ky: 0.5, cursor: 'cursor-ew-resize' },
+  { key: 't', kx: 0.5, ky: 0 },
+  { key: 'r', kx: 1, ky: 0.5 },
+  { key: 'b', kx: 0.5, ky: 1 },
+  { key: 'l', kx: 0, ky: 0.5 },
 ]
 
 /** Which axes a handle pulls along: a side, one; a corner, both. */
 function axesOf(handle: Corner): { x: boolean; y: boolean } {
   return { x: handle.kx !== 0.5, y: handle.ky !== 0.5 }
+}
+
+/**
+ * Which way a handle points out of the frame on screen, the page's turn and the
+ * frame's own together. Read in the unit square rather than the frame's real
+ * proportions, so a corner stays at 45 degrees to the frame's sides however
+ * wide and flat a line of text makes it.
+ */
+function outward(handle: Corner): number {
+  return Math.atan2(handle.ky - 0.5, handle.kx - 0.5) + turn.value
 }
 
 /**
@@ -425,6 +433,7 @@ function cornerStyle(corner: Corner) {
     height: `calc(8px * var(--px))`,
     borderWidth: 'calc(1px * var(--px))',
     transform: 'translate(-50%, -50%)',
+    cursor: resizeCursor(outward(corner)),
     pointerEvents: handlePointer.value,
   }
 }
@@ -451,7 +460,7 @@ function turnZoneStyle(zone: Corner) {
     width: along(zone.kx),
     height: along(zone.ky),
     transform: `translate(${out(zone.kx)}, ${out(zone.ky)})`,
-    cursor: rotateCursor(Math.atan2(zone.ky - 0.5, zone.kx - 0.5) + turn.value),
+    cursor: rotateCursor(outward(zone)),
     pointerEvents: handlePointer.value,
   }
 }
@@ -846,7 +855,7 @@ function onScaleDown(e: PointerEvent, corner: Corner) {
   scale.from = { x: e.clientX, y: e.clientY }
   scale.client = scale.from
   scale.grab = pageAt(e.clientX, e.clientY)
-  heldCursor.value = corner.cursor.replace(/^cursor-/, '')
+  heldCursor.value = resizeCursor(outward(corner))
   emit('select', false)
 }
 
