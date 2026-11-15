@@ -106,7 +106,7 @@ const mode = ref<Mode>('preview')
 const PARTS: { id: keyof MermaidParts; label: string }[] = [
   { id: 'translation', label: '譯文' },
   { id: 'source', label: '原文' },
-  { id: 'tags', label: '標記' },
+  { id: 'tags', label: '標籤' },
 ]
 /** Everything on, which is exactly what get_texts hands an agent. */
 const parts = reactive<MermaidParts>({ translation: true, source: true, tags: true })

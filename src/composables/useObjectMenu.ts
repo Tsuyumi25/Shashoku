@@ -47,7 +47,7 @@ export function useObjectMenu() {
    */
   const items = computed<MenuItem[]>(() => [
     ...(objectRef.value === null ? [] : [{ id: 'copy-ref', label: `複製 ref（${objectRef.value}）` }]),
-    { id: 'tags', label: '標記…' },
+    { id: 'tags', label: '標籤…' },
     { id: 'duplicate-unit', label: '製作副本（整個 Unit）' },
     ...(collectable.value.length === 0
       ? []

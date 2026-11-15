@@ -16,7 +16,7 @@
       class="page-btn"
       :class="editor.tagsShown && 'page-btn-on'"
       :aria-pressed="editor.tagsShown"
-      title="在畫布上用底色和字章看每個文字物件的標記"
+      title="在畫布上用底色和字章看每個文字物件的標籤"
       :disabled="!project.isOpen"
       @click="editor.tagsShown = !editor.tagsShown"
     >

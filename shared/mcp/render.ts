@@ -56,7 +56,7 @@ function blockLine(sentence: SentenceTexts, block: BlockTexts, caller: string | 
 
 export function renderSentence(sentence: SentenceTexts, caller?: string): string {
   const out = [`${sentence.no}  原文 ${sourcesOf(sentence)}`];
-  if (sentence.tags.length > 0) out.push(`${INDENT}標記 ${sentence.tags.join("、")}`);
+  if (sentence.tags.length > 0) out.push(`${INDENT}標籤 ${sentence.tags.join("、")}`);
   out.push(`${INDENT}譯文 ${sentence.translation === "" ? "（未翻）" : flat(sentence.translation)}`);
   if (sentence.blocks.length === 0) {
     out.push(`${INDENT}（這一面還沒有譯文方塊）`);
@@ -105,7 +105,7 @@ function nodeOf(sentence: SentenceTexts, parts: MermaidParts): string {
     const source = sentence.sources.filter((b) => b.text !== "").map((b) => labelText(b.text));
     said.push(`原：${source.length === 0 ? "（無）" : source.join(" / ")}`);
   }
-  if (parts.tags && sentence.tags.length > 0) said.push(`標記：${sentence.tags.map(labelText).join("、")}`);
+  if (parts.tags && sentence.tags.length > 0) said.push(`標籤：${sentence.tags.map(labelText).join("、")}`);
   const label = said.length === 0 ? `${sentence.no}` : `${sentence.no} ${said.join("<br/>")}`;
   return `n${sentence.no}["${label}"]`;
 }
@@ -479,9 +479,9 @@ export function renderChooseResult(result: WriteResult<ChooseOutcome>, caller?: 
 
 export function renderSetTagsResult(result: SetTagsResult, caller?: string): string {
   const taken = result.outcomes.filter((o) => o.ok);
-  const out: string[] = [`標記 ${taken.length} 句，拒絕 ${result.outcomes.length - taken.length} 句`];
+  const out: string[] = [`標籤 ${taken.length} 句，拒絕 ${result.outcomes.length - taken.length} 句`];
   for (const o of result.outcomes) {
-    out.push(o.ok ? `${o.ref} → ${o.tags.length === 0 ? "（無標記）" : o.tags.join("、")}` : `${o.ref} ✗ ${o.reason}`);
+    out.push(o.ok ? `${o.ref} → ${o.tags.length === 0 ? "（無標籤）" : o.tags.join("、")}` : `${o.ref} ✗ ${o.reason}`);
   }
   for (const r of result.registered) out.push(`${r.added ? "新登記" : "改色"} ${r.name} ${r.color}`);
   return withStates(out, result.pages, caller);

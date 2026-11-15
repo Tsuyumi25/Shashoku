@@ -178,7 +178,7 @@ import { onWheelTabs } from '@/lib/wheelTabs'
 
 const TABS: { panel: SidePanel; title: string }[] = [
   { panel: 'layers', title: '圖層' },
-  { panel: 'labels', title: '標籤' },
+  { panel: 'labels', title: '文本' },
 ]
 
 const project = useProjectStore()

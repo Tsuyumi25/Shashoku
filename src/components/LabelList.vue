@@ -96,7 +96,7 @@
         ref="searchEl"
         v-model="query"
         spellcheck="false"
-        placeholder="搜尋譯文"
+        placeholder="搜尋文本"
         class="min-w-0 flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
         @keydown="onSearchKey"
       />
@@ -165,7 +165,7 @@ const filtering = computed(() => query.value.trim().length > 0)
 
 const emptyNote = computed(() => {
   if (!project.isOpen) return '尚未開啟專案'
-  return filtering.value ? '沒有符合的譯文' : '本章沒有頁面'
+  return filtering.value ? '沒有符合的文本' : '本章沒有頁面'
 })
 
 /**

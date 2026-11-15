@@ -370,7 +370,7 @@ describe('renderTexts', () => {
     expect(graph).toBe(
       [
         'flowchart TD',
-        '  n2["2 譯：（未翻）<br/>原：い"] --> n1["1 譯：say #quot;hi#quot; #lt;3 go<br/>原：あ<br/>標記：框内"]',
+        '  n2["2 譯：（未翻）<br/>原：い"] --> n1["1 譯：say #quot;hi#quot; #lt;3 go<br/>原：あ<br/>標籤：框内"]',
         '  subgraph unlinked["未維護"]',
         '    n3["3 譯：three<br/>原：う"]',
         '  end',
@@ -414,7 +414,7 @@ describe('renderTexts', () => {
     const face = page.faces[0]
     const node = (parts: Parameters<typeof mermaidOf>[1]) => mermaidOf(face, parts).split('\n')[2]
     expect(node({ translation: false, source: true, tags: false })).toBe('    n1["1 原：あ"]')
-    expect(node({ translation: true, source: false, tags: true })).toBe('    n1["1 譯：one<br/>標記：框内"]')
+    expect(node({ translation: true, source: false, tags: true })).toBe('    n1["1 譯：one<br/>標籤：框内"]')
     expect(node({ translation: false, source: false, tags: false })).toBe('    n1["1"]')
     expect(mermaidDocument([page]).split('\n').slice(0, 3)).toEqual([
       '## 第 1 頁 · p1 · 001.jpg · f1 譯文',

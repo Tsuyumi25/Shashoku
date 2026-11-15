@@ -42,7 +42,7 @@ function parseTags(v: unknown): TagDefinition[] {
   if (!Array.isArray(v)) fail('tags 必須是陣列')
   const tags = v.map((t, i) => parseTagDefinition(t, i))
   const names = tags.map((t) => t.name)
-  if (new Set(names).size !== names.length) fail('標記 name 不可重複')
+  if (new Set(names).size !== names.length) fail('標籤 name 不可重複')
   return tags
 }
 

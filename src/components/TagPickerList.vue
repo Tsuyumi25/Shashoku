@@ -1,6 +1,6 @@
 <template>
   <div class="px-3 pt-2.5 pb-1 text-xs text-muted-foreground">
-    {{ targets.length > 1 ? `標記 ${targets.length} 句` : '標記' }}
+    {{ targets.length > 1 ? `標籤 ${targets.length} 句` : '標籤' }}
   </div>
   <div class="px-2">
     <input
@@ -8,14 +8,14 @@
       v-model="query"
       type="search"
       spellcheck="false"
-      placeholder="搜尋或新增標記"
+      placeholder="搜尋或新增標籤"
       class="w-full rounded border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
       @keydown.enter="onEnter"
     />
   </div>
   <button v-if="creatable" class="tp-row text-muted-foreground" @click="create">
     <Plus :size="15" />
-    <span class="min-w-0 flex-1 truncate">新標記「{{ query.trim() }}」</span>
+    <span class="min-w-0 flex-1 truncate">新標籤「{{ query.trim() }}」</span>
   </button>
   <div v-if="refusal" class="px-3 py-1 text-xs text-destructive">{{ refusal }}</div>
   <div class="max-h-72 overflow-y-auto pb-1">

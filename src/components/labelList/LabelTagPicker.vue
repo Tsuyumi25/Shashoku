@@ -2,7 +2,7 @@
   <PopoverRoot v-model:open="open">
     <PopoverTrigger
       class="tag-trigger"
-      title="標記"
+      title="標籤"
       :disabled="disabled"
       @pointerdown.stop
       @mousedown.stop

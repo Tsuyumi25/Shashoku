@@ -51,8 +51,8 @@ export function withoutTag(tags: readonly string[], tag: string): string[] {
 /** Why a name cannot be a tag, or null. A reserved name would make the page unreadable on the next load. */
 export function tagNameRefusal(name: string): string | null {
   const trimmed = name.trim()
-  if (trimmed.length === 0) return '標記不能是空白'
-  if (RESERVED_TAG_NAMES.includes(trimmed)) return `「${trimmed}」是保留字（${RESERVED_TAG_NAMES.join('、')}），不能當標記`
+  if (trimmed.length === 0) return '標籤不能是空白'
+  if (RESERVED_TAG_NAMES.includes(trimmed)) return `「${trimmed}」是保留字（${RESERVED_TAG_NAMES.join('、')}），不能當標籤`
   return null
 }
 

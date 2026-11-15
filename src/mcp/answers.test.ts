@@ -451,7 +451,7 @@ describe('answer — the orchestration the bridge drives', () => {
     expect(project.blockById(PAGE_ID, 's2')!.body).toMatchObject({ tags: ['x', 'y'] })
     expect(project.header.tags.find((t) => t.name === 'y')).toEqual({ name: 'y', color: '#123456' })
     expect(result.registered.find((r) => r.name === 'y')).toEqual({ name: 'y', color: '#123456', added: true })
-    expect(renderTexts(result.pages)).toContain('    標記 x、y')
+    expect(renderTexts(result.pages)).toContain('    標籤 x、y')
   })
 
   it('refuses a block address and a reserved name, writing nothing', async () => {

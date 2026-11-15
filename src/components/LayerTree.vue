@@ -182,7 +182,7 @@
           type="button"
           class="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-secondary hover:text-foreground"
           :class="isPinned(row.entry) ? 'text-primary' : 'text-muted-foreground'"
-          :title="isPinned(row.entry) ? `「${row.entry.name}」不再顯示在標籤清單的頁列` : `把叫「${row.entry.name}」的圖層顯示在標籤清單的頁列（這本書的每一頁）`"
+          :title="isPinned(row.entry) ? `「${row.entry.name}」不再顯示在文本的頁列` : `把叫「${row.entry.name}」的圖層顯示在文本的頁列（這本書的每一頁）`"
           @click.stop="project.togglePinnedLayerName(row.entry.name)"
         >
           <Pin :size="12" :class="isPinned(row.entry) && 'fill-current'" />

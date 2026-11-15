@@ -9,11 +9,11 @@
         <span class="min-w-0 truncate font-medium">{{ tag }}</span>
       </span>
       <span v-if="tagState.value.length === 0" class="text-muted-foreground">
-        未標記
+        沒有標籤
       </span>
     </template>
     <span v-else-if="tagState.kind === 'many'" class="text-muted-foreground">
-      標記不一致
+      標籤不一致
     </span>
   </div>
 

@@ -89,7 +89,7 @@ const INSTRUCTIONS = [
   "- A sentence under `subgraph 未維護` has no reading line yet. That is normal: sound effects and text outside balloons often never get one.",
   "- get_texts opens with the work's folder (the artwork is there) and a suggested notes folder. You may keep Markdown notes there on whatever is worth remembering about the work — its tone, its characters and how they speak, names to keep fixed — and should expect notes there to read before translating; the folder may not exist until you make it. This is only a suggestion: where the person says otherwise, follow them.",
   "- Before showing the artwork to a vision model, check the notes for whether this work may be shown to one. If they do not say, ask the person and write the answer down.",
-  "- Tags (標記) are yours to keep: name what helps the translating — who speaks a line, whether it is dialogue, narration or a sound. The person may change them too; take what they set as the better reading.",
+  "- Tags (標籤) are yours to keep: name what helps the translating — who speaks a line, whether it is dialogue, narration or a sound. The person may change them too; take what they set as the better reading.",
   "- Every write's answer opens with what somebody else changed since you last looked, and a whole get_texts read names those sentences. Take their changes into account before going on.",
   "- Never edit project.json or anything under pages/ yourself: the project's own data changes only through these tools.",
 ].join("\n");
@@ -151,14 +151,14 @@ function buildServer(getSource: () => string | undefined): McpServer {
         "section's header reads `第 3 頁 · p7 · 001.jpg · f1 譯文 · 19 句`: where the page " +
         "reads in the chapter, its id, its name, the face, and how many sentences it holds. " +
         "Under it each sentence is listed under its number in the order the story reads. `14  原文 …` " +
-        "is the artwork's words, each block of them under `s<n>`, `標記` is the sentence's tags, " +
+        "is the artwork's words, each block of them under `s<n>`, `標籤` is the sentence's tags, " +
         "`譯文` is what the whole " +
         "sentence reads as today, and `候選` is the drawer, each candidate under a letter " +
         "with `✓` on the one in effect. An empty 譯文 means the sentence is untranslated. " +
         "A sentence set in several blocks of lettering lists each block on its own line as " +
         "`14.2 <text>  候選 …`; the blocks are read as one sentence with `/` between them. " +
         "Each section ends with a mermaid flowchart of those lines, one node per sentence " +
-        "(`n14`, holding its 譯, 原 and 標記) and one arrow per line; sentences no line " +
+        "(`n14`, holding its 譯, 原 and 標籤) and one arrow per line; sentences no line " +
         "reaches yet sit in `subgraph 未維護`. Two arrows out of one node are two things " +
         "read at the same time. " +
         GRAMMAR +
