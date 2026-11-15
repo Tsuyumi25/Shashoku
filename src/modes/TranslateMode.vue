@@ -49,6 +49,8 @@
           </button>
         </div>
 
+        <PageNav />
+
         <!--
           What the panel showing can do, on a row of its own. Sharing the tab
           row would leave the two tabs fighting five buttons for the width,
@@ -157,6 +159,7 @@ import CanvasBottomBar from '@/components/CanvasBottomBar.vue'
 import CanvasView from '@/components/CanvasView.vue'
 import LabelList from '@/components/LabelList.vue'
 import LayerTree from '@/components/LayerTree.vue'
+import PageNav from '@/components/PageNav.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
 import TranslateSidebar from '@/modes/TranslateSidebar.vue'
 import { useFillSelection } from '@/composables/useFillSelection'

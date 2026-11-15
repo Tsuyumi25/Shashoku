@@ -1,26 +1,5 @@
 <template>
   <div data-region="list" class="flex h-full min-h-0 flex-col">
-    <div class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border px-2">
-      <Search :size="12" class="shrink-0 text-muted-foreground" />
-      <input
-        ref="searchEl"
-        v-model="query"
-        spellcheck="false"
-        placeholder="搜尋譯文"
-        class="min-w-0 flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
-        @keydown="onSearchKey"
-      />
-      <button
-        v-if="query.length > 0"
-        type="button"
-        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-        title="清除搜尋"
-        @click="query = ''"
-      >
-        <X :size="12" />
-      </button>
-    </div>
-
   <!--
     Every row rendered, not a window onto them. A chapter's translations are
     hundreds of rows, not an unbounded feed, and dragging needs the real list:
@@ -111,6 +90,26 @@
       </div>
     </div>
   </div>
+    <div class="flex h-7 shrink-0 items-center gap-1.5 border-t border-border px-2">
+      <Search :size="12" class="shrink-0 text-muted-foreground" />
+      <input
+        ref="searchEl"
+        v-model="query"
+        spellcheck="false"
+        placeholder="搜尋譯文"
+        class="min-w-0 flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
+        @keydown="onSearchKey"
+      />
+      <button
+        v-if="query.length > 0"
+        type="button"
+        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+        title="清除搜尋"
+        @click="query = ''"
+      >
+        <X :size="12" />
+      </button>
+    </div>
   <CanvasMenu :at="rowMenuAt" :items="ROW_MENU" @pick="onRowMenuPick" @close="closeRowMenu" />
   </div>
 </template>
