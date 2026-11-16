@@ -11,10 +11,11 @@ import { useCanvasLabel } from '@/composables/useCanvasLabel'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
-import { paintLabel, type DrawnLabel } from '@/lib/labelRaster'
-import { layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
+import { paintLabel, paintLabelGlow, type DrawnLabel } from '@/lib/labelRaster'
+import { glowAt, layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
-import type { RasterStackNode } from '@shared/page/stack'
+import type { GlowStackNode, RasterStackNode } from '@shared/page/stack'
+import { glowOf } from '@shared/effects/glow'
 import type { RunStackNode } from '@/lib/stackSegments'
 import { useExplodeStore } from '@/stores/explodeStore'
 import { useRasterStore } from '@/stores/rasterStore'
@@ -141,7 +142,7 @@ const effectedRasters = computed(() => {
   void raster.revision
   const out = new Map<string, EffectedLayer>()
   for (const node of props.nodes) {
-    if (node.kind !== 'raster' || node.entry.effects.length === 0) continue
+    if (node.entry.kind !== 'raster' || node.entry.effects.length === 0) continue
     const live = raster.liveLayer(node.entry.id)
     const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
     if (!source) continue
@@ -163,7 +164,7 @@ const effectedRasters = computed(() => {
 const drawnTexts = computed(() => {
   const out = new Map<string, DrawnLabel>()
   for (const node of props.nodes) {
-    if (node.kind === 'text') out.set(node.entry.id, labels.labelOf(node.entry))
+    if (node.entry.kind === 'text') out.set(node.entry.id, labels.labelOf(node.entry))
   }
   return out
 })
@@ -172,7 +173,7 @@ const drawnTexts = computed(() => {
 const joinedTexts = computed(() => {
   const out = new Map<string, OffscreenCanvas>()
   for (const node of props.nodes) {
-    if (node.kind !== 'text') continue
+    if (node.entry.kind !== 'text') continue
     const under = props.joined.get(node.entry.id)
     const joined = under ? labels.joinedOf(node.entry, under) : null
     if (joined) out.set(node.entry.id, joined)
@@ -215,6 +216,10 @@ function drawNodes(ctx: CanvasRenderingContext2D, view: ViewTransform, dpr: numb
     // them one at a time. A run carrying a stroke is the exception: its opacity
     // is on the element, because it belongs to the layer and the stroke as one.
     ctx.globalAlpha = props.overlay ? 1 : node.opacity
+    if (node.kind === 'glow') {
+      drawGlow(ctx, node)
+      continue
+    }
     if (node.kind === 'text') {
       drawText(ctx, node.entry)
       continue
@@ -253,6 +258,38 @@ function drawText(ctx: CanvasRenderingContext2D, entry: TextLayerEntry) {
   paintLabel(ctx, drawn, joinedTexts.value.get(entry.id) ?? sampleSource(drawn.sample))
 }
 
+/**
+ * A halo's own node, drawn from what its owner draws — which may sit in another
+ * run, so the owner's bitmap is reached through the same caches, keyed by the
+ * entry the two share.
+ */
+function drawGlow(ctx: CanvasRenderingContext2D, node: GlowStackNode) {
+  if (node.entry.kind === 'text') {
+    const drawn = drawnTexts.value.get(node.entry.id)
+    if (!drawn?.sample) return
+    paintLabelGlow(ctx, drawn, joinedTexts.value.get(node.entry.id) ?? sampleSource(drawn.sample))
+    return
+  }
+  const entry = node.entry
+  const glow = glowOf(entry.effects)
+  if (glow === null) return
+  const live = raster.liveLayer(entry.id)
+  const source = live?.canvas ?? props.bitmaps.get(entry.file)
+  const frame = live?.frame ?? entry
+  if (!source || frame.w <= 0 || frame.h <= 0) return
+  const stroked = effectedRasters.value.get(entry.id) ?? null
+  const halo = glowAt(stroked?.canvas ?? source, stroked?.frame ?? frame, glow, raster.writesTo(entry.id))
+  if (halo === null) return
+  if (props.place) {
+    ctx.save()
+    applyPlacement(ctx, entry, props.place, { x: 0, y: 0 })
+    ctx.drawImage(halo.canvas, halo.frame.x - frame.x, halo.frame.y - frame.y)
+    ctx.restore()
+    return
+  }
+  ctx.drawImage(halo.canvas, halo.frame.x, halo.frame.y)
+}
+
 let frame: number | null = null
 function schedulePaint() {
   if (frame !== null) return
@@ -274,9 +311,9 @@ watch(
   () =>
     props.nodes
       .map((node) =>
-        node.kind === 'raster'
-          ? `${node.entry.x},${node.entry.y},${node.entry.w},${node.entry.h},${node.opacity}`
-          : `t${node.entry.id},${node.entry.body.rotation},${node.opacity}`,
+        node.entry.kind === 'raster'
+          ? `${node.kind}${node.entry.x},${node.entry.y},${node.entry.w},${node.entry.h},${node.opacity}`
+          : `${node.kind}${node.entry.id},${node.entry.body.rotation},${node.opacity}`,
       )
       .join('|'),
   schedulePaint,

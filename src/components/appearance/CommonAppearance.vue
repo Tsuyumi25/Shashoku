@@ -40,8 +40,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LayerEntry } from '@shared/page/types'
-import { PASS_THROUGH } from '@shared/page/types'
-import { BLEND_MODE_ALLOWLIST } from '@shared/page/schema'
+import { BLEND_MODE_ALLOWLIST, PASS_THROUGH } from '@shared/page/types'
+import { BLEND_LABELS } from '@/lib/blendLabels'
 import { sharedValue } from '@shared/batch/value'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { MIXED_TEXT } from '@/lib/appearanceText'
@@ -60,27 +60,6 @@ const props = defineProps<{ targets: readonly AppearanceTarget[] }>()
 
 const project = useProjectStore()
 const editor = useEditorStore()
-
-/** Names as Photoshop's 繁體中文 build has them, so the vocabulary carries over. */
-const BLEND_LABELS: Record<string, string> = {
-  [PASS_THROUGH]: '穿透',
-  normal: '正常',
-  multiply: '色彩增值',
-  screen: '濾色',
-  overlay: '覆蓋',
-  darken: '變暗',
-  lighten: '變亮',
-  'color-dodge': '加亮顏色',
-  'color-burn': '加深顏色',
-  'hard-light': '實光',
-  'soft-light': '柔光',
-  difference: '差異化',
-  exclusion: '排除',
-  hue: '色相',
-  saturation: '飽和度',
-  color: '顏色',
-  luminosity: '明度',
-}
 
 const entries = computed<LayerEntry[]>(() => props.targets.map((t) => t.entry))
 

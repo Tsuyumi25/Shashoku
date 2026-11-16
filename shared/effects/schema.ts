@@ -1,4 +1,5 @@
-import type { LayerEffect, StrokeEffect, StrokePosition } from './types'
+import { BLEND_MODE_ALLOWLIST, PASS_THROUGH } from '../page/types'
+import type { GlowEffect, LayerEffect, StrokeEffect, StrokePosition } from './types'
 
 type Fail = (message: string) => never
 
@@ -29,10 +30,25 @@ function parseStrokeEffect(v: Record<string, unknown>, at: string, fail: Fail): 
   return stroke
 }
 
+function parseGlowEffect(v: Record<string, unknown>, at: string, fail: Fail): GlowEffect {
+  const { size, color, spread = 0, blendMode = 'screen' } = v
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) fail(`${at}.size 必須是非負數`)
+  if (typeof color !== 'string' || color.length === 0) fail(`${at}.color 必須是非空字串`)
+  if (typeof spread !== 'number' || !(spread >= 0 && spread <= 100)) fail(`${at}.spread 必須介於 0 到 100`)
+  if (
+    typeof blendMode !== 'string' ||
+    blendMode === PASS_THROUGH ||
+    !(BLEND_MODE_ALLOWLIST as readonly string[]).includes(blendMode)
+  )
+    fail(`${at}.blendMode 必須是穿透以外的混合模式`)
+  return { kind: 'glow', size, spread, color, blendMode }
+}
+
 function parseLayerEffect(v: unknown, at: string, fail: Fail): LayerEffect {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { kind } = v
   if (kind === 'stroke') return parseStrokeEffect(v, at, fail)
+  if (kind === 'glow') return parseGlowEffect(v, at, fail)
   fail(`${at}.kind 未知效果類型 '${String(kind)}'`)
 }
 
@@ -40,7 +56,9 @@ function parseLayerEffect(v: unknown, at: string, fail: Fail): LayerEffect {
 export function parseEffects(v: unknown, at: string, fail: Fail): LayerEffect[] {
   if (v === undefined) return []
   if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
-  return v.map((e, i) => parseLayerEffect(e, `${at}[${i}]`, fail))
+  const effects = v.map((e, i) => parseLayerEffect(e, `${at}[${i}]`, fail))
+  if (effects.filter((e) => e.kind === 'glow').length > 1) fail(`${at} 最多只能有一個光暈`)
+  return effects
 }
 
 function serializeLayerEffect(e: LayerEffect): Record<string, unknown> {
@@ -49,6 +67,8 @@ function serializeLayerEffect(e: LayerEffect): Record<string, unknown> {
     if (e.joins === false) out.joins = false
     return out
   }
+  if (e.kind === 'glow')
+    return { kind: 'glow', size: e.size, spread: e.spread, color: e.color, blendMode: e.blendMode }
   throw new Error(`unknown layer effect kind: ${(e as { kind: string }).kind}`)
 }
 

@@ -2957,6 +2957,43 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   /**
+   * `previewEffects` for an edit each node applies to its own list, so a
+   * selection that disagrees about its strokes keeps its strokes while one
+   * effect is tried on all of them.
+   */
+  function previewEffectsEach(
+    targets: readonly AppearanceTarget[],
+    edit: (effects: readonly LayerEffect[]) => LayerEffect[],
+  ) {
+    if (previewedFrom !== null && !sameNodes(previewedFrom, targets)) {
+      writeEffects(previewedFrom)
+      previewedFrom = null
+    }
+    previewedFrom ??= effectsOf(targets)
+    writeEffects(previewedFrom.map((s) => ({ ...s, effects: edit(s.effects) })))
+  }
+
+  /** `cmdApplyEffects` for an edit each node applies to its own list. One undo step. */
+  function cmdEditEffectsEach(
+    targets: readonly AppearanceTarget[],
+    edit: (effects: readonly LayerEffect[]) => LayerEffect[],
+  ) {
+    const previewed = previewedFrom
+    previewedFrom = null
+    if (previewed !== null && !sameNodes(previewed, targets)) writeEffects(previewed)
+    if (targets.length === 0) return
+    const before =
+      previewed !== null && sameNodes(previewed, targets) ? previewed : effectsOf(targets)
+    const after = before.map((entry) => ({ ...entry, effects: edit(entry.effects) }))
+    if (JSON.stringify(before) === JSON.stringify(after)) return
+    pushCommand({
+      label: `effects ${targets.length}`,
+      do: () => writeEffects(after),
+      undo: () => writeEffects(before),
+    })
+  }
+
+  /**
    * Joining let go of or taken back on each object, over its own strokes — a
    * selection that disagrees about its strokes still agrees to this, and one
    * list written to them all would make their strokes the same too.
@@ -3477,6 +3514,8 @@ export const useEditorStore = defineStore('editor', () => {
     cmdSetJoins,
     cmdApplyLook,
     previewEffects,
+    previewEffectsEach,
+    cmdEditEffectsEach,
     endEffectsPreview,
     previewStrokes,
     cmdApplyLentLook,

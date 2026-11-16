@@ -12,7 +12,7 @@ import type { LayerBitmaps } from '@/composables/useLayerBitmaps'
 import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
-import { paintLabel } from '@/lib/labelRaster'
+import { paintLabel, paintLabelGlow } from '@/lib/labelRaster'
 import type { EffectedLayer } from '@/lib/layerEffects'
 import { pictureWithEffects } from '@/lib/layerEffects'
 import type { LayerPlacement } from '@/lib/layerTransform'
@@ -75,11 +75,13 @@ const picture = computed<EffectedLayer>(() => {
     liveLayer: (id) => raster.liveLayer(id),
     place: (id) => held.get(id),
     overlay: (id) => (drawing ? stroke.overlayFor(id) : null),
-    drawText: (ctx, node) => {
+    drawText: (ctx, node, part) => {
       const drawn = labels.labelOf(node.entry)
       if (!drawn.sample) return
       const under = props.joined.get(node.entry.id)
-      paintLabel(ctx, drawn, (under && labels.joinedOf(node.entry, under)) ?? sampleSource(drawn.sample))
+      const picture = (under && labels.joinedOf(node.entry, under)) ?? sampleSource(drawn.sample)
+      if (part === 'halo') paintLabelGlow(ctx, drawn, picture)
+      else paintLabel(ctx, drawn, picture)
     },
   })
   return pictureWithEffects(buffer, props.node.entry.effects) ?? { canvas: buffer, frame: { x: 0, y: 0, w, h } }

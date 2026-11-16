@@ -8,6 +8,7 @@ import { PASS_THROUGH } from './types'
 import type { TextSide } from './text'
 import { isOnView } from './units'
 import { engineStrokesFor } from '../effects/stroke'
+import { glowOf, glowReach } from '../effects/glow'
 
 /**
  * How a page stacks, answered once.
@@ -46,20 +47,39 @@ export interface BufferStackNode extends StackNodeBase {
   children: StackNode[]
 }
 
-export type StackNode = RasterStackNode | TextStackNode | BufferStackNode
+/**
+ * A raster's or a text object's halo, as a node of its own right under it. Its
+ * blend mode is the halo's, and blending reads what is under it — so it has to
+ * be somewhere every medium can put it against the page, which is what a node
+ * is. Carries its owner's entry, so a gesture holding the owner holds it too.
+ */
+export interface GlowStackNode extends StackNodeBase {
+  kind: 'glow'
+  entry: RasterLayerEntry | TextLayerEntry
+}
+
+export type StackNode = RasterStackNode | TextStackNode | BufferStackNode | GlowStackNode
+
+/** The halo node an object needs under it, or null when it carries none that draws. */
+function glowNodeOf(entry: RasterLayerEntry | TextLayerEntry): GlowStackNode | null {
+  const glow = glowOf(entry.effects)
+  if (glow === null || glowReach(glow) === 0) return null
+  return { kind: 'glow', entry, opacity: entry.opacity, blendMode: glow.blendMode }
+}
 
 /**
  * Whether a folder costs a buffer. Pass-through at full opacity with nothing
  * grown from its edge is the one case that does not, which is why it is the
  * default a new folder gets: an ordinary folder is pure containment and should
- * cost nothing to draw. A stroke is grown from the contents as one picture, so
- * it needs that picture as much as an opacity does.
+ * cost nothing to draw. A stroke or a halo is grown from the contents as one
+ * picture, so it needs that picture as much as an opacity does.
  */
 function needsBuffer(folder: GroupLayerEntry): boolean {
   return (
     folder.blendMode !== PASS_THROUGH ||
     folder.opacity !== 1 ||
-    engineStrokesFor(folder.effects).length > 0
+    engineStrokesFor(folder.effects).length > 0 ||
+    glowReach(glowOf(folder.effects)) > 0
   )
 }
 
@@ -81,11 +101,15 @@ export function pageStack(layers: readonly LayerEntry[], side: TextSide, face: s
   for (const entry of layers) {
     if (!entry.visible) continue
     if (entry.kind === 'raster') {
+      const glow = glowNodeOf(entry)
+      if (glow) out.push(glow)
       out.push({ kind: 'raster', entry, opacity: entry.opacity, blendMode: entry.blendMode })
       continue
     }
     if (entry.kind === 'text') {
       if (!isOnView(entry, side, face)) continue
+      const glow = glowNodeOf(entry)
+      if (glow) out.push(glow)
       out.push({ kind: 'text', entry, opacity: entry.opacity, blendMode: entry.blendMode })
       continue
     }
@@ -117,7 +141,7 @@ export function pageStack(layers: readonly LayerEntry[], side: TextSide, face: s
 export function withoutText(nodes: readonly StackNode[]): StackNode[] {
   const out: StackNode[] = []
   for (const node of nodes) {
-    if (node.kind === 'text') continue
+    if (node.kind === 'text' || (node.kind === 'glow' && node.entry.kind === 'text')) continue
     out.push(node.kind === 'buffer' ? { ...node, children: withoutText(node.children) } : node)
   }
   return out

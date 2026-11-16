@@ -1,13 +1,14 @@
 import type {
   BufferStackNode,
+  GlowStackNode,
   RasterStackNode,
   StackNode,
   TextStackNode,
 } from '@shared/page/stack'
-import { engineStrokesFor } from '@shared/effects/stroke'
+import { effectsDraw } from '@/lib/layerEffects'
 
 /** Anything that draws as a bitmap at a place on the page. */
-export type RunStackNode = RasterStackNode | TextStackNode
+export type RunStackNode = RasterStackNode | TextStackNode | GlowStackNode
 
 /**
  * One element of the canvas's DOM, which is how the canvas expresses stacking:
@@ -55,9 +56,9 @@ export function stackSegments(
   for (const node of nodes) {
     if (node.kind === 'buffer') {
       // A box the browser isolates can blend and fade its contents as one, but
-      // it has no outline to grow from them: a folder with a stroke needs its
-      // contents as pixels.
-      const kind = engineStrokesFor(node.entry.effects).length > 0 ? 'picture' : 'buffer'
+      // it has no outline to grow from them: a folder with a stroke or a halo
+      // needs its contents as pixels.
+      const kind = effectsDraw(node.entry.effects) ? 'picture' : 'buffer'
       out.push({ kind, key: node.entry.id, blendMode: node.blendMode, node })
       continue
     }
@@ -76,7 +77,9 @@ export function stackSegments(
       last.nodes.push(node)
       continue
     }
-    out.push({ kind: 'run', key: node.entry.id, blendMode: node.blendMode, nodes: [node] })
+    // A halo shares its owner's entry, and the two can each start a run.
+    const key = node.kind === 'glow' ? `${node.entry.id}:glow` : node.entry.id
+    out.push({ kind: 'run', key, blendMode: node.blendMode, nodes: [node] })
   }
   return out
 }

@@ -35,6 +35,7 @@ function label(
     center: { x: x + w / 2, y: y + h / 2 },
     mirror,
     plain: '',
+    glow: null,
   }
 }
 

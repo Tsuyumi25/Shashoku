@@ -15,6 +15,26 @@ export const OCR_SCHEMA_VERSION = 2
  */
 export const PASS_THROUGH = 'pass-through'
 
+export const BLEND_MODE_ALLOWLIST = [
+  PASS_THROUGH,
+  'normal',
+  'multiply',
+  'screen',
+  'overlay',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
+  'hard-light',
+  'soft-light',
+  'difference',
+  'exclusion',
+  'hue',
+  'saturation',
+  'color',
+  'luminosity',
+] as const
+
 export interface LayerEntryBase {
 
   id: string

@@ -1,6 +1,8 @@
-import type { LayerEffect } from '@shared/effects/types'
+import type { GlowEffect, LayerEffect } from '@shared/effects/types'
 import type { EngineStrokeSpec } from '@shared/engine/types'
+import { glowOf, glowReach } from '@shared/effects/glow'
 import { engineStrokesFor } from '@shared/effects/stroke'
+import { glowPictureHeld } from '@/lib/glowPicture'
 
 /** A rectangle on the page, which is what a raster layer occupies. */
 export interface Frame {
@@ -37,9 +39,18 @@ export function effectMargin(strokes: readonly EngineStrokeSpec[]): number {
   return strokes.reduce((sum, s) => sum + Math.ceil(Math.max(0, s.width)), 0) + 1
 }
 
+/** The strokes' margin and then the halo's, which blurs out of what they left. */
+function marginFor(effects: readonly LayerEffect[]): number {
+  return effectMargin(engineStrokesFor(effects)) + glowReach(glowOf(effects))
+}
+
+/** Whether anything in the list draws, so a layer carrying it needs a picture of its own. */
+export function effectsDraw(effects: readonly LayerEffect[]): boolean {
+  return engineStrokesFor(effects).length > 0 || glowReach(glowOf(effects)) > 0
+}
+
 /**
- * One layer as it is drawn once its effects are on, or null when there is
- * nothing for them to do.
+ * One layer as it is drawn once its strokes are on, or null when it has none.
  *
  * Null rather than a copy of the source in the ordinary case, so a page of
  * plain layers costs nothing and the caller keeps drawing the bitmap it already
@@ -50,6 +61,9 @@ export function effectMargin(strokes: readonly EngineStrokeSpec[]): number {
  * Composited at draw time, so this is the answer for the canvas, the export and
  * the thumbnail alike — and going through the engine is what keeps it the same
  * band a text object gets rather than a second implementation of one.
+ *
+ * The halo is not here: a raster's halo is a stack node of its own, so that its
+ * blend mode reaches the page. See `GlowStackNode`.
  */
 export function layerWithEffects(
   source: CanvasImageSource,
@@ -78,9 +92,30 @@ export function layerWithEffects(
   )
   ctx.putImageData(new ImageData(new Uint8ClampedArray(after), w, h), 0, 0)
 
+  return { canvas, frame: { x: frame.x - margin, y: frame.y - margin, w, h } }
+}
+
+/**
+ * The halo of a picture that sits at `frame` on the page, placed where it lands
+ * there. Held against the picture under `version` (see `glowPictureHeld`),
+ * which is how a run repainting every frame of a drag gets away with it.
+ */
+export function glowAt(
+  picture: CanvasImageSource,
+  frame: Frame,
+  glow: GlowEffect,
+  version: number | null,
+): EffectedLayer | null {
+  const halo = glowPictureHeld(picture, frame.w, frame.h, glow, version)
+  if (halo === null) return null
   return {
-    canvas,
-    frame: { x: frame.x - margin, y: frame.y - margin, w, h },
+    canvas: halo.canvas,
+    frame: {
+      x: frame.x - halo.margin,
+      y: frame.y - halo.margin,
+      w: halo.canvas.width,
+      h: halo.canvas.height,
+    },
   }
 }
 
@@ -138,7 +173,7 @@ export function pictureWithEffects(
   picture: OffscreenCanvas,
   effects: readonly LayerEffect[],
 ): EffectedLayer | null {
-  if (engineStrokesFor(effects).length === 0) return null
+  if (!effectsDraw(effects)) return null
   const ctx = picture.getContext('2d')
   if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
   const { width, height } = picture
@@ -148,12 +183,24 @@ export function pictureWithEffects(
   const cut = content.getContext('2d')
   if (!cut) throw new Error('OffscreenCanvas 2d context unavailable')
   cut.drawImage(picture, -bounds.x, -bounds.y)
-  return layerWithEffects(content, bounds, effects)
+  const stroked = layerWithEffects(content, bounds, effects) ?? { canvas: content, frame: bounds }
+  const glow = glowOf(effects)
+  const halo = glow === null ? null : glowAt(stroked.canvas, stroked.frame, glow, null)
+  if (halo === null) return stroked
+
+  // A folder is already one picture, so its halo goes inside it and blends as
+  // that picture does.
+  const lit = new OffscreenCanvas(halo.frame.w, halo.frame.h)
+  const litCtx = lit.getContext('2d')
+  if (!litCtx) throw new Error('OffscreenCanvas 2d context unavailable')
+  litCtx.drawImage(halo.canvas, 0, 0)
+  litCtx.drawImage(stroked.canvas, stroked.frame.x - halo.frame.x, stroked.frame.y - halo.frame.y)
+  return { canvas: lit, frame: halo.frame }
 }
 
 /** The rectangle a layer occupies once its effects are on. */
 export function effectedFrame(frame: Frame, effects: readonly LayerEffect[]): Frame {
-  const margin = effectMargin(engineStrokesFor(effects))
+  const margin = marginFor(effects)
   if (margin === 0 || frame.w <= 0 || frame.h <= 0) return frame
   return {
     x: frame.x - margin,

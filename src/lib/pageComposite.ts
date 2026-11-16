@@ -8,13 +8,14 @@ import {
   type StackNode,
   type TextStackNode,
 } from '@shared/page/stack'
+import { glowOf } from '@shared/effects/glow'
 import { shownCodeOf } from '@shared/page/units'
 import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
-import { drawnLabel, paintLabel } from '@/lib/labelRaster'
+import { drawnLabel, paintLabel, paintLabelGlow } from '@/lib/labelRaster'
 import { flipOf } from '@/lib/flip'
 import { withJoinedBands, withoutOuterBand } from '@/lib/joinedStroke'
-import { layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
+import { glowAt, layerWithEffects, pictureWithEffects } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { StrokeOverlay } from '@/stores/strokeOverlayStore'
 import { sampleSource } from '@/lib/fontSampleCache'
@@ -138,7 +139,7 @@ function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
     stackedTextNodes(stack).map((node) => node.entry),
     (entry) => entry.effects,
   )
-  return (ctx, node) => {
+  return (ctx, node, part) => {
     const label = node.entry
     if (shownCodeOf(label).length === 0) return
     const drawn = labelOf(label, label.effects)
@@ -165,7 +166,8 @@ function drawTextWith(stack: readonly StackNode[]): StackPaint['drawText'] {
     // here and nothing to resample: the bitmap lands one pixel per pixel.
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = smoothingQualityFor(1)
-    paintLabel(ctx, drawn, picture)
+    if (part === 'halo') paintLabelGlow(ctx, drawn, picture)
+    else paintLabel(ctx, drawn, picture)
   }
 }
 
@@ -189,8 +191,11 @@ export interface StackPaint {
   place?(id: string): LayerPlacement | undefined
   /** The stroke being drawn on a layer, which only the canvas has. */
   overlay?(id: string): StrokeOverlay | null
-  /** How a text object is drawn. Merge never has one and refuses instead. */
-  drawText(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode): void
+  /**
+   * How a text object is drawn: the label itself, or its halo for the halo's
+   * own node. Merge never has one and refuses instead.
+   */
+  drawText(ctx: OffscreenCanvasRenderingContext2D, node: TextStackNode, part: 'label' | 'halo'): void
 }
 
 /**
@@ -247,6 +252,31 @@ function drawRaster(
 }
 
 /**
+ * A raster's halo, grown from the layer as its strokes leave it and put where
+ * the layer lands, gesture included — the layer's own node draws on top.
+ */
+function drawRasterGlow(ctx: OffscreenCanvasRenderingContext2D, entry: RasterLayerEntry, paint: StackPaint): void {
+  const glow = glowOf(entry.effects)
+  if (glow === null) return
+  const live = paint.liveLayer?.(entry.id) ?? null
+  const source = live?.canvas ?? paint.rasters.get(entry.file)
+  const frame = live?.frame ?? entry
+  if (!source || frame.w <= 0 || frame.h <= 0) return
+  const stroked = layerWithEffects(source, frame, entry.effects)
+  const halo = glowAt(stroked?.canvas ?? source, stroked?.frame ?? frame, glow, null)
+  if (halo === null) return
+  const place = paint.place?.(entry.id)
+  if (!place) {
+    ctx.drawImage(halo.canvas, halo.frame.x, halo.frame.y)
+    return
+  }
+  ctx.save()
+  applyPlacement(ctx, entry, place, { x: 0, y: 0 })
+  ctx.drawImage(halo.canvas, halo.frame.x - frame.x, halo.frame.y - frame.y)
+  ctx.restore()
+}
+
+/**
  * A stack onto a context already in page coordinates — the caller decides where
  * the origin is, which is what lets a merge draw into its own frame.
  */
@@ -262,7 +292,13 @@ export function drawStack(
     if (node.kind === 'raster') {
       drawRaster(ctx, node, paint)
     } else if (node.kind === 'text') {
-      paint.drawText(ctx, node)
+      paint.drawText(ctx, node, 'label')
+    } else if (node.kind === 'glow') {
+      if (node.entry.kind === 'text') {
+        paint.drawText(ctx, { kind: 'text', entry: node.entry, opacity: node.opacity, blendMode: node.blendMode }, 'halo')
+      } else {
+        drawRasterGlow(ctx, node.entry, paint)
+      }
     } else {
       // A folder with blending of its own has to become one picture before that
       // blending can apply, which is the buffer the pass-through default avoids.

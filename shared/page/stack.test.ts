@@ -231,6 +231,32 @@ describe('the canvas with its text taken out', () => {
   })
 })
 
+describe('a halo under the object it belongs to', () => {
+  const glow = { kind: 'glow', size: 8, spread: 0, color: '#ffffff', blendMode: 'screen' } as const
+  const kinds = (nodes: readonly StackNode[]) => nodes.map((n) => `${n.kind}:${n.entry.id}`)
+
+  it("stands right under its owner, with the halo's blending and the owner's opacity", () => {
+    const nodes = pageStack([raster('a'), text('b', { effects: [glow], opacity: 0.5 })], 'translation', FACE)
+    expect(kinds(nodes)).toEqual(['raster:a', 'glow:b', 'text:b'])
+    expect(nodes[1]).toMatchObject({ blendMode: 'screen', opacity: 0.5 })
+  })
+
+  it('draws nothing for a halo with no size', () => {
+    const nodes = pageStack([raster('a', { effects: [{ ...glow, size: 0 }] })], 'translation', FACE)
+    expect(kinds(nodes)).toEqual(['raster:a'])
+  })
+
+  it('goes with the text when the text is taken out, and stays with a raster', () => {
+    const nodes = pageStack([raster('a', { effects: [glow] }), text('b', { effects: [glow] })], 'translation', FACE)
+    expect(kinds(withoutText(nodes))).toEqual(['glow:a', 'raster:a'])
+  })
+
+  it("buffers a folder that carries one, so the halo grows from the folder's picture", () => {
+    const [node] = pageStack([folder('g', [text('a')], { effects: [glow] })], 'translation', FACE)
+    expect(node.kind).toBe('buffer')
+  })
+})
+
 describe('the page as only its original', () => {
   it('draws the bottom raster alone, plainly, even when it is hidden or dimmed', () => {
     const layers = [

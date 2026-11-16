@@ -1,8 +1,9 @@
 import type { EngineSpan } from '@shared/engine/types'
 import { parseMarkup, resolveSpans } from '@shared/page/markup'
 import { byteAt, byteOffsets } from './textProjection'
-import type { LayerEffect } from '@shared/effects/types'
+import type { GlowEffect, LayerEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
+import { glowOf } from '@shared/effects/glow'
 import { engineStrokesFor } from '@shared/effects/stroke'
 import {
   catalogByFace,
@@ -12,6 +13,7 @@ import {
   representativeOf,
 } from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
+import { glowPictureHeld } from './glowPicture'
 import { drawnTurn, NO_FLIP, type Flip } from './flip'
 import {
   frameCenter,
@@ -278,6 +280,8 @@ export interface DrawnLabel {
    * is what says which string the cluster table counts in.
    */
   plain: string
+  /** The halo laid under the bitmap where it lands, or null. */
+  glow: GlowEffect | null
 }
 
 /**
@@ -316,6 +320,7 @@ export function drawnLabel(
 ): DrawnLabel {
   const turn = quantizeRotation(rotation)
   const painted = paintedText(code, style)
+  const glow = glowOf(effects)
 
   const upright = measured(painted, style, effects)
   const box = labelBoxSize(style, upright)
@@ -327,13 +332,13 @@ export function drawnLabel(
   const mirror = drawing.mirror
   if (!upright) {
     const center = placeLabel(middle, box, spin).center
-    return { sample: null, missingFamily: null, box, center, mirror, plain: painted.plain }
+    return { sample: null, missingFamily: null, box, center, mirror, plain: painted.plain, glow }
   }
 
   const spun = spin === 0 ? upright : measured(painted, style, effects, spin)
   const blit = spun ? { w: spun.width, h: spun.height } : box
   const { center, phase } = placeLabel(middle, blit, spin)
-  return { ...rasterFor(painted, style, effects, phase, spin), box, center, mirror, plain: painted.plain }
+  return { ...rasterFor(painted, style, effects, phase, spin), box, center, mirror, plain: painted.plain, glow }
 }
 
 /**
@@ -353,5 +358,26 @@ export function paintLabel(
   ctx.translate(drawn.center.x, drawn.center.y)
   ctx.scale(drawn.mirror.x, drawn.mirror.y)
   ctx.drawImage(picture, -width / 2, -height / 2)
+  ctx.restore()
+}
+
+/**
+ * The label's halo, where `paintLabel` would put the label: a picture in page
+ * pixels grown from the same bitmap, so it zooms and mirrors with the letters
+ * it came from. Drawn by the halo's own stack node, under the label's.
+ */
+export function paintLabelGlow(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  drawn: DrawnLabel,
+  picture: CanvasImageSource,
+): void {
+  if (!drawn.sample || !drawn.glow) return
+  const { width, height } = drawn.sample.image
+  const halo = glowPictureHeld(picture, width, height, drawn.glow)
+  if (!halo) return
+  ctx.save()
+  ctx.translate(drawn.center.x, drawn.center.y)
+  ctx.scale(drawn.mirror.x, drawn.mirror.y)
+  ctx.drawImage(halo.canvas, -width / 2 - halo.margin, -height / 2 - halo.margin)
   ctx.restore()
 }

@@ -37,7 +37,35 @@ export interface StrokeEffect {
 }
 
 
-export type LayerEffect = StrokeEffect
+/**
+ * A soft halo blurred out of everything the node draws, strokes included, laid
+ * under it. Independent of the strokes: a stroke is a hard band grown from the
+ * edge, this is the edge smeared outwards, and a label may want both.
+ *
+ * The fields are Photoshop's Outer Glow, minus what only Photoshop offers
+ * (technique, contour, range, noise, jitter), because letterers arrive from it.
+ */
+export interface GlowEffect {
+  kind: 'glow'
+
+  /** How far past the edge the halo reaches, in page pixels: Photoshop's Size. */
+  size: number
+
+  /**
+   * Percent of `size` the shape is grown solid before the rest is blurred,
+   * 0–100: Photoshop's Spread. 0 starts fading at the edge, 100 is a hard band.
+   */
+  spread: number
+
+  /** Its colour; the alpha is the halo's opacity. */
+  color: string
+
+  /** How the halo meets what is under the node. One of the layer blend modes, never pass-through. */
+  blendMode: string
+}
+
+
+export type LayerEffect = StrokeEffect | GlowEffect
 
 
 /**
@@ -50,4 +78,17 @@ export const DEFAULT_STROKE: StrokeEffect = {
   width: 3,
   color: '#000000',
   position: 'outside',
+}
+
+
+/**
+ * White, since a halo is mostly asked for to lift dark letters off dark
+ * artwork; screen, which is what Photoshop's and Illustrator's glows start as.
+ */
+export const DEFAULT_GLOW: GlowEffect = {
+  kind: 'glow',
+  size: 8,
+  spread: 0,
+  color: '#ffffffff',
+  blendMode: 'screen',
 }

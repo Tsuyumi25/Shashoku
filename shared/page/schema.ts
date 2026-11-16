@@ -18,7 +18,7 @@ import type {
   TranslationTextLayerEntry,
   TranslationUnit,
 } from './types'
-import { MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
+import { BLEND_MODE_ALLOWLIST, MANIFEST_SCHEMA_VERSION, OCR_SCHEMA_VERSION, PASS_THROUGH } from './types'
 import { hasEdge, normalizeEdges, wouldCycle, type ReadingEdge } from './readingGraph'
 import { linesOf } from './text'
 import { BLOCK_JOINER, shownCodeOf } from './units'
@@ -33,26 +33,6 @@ import type { TextStyle } from '../text-style/types'
 import { normalizeTagSet } from '../tags/set'
 import { RESERVED_TAG_NAMES } from '../ssk/constants'
 
-
-export const BLEND_MODE_ALLOWLIST = [
-  PASS_THROUGH,
-  'normal',
-  'multiply',
-  'screen',
-  'overlay',
-  'darken',
-  'lighten',
-  'color-dodge',
-  'color-burn',
-  'hard-light',
-  'soft-light',
-  'difference',
-  'exclusion',
-  'hue',
-  'saturation',
-  'color',
-  'luminosity',
-] as const
 
 /**
  * The last version whose bodies held plain text. Everything it stored is read
