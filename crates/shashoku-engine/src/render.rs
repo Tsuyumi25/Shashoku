@@ -1110,6 +1110,25 @@ impl Bands {
     }
 }
 
+/// How much of a label a paint lays down. Each pixel is the strokes' share plus
+/// the fill's, so the fill alone is what a caller subtracts from the whole to
+/// have the strokes, still measured as though the fill were there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Part {
+    #[default]
+    Whole,
+    Fill,
+}
+
+impl Part {
+    fn keep(self, coats: Ink, fill: Ink) -> Ink {
+        match self {
+            Part::Whole => coats + fill,
+            Part::Fill => fill,
+        }
+    }
+}
+
 /// Where one stroke lays its colour.
 struct Coat {
     bands: Bands,
@@ -1421,6 +1440,7 @@ fn paint_run(
     fill: Rgba,
     strokes: &[StrokeSpec],
     weight: f32,
+    part: Part,
 ) -> Result<TextBitmap, String> {
     // Groups that all land on the call's own fill and weight — spans that only
     // changed a size, say — are one paint after all, and one paint is what the
@@ -1430,7 +1450,7 @@ fn paint_run(
             group.color.unwrap_or(fill) == fill && group.weight.unwrap_or(weight) == weight
         })
     {
-        return paint_groups(run, fill, strokes, weight);
+        return paint_groups(run, fill, strokes, weight, part);
     }
 
     let count = run.width as usize * run.height as usize;
@@ -1480,7 +1500,7 @@ fn paint_run(
     let mut rgba = vec![0u8; count * 4];
     for (i, out) in rgba.chunks_exact_mut(4).enumerate() {
         let (coats, shown) = weigh(&pieces, |at| levels.at(at, i));
-        (coats + fill * shown).write(out);
+        part.keep(coats, fill * shown).write(out);
     }
     Ok(bitmap_of(rgba, run))
 }
@@ -1520,6 +1540,7 @@ fn paint_groups(
     fill: Rgba,
     strokes: &[StrokeSpec],
     weight: f32,
+    part: Part,
 ) -> Result<TextBitmap, String> {
     let (w, h) = (run.width, run.height);
     let count = w as usize * h as usize;
@@ -1591,12 +1612,12 @@ fn paint_groups(
             1.0
         };
         let (shape, ink) = (shape * keep, ink * keep);
-        let pixel = if shape <= shown {
-            coated + ink + gap * (shown - shape)
+        let coats = if shape <= shown {
+            coated + gap * (shown - shape)
         } else {
-            ink + coated * ((1.0 - shape) / (1.0 - shown))
+            coated * ((1.0 - shape) / (1.0 - shown))
         };
-        pixel.write(out);
+        part.keep(coats, ink).write(out);
     }
     Ok(bitmap_of(rgba, run))
 }
@@ -1623,11 +1644,12 @@ pub fn render_text(
     spans: &[SpanStyle],
     scale: Scale,
     leading: f32,
+    part: Part,
 ) -> Result<TextBitmap, String> {
     let run = build_horizontal_path(
         font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
-    paint_run(spin(run, rotation), fill, strokes, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight, part)
 }
 
 #[expect(
@@ -1649,11 +1671,12 @@ pub fn render_vertical(
     spans: &[SpanStyle],
     scale: Scale,
     leading: f32,
+    part: Part,
 ) -> Result<TextBitmap, String> {
     let run = build_vertical_path(
         font_bytes, text, size_px, padding, face_index, phase, align, spans, scale, leading,
     )?;
-    paint_run(spin(run, rotation), fill, strokes, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight, part)
 }
 
 /// The outline was built for the metrics its glyphs settle; nothing here will
@@ -1911,9 +1934,10 @@ pub fn render_notdef(
     fill: Rgba,
     strokes: &[StrokeSpec],
     weight: f32,
+    part: Part,
 ) -> Result<TextBitmap, String> {
     let run = build_notdef_path(text, size_px, padding, vertical, phase, align);
-    paint_run(spin(run, rotation), fill, strokes, weight)
+    paint_run(spin(run, rotation), fill, strokes, weight, part)
 }
 
 pub fn measure_notdef(
@@ -2011,6 +2035,7 @@ mod spin_tests {
             FILL,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap()
     }
@@ -2135,6 +2160,7 @@ mod notdef_tests {
             FILL,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap()
     }
@@ -2300,6 +2326,7 @@ mod notdef_tests {
             FILL,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap();
 
@@ -2324,6 +2351,7 @@ mod notdef_tests {
             red,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         let (cx, cy) = box_centre(0.0, 0);
@@ -2351,6 +2379,7 @@ mod notdef_tests {
             FILL,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         assert!(bmp.width >= 1 && bmp.height >= 1);
@@ -2381,6 +2410,7 @@ mod align_tests {
             FILL,
             &[],
             0.0,
+            Part::Whole,
         )
         .unwrap()
     }
@@ -2580,7 +2610,14 @@ mod stroke_tests {
 
     #[test]
     fn a_light_fill_keeps_its_colour_where_the_edge_is_soft() {
-        let bmp = paint_run(disc_run(30.5), Rgba(255, 255, 255, 255), &[], 0.0).unwrap();
+        let bmp = paint_run(
+            disc_run(30.5),
+            Rgba(255, 255, 255, 255),
+            &[],
+            0.0,
+            Part::Whole,
+        )
+        .unwrap();
         let soft = soft_edge_colours(&bmp);
         assert!(soft.len() > 50, "no soft edge to look at");
         assert!(
@@ -2588,6 +2625,33 @@ mod stroke_tests {
             "edge pulled towards black: {:?}",
             soft.iter().find(|c| c != &&[255, 255, 255]).unwrap()
         );
+    }
+
+    #[test]
+    fn the_fill_alone_is_what_the_strokes_leave_of_it() {
+        let fill = Rgba(90, 90, 90, 255);
+        let stroke = |position| StrokeSpec {
+            width: 4.0,
+            color: Rgba(255, 255, 255, 255),
+            position,
+        };
+        let alpha = |strokes: &[StrokeSpec], part| -> Vec<u8> {
+            let bmp = paint_run(disc_run(30.5), fill, strokes, 0.0, part).unwrap();
+            bmp.rgba.chunks_exact(4).map(|px| px[3]).collect()
+        };
+        let bare = alpha(&[], Part::Whole);
+
+        assert_eq!(alpha(&[], Part::Fill), bare);
+        assert_eq!(alpha(&[stroke(StrokePosition::Outside)], Part::Fill), bare);
+
+        let under_inside = alpha(&[stroke(StrokePosition::Inside)], Part::Fill);
+        let covered: u32 = bare.iter().map(|&a| a as u32).sum();
+        let left: u32 = under_inside.iter().map(|&a| a as u32).sum();
+        assert!(
+            left < covered,
+            "an inside stroke left the whole fill: {left} of {covered}"
+        );
+        assert!(under_inside.iter().zip(&bare).all(|(l, b)| l <= b));
     }
 
     #[test]
@@ -2601,6 +2665,7 @@ mod stroke_tests {
                 position: StrokePosition::Outside,
             }],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         // The fill's own edge is buried under the band, so every soft pixel
@@ -2623,6 +2688,7 @@ mod stroke_tests {
             FILL,
             &[spec(8.0, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for step in 0..10 {
@@ -2641,6 +2707,7 @@ mod stroke_tests {
             FILL,
             &[spec(pen, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2665,6 +2732,7 @@ mod stroke_tests {
             FILL,
             &[spec(pen, StrokePosition::Inside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2688,6 +2756,7 @@ mod stroke_tests {
             FILL,
             &[spec(pen, StrokePosition::Center)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2726,7 +2795,14 @@ mod stroke_tests {
             clusters: Vec::new(),
         };
 
-        let bmp = paint_run(run, FILL, &[spec(10.0, StrokePosition::Outside)], 0.0).unwrap();
+        let bmp = paint_run(
+            run,
+            FILL,
+            &[spec(10.0, StrokePosition::Outside)],
+            0.0,
+            Part::Whole,
+        )
+        .unwrap();
         for step in 0..4 {
             for angle in ANGLES {
                 let (alpha, is_ink) = probe(&bmp, step as f32, angle);
@@ -2749,6 +2825,7 @@ mod stroke_tests {
             FILL,
             &[spec(pen, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for tenth in 0..40 {
@@ -2767,6 +2844,7 @@ mod stroke_tests {
             Rgba(0, 0, 0, 128),
             &[spec(pen, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2788,6 +2866,7 @@ mod stroke_tests {
                 Rgba(0, 0, 0, 0),
                 &[spec(pen, StrokePosition::Outside)],
                 weight,
+                Part::Whole,
             )
             .unwrap();
             for angle in ANGLES {
@@ -2823,6 +2902,7 @@ mod stroke_tests {
                 coloured(6.0, StrokePosition::Outside, BLUE),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2848,6 +2928,7 @@ mod stroke_tests {
                 coloured(3.0, StrokePosition::Inside, BLUE),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2873,6 +2954,7 @@ mod stroke_tests {
                 spec(4.0, StrokePosition::Outside),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2897,6 +2979,7 @@ mod stroke_tests {
                 coloured(5.0, StrokePosition::Outside, BLUE),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2923,6 +3006,7 @@ mod stroke_tests {
                 coloured(2.0, StrokePosition::Outside, BLUE),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -2944,6 +3028,7 @@ mod stroke_tests {
             FILL,
             &[spec(4.0, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         let wrapped = paint_run(
@@ -2954,6 +3039,7 @@ mod stroke_tests {
                 coloured(5.0, StrokePosition::Outside, Rgba(0, 0, 255, 0)),
             ],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         assert!(alone.rgba == wrapped.rgba);
@@ -2968,7 +3054,14 @@ mod stroke_tests {
             color: Some(Rgba(0, 0, 0, 0)),
             weight: None,
         }];
-        let bmp = paint_run(run, FILL, &[spec(4.0, StrokePosition::Outside)], 0.0).unwrap();
+        let bmp = paint_run(
+            run,
+            FILL,
+            &[spec(4.0, StrokePosition::Outside)],
+            0.0,
+            Part::Whole,
+        )
+        .unwrap();
         for angle in ANGLES {
             assert_eq!(
                 pixel(&bmp, radius - 2.0, angle)[3],
@@ -2990,6 +3083,7 @@ mod stroke_tests {
             FILL,
             &[spec(pen, StrokePosition::Outside)],
             weight,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -3017,6 +3111,7 @@ mod stroke_tests {
             FILL,
             &[spec(8.0, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         // From the centre out to the pen's reach: no cancelled ring anywhere.
@@ -3035,6 +3130,7 @@ mod stroke_tests {
             FILL,
             &[spec(0.0, StrokePosition::Outside)],
             0.0,
+            Part::Whole,
         )
         .unwrap();
         for angle in ANGLES {
@@ -3078,7 +3174,7 @@ mod stroke_tests {
 
             let cov = coverage_of(&path, w, h).unwrap();
             let field = signed_distance_field(&cov, w as usize, h as usize);
-            let bmp = paint_run(run, FILL, &[ink], 0.0).unwrap();
+            let bmp = paint_run(run, FILL, &[ink], 0.0, Part::Whole).unwrap();
 
             let mut worst = 0.0f32;
             for i in 0..(w * h) as usize {
@@ -3210,6 +3306,7 @@ mod measure_tests {
                     spans,
                     Scale::ONE,
                     DEFAULT_LEADING,
+                    Part::Whole,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -3251,6 +3348,7 @@ mod measure_tests {
                     spans,
                     Scale::ONE,
                     DEFAULT_LEADING,
+                    Part::Whole,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -3275,6 +3373,7 @@ mod measure_tests {
                     BLACK,
                     &spec(),
                     -1.0,
+                    Part::Whole,
                 )
                 .unwrap();
                 agree(&m, &r);
@@ -3310,6 +3409,7 @@ mod phase_tests {
             &[],
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap()
     }
@@ -3416,6 +3516,7 @@ mod phase_tests {
             &[],
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap();
         let moved = render_vertical(
@@ -3433,6 +3534,7 @@ mod phase_tests {
             &[],
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap();
 
@@ -3474,6 +3576,7 @@ mod span_tests {
             spans,
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap()
     }
@@ -3777,6 +3880,7 @@ mod scale_tests {
             &SPANS,
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap();
         let down = render_vertical(
@@ -3794,6 +3898,7 @@ mod scale_tests {
             &SPANS,
             Scale::ONE,
             DEFAULT_LEADING,
+            Part::Whole,
         )
         .unwrap();
         assert_eq!(drew(&across), UNSCALED_HORIZONTAL);

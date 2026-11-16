@@ -9,6 +9,7 @@ import {
   type TextStackNode,
 } from '@shared/page/stack'
 import { glowOf } from '@shared/effects/glow'
+import { withTone } from '@shared/effects/tone'
 import { shownCodeOf } from '@shared/page/units'
 import { faceTree } from '@shared/page/trees'
 import { smoothingQualityFor } from '@/lib/coords'
@@ -262,7 +263,7 @@ function drawRasterGlow(ctx: OffscreenCanvasRenderingContext2D, entry: RasterLay
   const source = live?.canvas ?? paint.rasters.get(entry.file)
   const frame = live?.frame ?? entry
   if (!source || frame.w <= 0 || frame.h <= 0) return
-  const stroked = layerWithEffects(source, frame, entry.effects)
+  const stroked = layerWithEffects(source, frame, withTone(entry.effects, null))
   const halo = glowAt(stroked?.canvas ?? source, stroked?.frame ?? frame, glow, null)
   if (halo === null) return
   const place = paint.place?.(entry.id)

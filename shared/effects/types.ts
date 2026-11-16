@@ -65,7 +65,38 @@ export interface GlowEffect {
 }
 
 
-export type LayerEffect = StrokeEffect | GlowEffect
+/**
+ * What the node draws, turned into a sheet of screentone film: black dots on
+ * clear, bigger where it is darker, so a picture keeps its shading as dots the
+ * way a printed page carries it and the page shows between them. On text only
+ * the letters' fill is screened; the strokes lie over it as they were.
+ *
+ * The dots sit on a grid fixed to the page, so tone on neighbouring objects
+ * lines up and moving an object does not drag its dots along.
+ */
+export interface ToneEffect {
+  kind: 'tone'
+
+  /**
+   * Distance between neighbouring dot centres, in page pixels. Not lines per
+   * inch: a page here has no print size to measure an inch against, and what
+   * gets matched is the dots on the artwork, which are counted in its pixels.
+   */
+  spacing: number
+
+  /** The angle the rows of dots run at, in degrees. */
+  angle: number
+
+  /**
+   * How much of each cell a dot covers: `'image'` reads it from the picture,
+   * one minus its brightness, times its alpha; a number is that percent times
+   * the alpha. Through the alpha a soft brush's edge thins into smaller dots.
+   */
+  density: 'image' | number
+}
+
+
+export type LayerEffect = StrokeEffect | GlowEffect | ToneEffect
 
 
 /**
@@ -91,4 +122,16 @@ export const DEFAULT_GLOW: GlowEffect = {
   spread: 0,
   color: '#ffffffff',
   blendMode: 'screen',
+}
+
+
+/**
+ * Ten pixels between dots is 60 lines at 600 dpi, the commonest pairing in
+ * digital manga; 45 degrees is how tone is usually laid.
+ */
+export const DEFAULT_TONE: ToneEffect = {
+  kind: 'tone',
+  spacing: 10,
+  angle: 45,
+  density: 'image',
 }

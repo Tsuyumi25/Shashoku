@@ -1,9 +1,10 @@
 import type { EngineSpan } from '@shared/engine/types'
 import { parseMarkup, resolveSpans } from '@shared/page/markup'
 import { byteAt, byteOffsets } from './textProjection'
-import type { GlowEffect, LayerEffect } from '@shared/effects/types'
+import type { GlowEffect, LayerEffect, ToneEffect } from '@shared/effects/types'
 import type { TextStyle } from '@shared/text-style/types'
 import { glowOf } from '@shared/effects/glow'
+import { toneOf } from '@shared/effects/tone'
 import { engineStrokesFor } from '@shared/effects/stroke'
 import {
   catalogByFace,
@@ -14,6 +15,7 @@ import {
 } from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
 import { glowPictureHeld } from './glowPicture'
+import { tonedLabelHeld } from './tonePicture'
 import { drawnTurn, NO_FLIP, type Flip } from './flip'
 import {
   frameCenter,
@@ -154,6 +156,7 @@ function rasterFor(
   effects: readonly LayerEffect[],
   phase: Point = NO_PHASE,
   rotation = 0,
+  fillOnly = false,
 ): LabelRaster {
   if (painted.plain.length === 0) return NOTHING
 
@@ -163,7 +166,7 @@ function rasterFor(
   // would say the wrong one.
   if (!entry && !catalogLoaded.value) return NOTHING
 
-  const req = requestFor(painted, style, effects, phase, rotation)
+  const req = { ...requestFor(painted, style, effects, phase, rotation), fillOnly }
 
   if (entry) {
     try {
@@ -282,6 +285,17 @@ export interface DrawnLabel {
   plain: string
   /** The halo laid under the bitmap where it lands, or null. */
   glow: GlowEffect | null
+  /** The screentone the letters' fill is turned into where it lands, or null. */
+  tone: LabelTone | null
+}
+
+/**
+ * A label's screentone beside the fill it screens: the same bitmap with only
+ * the fill's share of each pixel, so the strokes are the whole less this.
+ */
+export interface LabelTone {
+  effect: ToneEffect
+  fill: ImageData
 }
 
 /**
@@ -306,9 +320,12 @@ export interface DrawnLabel {
  *    grid. At an angle of zero this is the first question again.
  * 3. Turned and phased, rasterized — the bitmap to draw.
  *
+ * A label carrying a screentone asks once more: the same bitmap with only the
+ * fill painted, which is what gets screened (see `LabelTone`).
+ *
  * The measures cost a fraction of a percent of a raster, so a fresh label
- * costs one rasterization however it is turned; the phase is quantised so a
- * drag adds a handful rather than one per frame.
+ * costs one rasterization however it is turned, two with a screentone; the
+ * phase is quantised so a drag adds a handful rather than one per frame.
  */
 export function drawnLabel(
   code: string,
@@ -321,6 +338,7 @@ export function drawnLabel(
   const turn = quantizeRotation(rotation)
   const painted = paintedText(code, style)
   const glow = glowOf(effects)
+  const toneEffect = toneOf(effects)
 
   const upright = measured(painted, style, effects)
   const box = labelBoxSize(style, upright)
@@ -332,13 +350,16 @@ export function drawnLabel(
   const mirror = drawing.mirror
   if (!upright) {
     const center = placeLabel(middle, box, spin).center
-    return { sample: null, missingFamily: null, box, center, mirror, plain: painted.plain, glow }
+    return { sample: null, missingFamily: null, box, center, mirror, plain: painted.plain, glow, tone: null }
   }
 
   const spun = spin === 0 ? upright : measured(painted, style, effects, spin)
   const blit = spun ? { w: spun.width, h: spun.height } : box
   const { center, phase } = placeLabel(middle, blit, spin)
-  return { ...rasterFor(painted, style, effects, phase, spin), box, center, mirror, plain: painted.plain, glow }
+  const raster = rasterFor(painted, style, effects, phase, spin)
+  const fill = toneEffect && raster.sample ? rasterFor(painted, style, effects, phase, spin, true).sample : null
+  const tone = toneEffect && fill ? { effect: toneEffect, fill: fill.image } : null
+  return { ...raster, box, center, mirror, plain: painted.plain, glow, tone }
 }
 
 /**
@@ -346,6 +367,10 @@ export function drawnLabel(
  * page's axes as `mirror` says, one pixel per pixel. The one place every
  * surface draws a label from, so the canvas, a folder's picture and the export
  * cannot come to disagree about which way round it lands.
+ *
+ * Screentone is laid where the bitmap lands, on the page's own grid, so it is
+ * worked out from where each pixel's centre falls — backwards along a mirrored
+ * axis. Only the fill is screened; the strokes lie over it as they were.
  */
 export function paintLabel(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -354,10 +379,23 @@ export function paintLabel(
 ): void {
   if (!drawn.sample) return
   const { width, height } = drawn.sample.image
+  const shown = drawn.tone
+    ? tonedLabelHeld(
+        picture,
+        drawn.tone.fill,
+        {
+          x0: drawn.center.x + drawn.mirror.x * (0.5 - width / 2),
+          y0: drawn.center.y + drawn.mirror.y * (0.5 - height / 2),
+          dx: drawn.mirror.x,
+          dy: drawn.mirror.y,
+        },
+        drawn.tone.effect,
+      )
+    : picture
   ctx.save()
   ctx.translate(drawn.center.x, drawn.center.y)
   ctx.scale(drawn.mirror.x, drawn.mirror.y)
-  ctx.drawImage(picture, -width / 2, -height / 2)
+  ctx.drawImage(shown, -width / 2, -height / 2)
   ctx.restore()
 }
 

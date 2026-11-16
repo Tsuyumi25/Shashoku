@@ -1,5 +1,5 @@
 import { BLEND_MODE_ALLOWLIST, PASS_THROUGH } from '../page/types'
-import type { GlowEffect, LayerEffect, StrokeEffect, StrokePosition } from './types'
+import type { GlowEffect, LayerEffect, StrokeEffect, StrokePosition, ToneEffect } from './types'
 
 type Fail = (message: string) => never
 
@@ -44,11 +44,21 @@ function parseGlowEffect(v: Record<string, unknown>, at: string, fail: Fail): Gl
   return { kind: 'glow', size, spread, color, blendMode }
 }
 
+function parseToneEffect(v: Record<string, unknown>, at: string, fail: Fail): ToneEffect {
+  const { spacing, angle, density } = v
+  if (typeof spacing !== 'number' || !Number.isFinite(spacing) || spacing <= 0) fail(`${at}.spacing 必須是正數`)
+  if (typeof angle !== 'number' || !Number.isFinite(angle)) fail(`${at}.angle 必須是數字`)
+  if (density !== 'image' && !(typeof density === 'number' && density >= 0 && density <= 100))
+    fail(`${at}.density 必須是 'image' 或 0 到 100 之間的數字`)
+  return { kind: 'tone', spacing, angle, density }
+}
+
 function parseLayerEffect(v: unknown, at: string, fail: Fail): LayerEffect {
   if (!isRecord(v)) fail(`${at} 必須是物件`)
   const { kind } = v
   if (kind === 'stroke') return parseStrokeEffect(v, at, fail)
   if (kind === 'glow') return parseGlowEffect(v, at, fail)
+  if (kind === 'tone') return parseToneEffect(v, at, fail)
   fail(`${at}.kind 未知效果類型 '${String(kind)}'`)
 }
 
@@ -58,6 +68,7 @@ export function parseEffects(v: unknown, at: string, fail: Fail): LayerEffect[] 
   if (!Array.isArray(v)) fail(`${at} 必須是陣列`)
   const effects = v.map((e, i) => parseLayerEffect(e, `${at}[${i}]`, fail))
   if (effects.filter((e) => e.kind === 'glow').length > 1) fail(`${at} 最多只能有一個光暈`)
+  if (effects.filter((e) => e.kind === 'tone').length > 1) fail(`${at} 最多只能有一個網點`)
   return effects
 }
 
@@ -69,6 +80,7 @@ function serializeLayerEffect(e: LayerEffect): Record<string, unknown> {
   }
   if (e.kind === 'glow')
     return { kind: 'glow', size: e.size, spread: e.spread, color: e.color, blendMode: e.blendMode }
+  if (e.kind === 'tone') return { kind: 'tone', spacing: e.spacing, angle: e.angle, density: e.density }
   throw new Error(`unknown layer effect kind: ${(e as { kind: string }).kind}`)
 }
 

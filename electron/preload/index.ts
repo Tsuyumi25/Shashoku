@@ -95,6 +95,7 @@ const engineApi: ShashokuEngineApi = {
     scaleX,
     scaleY,
     leading,
+    fillOnly,
   ) =>
     engine.renderText(
       font,
@@ -112,6 +113,7 @@ const engineApi: ShashokuEngineApi = {
       scaleX,
       scaleY,
       leading,
+      fillOnly,
     ),
   renderVertical: (
     font,
@@ -129,6 +131,7 @@ const engineApi: ShashokuEngineApi = {
     scaleX,
     scaleY,
     leading,
+    fillOnly,
   ) =>
     engine.renderVertical(
       font,
@@ -146,6 +149,7 @@ const engineApi: ShashokuEngineApi = {
       scaleX,
       scaleY,
       leading,
+      fillOnly,
     ),
   renderNotdef: (
     text,
@@ -159,6 +163,7 @@ const engineApi: ShashokuEngineApi = {
     phaseY,
     align,
     weightPx,
+    fillOnly,
   ) =>
     engine.renderNotdef(
       text,
@@ -172,6 +177,7 @@ const engineApi: ShashokuEngineApi = {
       phaseY,
       align,
       weightPx,
+      fillOnly,
     ),
   measureText: (
     font,

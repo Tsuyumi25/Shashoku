@@ -59,6 +59,8 @@ export interface SampleRequest {
   scaleY?: number
   /** Line pitch as a multiple of the size; moves lines, so part of both identities too. */
   leading?: number
+  /** Only the fill's share, the strokes measured as if it were there; a different picture, so keyed. */
+  fillOnly?: boolean
 }
 
 export interface Sample {
@@ -193,6 +195,7 @@ function keyOf(req: SampleRequest): string {
     req.weightPx ?? 0,
     `${req.scaleX ?? 1},${req.scaleY ?? 1},${req.leading ?? 1.2}`,
     spansKey(req.spans, true),
+    req.fillOnly ? 'fill' : 'whole',
     req.text,
   ].join('|')
 }
@@ -236,6 +239,7 @@ function rasterize(req: SampleRequest): Sample {
       req.phaseY,
       req.align,
       req.weightPx,
+      req.fillOnly,
     )
     // No marks: coverage is a question about a face, and there is no face.
     return {
@@ -266,6 +270,7 @@ function rasterize(req: SampleRequest): Sample {
         req.scaleX,
         req.scaleY,
         req.leading,
+        req.fillOnly,
       )
     : window.engine.renderText(
         drawWith,
@@ -283,6 +288,7 @@ function rasterize(req: SampleRequest): Sample {
         req.scaleX,
         req.scaleY,
         req.leading,
+        req.fillOnly,
       )
 
   const missing = new Set(uncovered)

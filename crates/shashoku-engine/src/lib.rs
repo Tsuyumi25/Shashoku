@@ -274,6 +274,14 @@ fn fill_from_opt(fill: Option<String>) -> napi::Result<render::Rgba> {
 /// A real number, not a flag. Rounding a phase to some number of steps keeps a
 /// bitmap cache finite, which is the caller's problem and the caller's constant
 /// to choose — putting it here would freeze one answer into the surface.
+fn part_from_opt(fill_only: Option<bool>) -> render::Part {
+    if fill_only == Some(true) {
+        render::Part::Fill
+    } else {
+        render::Part::Whole
+    }
+}
+
 fn phase_from_opt(x: Option<f64>, y: Option<f64>) -> Phase {
     Phase {
         x: x.unwrap_or(0.0) as f32,
@@ -412,6 +420,9 @@ pub fn render_text(
     scale_y: Option<f64>,
     // Line pitch as a multiple of the size; 1.2 when absent.
     leading: Option<f64>,
+    // Only the fill's share of each pixel, the strokes still measured as though
+    // it were there: the whole less this is the strokes.
+    fill_only: Option<bool>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -431,6 +442,7 @@ pub fn render_text(
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
         leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
+        part_from_opt(fill_only),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -992,6 +1004,9 @@ pub fn render_vertical(
     scale_y: Option<f64>,
     // Line pitch as a multiple of the size; 1.2 when absent.
     leading: Option<f64>,
+    // Only the fill's share of each pixel, the strokes still measured as though
+    // it were there: the whole less this is the strokes.
+    fill_only: Option<bool>,
 ) -> napi::Result<TextBitmap> {
     let (data, face_index) = resolve_font(font)?;
     let fill = fill_from_opt(fill_color)?;
@@ -1011,6 +1026,7 @@ pub fn render_vertical(
         &spans_to_styles(spans)?,
         scale_from_opt(scale_x, scale_y),
         leading.map_or(render::DEFAULT_LEADING, |l| l as f32),
+        part_from_opt(fill_only),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {
@@ -1085,6 +1101,9 @@ pub fn render_notdef(
     // Moves the fill's own edge, in pixels, positive outward. Thins the
     // strokes when negative, which is the direction a large size needs.
     weight_px: Option<f64>,
+    // Only the fill's share of each pixel, the strokes still measured as though
+    // it were there: the whole less this is the strokes.
+    fill_only: Option<bool>,
 ) -> napi::Result<TextBitmap> {
     let fill = fill_from_opt(fill_color)?;
     let strokes = stroke_inputs_to_specs(strokes.unwrap_or_default())?;
@@ -1099,6 +1118,7 @@ pub fn render_notdef(
         fill,
         &strokes,
         weight_px.unwrap_or(0.0) as f32,
+        part_from_opt(fill_only),
     )
     .map_err(napi::Error::from_reason)?;
     Ok(TextBitmap {

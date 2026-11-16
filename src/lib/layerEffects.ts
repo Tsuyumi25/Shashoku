@@ -1,8 +1,10 @@
-import type { GlowEffect, LayerEffect } from '@shared/effects/types'
+import type { GlowEffect, LayerEffect, ToneEffect } from '@shared/effects/types'
 import type { EngineStrokeSpec } from '@shared/engine/types'
 import { glowOf, glowReach } from '@shared/effects/glow'
 import { engineStrokesFor } from '@shared/effects/stroke'
+import { toneOf, withTone } from '@shared/effects/tone'
 import { glowPictureHeld } from '@/lib/glowPicture'
+import { tonePicture } from '@/lib/tonePicture'
 
 /** A rectangle on the page, which is what a raster layer occupies. */
 export interface Frame {
@@ -46,11 +48,12 @@ function marginFor(effects: readonly LayerEffect[]): number {
 
 /** Whether anything in the list draws, so a layer carrying it needs a picture of its own. */
 export function effectsDraw(effects: readonly LayerEffect[]): boolean {
-  return engineStrokesFor(effects).length > 0 || glowReach(glowOf(effects)) > 0
+  return engineStrokesFor(effects).length > 0 || glowReach(glowOf(effects)) > 0 || toneOf(effects) !== null
 }
 
 /**
- * One layer as it is drawn once its strokes are on, or null when it has none.
+ * One layer as it is drawn once its strokes and its screentone are on, or null
+ * when it has neither.
  *
  * Null rather than a copy of the source in the ordinary case, so a page of
  * plain layers costs nothing and the caller keeps drawing the bitmap it already
@@ -62,8 +65,9 @@ export function effectsDraw(effects: readonly LayerEffect[]): boolean {
  * the thumbnail alike — and going through the engine is what keeps it the same
  * band a text object gets rather than a second implementation of one.
  *
- * The halo is not here: a raster's halo is a stack node of its own, so that its
- * blend mode reaches the page. See `GlowStackNode`.
+ * Screentone comes last, over the strokes too, on the page's grid. The halo is
+ * not here: a raster's halo is a stack node of its own, so that its blend mode
+ * reaches the page. See `GlowStackNode`.
  */
 export function layerWithEffects(
   source: CanvasImageSource,
@@ -71,28 +75,39 @@ export function layerWithEffects(
   effects: readonly LayerEffect[],
 ): EffectedLayer | null {
   const strokes = engineStrokesFor(effects)
-  if (strokes.length === 0) return null
+  const tone = toneOf(effects)
+  if (strokes.length === 0 && tone === null) return null
   if (frame.w <= 0 || frame.h <= 0) return null
 
   const margin = effectMargin(strokes)
   const w = frame.w + margin * 2
   const h = frame.h + margin * 2
+  const at = { x: frame.x - margin, y: frame.y - margin, w, h }
 
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable')
   ctx.drawImage(source, margin, margin, frame.w, frame.h)
 
-  const before = ctx.getImageData(0, 0, w, h)
-  const after = window.engine.strokeLayer(
-    new Uint8Array(before.data.buffer.slice(0)),
-    w,
-    h,
-    strokes,
-  )
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(after), w, h), 0, 0)
+  if (strokes.length > 0) {
+    const before = ctx.getImageData(0, 0, w, h)
+    const after = window.engine.strokeLayer(
+      new Uint8Array(before.data.buffer.slice(0)),
+      w,
+      h,
+      strokes,
+    )
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(after), w, h), 0, 0)
+  }
 
-  return { canvas, frame: { x: frame.x - margin, y: frame.y - margin, w, h } }
+  const stroked = { canvas, frame: at }
+  return tone === null ? stroked : screened(canvas, at, tone)
+}
+
+/** A picture already placed on the page, turned into screentone on the page's grid. */
+function screened(canvas: CanvasImageSource, frame: Frame, tone: ToneEffect): EffectedLayer {
+  const grid = { x0: frame.x + 0.5, y0: frame.y + 0.5, dx: 1, dy: 1 } as const
+  return { canvas: tonePicture(canvas, frame.w, frame.h, grid, tone), frame }
 }
 
 /**
@@ -119,6 +134,14 @@ export function glowAt(
   }
 }
 
+/** A layer's picture twice over: with its strokes on, and as drawn. */
+export interface HeldLayer {
+  /** Before any screentone, which is what a halo grows from; null with no strokes. */
+  stroked: EffectedLayer | null
+  /** Strokes and screentone on; null when the layer draws its own bitmap. */
+  shown: EffectedLayer | null
+}
+
 /**
  * `layerWithEffects`, kept against the source it was grown from until the
  * frame, the effects or `version` changes. A canvas written in place keeps its
@@ -129,16 +152,22 @@ export function layerWithEffectsHeld(
   frame: Frame,
   effects: readonly LayerEffect[],
   version: number,
-): EffectedLayer | null {
+): HeldLayer {
   const key = `${frame.x},${frame.y},${frame.w},${frame.h}|${version}|${JSON.stringify(effects)}`
   const held = effectedBySource.get(source)
-  if (held?.key === key) return held.effected
-  const effected = layerWithEffects(source, frame, effects)
-  effectedBySource.set(source, { key, effected })
-  return effected
+  if (held?.key === key) return held.layer
+  const stroked = layerWithEffects(source, frame, withTone(effects, null))
+  const tone = toneOf(effects)
+  const shown =
+    tone === null || frame.w <= 0 || frame.h <= 0
+      ? stroked
+      : screened(stroked?.canvas ?? source, stroked?.frame ?? frame, tone)
+  const layer = { stroked, shown }
+  effectedBySource.set(source, { key, layer })
+  return layer
 }
 
-const effectedBySource = new WeakMap<CanvasImageSource, { key: string; effected: EffectedLayer | null }>()
+const effectedBySource = new WeakMap<CanvasImageSource, { key: string; layer: HeldLayer }>()
 
 /** The smallest rectangle holding every pixel with any alpha, or null when none has. */
 export function alphaBounds(rgba: Uint8ClampedArray, width: number, height: number): Frame | null {
@@ -183,10 +212,12 @@ export function pictureWithEffects(
   const cut = content.getContext('2d')
   if (!cut) throw new Error('OffscreenCanvas 2d context unavailable')
   cut.drawImage(picture, -bounds.x, -bounds.y)
-  const stroked = layerWithEffects(content, bounds, effects) ?? { canvas: content, frame: bounds }
+  const stroked = layerWithEffects(content, bounds, withTone(effects, null)) ?? { canvas: content, frame: bounds }
+  const tone = toneOf(effects)
+  const shown = tone === null ? stroked : screened(stroked.canvas, stroked.frame, tone)
   const glow = glowOf(effects)
   const halo = glow === null ? null : glowAt(stroked.canvas, stroked.frame, glow, null)
-  if (halo === null) return stroked
+  if (halo === null) return shown
 
   // A folder is already one picture, so its halo goes inside it and blends as
   // that picture does.
@@ -194,7 +225,7 @@ export function pictureWithEffects(
   const litCtx = lit.getContext('2d')
   if (!litCtx) throw new Error('OffscreenCanvas 2d context unavailable')
   litCtx.drawImage(halo.canvas, 0, 0)
-  litCtx.drawImage(stroked.canvas, stroked.frame.x - halo.frame.x, stroked.frame.y - halo.frame.y)
+  litCtx.drawImage(shown.canvas, shown.frame.x - halo.frame.x, shown.frame.y - halo.frame.y)
   return { canvas: lit, frame: halo.frame }
 }
 

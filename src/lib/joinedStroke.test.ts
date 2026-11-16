@@ -36,6 +36,7 @@ function label(
     mirror,
     plain: '',
     glow: null,
+    tone: null,
   }
 }
 

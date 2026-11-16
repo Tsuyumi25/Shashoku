@@ -9,6 +9,7 @@ import type { TextSide } from './text'
 import { isOnView } from './units'
 import { engineStrokesFor } from '../effects/stroke'
 import { glowOf, glowReach } from '../effects/glow'
+import { toneOf } from '../effects/tone'
 
 /**
  * How a page stacks, answered once.
@@ -71,15 +72,16 @@ function glowNodeOf(entry: RasterLayerEntry | TextLayerEntry): GlowStackNode | n
  * Whether a folder costs a buffer. Pass-through at full opacity with nothing
  * grown from its edge is the one case that does not, which is why it is the
  * default a new folder gets: an ordinary folder is pure containment and should
- * cost nothing to draw. A stroke or a halo is grown from the contents as one
- * picture, so it needs that picture as much as an opacity does.
+ * cost nothing to draw. A stroke, a halo or a screentone is made from the
+ * contents as one picture, so it needs that picture as much as an opacity does.
  */
 function needsBuffer(folder: GroupLayerEntry): boolean {
   return (
     folder.blendMode !== PASS_THROUGH ||
     folder.opacity !== 1 ||
     engineStrokesFor(folder.effects).length > 0 ||
-    glowReach(glowOf(folder.effects)) > 0
+    glowReach(glowOf(folder.effects)) > 0 ||
+    toneOf(folder.effects) !== null
   )
 }
 

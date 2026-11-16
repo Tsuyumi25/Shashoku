@@ -15,6 +15,7 @@ function label(mirror: DrawnLabel['mirror']): DrawnLabel {
     mirror,
     plain: '',
     glow: null,
+    tone: null,
   }
 }
 

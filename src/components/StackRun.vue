@@ -12,7 +12,7 @@ import { applyViewTransform, type ViewTransform } from '@/lib/coords'
 import { paintPieces } from '@/lib/explode/pieces'
 import { sampleSource } from '@/lib/fontSampleCache'
 import { paintLabel, paintLabelGlow, type DrawnLabel } from '@/lib/labelRaster'
-import { glowAt, layerWithEffectsHeld, type EffectedLayer } from '@/lib/layerEffects'
+import { glowAt, layerWithEffectsHeld, type HeldLayer } from '@/lib/layerEffects'
 import { applyPlacement, type LayerPlacement } from '@/lib/layerTransform'
 import type { GlowStackNode, RasterStackNode } from '@shared/page/stack'
 import { glowOf } from '@shared/effects/glow'
@@ -103,7 +103,7 @@ function drawRaster(ctx: CanvasRenderingContext2D, node: RasterStackNode): void 
 
   // The band reaches past the layer, so what is drawn and where both grow. A
   // layer carrying no effects has none of this and draws its own bitmap.
-  const effected = effectedRasters.value.get(node.entry.id) ?? null
+  const effected = effectedRasters.value.get(node.entry.id)?.shown ?? null
   const picture = effected?.canvas ?? source
   const { w, h } = effected?.frame ?? { w: fw, h: fh }
 
@@ -111,6 +111,7 @@ function drawRaster(ctx: CanvasRenderingContext2D, node: RasterStackNode): void 
     // Around the layer's own middle, and undone afterwards so a preview can
     // never leak onto whatever else this canvas holds.
     ctx.save()
+    // HACK: the screened picture is moved whole, so tone dots ride with a placement until it lands.
     applyPlacement(ctx, node.entry, props.place, { x: 0, y: 0 })
     // The placement is the layer's, so a band drawn under it has to be put back
     // where it sits relative to the layer's own corner.
@@ -140,15 +141,14 @@ const effectedRasters = computed(() => {
   // file or from the hand.
   void props.bitmaps.revision.value
   void raster.revision
-  const out = new Map<string, EffectedLayer>()
+  const out = new Map<string, HeldLayer>()
   for (const node of props.nodes) {
     if (node.entry.kind !== 'raster' || node.entry.effects.length === 0) continue
     const live = raster.liveLayer(node.entry.id)
     const source = live?.canvas ?? props.bitmaps.get(node.entry.file)
     if (!source) continue
     const frame = live?.frame ?? node.entry
-    const effected = layerWithEffectsHeld(source, frame, node.entry.effects, raster.writesTo(node.entry.id))
-    if (effected) out.set(node.entry.id, effected)
+    out.set(node.entry.id, layerWithEffectsHeld(source, frame, node.entry.effects, raster.writesTo(node.entry.id)))
   }
   return out
 })
@@ -277,7 +277,7 @@ function drawGlow(ctx: CanvasRenderingContext2D, node: GlowStackNode) {
   const source = live?.canvas ?? props.bitmaps.get(entry.file)
   const frame = live?.frame ?? entry
   if (!source || frame.w <= 0 || frame.h <= 0) return
-  const stroked = effectedRasters.value.get(entry.id) ?? null
+  const stroked = effectedRasters.value.get(entry.id)?.stroked ?? null
   const halo = glowAt(stroked?.canvas ?? source, stroked?.frame ?? frame, glow, raster.writesTo(entry.id))
   if (halo === null) return
   if (props.place) {

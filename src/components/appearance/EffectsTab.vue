@@ -15,6 +15,20 @@
       >
         光暈{{ glowState === 'mixed' ? '（部分）' : '' }}
       </button>
+      <button
+        type="button"
+        class="h-6 rounded border px-2"
+        :class="
+          toneState === 'off'
+            ? 'border-input text-muted-foreground hover:border-primary hover:text-foreground'
+            : 'border-primary text-foreground'
+        "
+        :aria-pressed="toneState === 'on' ? 'true' : toneState === 'mixed' ? 'mixed' : 'false'"
+        :title="toneState === 'mixed' ? '網點：選取裡有的有、有的沒有，按一下全部打開' : '網點'"
+        @click="toggleTone"
+      >
+        網點{{ toneState === 'mixed' ? '（部分）' : '' }}
+      </button>
     </div>
 
     <div v-if="glowState !== 'off'" class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1.5 border-t border-border pt-2">
@@ -59,14 +73,17 @@
       />
       <span class="text-muted-foreground">px</span>
     </div>
+
+    <ToneSettings v-if="toneState !== 'off'" :targets="targets" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { GlowEffect, LayerEffect } from '@shared/effects/types'
-import { DEFAULT_GLOW } from '@shared/effects/types'
+import { DEFAULT_GLOW, DEFAULT_TONE } from '@shared/effects/types'
 import { glowOf, withGlow } from '@shared/effects/glow'
+import { toneOf, withTone } from '@shared/effects/tone'
 import { BLEND_MODE_ALLOWLIST, PASS_THROUGH } from '@shared/page/types'
 import ColorField from '@/components/ColorField.vue'
 import NumberStepper from '@/components/NumberStepper.vue'
@@ -74,6 +91,7 @@ import type { AppearanceTarget } from '@/lib/appearance'
 import { MIXED_TEXT } from '@/lib/appearanceText'
 import { BLEND_LABELS } from '@/lib/blendLabels'
 import { useEditorStore } from '@/stores/editorStore'
+import ToneSettings from './ToneSettings.vue'
 
 /**
  * The effects that are not part of every label: switched on from the row of
@@ -125,5 +143,18 @@ function glowEdit(patch: Partial<Omit<GlowEffect, 'kind'>>) {
     const glow = glowOf(effects)
     return glow === null ? [...effects] : withGlow(effects, { ...glow, ...patch })
   }
+}
+
+const toneState = computed<'on' | 'off' | 'mixed'>(() => {
+  const on = props.targets.filter((t) => toneOf(t.entry.effects) !== null).length
+  if (on === 0) return 'off'
+  return on === props.targets.length ? 'on' : 'mixed'
+})
+
+function toggleTone() {
+  const turnOn = toneState.value !== 'on'
+  editor.cmdEditEffectsEach(props.targets, (effects) =>
+    withTone(effects, turnOn ? (toneOf(effects) ?? { ...DEFAULT_TONE }) : null),
+  )
 }
 </script>

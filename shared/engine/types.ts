@@ -295,6 +295,10 @@ export interface ShashokuEngineApi {
    * `leading` is how far apart lines sit, baseline to baseline, or columns
    * sit, centre to centre, as a multiple of the largest size in the line —
    * Photoshop's leading. Absent is 1.2.
+   *
+   * `fillOnly` paints only the fill's share of each pixel, the strokes still
+   * measured as though it were there. The whole bitmap less this one, in
+   * premultiplied terms, is the strokes alone.
    */
   renderText(
     font: EngineFontSource,
@@ -312,6 +316,7 @@ export interface ShashokuEngineApi {
     scaleX?: number,
     scaleY?: number,
     leading?: number,
+    fillOnly?: boolean,
   ): EngineBitmap;
   renderVertical(
     font: EngineFontSource,
@@ -329,6 +334,7 @@ export interface ShashokuEngineApi {
     scaleX?: number,
     scaleY?: number,
     leading?: number,
+    fillOnly?: boolean,
   ): EngineBitmap;
   /**
    * The render call stopped where painting would start. Takes only the
@@ -396,6 +402,7 @@ export interface ShashokuEngineApi {
     phaseY?: number,
     align?: TextAlign,
     weightPx?: number,
+    fillOnly?: boolean,
   ): EngineBitmap;
   measureNotdef(
     text: string,
