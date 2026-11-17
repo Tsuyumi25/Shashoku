@@ -259,3 +259,18 @@ describe("font groups", () => {
   });
 });
 
+
+describe("the floating effects panel", () => {
+  it("comes back open or shut, where it was left", () => {
+    for (const open of [true, false]) {
+      const prefs = defaultPreferences();
+      prefs.effectsPanel = { open, x: 812, y: 140 };
+      expect(parsePreferences(serializePreferences(prefs)).effectsPanel).toEqual({ open, x: 812, y: 140 });
+    }
+  });
+
+  it("is unplaced in a file that never mentioned it, or mentioned it badly", () => {
+    expect(parsePreferences("{}").effectsPanel).toBeNull();
+    expect(parsePreferences(JSON.stringify({ effectsPanel: { open: true, x: "left", y: 0 } })).effectsPanel).toBeNull();
+  });
+});

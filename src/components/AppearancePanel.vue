@@ -9,26 +9,22 @@
         其中有不在目前頁面的物件
       </p>
 
-      <EffectsTab v-if="tab === 'effects'" :targets="targets" />
+      <CommonAppearance :targets="targets" />
 
-      <template v-else>
-        <CommonAppearance :targets="targets" />
+      <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[11px] text-muted-foreground/60">
+        選取的種類不同,只有共通的能一起調
+      </div>
 
-        <div v-if="kind === 'mixed'" class="mt-2 px-0.5 text-[11px] text-muted-foreground/60">
-          選取的種類不同,只有共通的能一起調
-        </div>
+      <div v-else-if="kind === 'text'" class="mt-2 border-t border-border pt-2">
+        <TextAppearance :targets="textTargets" />
+      </div>
 
-        <div v-else-if="kind === 'text'" class="mt-2 border-t border-border pt-2">
-          <TextAppearance :targets="textTargets" />
-        </div>
-
-        <div
-          v-else-if="kind === 'raster' || kind === 'group'"
-          class="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 border-t border-border pt-2 text-xs"
-        >
-          <EffectsAppearance :targets="kind === 'raster' ? rasterTargets : targets" />
-        </div>
-      </template>
+      <div
+        v-else-if="kind === 'raster' || kind === 'group'"
+        class="mt-2 grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 border-t border-border pt-2 text-xs"
+      >
+        <EffectsAppearance :targets="kind === 'raster' ? rasterTargets : targets" />
+      </div>
     </template>
 
     <p v-else class="px-0.5 text-xs text-muted-foreground">未選取物件</p>
@@ -40,7 +36,6 @@ import { computed } from 'vue'
 import type { RasterLayerEntry, TextLayerEntry } from '@shared/page/types'
 import CommonAppearance from '@/components/appearance/CommonAppearance.vue'
 import EffectsAppearance from '@/components/appearance/EffectsAppearance.vue'
-import EffectsTab from '@/components/appearance/EffectsTab.vue'
 import TextAppearance from '@/components/appearance/TextAppearance.vue'
 import type { AppearanceTarget } from '@/lib/appearance'
 import { scopeText } from '@/lib/appearanceText'
@@ -65,9 +60,6 @@ import { useEditorStore } from '@/stores/editorStore'
  * under the hand.
  */
 const editor = useEditorStore()
-
-/** Which of the two tabs the column above is showing. */
-defineProps<{ tab: 'appearance' | 'effects' }>()
 
 const targets = computed(() => editor.selectedNodes())
 const kind = computed(() => editor.appearanceKind)

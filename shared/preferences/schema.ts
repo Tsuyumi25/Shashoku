@@ -82,6 +82,7 @@ export function parsePreferences(raw: string): Preferences {
     favorites,
     panelLayout,
     sidePanel,
+    effectsPanel,
     undoPixelSteps,
     undoPixelBytes,
     ocr,
@@ -206,6 +207,16 @@ export function parsePreferences(raw: string): Preferences {
   if (sidePanel === "layers" || sidePanel === "labels") {
     prefs.sidePanel = sidePanel;
   }
+  if (
+    isRecord(effectsPanel) &&
+    typeof effectsPanel.open === "boolean" &&
+    typeof effectsPanel.x === "number" &&
+    Number.isFinite(effectsPanel.x) &&
+    typeof effectsPanel.y === "number" &&
+    Number.isFinite(effectsPanel.y)
+  ) {
+    prefs.effectsPanel = { open: effectsPanel.open, x: effectsPanel.x, y: effectsPanel.y };
+  }
   // Floored rather than range-checked at the top: a ceiling somebody wants to
   // be enormous is their business, and one small enough to hold nothing is the
   // only setting that would break undo outright.
@@ -306,6 +317,7 @@ export function serializePreferences(prefs: Preferences): string {
       favorites: prefs.favorites,
       panelLayout: prefs.panelLayout,
       sidePanel: prefs.sidePanel,
+      effectsPanel: prefs.effectsPanel,
       undoPixelSteps: prefs.undoPixelSteps,
       undoPixelBytes: prefs.undoPixelBytes,
       ocr: prefs.ocr,

@@ -243,6 +243,15 @@ export const usePreferencesStore = defineStore('preferences', () => {
     prefs.wandSamplesAll = on
   }
 
+  /** Opened where it was last left, or at `fallback` the first time. */
+  function setEffectsPanelOpen(open: boolean, fallback: { x: number; y: number }) {
+    prefs.effectsPanel = { ...(prefs.effectsPanel ?? fallback), open }
+  }
+
+  function placeEffectsPanel(x: number, y: number) {
+    prefs.effectsPanel = { open: prefs.effectsPanel?.open ?? true, x, y }
+  }
+
   function setRulersShown(on: boolean) {
     prefs.rulersShown = on
   }
@@ -305,6 +314,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMarkMissingGlyphs,
     setRemoveEachStroke,
     setWandSamplesAll,
+    setEffectsPanelOpen,
+    placeEffectsPanel,
     setRulersShown,
     setSidePanel,
     setRetouchOpacity,

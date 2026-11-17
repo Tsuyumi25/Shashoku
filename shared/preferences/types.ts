@@ -28,6 +28,13 @@ export type MissingGlyphMode = "hide" | "tofu";
  */
 export type SidePanel = "layers" | "labels";
 
+/** A panel that floats over the window and is put back where it was left. */
+export interface FloatingPanel {
+  open: boolean;
+  x: number;
+  y: number;
+}
+
 /**
  * How far pixel history reaches, as a floor in steps and a ceiling in bytes.
  *
@@ -215,6 +222,11 @@ export interface Preferences {
    */
   sidePanel: SidePanel;
   /**
+   * The floating effects panel: whether it was open, and where its corner sat
+   * in the window, in CSS pixels. Null until it has first been placed.
+   */
+  effectsPanel: FloatingPanel | null;
+  /**
    * How many pixel steps are kept whatever they weigh. The floor wins over the
    * ceiling, so this is what "you can always go back at least this far" means.
    */
@@ -277,6 +289,7 @@ export function defaultPreferences(): Preferences {
     panelLayout: {},
     // The reading, because a page is framed and typed before it is stacked.
     sidePanel: "labels",
+    effectsPanel: null,
     // Provisional on both counts — see MIN_UNDO_PIXEL_STEPS above. Ten steps is
     // enough to back out of a mistaken sequence; half a gigabyte is under what
     // one full-page layer at the largest page would cost twice over, so the

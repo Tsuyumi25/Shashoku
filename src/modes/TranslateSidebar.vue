@@ -12,51 +12,49 @@
     <ResizeHandle vertical />
 
     <SplitterPanel :order="2" :default-size="82" :min-size="20" class="flex min-h-0 flex-col">
-      <div class="flex h-7 shrink-0 items-stretch border-b border-border text-xs select-none" role="tablist">
+      <div class="flex h-7 shrink-0 items-center border-b border-border pl-2 pr-1 text-xs select-none">
+        <span class="font-medium text-foreground">外觀</span>
         <button
-          v-for="t in TABS"
-          :key="t.tab"
           type="button"
-          role="tab"
-          class="border-b-2 px-2 transition-colors"
+          class="ml-auto h-5 rounded border px-2 transition-colors"
           :class="
-            tab === t.tab
-              ? 'border-primary font-medium text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+            effectsOpen
+              ? 'border-primary text-foreground'
+              : 'border-input text-muted-foreground hover:border-primary hover:text-foreground'
           "
-          :aria-selected="tab === t.tab"
-          @click="tab = t.tab"
+          :aria-pressed="effectsOpen"
+          title="光暈、網點這些特效，放在可以拖到任何地方的浮動面板裡"
+          @click="toggleEffects"
         >
-          {{ t.label }}
+          特效
         </button>
       </div>
-      <AppearancePanel class="min-h-0 flex-1" :tab="tab" />
+      <AppearancePanel class="min-h-0 flex-1" />
     </SplitterPanel>
   </SplitterGroup>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
+import { useWindowSize } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import AppearancePanel from '@/components/AppearancePanel.vue'
 import ResizeHandle from '@/components/ResizeHandle.vue'
+import { firstEffectsPanelPlace } from '@/lib/effectsPanel'
 import ToolBoard from '@/modes/ToolBoard.vue'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 
 /**
  * The verbs on top and what the selection looks like under them, the line
- * between them where the reader wants it.
+ * between them where the reader wants it. The effects a label only sometimes
+ * wants float in a panel of their own, opened from the appearance heading.
  */
 const preferences = usePreferencesStore()
+const { width: windowW } = useWindowSize()
 
-/**
- * The colour, weight and strokes every label is set with stay in front; the
- * effects a label only sometimes wants wait one tab over.
- */
-const TABS = [
-  { tab: 'appearance', label: '外觀' },
-  { tab: 'effects', label: '特效' },
-] as const
+const effectsOpen = computed(() => preferences.prefs.effectsPanel?.open === true)
 
-const tab = ref<(typeof TABS)[number]['tab']>('appearance')
+function toggleEffects() {
+  preferences.setEffectsPanelOpen(!effectsOpen.value, firstEffectsPanelPlace(windowW.value))
+}
 </script>

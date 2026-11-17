@@ -103,6 +103,7 @@
     <SettingsPopup />
     <PageManager />
     <NewProjectDialog />
+    <EffectsPanel v-if="ui.view === 'editor'" />
   </div>
 </template>
 
@@ -111,6 +112,7 @@ import { watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { SplitterGroup, SplitterPanel } from 'reka-ui'
 import ActionSearchProbe from '@/components/ActionSearchProbe.vue'
+import EffectsPanel from '@/components/EffectsPanel.vue'
 import ExportPanel from '@/components/ExportPanel.vue'
 import ExportPreview from '@/components/ExportPreview.vue'
 import LibraryTabs from '@/components/materials/LibraryTabs.vue'
