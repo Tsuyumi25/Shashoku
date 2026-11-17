@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ToneEffect } from '@shared/effects/types'
-import { screenPixels, type PageGrid } from './tonePicture'
+import { drawnTurn, type Flip } from './flip'
+import { labelToneGrid, pageGrid, screenPixels, type PlacedLabel, type SheetGrid } from './tonePicture'
 
 const SIDE = 120
-const GRID: PageGrid = { x0: 0.5, y0: 0.5, dx: 1, dy: 1 }
+const GRID: SheetGrid = pageGrid(0, 0)
 const TONE: ToneEffect = { kind: 'tone', spacing: 8, angle: 45, density: 'image' }
 
 /** A square of one colour, straight RGBA. */
@@ -73,5 +74,63 @@ describe('a label with its fill screened', () => {
     screenPixels(fill, out, fill, SIDE, SIDE, GRID, TONE)
     expect(meanAlpha(out)).toBeCloseTo(0.5, 1)
     for (let i = 0; i < out.length; i += 4) expect(out[i]).toBe(0)
+  })
+})
+
+describe('screentone on a text object', () => {
+  /** A grey square label placed with its anchor, screened as `paintLabel` would. */
+  function screenedAt(label: PlacedLabel, origin: { x: number; y: number }): Uint8ClampedArray {
+    const fill = flat(128, 128, 128, 255)
+    const out = fill.slice()
+    screenPixels(fill, out, fill, SIDE, SIDE, labelToneGrid(label, origin), TONE)
+    return out
+  }
+
+  it('carries its dots along when the object moves, like a sheet stuck to it', () => {
+    const here: PlacedLabel = { center: { x: 200.5, y: 150.5 }, mirror: { x: 1, y: 1 }, spin: 0, width: SIDE, height: SIDE }
+    const moved: PlacedLabel = { ...here, center: { x: 213.5, y: 156.5 } }
+    expect(screenedAt(moved, { x: 193, y: 146 })).toEqual(screenedAt(here, { x: 180, y: 140 }))
+  })
+
+  it('keeps every point of the letters under the same ink however the object is turned or flipped', () => {
+    const origin = { x: 300, y: 200 }
+    /** Where the frame's centre sits from the stored point, before turning and flipping. */
+    const offset = { x: 7, y: 3 }
+    const upright = screenedAt(
+      { center: { x: origin.x + offset.x, y: origin.y + offset.y }, mirror: { x: 1, y: 1 }, spin: 0, width: SIDE, height: SIDE },
+      origin,
+    )
+
+    const cases: [number, Flip][] = [
+      [Math.PI / 2, { x: false, y: false }],
+      [Math.PI / 2, { x: true, y: false }],
+      [0, { x: true, y: true }],
+      [Math.PI, { x: false, y: true }],
+    ]
+    for (const [rotation, flip] of cases) {
+      const { turn: spin, mirror } = drawnTurn(rotation, flip)
+      // The object's own flip and turn carry the frame's centre around the stored point.
+      const fx = flip.x ? -offset.x : offset.x
+      const fy = flip.y ? -offset.y : offset.y
+      const center = {
+        x: origin.x + Math.cos(rotation) * fx - Math.sin(rotation) * fy,
+        y: origin.y + Math.sin(rotation) * fx + Math.cos(rotation) * fy,
+      }
+      const turned = screenedAt({ center, mirror, spin, width: SIDE, height: SIDE }, origin)
+      // The engine puts the letters' point b at R(spin)·b from the bitmap's centre.
+      const c = Math.round(Math.cos(spin))
+      const n = Math.round(Math.sin(spin))
+      for (let j = 0; j < SIDE; j += 7) {
+        for (let i = 0; i < SIDE; i += 7) {
+          const bx = i + 0.5 - SIDE / 2
+          const by = j + 0.5 - SIDE / 2
+          const ti = Math.round(c * bx - n * by + SIDE / 2 - 0.5)
+          const tj = Math.round(n * bx + c * by + SIDE / 2 - 0.5)
+          const want = upright[(j * SIDE + i) * 4 + 3]!
+          const got = turned[(tj * SIDE + ti) * 4 + 3]!
+          expect(Math.abs(got - want), `rotation ${rotation}, flip ${JSON.stringify(flip)}, at ${i},${j}`).toBeLessThanOrEqual(1)
+        }
+      }
+    }
   })
 })

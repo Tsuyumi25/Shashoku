@@ -71,8 +71,11 @@ export interface GlowEffect {
  * way a printed page carries it and the page shows between them. On text only
  * the letters' fill is screened; the strokes lie over it as they were.
  *
- * The dots sit on a grid fixed to the page, so tone on neighbouring objects
- * lines up and moving an object does not drag its dots along.
+ * On text the sheet is stuck to the object: the dots are laid from its stored
+ * position and turn and mirror with it, so moving, turning or flipping it
+ * carries them along. A raster layer has no such point — its frame moves
+ * whenever painting grows it — so its dots are laid from the page's corner
+ * instead.
  */
 export interface ToneEffect {
   kind: 'tone'

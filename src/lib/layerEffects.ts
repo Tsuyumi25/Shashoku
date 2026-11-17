@@ -4,7 +4,7 @@ import { glowOf, glowReach } from '@shared/effects/glow'
 import { engineStrokesFor } from '@shared/effects/stroke'
 import { toneOf, withTone } from '@shared/effects/tone'
 import { glowPictureHeld } from '@/lib/glowPicture'
-import { tonePicture } from '@/lib/tonePicture'
+import { pageGrid, tonePicture } from '@/lib/tonePicture'
 
 /** A rectangle on the page, which is what a raster layer occupies. */
 export interface Frame {
@@ -106,8 +106,7 @@ export function layerWithEffects(
 
 /** A picture already placed on the page, turned into screentone on the page's grid. */
 function screened(canvas: CanvasImageSource, frame: Frame, tone: ToneEffect): EffectedLayer {
-  const grid = { x0: frame.x + 0.5, y0: frame.y + 0.5, dx: 1, dy: 1 } as const
-  return { canvas: tonePicture(canvas, frame.w, frame.h, grid, tone), frame }
+  return { canvas: tonePicture(canvas, frame.w, frame.h, pageGrid(frame.x, frame.y), tone), frame }
 }
 
 /**

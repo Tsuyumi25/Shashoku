@@ -2,15 +2,54 @@ import type { ToneEffect } from '@shared/effects/types'
 import { toneInk } from '@shared/effects/tone'
 
 /**
- * Where a picture's pixels land on the page: pixel (i, j) has its centre at
- * (`x0` + `dx`·i, `y0` + `dy`·j). A mirrored label steps backwards, so `dx` and
- * `dy` are ±1.
+ * Where a picture's pixels fall on the sheet the dots are printed on: pixel
+ * (i, j) has its centre at (`x0` + `ix`·i + `jx`·j, `y0` + `iy`·i + `jy`·j).
+ * For a raster layer the sheet is the page; for a text object it is the
+ * object's own unturned, unmirrored frame.
  */
-export interface PageGrid {
+export interface SheetGrid {
   x0: number
   y0: number
-  dx: 1 | -1
-  dy: 1 | -1
+  ix: number
+  iy: number
+  jx: number
+  jy: number
+}
+
+/** The page itself as the sheet, a picture's top-left pixel at (`x`, `y`). */
+export function pageGrid(x: number, y: number): SheetGrid {
+  return { x0: x + 0.5, y0: y + 0.5, ix: 1, iy: 0, jx: 0, jy: 1 }
+}
+
+/**
+ * A label's bitmap where it lands: centred on `center`, turned by `spin` by
+ * the engine and then mirrored in the page's axes as `mirror` says.
+ */
+export interface PlacedLabel {
+  center: { x: number; y: number }
+  mirror: { x: 1 | -1; y: 1 | -1 }
+  spin: number
+  width: number
+  height: number
+}
+
+/**
+ * The sheet stuck to a text object: each pixel's centre taken back through the
+ * mirror and the turn into the object's own frame, measured from `origin` —
+ * the point the object is stored at, which typing and resizing leave alone. So
+ * moving, turning and flipping the object carry its dots along.
+ *
+ * The engine turns by R(spin) = [[cos, −sin], [sin, cos]] in the page's y-down
+ * axes and the mirror comes after; undone, a page offset q from the centre is
+ * R(−spin)·S·q in the frame.
+ */
+export function labelToneGrid(label: PlacedLabel, origin: { x: number; y: number }): SheetGrid {
+  const { center, mirror, spin, width, height } = label
+  const a = mirror.x * (center.x - origin.x) + 0.5 - width / 2
+  const b = mirror.y * (center.y - origin.y) + 0.5 - height / 2
+  const cos = Math.cos(spin)
+  const sin = Math.sin(spin)
+  return { x0: cos * a + sin * b, y0: -sin * a + cos * b, ix: cos, iy: -sin, jx: sin, jy: cos }
 }
 
 /**
@@ -24,7 +63,7 @@ export function tonePicture(
   source: CanvasImageSource,
   width: number,
   height: number,
-  grid: PageGrid,
+  grid: SheetGrid,
   tone: ToneEffect,
 ): OffscreenCanvas {
   const { canvas, ctx } = canvasOf(width, height)
@@ -44,7 +83,7 @@ export function tonePicture(
 export function tonedLabel(
   whole: CanvasImageSource,
   fill: ImageData,
-  grid: PageGrid,
+  grid: SheetGrid,
   tone: ToneEffect,
 ): OffscreenCanvas {
   const { width, height } = fill
@@ -64,10 +103,10 @@ export function tonedLabel(
 export function tonedLabelHeld(
   whole: CanvasImageSource,
   fill: ImageData,
-  grid: PageGrid,
+  grid: SheetGrid,
   tone: ToneEffect,
 ): OffscreenCanvas {
-  const key = `${grid.x0},${grid.y0},${grid.dx},${grid.dy}|${tone.spacing}|${tone.angle}|${tone.density}`
+  const key = `${grid.x0},${grid.y0},${grid.ix},${grid.iy},${grid.jx},${grid.jy}|${tone.spacing}|${tone.angle}|${tone.density}`
   const held = heldByPicture.get(whole)
   if (held?.fill === fill && held.key === key) return held.picture
   const picture = tonedLabel(whole, fill, grid, tone)
@@ -88,7 +127,7 @@ export function screenPixels(
   over: Uint8ClampedArray | null,
   width: number,
   height: number,
-  grid: PageGrid,
+  grid: SheetGrid,
   tone: ToneEffect,
 ): void {
   const rad = (tone.angle * Math.PI) / 180
@@ -96,7 +135,8 @@ export function screenPixels(
   const sin = Math.sin(rad)
   const fixed = tone.density === 'image' ? null : tone.density / 100
   for (let j = 0; j < height; j++) {
-    const y = grid.y0 + grid.dy * j
+    const rowX = grid.x0 + grid.jx * j
+    const rowY = grid.y0 + grid.jy * j
     for (let i = 0; i < width; i++) {
       const at = (j * width + i) * 4
       const a = ink[at + 3]! / 255
@@ -104,7 +144,8 @@ export function screenPixels(
       const g = ink[at + 1]!
       const b = ink[at + 2]!
       const density = a === 0 ? 0 : (fixed ?? 1 - (0.299 * r + 0.587 * g + 0.114 * b) / 255) * a
-      const dot = density === 0 ? 0 : toneInk(grid.x0 + grid.dx * i, y, density, tone.spacing, cos, sin)
+      const dot =
+        density === 0 ? 0 : toneInk(rowX + grid.ix * i, rowY + grid.iy * i, density, tone.spacing, cos, sin)
       if (over === null) {
         out[at] = 0
         out[at + 1] = 0

@@ -15,7 +15,7 @@ import {
 } from './fontCatalog'
 import { measureFor, sampleFor, type Sample } from './fontSampleCache'
 import { glowPictureHeld } from './glowPicture'
-import { tonedLabelHeld } from './tonePicture'
+import { labelToneGrid, tonedLabelHeld } from './tonePicture'
 import { drawnTurn, NO_FLIP, type Flip } from './flip'
 import {
   frameCenter,
@@ -296,6 +296,10 @@ export interface DrawnLabel {
 export interface LabelTone {
   effect: ToneEffect
   fill: ImageData
+  /** The object's stored position, which the dots are laid from; see `labelToneGrid`. */
+  origin: Point
+  /** The turn the engine drew the bitmap at, in radians, which the dots are taken back through. */
+  spin: number
 }
 
 /**
@@ -358,7 +362,7 @@ export function drawnLabel(
   const { center, phase } = placeLabel(middle, blit, spin)
   const raster = rasterFor(painted, style, effects, phase, spin)
   const fill = toneEffect && raster.sample ? rasterFor(painted, style, effects, phase, spin, true).sample : null
-  const tone = toneEffect && fill ? { effect: toneEffect, fill: fill.image } : null
+  const tone = toneEffect && fill ? { effect: toneEffect, fill: fill.image, origin: at, spin } : null
   return { ...raster, box, center, mirror, plain: painted.plain, glow, tone }
 }
 
@@ -368,9 +372,10 @@ export function drawnLabel(
  * surface draws a label from, so the canvas, a folder's picture and the export
  * cannot come to disagree about which way round it lands.
  *
- * Screentone is laid where the bitmap lands, on the page's own grid, so it is
- * worked out from where each pixel's centre falls — backwards along a mirrored
- * axis. Only the fill is screened; the strokes lie over it as they were.
+ * Screentone is worked out in the object's own frame, each pixel's centre
+ * taken back through the mirror and the turn, so the dots travel, turn and
+ * flip with it. Only the fill is screened; the strokes lie
+ * over it as they were.
  */
 export function paintLabel(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -383,12 +388,7 @@ export function paintLabel(
     ? tonedLabelHeld(
         picture,
         drawn.tone.fill,
-        {
-          x0: drawn.center.x + drawn.mirror.x * (0.5 - width / 2),
-          y0: drawn.center.y + drawn.mirror.y * (0.5 - height / 2),
-          dx: drawn.mirror.x,
-          dy: drawn.mirror.y,
-        },
+        labelToneGrid({ center: drawn.center, mirror: drawn.mirror, spin: drawn.tone.spin, width, height }, drawn.tone.origin),
         drawn.tone.effect,
       )
     : picture
