@@ -6,6 +6,8 @@ import {
   DEFAULT_BRUSH_OPACITY,
   DEFAULT_BRUSH_SIZE,
   DEFAULT_BRUSH_STABILIZATION,
+  DEFAULT_BRUSH_FLOW,
+  buildUpCircle,
   MAX_BRUSH_SIZE,
   MIN_BRUSH_SIZE,
   stampMaskCircle,
@@ -44,6 +46,7 @@ import {
 } from '@/lib/selection/rect'
 import { offsetSegments, traceMaskSegments } from '@/lib/selection/trace'
 import { linePressure, rememberStrokeEnd, settleStrokeEnd } from '@/lib/selection/strokeEnd'
+import { sprayWhileHeld } from '@/lib/selection/airbrush'
 
 export type { MaskTarget }
 
@@ -62,6 +65,14 @@ export interface BrushSettings {
    * raw feel; above it, a stroke's path resists following hand tremor at the
    * cost of lagging the pointer while the hand is still moving. */
   stabilization: number
+  /**
+   * How much of the way to the opacity each dab goes, as a fraction. At `1`
+   * a dab takes the stronger and a stroke cannot build up within itself; below
+   * it, lingering and passing again darken, up to the opacity.
+   */
+  flow: number
+  /** Whether a resting pen keeps laying dabs, so it darkens while held still. */
+  airbrush: boolean
 }
 
 export type SelectionGestureKind = 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon'
@@ -157,12 +168,16 @@ export const useSelectionStore = defineStore('selection', () => {
       hardness: DEFAULT_BRUSH_HARDNESS,
       opacity: DEFAULT_BRUSH_OPACITY,
       stabilization: DEFAULT_BRUSH_STABILIZATION,
+      flow: DEFAULT_BRUSH_FLOW,
+      airbrush: false,
     },
     erase: {
       size: DEFAULT_BRUSH_SIZE,
       hardness: DEFAULT_BRUSH_HARDNESS,
       opacity: DEFAULT_BRUSH_OPACITY,
       stabilization: DEFAULT_BRUSH_STABILIZATION,
+      flow: DEFAULT_BRUSH_FLOW,
+      airbrush: false,
     },
   })
 
@@ -546,6 +561,11 @@ export const useSelectionStore = defineStore('selection', () => {
     dirty: Rect
     /** Where the hand is now, which is where it lets go. */
     at: Point
+    /** Flow as it stood at the press, like the shape. */
+    flow: number
+    /** The last dab stamped, which a resting airbrush keeps stamping. */
+    last: Dab | null
+    stopSpraying: () => void
   }
   let stroke: Stroke | null = null
 
@@ -588,7 +608,28 @@ export const useSelectionStore = defineStore('selection', () => {
       DEFAULT_BRUSH_SPACING_RATIO,
       brushStabilizationFor(mode),
     )
-    stroke = { target, mode, shape, sampler, opened, record: null, dirty: EMPTY_RECT, at }
+    const settings = brushes.value[mode]
+    const begun: Stroke = {
+      target,
+      mode,
+      shape,
+      sampler,
+      opened,
+      record: null,
+      dirty: EMPTY_RECT,
+      at,
+      flow: settings.flow,
+      last: null,
+      stopSpraying: () => {},
+    }
+    stroke = begun
+    if (settings.airbrush) {
+      begun.stopSpraying = sprayWhileHeld(
+        () => begun.last,
+        () => begun.at,
+        (dab) => stamp([dab]),
+      )
+    }
     const time = performance.now()
     if (from === null) {
       stamp(sampler.begin({ x: at.x, y: at.y, pressure, time }))
@@ -683,19 +724,16 @@ export const useSelectionStore = defineStore('selection', () => {
     const window_ = readWindow(region)
     let local = EMPTY_RECT
     for (const dab of dabs) {
+      const at = { x: dab.x - region.x, y: dab.y - region.y }
+      const head = { radius: dab.radius, hardness: s.shape.hardness, opacity: dab.opacity }
       local = unionRect(
         local,
-        stampMaskCircle(
-          window_.bytes,
-          region.w,
-          region.h,
-          dab.x - region.x,
-          dab.y - region.y,
-          { radius: dab.radius, hardness: s.shape.hardness, opacity: dab.opacity },
-          s.mode,
-        ),
+        s.flow < 1
+          ? buildUpCircle(window_.bytes, region.w, region.h, at.x, at.y, head, s.flow, s.mode, null)
+          : stampMaskCircle(window_.bytes, region.w, region.h, at.x, at.y, head, s.mode),
       )
     }
+    s.last = dabs.at(-1) ?? s.last
     if (isEmptyRect(local)) return
 
     const dirty = { ...local, x: local.x + region.x, y: local.y + region.y }
@@ -720,6 +758,7 @@ export const useSelectionStore = defineStore('selection', () => {
     const s = stroke
     stroke = null
     if (s === null) return
+    s.stopSpraying()
     /*
      * A stroke that drew nothing — a brush sized to nothing, a press with no
      * travel outside the page — is not a step. Anything it did to get ready is
@@ -764,6 +803,14 @@ export const useSelectionStore = defineStore('selection', () => {
    */
   function setBrushOpacity(mode: MaskBrushMode, opacity: number): void {
     brushes.value[mode].opacity = Math.min(1, Math.max(0, opacity))
+  }
+
+  function setBrushFlow(mode: MaskBrushMode, flow: number): void {
+    brushes.value[mode].flow = Math.min(1, Math.max(0.01, flow))
+  }
+
+  function setBrushAirbrush(mode: MaskBrushMode, on: boolean): void {
+    brushes.value[mode].airbrush = on
   }
 
   function toggleQuickMask(): void {
@@ -944,6 +991,8 @@ export const useSelectionStore = defineStore('selection', () => {
     endStroke,
     nudgeBrushSize,
     setBrushOpacity,
+    setBrushFlow,
+    setBrushAirbrush,
     toggleQuickMask,
     reset,
   }

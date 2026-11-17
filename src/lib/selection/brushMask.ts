@@ -7,6 +7,7 @@ export const MAX_BRUSH_SIZE = 500
 export const DEFAULT_BRUSH_SIZE = 40
 export const DEFAULT_BRUSH_HARDNESS = 0.8
 export const DEFAULT_BRUSH_OPACITY = 1
+export const DEFAULT_BRUSH_FLOW = 1
 /** Off: no settings surface offers this yet, so a stroke's raw feel is what
  * every existing brush already ships with. */
 export const DEFAULT_BRUSH_STABILIZATION = 0
@@ -38,7 +39,7 @@ export interface BrushShape {
  * Stamps take the stronger of what is already there rather than accumulating,
  * so a stroke drawn slowly does not come out darker than the same stroke drawn
  * quickly. Within one stroke the brush has one opacity, as it does in
- * Photoshop; building up is what a second stroke is for.
+ * Photoshop at full flow; below full flow see `buildUpCircle`.
  */
 export function stampMaskCircle(
   mask: Uint8ClampedArray,
@@ -89,6 +90,73 @@ export function stampMaskCircle(
       } else if (255 - value < held) {
         mask[row + x] = 255 - value
       }
+    }
+  }
+  return bounds
+}
+
+/**
+ * One stamp of a brush at less than full flow, built up rather than taken at
+ * the stronger: each pixel moves toward the opacity by the stamp's strength
+ * there times `flow`, so lingering and passing again darken within one stroke
+ * and the opacity stays the ceiling — Photoshop's flow, Clip Studio Paint's
+ * brush density. Erasing moves toward one less the opacity instead.
+ *
+ * `ceiling`, the same size as `mask`, scales the opacity per pixel; a stroke
+ * cut to a feathered selection takes it here, since cutting what has already
+ * built up would cut it again on every stamp.
+ *
+ * A step smaller than a byte is rounded up with the odds of its fraction, or a
+ * low flow's rim would never build up at all.
+ */
+export function buildUpCircle(
+  mask: Uint8Array | Uint8ClampedArray,
+  w: number,
+  h: number,
+  cx: number,
+  cy: number,
+  shape: BrushShape,
+  flow: number,
+  mode: MaskBrushMode,
+  ceiling: Uint8ClampedArray | null,
+): Rect {
+  const { radius, hardness, opacity } = shape
+  const bounds = clampToPage(
+    {
+      x: Math.floor(cx - radius) - 1,
+      y: Math.floor(cy - radius) - 1,
+      w: Math.ceil(radius * 2) + 3,
+      h: Math.ceil(radius * 2) + 3,
+    },
+    w,
+    h,
+  )
+  if (isEmptyRect(bounds) || radius <= 0 || opacity <= 0 || flow <= 0) return EMPTY_RECT
+
+  const inner = radius * Math.min(0.999, hardness)
+  const outside = radius * radius
+  const solid = inner * inner
+  const y1 = bounds.y + bounds.h
+  const x1 = bounds.x + bounds.w
+  const cap = opacity * 255
+
+  for (let y = bounds.y; y < y1; y++) {
+    const row = y * w
+    const dy2 = (y - cy) * (y - cy)
+    for (let x = bounds.x; x < x1; x++) {
+      const dx = x - cx
+      const d2 = dx * dx + dy2
+      if (d2 > outside) continue
+      const strength = d2 <= solid ? 1 : 1 - (Math.sqrt(d2) - inner) / (radius - inner)
+      if (strength <= 0) continue
+      const at = row + x
+      const top = ceiling === null ? cap : (cap * ceiling[at]!) / 255
+      const held = mask[at]!
+      const gap = mode === 'paint' ? top - held : held - (255 - top)
+      if (gap <= 0) continue
+      const step = strength * flow * gap
+      const moved = mode === 'paint' ? held + step : held - step
+      mask[at] = Math.floor(moved + Math.random())
     }
   }
   return bounds

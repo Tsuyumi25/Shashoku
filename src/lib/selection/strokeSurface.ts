@@ -141,6 +141,22 @@ export function raiseInto(surface: StrokeSurface, values: Uint8ClampedArray, fro
 }
 
 /**
+ * Writes `values`, laid over `from`, into the surface outright. For coverage
+ * that was read out of the surface and built up on: the ceiling `raiseInto`
+ * takes has nothing left to decide there.
+ */
+export function placeInto(surface: StrokeSurface, values: Uint8Array, from: Rect): void {
+  const part = intersectRect(surface.region, from)
+  if (isEmptyRect(part)) return
+  const to = surface.region
+  for (let row = 0; row < part.h; row++) {
+    const src = (part.y + row - from.y) * from.w + (part.x - from.x)
+    const dst = (part.y + row - to.y) * to.w + (part.x - to.x)
+    surface.coverage.set(values.subarray(src, src + part.w), dst)
+  }
+}
+
+/**
  * Cuts coverage down to a selection, in place. `coverage` is laid over `at` and
  * `mask` over `within`, which has to lie inside it.
  *

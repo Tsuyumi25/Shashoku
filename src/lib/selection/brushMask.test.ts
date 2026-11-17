@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stampMaskCircle, strokeMask, type BrushShape } from '@/lib/selection/brushMask'
+import { buildUpCircle, stampMaskCircle, strokeMask, type BrushShape } from '@/lib/selection/brushMask'
 import { isEmptyRect } from '@/lib/selection/rect'
 
 const W = 20
@@ -162,5 +162,52 @@ describe('strokeMask', () => {
     strokeMask(mask, W, H, { x: 4, y: 10 }, { x: 16, y: 10 }, half, 'paint')
     strokeMask(mask, W, H, { x: 10, y: 4 }, { x: 10, y: 16 }, half, 'paint')
     expect(at(mask, 10, 10)).toBe(128)
+  })
+})
+
+describe('buildUpCircle', () => {
+  /** The same stamp laid `times` times on one spot. */
+  function rest(times: number, flow: number, opacity = 1, ceiling: Uint8ClampedArray | null = null) {
+    const mask = blank()
+    for (let i = 0; i < times; i++) buildUpCircle(mask, W, H, 10, 10, shape(6, 1, opacity), flow, 'paint', ceiling)
+    return mask
+  }
+
+  it('darkens with every stamp on the same spot within one stroke', () => {
+    const once = at(rest(1, 0.2), 10, 10)
+    const thrice = at(rest(3, 0.2), 10, 10)
+    expect(once).toBeGreaterThan(0)
+    expect(thrice).toBeGreaterThan(once)
+  })
+
+  it('stops at the opacity however long the pen stays', () => {
+    const mask = rest(200, 0.3, 0.6)
+    expect(at(mask, 10, 10)).toBeGreaterThanOrEqual(152)
+    expect(at(mask, 10, 10)).toBeLessThanOrEqual(154)
+  })
+
+  it('builds a low flow up on average instead of losing steps smaller than a byte', () => {
+    const mask = rest(40, 0.01)
+    let sum = 0
+    for (let y = 8; y <= 12; y++) for (let x = 8; x <= 12; x++) sum += at(mask, x, y)
+    const expected = 255 * (1 - 0.99 ** 40)
+    expect(sum / 25).toBeGreaterThan(expected * 0.85)
+    expect(sum / 25).toBeLessThan(expected * 1.15)
+  })
+
+  it('builds toward a feathered selection rather than past it', () => {
+    const ceiling = new Uint8ClampedArray(W * H).fill(64)
+    const mask = rest(200, 0.5, 1, ceiling)
+    expect(at(mask, 10, 10)).toBeLessThanOrEqual(65)
+    expect(at(mask, 10, 10)).toBeGreaterThanOrEqual(63)
+  })
+
+  it('erases toward one less the opacity and leaves what is already lighter alone', () => {
+    const mask = new Uint8ClampedArray(W * H).fill(255)
+    mask[10 * W + 13] = 10
+    for (let i = 0; i < 200; i++) buildUpCircle(mask, W, H, 10, 10, shape(6, 1, 0.75), 0.3, 'erase', null)
+    expect(at(mask, 10, 10)).toBeGreaterThanOrEqual(63)
+    expect(at(mask, 10, 10)).toBeLessThanOrEqual(65)
+    expect(at(mask, 13, 10)).toBe(10)
   })
 })

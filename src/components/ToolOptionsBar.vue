@@ -62,6 +62,35 @@
         ✓ 修復塗好的地方
       </button>
     </template>
+
+    <template v-else-if="brushMode !== null && brush !== null">
+      <label
+        class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        title="每個筆印往不透明度走多少。100% 時同一筆塗再多次也不會更深；低於 100% 時停留和來回會越疊越深，最深到不透明度"
+      >
+        流量
+        <input
+          type="range"
+          min="1"
+          max="100"
+          step="1"
+          class="h-4 w-24 accent-primary"
+          :value="Math.round(brush.flow * 100)"
+          @input="(e) => selection.setBrushFlow(brushMode!, Number((e.target as HTMLInputElement).value) / 100)"
+        />
+        <span class="w-9 tabular-nums text-foreground">{{ Math.round(brush.flow * 100) }}%</span>
+      </label>
+      <button
+        type="button"
+        class="option-btn"
+        :aria-pressed="brush.airbrush"
+        :class="brush.airbrush && 'option-btn-on'"
+        title="開著時筆停住不動也會繼續噴，越停越深；流量低於 100% 才看得出來"
+        @click="selection.setBrushAirbrush(brushMode!, !brush.airbrush)"
+      >
+        連續噴塗
+      </button>
+    </template>
   </div>
 </template>
 
@@ -71,8 +100,9 @@ import { AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter, SquareDot } f
 import { CANVAS_TOOLS } from '@/components/canvasTools'
 import { useAlignToSelection } from '@/composables/useAlignToSelection'
 import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
-import { useEditorStore } from '@/stores/editorStore'
+import { maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
+import { useSelectionStore } from '@/stores/selectionStore'
 
 /** Photoshop's two centre buttons, and the pair pressed together — where Photoshop keeps them, on the move tool. */
 const ALIGN_CHOICES = [
@@ -85,6 +115,10 @@ const editor = useEditorStore()
 const preferences = usePreferencesStore()
 const aligner = useAlignToSelection()
 const removal = useRemoveStrokes()
+const selection = useSelectionStore()
+
+const brushMode = computed(() => maskBrushModeOf(editor.tool))
+const brush = computed(() => (brushMode.value === null ? null : selection.brushes[brushMode.value]))
 
 const current = computed(() => CANVAS_TOOLS.find((t) => t.tool === editor.tool) ?? null)
 </script>

@@ -6,7 +6,8 @@ import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
 import { hexToRgb } from '@/lib/color'
 import { useExplodeStore } from '@/stores/explodeStore'
 import { pressureFrom } from '@/lib/selection/brushInput'
-import { stampMaskCircle } from '@/lib/selection/brushMask'
+import { buildUpCircle, stampMaskCircle } from '@/lib/selection/brushMask'
+import { sprayWhileHeld } from '@/lib/selection/airbrush'
 import {
   forgetStrokeEnd,
   linePressure,
@@ -33,6 +34,7 @@ import {
   coverageWithin,
   cutToMask,
   EMPTY_SURFACE,
+  placeInto,
   raiseInto,
   surfaceHolding,
   type StrokeSurface,
@@ -96,6 +98,11 @@ interface Stroke {
   shown: number
   /** Where the hand is now, which is where it lets go. */
   at: Point
+  /** Flow as it stood at the press, like the shape. Ignored by the remove brush. */
+  flow: number
+  /** The last dab stamped, which a resting airbrush keeps stamping. */
+  last: Dab | null
+  stopSpraying: () => void
 }
 
 /**
@@ -165,6 +172,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
   let coverageScratch = new Uint8Array(0)
   let inkScratch = new Uint8ClampedArray(0)
   let stampScratch = new Uint8ClampedArray(0)
+  let buildScratch = new Uint8Array(0)
 
   /**
    * Where a dab lands, read through whichever piece of a split page is under
@@ -271,6 +279,11 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     s.surface = surfaceHolding(s.surface, window, s.pageW, s.pageH)
     if (isEmptyRect(window) || isEmptyRect(s.surface.region)) return
     overlay.holding(s.surface.region)
+    s.last = dabs.at(-1) ?? s.last
+    if (s.flow < 1 && !s.removing) {
+      buildUp(s, dabs, window)
+      return
+    }
 
     const stamped = stampedOver(window)
     // Always the painting direction: this is coverage, and the eraser's coverage
@@ -300,6 +313,38 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
     // straight in would put back whatever a feathered selection had thinned.
     if (!s.removing) cut(s, stamped, window, segment)
     raiseInto(s.surface, stamped, window)
+    s.dirty = unionRect(s.dirty, segment)
+    show(s, segment)
+  }
+
+  /**
+   * Builds a batch of dabs up on the stroke as it stands, below full flow.
+   * The selection is the ceiling each pixel builds toward rather than a cut
+   * after the fact, which would cut what has already built up once per stamp.
+   */
+  function buildUp(s: Stroke, dabs: readonly Dab[], window: Rect): void {
+    const size = window.w * window.h
+    if (buildScratch.length < size) buildScratch = new Uint8Array(size)
+    const held = coverageWithin(s.surface, window, buildScratch)
+    const ceiling = selection.maskPatchOf(s.page, window)
+    let local: Rect = EMPTY_RECT
+    for (const dab of dabs) {
+      const stamp = buildUpCircle(
+        held,
+        window.w,
+        window.h,
+        dab.x - window.x,
+        dab.y - window.y,
+        { radius: dab.radius, hardness: s.shape.hardness, opacity: dab.opacity },
+        s.flow,
+        'paint',
+        ceiling,
+      )
+      local = unionRect(local, stamp)
+    }
+    if (isEmptyRect(local)) return
+    placeInto(s.surface, held, window)
+    const segment = { x: local.x + window.x, y: local.y + window.y, w: local.w, h: local.h }
     s.dirty = unionRect(s.dirty, segment)
     show(s, segment)
   }
@@ -436,8 +481,18 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
       taken,
       shown: resumed?.shown ?? overlay.begin(entry.id, removing ? 'source-over' : operatorFor(mode, alphaLocked)),
       at,
+      flow: selection.brushes[mode].flow,
+      last: null,
+      stopSpraying: () => {},
     }
     stroke = opened
+    if (!removing && selection.brushes[mode].airbrush) {
+      opened.stopSpraying = sprayWhileHeld(
+        () => opened.last,
+        () => opened.at,
+        (dab) => applyDabs([dab]),
+      )
+    }
     editor.beginStroke()
     const from = e.shiftKey && !removing ? lineStartOn(`layer:${mode}`, page, editor.historyStep) : null
     if (from === null) {
@@ -507,6 +562,7 @@ export function useLayerBrush(container: Ref<HTMLElement | null>) {
      * this one.
      */
     stroke = null
+    s.stopSpraying()
     const el = e.currentTarget as HTMLElement | null
     if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
     if (s.removing) {
