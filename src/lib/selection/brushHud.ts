@@ -31,3 +31,19 @@ export function hudBrushHardness(startHardness: number, dy: number): number {
   const moved = Math.round((startHardness + dy / HARDNESS_SWEEP_PX) * 100) / 100
   return Math.min(1, Math.max(0, moved))
 }
+
+/**
+ * A size slider's travel, `0` to `1`, as a size — proportional along its
+ * length for the same reason the drag is, so the low end is not crushed into
+ * the first few pixels of the track.
+ */
+export function brushSizeAt(travel: number): number {
+  const t = Math.min(1, Math.max(0, travel))
+  return Math.round(MIN_BRUSH_SIZE * (MAX_BRUSH_SIZE / MIN_BRUSH_SIZE) ** t)
+}
+
+/** Where on a size slider's travel `size` sits; the inverse of `brushSizeAt`. */
+export function brushSizeTravel(size: number): number {
+  const clamped = Math.min(MAX_BRUSH_SIZE, Math.max(MIN_BRUSH_SIZE, size))
+  return Math.log(clamped / MIN_BRUSH_SIZE) / Math.log(MAX_BRUSH_SIZE / MIN_BRUSH_SIZE)
+}

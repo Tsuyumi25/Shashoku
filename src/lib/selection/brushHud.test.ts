@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hudBrushHardness, hudBrushSize } from './brushHud'
+import { brushSizeAt, brushSizeTravel, hudBrushHardness, hudBrushSize } from './brushHud'
 import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from './brushMask'
 
 describe('hudBrushSize', () => {
@@ -42,5 +42,23 @@ describe('hudBrushHardness', () => {
   it('lands back on the value it started from', () => {
     expect(hudBrushHardness(0.63, 40)).toBe(0.83)
     expect(hudBrushHardness(0.83, -40)).toBe(0.63)
+  })
+})
+
+describe('the size slider', () => {
+  it('reaches the smallest and the largest brush at its two ends', () => {
+    expect(brushSizeAt(0)).toBe(MIN_BRUSH_SIZE)
+    expect(brushSizeAt(1)).toBe(MAX_BRUSH_SIZE)
+  })
+
+  it('puts every whole size back where it was after a trip through the track', () => {
+    for (let size = MIN_BRUSH_SIZE; size <= MAX_BRUSH_SIZE; size++) {
+      const travel = Math.round(brushSizeTravel(size) * 10000) / 10000
+      expect(brushSizeAt(travel)).toBe(size)
+    }
+  })
+
+  it('gives the small sizes more of the track than the large ones', () => {
+    expect(brushSizeAt(0.5)).toBeLessThan(MAX_BRUSH_SIZE / 4)
   })
 })

@@ -66,6 +66,35 @@
     <template v-else-if="brushMode !== null && brush !== null">
       <label
         class="flex items-center gap-1.5 text-xs text-muted-foreground"
+        title="筆刷的直徑，頁面像素。也可以用 [ 和 ] 調"
+      >
+        大小
+        <input
+          type="range"
+          min="0"
+          :max="SIZE_STEPS"
+          step="1"
+          class="h-4 w-24 accent-primary"
+          :value="Math.round(brushSizeTravel(brush.size) * SIZE_STEPS)"
+          @input="(e) => selection.setBrushSize(brushMode!, brushSizeAt(Number((e.target as HTMLInputElement).value) / SIZE_STEPS))"
+        />
+        <span class="w-12 tabular-nums text-foreground">{{ brush.size }} px</span>
+      </label>
+      <label class="flex items-center gap-1.5 text-xs text-muted-foreground" title="筆刷邊緣多硬。100% 是一刀切齊的邊，越低邊緣淡出得越寬">
+        硬度
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          class="h-4 w-24 accent-primary"
+          :value="Math.round(brush.hardness * 100)"
+          @input="(e) => selection.setBrushHardness(brushMode!, Number((e.target as HTMLInputElement).value) / 100)"
+        />
+        <span class="w-9 tabular-nums text-foreground">{{ Math.round(brush.hardness * 100) }}%</span>
+      </label>
+      <label
+        class="flex items-center gap-1.5 text-xs text-muted-foreground"
         title="每個筆印往不透明度走多少。100% 時同一筆塗再多次也不會更深；低於 100% 時停留和來回會越疊越深，最深到不透明度"
       >
         流量
@@ -100,6 +129,7 @@ import { AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter, SquareDot } f
 import { CANVAS_TOOLS } from '@/components/canvasTools'
 import { useAlignToSelection } from '@/composables/useAlignToSelection'
 import { useRemoveStrokes } from '@/composables/useRemoveStrokes'
+import { brushSizeAt, brushSizeTravel } from '@/lib/selection/brushHud'
 import { maskBrushModeOf, useEditorStore } from '@/stores/editorStore'
 import { usePreferencesStore } from '@/stores/preferencesStore'
 import { useSelectionStore } from '@/stores/selectionStore'
@@ -118,6 +148,8 @@ const removal = useRemoveStrokes()
 const selection = useSelectionStore()
 
 const brushMode = computed(() => maskBrushModeOf(editor.tool))
+/** Fine enough that every whole size up to the largest has a stop of its own. */
+const SIZE_STEPS = 10000
 const brush = computed(() => (brushMode.value === null ? null : selection.brushes[brushMode.value]))
 
 const current = computed(() => CANVAS_TOOLS.find((t) => t.tool === editor.tool) ?? null)

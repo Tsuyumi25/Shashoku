@@ -805,6 +805,15 @@ export const useSelectionStore = defineStore('selection', () => {
     brushes.value[mode].opacity = Math.min(1, Math.max(0, opacity))
   }
 
+  function setBrushSize(mode: MaskBrushMode, size: number): void {
+    brushes.value[mode].size = Math.min(MAX_BRUSH_SIZE, Math.max(MIN_BRUSH_SIZE, Math.round(size)))
+  }
+
+  /** Two decimals, the precision the heads-up display stores and shows. */
+  function setBrushHardness(mode: MaskBrushMode, hardness: number): void {
+    brushes.value[mode].hardness = Math.min(1, Math.max(0, Math.round(hardness * 100) / 100))
+  }
+
   function setBrushFlow(mode: MaskBrushMode, flow: number): void {
     brushes.value[mode].flow = Math.min(1, Math.max(0.01, flow))
   }
@@ -991,6 +1000,8 @@ export const useSelectionStore = defineStore('selection', () => {
     endStroke,
     nudgeBrushSize,
     setBrushOpacity,
+    setBrushSize,
+    setBrushHardness,
     setBrushFlow,
     setBrushAirbrush,
     toggleQuickMask,
