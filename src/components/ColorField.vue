@@ -1,7 +1,11 @@
 <template>
   <span class="color-field">
     <PopoverRoot v-model:open="open">
+      <PopoverTrigger v-if="$slots.trigger" as-child>
+        <slot name="trigger" />
+      </PopoverTrigger>
       <PopoverTrigger
+        v-else
         class="color-swatch"
         :class="mixed && 'is-mixed'"
         :style="{ '--swatch': mixed ? 'transparent' : modelValue }"
@@ -9,8 +13,16 @@
         :aria-label="label"
       />
       <PopoverPortal>
-        <PopoverContent class="color-popover" side="bottom" align="start" :side-offset="6">
+        <PopoverContent class="color-popover" :side="side ?? 'bottom'" align="start" :side-offset="6">
+          <hex-color-picker
+            v-if="opaque"
+            class="color-picker"
+            :color="picking"
+            @color-changed="onPicked"
+            @keyup="commit"
+          />
           <hex-alpha-color-picker
+            v-else
             class="color-picker"
             :color="picking"
             @color-changed="onPicked"
@@ -60,6 +72,7 @@ import { useClipboard, useEventListener } from '@vueuse/core'
 import { Check, Copy, X } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import 'vanilla-colorful/hex-alpha-color-picker.js'
+import 'vanilla-colorful/hex-color-picker.js'
 import { MIXED_TEXT } from '@/lib/appearanceText'
 import { normalHex } from '@/lib/color'
 
@@ -75,6 +88,10 @@ const props = defineProps<{
   mixed?: boolean
   /** Offer taking the colour away altogether, for a property that can be absent. */
   clearable?: boolean
+  /** Which side of the trigger the picker opens on; below when absent. */
+  side?: 'bottom' | 'right'
+  /** A colour that carries no alpha of its own, so the picker offers none. */
+  opaque?: boolean
 }>()
 const emit = defineEmits<{
   /** Every step of a drag, for the canvas to follow. */
@@ -135,7 +152,8 @@ function clear() {
   emit('clear')
 }
 
-function write(hex: string) {
+function write(picked: string) {
+  const hex = props.opaque ? picked.slice(0, 7) : picked
   const changed = moving || props.mixed || hex !== (normalHex(props.modelValue) ?? props.modelValue)
   moving = false
   if (changed) emit('update:modelValue', hex)

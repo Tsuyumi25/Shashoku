@@ -16,6 +16,8 @@
         <component :is="tool.icon" :size="15" />
       </button>
     </template>
+    <div class="rail-divider" />
+    <ForegroundBackground class="my-1" />
 
     <div class="flex-1" />
 
@@ -71,6 +73,7 @@
 import { computed } from 'vue'
 import { Contrast, Languages, Settings } from '@lucide/vue'
 import { CANVAS_TOOLS } from '@/components/canvasTools'
+import ForegroundBackground from '@/components/ForegroundBackground.vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSelectionStore } from '@/stores/selectionStore'

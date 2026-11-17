@@ -2749,6 +2749,10 @@ useEventListener(window, 'keydown', (e) => {
     editor.setTextSide(editor.textSide === 'source' ? 'translation' : 'source')
   } else if (key === 'q') {
     selection.toggleQuickMask()
+  } else if (key === 'x') {
+    editor.swapColors()
+  } else if (key === 'd') {
+    editor.resetColors()
   } else if (e.key === '[' || e.key === ']') {
     // Sizes whichever mask tool is up, and nothing otherwise: the two keep
     // their own sizes, so with neither of them up there is no one to size.

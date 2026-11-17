@@ -567,11 +567,23 @@ export const useEditorStore = defineStore('editor', () => {
   const tagsShown = ref(false)
 
   /**
-   * The colour the eyedropper puts away. Nothing reads it yet — it is here so
-   * that sampling has somewhere to land rather than being invented alongside
-   * the swatch that will show it.
+   * The colour the brush and a selection's fill lay down, and where the
+   * eyedropper puts what it samples. Opaque: how much of it lands is the
+   * brush's opacity, not the colour's.
    */
   const foreground = ref('#000000')
+  /** The colour one swap away. Nothing paints with it until it is swapped in. */
+  const background = ref('#ffffff')
+
+  function swapColors() {
+    ;[foreground.value, background.value] = [background.value, foreground.value]
+  }
+
+  /** Black over white, what every hand expects back from D. */
+  function resetColors() {
+    foreground.value = '#000000'
+    background.value = '#ffffff'
+  }
 
   const fontSize = ref(14)
 
@@ -3416,6 +3428,9 @@ export const useEditorStore = defineStore('editor', () => {
     showingOriginal,
     tagsShown,
     foreground,
+    background,
+    swapColors,
+    resetColors,
     fontSize,
     adjustFontSize,
     view,

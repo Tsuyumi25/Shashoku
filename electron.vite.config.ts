@@ -74,7 +74,7 @@ export default defineConfig({
     plugins: [
       tailwindcss(),
       vue({
-        template: { compilerOptions: { isCustomElement: (tag) => tag === "hex-alpha-color-picker" } },
+        template: { compilerOptions: { isCustomElement: (tag) => tag === "hex-alpha-color-picker" || tag === "hex-color-picker" } },
       }),
     ],
     build: {

@@ -34,9 +34,10 @@ const working = ref(false)
  * coming from a selection or from the remove brush.
  *
  * The same shape as filling, with the colour arriving from a model instead of
- * from the swatch: one scratch, one transaction, one swappable record. That is
- * deliberate — an erase that could not be taken back the same way as every
- * other write would be the one operation in the editor with its own history.
+ * from the foreground colour: one scratch, one transaction, one swappable
+ * record. That is deliberate — an erase that could not be taken back the same
+ * way as every other write would be the one operation in the editor with its
+ * own history.
  *
  * Writes into the layer being worked on, as Photoshop's Remove tool does: the
  * retouch layer already sits over a locked copy of the artwork, so the original
